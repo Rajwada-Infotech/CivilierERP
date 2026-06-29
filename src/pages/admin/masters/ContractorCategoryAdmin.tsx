@@ -48,6 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Trash2, Search, RefreshCw, Tag } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormState {
@@ -189,31 +190,19 @@ export default function ContractorCategoryAdmin() {
         { label: "Contractor Categories" },
       ]} />
 
-      <div className="relative space-y-6 mt-6">
-
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Tag className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground leading-none">
-              Contractor Categories
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage contractor category master data
-            </p>
-          </div>
-        </div>
-        {rights.canCreate && (
-          <button onClick={openAdd} className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition">
-            <Plus className="h-4 w-4" />
-            Add Category
-          </button>
-        )}
-      </div>
-
+      <AdminShell
+        title="Contractor Categories"
+        subtitle="Manage contractor category master data"
+        icon={Tag}
+        action={
+          rights.canCreate && (
+            <button onClick={openAdd} className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition">
+              <Plus className="h-4 w-4" />
+              Add Category
+            </button>
+          )
+        }
+      >
       {/* Stats strip */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -338,7 +327,7 @@ export default function ContractorCategoryAdmin() {
         </CardContent>
       </Card>
 
-      </div>{/* end space-y-6 wrapper */}
+      </AdminShell>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>

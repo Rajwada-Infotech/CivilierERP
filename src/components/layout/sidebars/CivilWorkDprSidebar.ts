@@ -1,29 +1,29 @@
-import { BarChart3, GitBranch, HardHat, Users2 } from "lucide-react";
+import { Chart2, Hierarchy, Building3, Profile2User } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const civilWorkDprNavItems: NavItem[] = [
   {
     label: "Dashboard",
-    icon: BarChart3,
+    icon: Chart2,
     path: "/civilworkdpr",
     pageKey: "civilworkdpr-dashboard",
     isDashboard: true,
   },
   {
     label: "Dependency",
-    icon: GitBranch,
+    icon: Hierarchy,
     path: "/civilworkdpr/dependency",
     pageKey: "civilworkdpr-dependency",
   },
   {
-    label: "Contractor Register",
-    icon: HardHat,
+    label: "Contractor",
+    icon: Building3,
     path: "/civilworkdpr/contractor-register",
     pageKey: "civilworkdpr-contractor-register",
   },
   {
-    label: "Worker Attendance",
-    icon: Users2,
+    label: "Attendance",
+    icon: Profile2User,
     path: "/civilworkdpr/worker-attendance",
     pageKey: "civilworkdpr-worker-attendance",
   },

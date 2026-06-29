@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SuperAdminShell } from "@/components/superadmin/SuperAdminShell";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -479,38 +480,31 @@ export default function SuperAdminDashboard() {
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <Breadcrumbs items={["Super Admin", "Dashboard"]} />
 
-      <div className="mb-6 flex items-center gap-3">
-        <div className="rounded-lg bg-yellow-500/10 p-2">
-          <Crown className="text-yellow-500" size={22} />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Super Admin Control Panel
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Live tenant, user, and platform visibility powered by backend data
-          </p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Badge className="border-yellow-500/30 bg-yellow-500/15 px-3 text-xs text-yellow-600">
-            <Crown size={10} className="mr-1" /> SUPER ADMIN
-          </Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshAll}
-            disabled={tenantsFetching || usersFetching || metricsFetching}
-          >
-            {tenantsFetching || usersFetching || metricsFetching ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-      </div>
-
+      <SuperAdminShell
+        title="Super Admin Control Panel"
+        subtitle="Live tenant, user, and platform visibility powered by backend data"
+        icon={Crown}
+        action={
+          <div className="flex items-center gap-2">
+            <Badge className="border-yellow-500/30 bg-yellow-500/15 px-3 text-xs text-yellow-600">
+              <Crown size={10} className="mr-1" /> SUPER ADMIN
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshAll}
+              disabled={tenantsFetching || usersFetching || metricsFetching}
+            >
+              {tenantsFetching || usersFetching || metricsFetching ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
+        }
+      >
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label} className="border">
@@ -947,6 +941,7 @@ export default function SuperAdminDashboard() {
           )}
         </div>
       )}
+      </SuperAdminShell>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-lg">

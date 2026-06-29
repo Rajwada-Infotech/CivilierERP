@@ -1,17 +1,16 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DashboardBackground } from "@/components/DashboardBackground";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   ShieldCheck,
   Users,
   UserCheck,
   BarChart3,
   RefreshCw,
+  Crown,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Lock } from "lucide-react";
 
@@ -73,6 +72,25 @@ const getActivityIcon = (event: string, actionType: string) => {
   if (actionType === "delete") return Shield;
   return BarChart3;
 };
+
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join("") || "?";
+
+const AVATAR_PALETTE = [
+  "bg-blue-500/15 text-blue-600",
+  "bg-violet-500/15 text-violet-600",
+  "bg-emerald-500/15 text-emerald-600",
+  "bg-amber-500/15 text-amber-600",
+  "bg-rose-500/15 text-rose-600",
+  "bg-cyan-500/15 text-cyan-600",
+];
+const avatarColor = (seed: number) =>
+  AVATAR_PALETTE[seed % AVATAR_PALETTE.length];
 
 const PAGE_NAME_MAP: Record<string, string> = {
   login: "Login",
@@ -148,6 +166,7 @@ const getPageName = (resource?: string): string => {
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
+  const [justClicked, setJustClicked] = React.useState(false);
   const {
     data: dashData,
     isLoading: dashLoading,
@@ -194,16 +213,12 @@ export default function AdminDashboard() {
   const recentUsers = dashData?.recentUsers ?? [];
   const recentActivities = activityData?.data ?? [];
 
-  const statCards = [
-    {
-      title: "Total Users",
-      value: stats.totalUsers,
-      sub: "registered accounts",
-      icon: Users,
-      color: "text-blue-600",
-      bg: "bg-blue-500/10",
-      borderL: "border-l-blue-500",
-    },
+  const activeRatio =
+    stats.totalUsers > 0
+      ? Math.round((stats.activeUsers / stats.totalUsers) * 100)
+      : 0;
+
+  const minorStats = [
     {
       title: "Active Users",
       value: stats.activeUsers,
@@ -211,7 +226,7 @@ export default function AdminDashboard() {
       icon: UserCheck,
       color: "text-emerald-600",
       bg: "bg-emerald-500/10",
-      borderL: "border-l-emerald-500",
+      ring: "ring-emerald-500/20",
     },
     {
       title: "Inactive Users",
@@ -220,164 +235,223 @@ export default function AdminDashboard() {
       icon: ShieldCheck,
       color: "text-amber-600",
       bg: "bg-amber-500/10",
-      borderL: "border-l-amber-500",
+      ring: "ring-amber-500/20",
     },
     {
-      title: "Total Activity Logs",
+      title: "Activity Logs",
       value: stats.recentActions,
       sub: "all time entries",
       icon: BarChart3,
       color: "text-violet-600",
       bg: "bg-violet-500/10",
-      borderL: "border-l-violet-500",
+      ring: "ring-violet-500/20",
     },
   ];
+
+  const refreshAction = (
+    <div className="flex items-center gap-2">
+      {dataUpdatedAt > 0 && (
+        <span className="text-xs text-muted-foreground hidden sm:block">
+          Updated: {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
+        </span>
+      )}
+      <button
+        onClick={() => {
+          setJustClicked(true);
+          setTimeout(() => setJustClicked(false), 600);
+          refetch();
+        }}
+        disabled={isFetching}
+        className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/50 text-blue-700 transition-all duration-200 active:scale-90 disabled:opacity-70 ${
+          justClicked ? "ring-2 ring-blue-500/30" : ""
+        }`}
+      >
+        <RefreshCw
+          size={13}
+          className={`transition-transform ${
+            isFetching || justClicked
+              ? "animate-spin duration-500"
+              : "duration-500 group-hover:rotate-180"
+          }`}
+        />
+        Refresh
+      </button>
+    </div>
+  );
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Dashboard"]} />
-      <div className="relative p-6 space-y-8">
-        <DashboardBackground />
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Admin Dashboard
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Live data from your database
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {dataUpdatedAt > 0 && (
-              <span className="text-xs text-muted-foreground hidden sm:block">
-                Updated: {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
-              </span>
-            )}
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
-              Refresh
-            </button>
-          </div>
-        </div>
-
+      <AdminShell
+        title="Control Center"
+        subtitle="Live overview of users, access & system activity"
+        icon={Crown}
+        action={refreshAction}
+      >
         {dashError && (
           <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
             Failed to load dashboard data — please try refreshing.
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {statCards.map((stat) => (
-            <Card
-              className={`hover:shadow-xl transition-all border-primary/20 border-l-2 ${stat.borderL}`}
-              key={stat.title}
-            >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs sm:text-sm font-medium line-clamp-2">
-                  {stat.title}
-                </CardTitle>
-                <div className={`p-2 rounded-lg ${stat.bg}`}>
-                  <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color}`} />
+        {/* ── Stat row: one spotlight card + three compact cards ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+          {/* Spotlight: Total Users with active-ratio progress ring */}
+          <div className="lg:col-span-1 relative overflow-hidden rounded-xl border border-blue-500/25 bg-gradient-to-br from-blue-600 to-indigo-600 text-white p-3.5 flex flex-col justify-between min-h-[100px]">
+            <div
+              className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%)",
+              }}
+            />
+            <div className="relative z-10 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-white/70">
+                Total Users
+              </span>
+              <div className="p-1 rounded-md bg-white/15">
+                <Users size={13} />
+              </div>
+            </div>
+            <div className="relative z-10">
+              {loading ? (
+                <div className="h-7 w-16 rounded-md bg-white/20 animate-pulse" />
+              ) : (
+                <div className="text-2xl font-bold tabular-nums leading-none">
+                  {stats.totalUsers.toLocaleString()}
                 </div>
-              </CardHeader>
-              <CardContent className="pt-1">
-                {loading ? (
-                  <div className="h-8 w-16 rounded-md bg-muted animate-pulse" />
-                ) : (
-                  <div className="text-xl sm:text-2xl md:text-3xl font-bold">
-                    {stat.value.toLocaleString()}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">{stat.sub}</p>
-              </CardContent>
-            </Card>
+              )}
+              <p className="text-[11px] text-white/70 mt-0.5">
+                registered accounts
+              </p>
+            </div>
+            <div className="relative z-10 mt-1.5">
+              <div className="flex items-center justify-between text-[10px] text-white/70 mb-1">
+                <span>Active ratio</span>
+                <span className="font-semibold text-white">{activeRatio}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/15 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-white/80 transition-all duration-700"
+                  style={{ width: `${activeRatio}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {minorStats.map((stat) => (
+            <div
+              key={stat.title}
+              className={`rounded-xl border border-border bg-card p-3.5 flex flex-col justify-between min-h-[100px] hover:shadow-lg hover:-translate-y-0.5 transition-all ring-1 ring-transparent hover:${stat.ring}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {stat.title}
+                </span>
+                <div className={`p-1 rounded-md ${stat.bg}`}>
+                  <stat.icon size={13} className={stat.color} />
+                </div>
+              </div>
+              {loading ? (
+                <div className="h-7 w-14 rounded-md bg-muted animate-pulse" />
+              ) : (
+                <div className="text-2xl font-bold tabular-nums text-foreground leading-none">
+                  {stat.value.toLocaleString()}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">{stat.sub}</p>
+            </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm sm:text-base">
-                Recent Users
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-48 sm:h-56 md:h-64 lg:h-72 pr-4">
-                {loading ? (
-                  <ul className="space-y-2 p-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <li
-                        key={i}
-                        className="h-8 rounded-md bg-muted animate-pulse"
-                      />
-                    ))}
-                  </ul>
-                ) : recentUsers.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">
-                    No users found.
-                  </p>
-                ) : (
-                  <ul className="space-y-2 p-4 divide-y divide-border/50">
-                    {recentUsers.map((user) => (
-                      <li
-                        key={user.id}
-                        className="flex items-center justify-between py-2 px-1 text-xs sm:text-sm"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{user.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {user.email}
-                          </p>
-                        </div>
-                        <Badge
-                          className={`ml-2 px-1.5 sm:px-2.5 py-0.5 text-xs font-semibold border-2 transition-colors whitespace-nowrap ${
-                            !user.discontinue
-                              ? "border-green-500 bg-transparent text-green-700 hover:bg-green-500/10"
-                              : "border-red-500 bg-transparent text-red-700 hover:bg-red-500/10"
-                          }`}
-                        >
-                          {!user.discontinue ? "Active" : "Inactive"}
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <Card className="md:col-span-1 lg:col-span-2">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm sm:text-base">
-                Recent Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-64 sm:h-72 md:h-[18rem] lg:h-[20rem] xl:h-[22rem] pr-4">
-                {loading ? (
-                  <div className="space-y-2 p-4">
-                    {Array.from({ length: 5 }).map((_, i) => (
+        {/* ── Recent Users + Recent Activity ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          <div className="lg:col-span-2 rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-3.5 py-2 border-b border-border/60 flex items-center gap-2">
+              <Users size={13} className="text-blue-600" />
+              <h2 className="text-sm font-semibold">Recent Users</h2>
+            </div>
+            <div>
+              {loading ? (
+                <ul className="space-y-2 p-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <li
+                      key={i}
+                      className="h-10 rounded-md bg-muted animate-pulse"
+                    />
+                  ))}
+                </ul>
+              ) : recentUsers.length === 0 ? (
+                <p className="p-4 text-sm text-muted-foreground">
+                  No users found.
+                </p>
+              ) : (
+                <ul className="divide-y divide-border/40">
+                  {recentUsers.map((user, i) => (
+                    <li
+                      key={user.id}
+                      className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted/40 transition-colors"
+                    >
                       <div
-                        key={i}
-                        className="h-14 rounded-lg bg-muted animate-pulse"
-                      />
-                    ))}
-                  </div>
-                ) : recentActivities.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">
-                    No activity found.
-                  </p>
-                ) : (
-                  <div className="space-y-2 p-3 sm:p-4">
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarColor(i)}`}
+                      >
+                        {getInitials(user.name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-xs truncate">
+                          {user.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate">
+                          {user.email}
+                        </p>
+                      </div>
+                      <span
+                        className={`flex items-center gap-1.5 text-[10px] font-semibold shrink-0 ${
+                          !user.discontinue
+                            ? "text-emerald-600"
+                            : "text-rose-600"
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            !user.discontinue
+                              ? "bg-emerald-500"
+                              : "bg-rose-500"
+                          }`}
+                        />
+                        {!user.discontinue ? "Active" : "Inactive"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="lg:col-span-3 rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-3.5 py-2 border-b border-border/60 flex items-center gap-2">
+              <BarChart3 size={13} className="text-violet-600" />
+              <h2 className="text-sm font-semibold">Recent Activity</h2>
+            </div>
+            <div>
+              {loading ? (
+                <div className="space-y-2 p-4">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-14 rounded-lg bg-muted animate-pulse"
+                    />
+                  ))}
+                </div>
+              ) : recentActivities.length === 0 ? (
+                <p className="p-4 text-sm text-muted-foreground">
+                  No activity found.
+                </p>
+              ) : (
+                <div className="relative px-3.5 py-2">
+                  {/* Vertical timeline rail */}
+                  <div className="absolute left-[22px] top-2 bottom-2 w-px bg-border" />
+                  <div className="space-y-1.5">
                     {recentActivities.map((activity, i) => {
                       const Icon = getActivityIcon(
                         activity.event,
@@ -392,17 +466,27 @@ export default function AdminDashboard() {
                       return (
                         <div
                           key={activity.id || i}
-                          className="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 bg-gradient-to-r from-muted/30 to-accent/30 rounded-lg text-xs sm:text-sm hover:shadow-md hover:ring-1 hover:ring-primary/20 transition-all"
+                          className="relative flex items-start gap-2.5 pl-0"
                         >
-                          <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 mt-0.5 flex-shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <p className="font-semibold text-foreground line-clamp-1 leading-tight">
-                              {pageName}
-                            </p>
-                            <p className="text-xs text-muted-foreground leading-tight line-clamp-1">
+                          <div className="relative z-10 w-6 h-6 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
+                            <Icon className="h-3 w-3 text-violet-600" />
+                          </div>
+                          <div className="min-w-0 flex-1 rounded-lg bg-muted/30 px-2.5 py-1.5 hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold text-foreground text-xs truncate">
+                                {pageName}
+                              </p>
+                              <Badge
+                                variant="outline"
+                                className={`text-[9px] px-1.5 py-0 whitespace-nowrap shrink-0 ${getRelativeTimeColor(activity.timestamp)}`}
+                              >
+                                {getRelativeTime(activity.timestamp)}
+                              </Badge>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground truncate">
                               {subDetail}
                             </p>
-                            <p className="text-xs text-muted-foreground leading-tight">
+                            <p className="text-[10px] text-muted-foreground/70">
                               by {activity.userName || activity.userEmail} •{" "}
                               {new Date(activity.timestamp).toLocaleString(
                                 "en-IN",
@@ -416,22 +500,16 @@ export default function AdminDashboard() {
                               )}
                             </p>
                           </div>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs whitespace-nowrap ml-1 sm:ml-2 ${getRelativeTimeColor(activity.timestamp)}`}
-                          >
-                            {getRelativeTime(activity.timestamp)}
-                          </Badge>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      </AdminShell>
     </>
   );
 }

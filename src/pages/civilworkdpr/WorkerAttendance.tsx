@@ -119,49 +119,54 @@ function WorkerCard({ worker, onClick }: { worker: WorkerSummary; onClick: () =>
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 const WorkerAttendance: React.FC = () => {
+  const [companyId, setCompanyId] = useState<number | "">("");
   const [projectId, setProjectId] = useState<number | "">("");
-  const [contractorId, setContractorId] = useState<number | "">("");
   const [activityId, setActivityId] = useState<number | "">("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
+  // Company is a real enterprise record (business_type=C) — same source as
+  // every other Company filter in the app — not a contractor.
+  const { data: companyOptions = [] } = useQuery({
+    queryKey: ["workerAttendanceCompanies"],
+    queryFn: () => getEnterpriseOptions(undefined, "C"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const companies = useMemo(
+    () => companyOptions.map((c: any) => ({ id: c.id, name: c.label })),
+    [companyOptions],
+  );
+
+  // Project is also a real enterprise record (business_type=P); each one
+  // carries the company_id of its parent Company, so selecting a Company
+  // narrows Project options client-side without a separate endpoint.
   const { data: projects = [] } = useQuery({
     queryKey: ["workerAttendanceProjects"],
     queryFn: () => getEnterpriseOptions(undefined, "P"),
     staleTime: 5 * 60 * 1000,
   });
+  const projectsForCompany = useMemo(() => {
+    if (!companyId) return projects as any[];
+    return (projects as any[]).filter((p) => p.company_id === companyId);
+  }, [companyId, projects]);
 
-  // Allocations drive the Company/Activity dropdowns — "all contractors/
-  // activities associated with the selected project", per spec.
+  // Activity options come from ContractorAllocation — "what work has
+  // actually been allocated" — scoped to whichever Project(s) belong to the
+  // selected Company, and further narrowed once a specific Project is picked.
   const { data: allocations = [] } = useQuery({
     queryKey: ["contractorAllocations"],
     queryFn: getContractorAllocations,
     staleTime: 60 * 1000,
   });
 
-  // Company drives the cascade first — Project options are whichever
-  // projects that company has been allocated work on, and Activity options
-  // are further narrowed to that company's work within the chosen project.
-  const companies = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const a of allocations) {
-      if (a.contractorId) map.set(a.contractorId, a.contractorName || `Contractor #${a.contractorId}`);
-    }
-    return Array.from(map, ([id, name]) => ({ id, name }));
-  }, [allocations]);
+  const companyProjectIds = useMemo(
+    () => new Set(projectsForCompany.map((p) => p.id)),
+    [projectsForCompany],
+  );
 
-  const allocationsForCompany = contractorId
-    ? allocations.filter((a) => a.contractorId === contractorId)
+  const allocationsForCompany = companyId
+    ? allocations.filter((a) => a.projectId != null && companyProjectIds.has(a.projectId))
     : allocations;
-
-  const projectsForCompany = useMemo(() => {
-    if (!contractorId) return projects as any[];
-    const map = new Map<number, string>();
-    for (const a of allocationsForCompany) {
-      if (a.projectId) map.set(a.projectId, a.projectName || `Project #${a.projectId}`);
-    }
-    return Array.from(map, ([id, label]) => ({ id, label }));
-  }, [contractorId, allocationsForCompany, projects]);
 
   const allocationsForProject = projectId
     ? allocationsForCompany.filter((a) => a.projectId === projectId)
@@ -180,11 +185,11 @@ const WorkerAttendance: React.FC = () => {
     isLoading,
     isFetching,
   } = useQuery({
-    queryKey: ["workers", projectId, contractorId, activityId, search, page],
+    queryKey: ["workers", companyId, projectId, activityId, search, page],
     queryFn: () =>
       getWorkers({
+        companyId: companyId || undefined,
         projectId: projectId || undefined,
-        contractorId: contractorId || undefined,
         activityId: activityId || undefined,
         search: search || undefined,
         page,
@@ -241,9 +246,9 @@ const WorkerAttendance: React.FC = () => {
                 <HardHat size={11} /> Company
               </label>
               <select
-                value={contractorId}
+                value={companyId}
                 onChange={(e) => {
-                  setContractorId(e.target.value ? Number(e.target.value) : "");
+                  setCompanyId(e.target.value ? Number(e.target.value) : "");
                   resetDependent();
                 }}
                 className={inputCls}

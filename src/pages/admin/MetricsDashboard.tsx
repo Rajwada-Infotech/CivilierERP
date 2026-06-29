@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -197,24 +198,11 @@ const MetricsDashboard = () => {
     <>
       <Breadcrumbs items={["Admin", "Live Metrics"]} />
 
-      <div className="space-y-8 mt-6">
-        {/* ── Page header ─────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-teal-500/10 flex items-center justify-center">
-              <TrendingUp size={17} className="text-teal-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                Live Metrics Dashboard
-              </h1>
-              <p className="text-xs font-body text-muted-foreground mt-0.5">
-                Enter your backend URL and Bearer token to connect. "Start live" polls every 10 seconds.
-              </p>
-            </div>
-          </div>
-        </div>
-
+      <AdminShell
+        title="Live Metrics Dashboard"
+        subtitle={'Enter your backend URL and Bearer token to connect. "Start live" polls every 10 seconds.'}
+        icon={TrendingUp}
+      >
         {/* ── Connect Panel ────────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
@@ -525,7 +513,7 @@ const MetricsDashboard = () => {
             )}
           </div>
         )}
-      </div>
+      </AdminShell>
     </>
   );
 };

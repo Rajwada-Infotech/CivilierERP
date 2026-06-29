@@ -1,22 +1,11 @@
-import {
-  Crown,
-  Building2,
-  ShieldCheck,
-  Globe,
-  Shield,
-  Settings,
-  TrendingUp,
-  FileText,
-  Users,
-  Database,
-} from "lucide-react";
+import { Crown, Building, ShieldTick, Global, Shield, Setting, TrendUp, DocumentText, Profile2User, Data } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const superAdminNavItems: NavItem[] = [
   { label: "Control Panel", icon: Crown, path: "/superadmin", isDashboard: true },
   {
-    label: "Tenant Management",
-    icon: Building2,
+    label: "Tenants",
+    icon: Building,
     children: [
       { label: "All Tenants", path: "/superadmin" },
       { label: "Admin Control", path: "/admin/control-panel" },
@@ -24,7 +13,7 @@ export const superAdminNavItems: NavItem[] = [
   },
   {
     label: "User Control",
-    icon: Users,
+    icon: Profile2User,
     children: [
       { label: "Manage Users", path: "/users" },
       { label: "Activity Browser", path: "/admin/activity-browser" },
@@ -43,7 +32,7 @@ export const superAdminNavItems: NavItem[] = [
   },
   {
     label: "Enterprise",
-    icon: Globe,
+    icon: Global,
     children: [
       { label: "Enterprise", path: "/admin/masters/business-unit" },
       { label: "Company", path: "/admin/masters/company" },
@@ -51,8 +40,8 @@ export const superAdminNavItems: NavItem[] = [
     ],
   },
   {
-    label: "System Config",
-    icon: Settings,
+    label: "Config",
+    icon: Setting,
     children: [
       { label: "API Integration", path: "/admin/api-integration" },
       { label: "Role Master", path: "/admin/masters/role-master" },
@@ -60,6 +49,6 @@ export const superAdminNavItems: NavItem[] = [
       { label: "Signature", path: "/admin/signature" },
     ],
   },
-  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
-  { label: "DBA Console", icon: Database, path: "/dba" },
+  { label: "Live Metrics", icon: TrendUp, path: "/admin/metrics" },
+  { label: "DBA Console", icon: Data, path: "/dba" },
 ];

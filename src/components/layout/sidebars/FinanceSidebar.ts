@@ -1,11 +1,11 @@
-import { BarChart3, Landmark, Scale } from "lucide-react";
+import { Chart2, Bank, Judge } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
-  { label: "Proceeding", icon: BarChart3, path: "/finance", pageKey: "finance-dashboard", isDashboard: true },
+  { label: "Proceeding", icon: Chart2, path: "/finance", pageKey: "finance-dashboard", isDashboard: true },
   {
     label: "Transaction",
-    icon: Landmark,
+    icon: Bank,
     children: [
       { label: "Payment",          path: "/payments",          pageKey: "new-payment" },
       { label: "Received Payment", path: "/received-payments", pageKey: "received-payment" },
@@ -14,7 +14,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
   },
   {
     label: "Query",
-    icon: Scale,
+    icon: Judge,
     children: [
       { label: "Trial Balance", path: "/transactions", pageKey: "transactions" },
     ],

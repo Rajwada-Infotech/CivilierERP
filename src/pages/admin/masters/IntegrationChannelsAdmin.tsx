@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { Plug, Plus, Pencil, PowerOff, Search, Radio } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -217,28 +218,20 @@ export default function IntegrationChannelsAdmin() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6 space-y-5 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Plug className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Integration Channels</h1>
-            <p className="text-sm text-muted-foreground">
-              Manage the channels available in the Communicator
-            </p>
-          </div>
-        </div>
-        {rights.canCreate && (
-          <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
-            <Plus className="h-4 w-4" />
-            Add Channel
-          </Button>
-        )}
-      </div>
-
+    <div className="max-w-5xl mx-auto">
+      <AdminShell
+        title="Integration Channels"
+        subtitle="Manage the channels available in the Communicator"
+        icon={Plug}
+        action={
+          rights.canCreate && (
+            <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+              <Plus className="h-4 w-4" />
+              Add Channel
+            </Button>
+          )
+        }
+      >
       {/* Stats strip */}
       <div className="grid grid-cols-3 gap-4">
         {[
@@ -455,6 +448,7 @@ export default function IntegrationChannelsAdmin() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </AdminShell>
     </div>
   );
 }

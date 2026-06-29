@@ -43,6 +43,8 @@ import {
   Ruler,
   SlidersHorizontal,
   DoorOpen,
+  Target,
+  TrendingUp,
   Megaphone,
   UsersRound,
 } from "lucide-react";
@@ -231,6 +233,20 @@ const financeSetupItems = [
     color: "text-green-500",
     pageKey: "tds-master",
   },
+  {
+    icon: Target,
+    label: "Cost Center",
+    path: "/masters/cost-center",
+    color: "text-pink-500",
+    pageKey: "cost-center",
+  },
+  {
+    icon: TrendingUp,
+    label: "Profit Center",
+    path: "/masters/profit-center",
+    color: "text-teal-500",
+    pageKey: "profit-center",
+  },
 ];
 
 const materialSetupItems = [
@@ -385,6 +401,12 @@ const salesAutomationSetupItems = [
 
 const adminSetupItems = [
   {
+    icon: LayoutGrid,
+    label: "Menu Types",
+    path: "/admin/masters/menu-types",
+    color: "text-emerald-500",
+  },
+  {
     icon: Tag,
     label: "Entry Type",
     path: "/masters/named-entry-type",
@@ -401,12 +423,6 @@ const adminSetupItems = [
     label: "Role Master",
     path: "/admin/masters/role-master",
     color: "text-blue-400",
-  },
-  {
-    icon: LayoutGrid,
-    label: "Menu Types",
-    path: "/admin/masters/menu-types",
-    color: "text-emerald-500",
   },
 ];
 
@@ -637,10 +653,20 @@ const SetupDropdown = ({
 
 // ─── User Menu ────────────────────────────────────────────────────────────────
 
+const ROLE_ACCENT: Record<string, { label: string; color: string }> = {
+  super_admin: { label: "Super Admin", color: "#a855f7" },
+  admin: { label: "Admin", color: "#3b82f6" },
+  dba: { label: "DBA", color: "#10b981" },
+  marketing_head: { label: "Marketing Head", color: "#f97316" },
+  sales_team_lead: { label: "Sales Team Lead", color: "#a855f7" },
+  sales_person: { label: "Sales Person", color: "#6366f1" },
+};
+
 const UserMenuContent: React.FC<{
   currentUser: ReturnType<typeof useAuth>["currentUser"];
   isSuperAdmin: boolean;
   isDba: boolean;
+  open: boolean;
   onClose: () => void;
   navigate: (p: string) => void;
   handleLogout: () => void;
@@ -648,76 +674,107 @@ const UserMenuContent: React.FC<{
   currentUser,
   isSuperAdmin,
   isDba,
+  open,
   onClose,
   navigate,
   handleLogout,
-}) => (
-  <>
-    <div className="px-3 py-2 border-b border-border mb-1">
-      <p className="text-sm font-heading font-semibold text-foreground">
-        {currentUser?.name}
-      </p>
-      <p className="text-xs text-muted-foreground truncate">
-        {currentUser?.email}
-      </p>
-      <div className="mt-1.5">
-        {isSuperAdmin && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
-            Super Admin
-          </span>
-        )}
-        {currentUser?.role === "admin" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
-            Admin
-          </span>
-        )}
-        {currentUser?.role === "dba" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
-            DBA
-          </span>
-        )}
-        {currentUser?.role === "marketing_head" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-orange-500/10 text-orange-600">
-            Marketing Head
-          </span>
-        )}
-        {currentUser?.role === "sales_team_lead" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-purple-500/10 text-purple-600">
-            Sales Team Lead
-          </span>
-        )}
-        {currentUser?.role === "sales_person" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-indigo-500/10 text-indigo-600">
-            Sales Person
-          </span>
-        )}
-        {currentUser?.role === "user" && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-            User · {currentUser.pagePermissions?.length || 0} pages
-          </span>
-        )}
+}) => {
+  const roleKey = isSuperAdmin
+    ? "super_admin"
+    : isDba
+      ? "dba"
+      : (currentUser?.role ?? "");
+  const accent = ROLE_ACCENT[roleKey];
+
+  // Each row reveals with a slight stagger keyed off `open` (rather than a
+  // one-shot mount animation) so it re-plays every time the menu opens —
+  // the dropdown's content stays mounted, only opacity/scale toggle.
+  const cascade = (i: number): React.CSSProperties => ({
+    opacity: open ? 1 : 0,
+    transform: open ? "translateY(0)" : "translateY(-6px)",
+    transition: `opacity 240ms ease ${i * 55}ms, transform 240ms cubic-bezier(0.16,1,0.3,1) ${i * 55}ms`,
+  });
+
+  return (
+    <>
+      {/* ── Identity banner ── */}
+      <div
+        className="relative -m-1 mb-1 px-4 pt-4 pb-3.5 rounded-t-2xl overflow-hidden"
+        style={cascade(0)}
+      >
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: accent
+              ? `linear-gradient(135deg, ${accent.color}1F 0%, transparent 70%)`
+              : "linear-gradient(135deg, hsl(var(--primary) / 0.12) 0%, transparent 70%)",
+          }}
+        />
+        <div className="relative z-10 flex items-center gap-3">
+          <div
+            className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-heading font-bold text-primary-foreground shrink-0 overflow-hidden ring-2 ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
+            style={accent ? { boxShadow: `0 0 0 2px ${accent.color}40` } : undefined}
+          >
+            {currentUser?.avatarUrl ? (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name}
+                className="w-full h-full object-cover rounded-full"
+              />
+            ) : (
+              currentUser?.initials || "?"
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-heading font-semibold text-foreground truncate">
+              {currentUser?.name}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {currentUser?.email}
+            </p>
+          </div>
+        </div>
+        <div className="relative z-10 mt-2.5">
+          {accent ? (
+            <span
+              className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-heading font-semibold"
+              style={{ background: `${accent.color}1A`, color: accent.color }}
+            >
+              {accent.label}
+            </span>
+          ) : (
+            <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
+              User · {currentUser?.pagePermissions?.length || 0} pages
+            </span>
+          )}
+        </div>
       </div>
-    </div>
-    <button
-      onMouseDown={() => {
-        onClose();
-        if (isSuperAdmin) navigate("/superadmin/profile");
-        else if (isDba) navigate("/dba/profile");
-        else if (currentUser?.role === "admin") navigate("/admin/profile");
-        else navigate("/user/profile");
-      }}
-      className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
-    >
-      <User size={14} /> Profile
-    </button>
-    <button
-      onMouseDown={handleLogout}
-      className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
-    >
-      <LogOut size={14} /> Sign Out
-    </button>
-  </>
-);
+
+      <div className="border-t border-border/60" style={cascade(1)} />
+
+      <button
+        onMouseDown={() => {
+          onClose();
+          if (isSuperAdmin) navigate("/superadmin/profile");
+          else if (isDba) navigate("/dba/profile");
+          else if (currentUser?.role === "admin") navigate("/admin/profile");
+          else navigate("/user/profile");
+        }}
+        style={cascade(2)}
+        className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-lg hover:bg-muted transition-colors text-foreground"
+      >
+        <User size={14} /> Profile
+      </button>
+      <button
+        onMouseDown={handleLogout}
+        style={cascade(3)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
+      >
+        <LogOut size={14} /> Sign Out
+      </button>
+    </>
+  );
+};
 
 // ─── TopNavbar ────────────────────────────────────────────────────────────────
 
@@ -1200,6 +1257,7 @@ export const TopNavbar = () => {
               currentUser={currentUser}
               isSuperAdmin={isSuperAdmin}
               isDba={isDba}
+              open={userOpen}
               onClose={closeUser}
               navigate={navigate}
               handleLogout={handleLogout}
@@ -1245,6 +1303,7 @@ export const TopNavbar = () => {
               currentUser={currentUser}
               isSuperAdmin={isSuperAdmin}
               isDba={isDba}
+              open={userOpen}
               onClose={closeUser}
               navigate={navigate}
               handleLogout={handleLogout}

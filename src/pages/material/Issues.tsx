@@ -298,21 +298,6 @@ export default function Issues() {
     }
   }, [finYears, viewMode, header.finYearId]);
 
-  // ── Auto-select main godown ──────────────────────────────────────────────
-
-  useEffect(() => {
-    if (
-      (godowns as any[]).length > 0 &&
-      !header.godownId &&
-      viewMode === "form"
-    ) {
-      const main = (godowns as any[]).find((g) => g.isMain);
-      const first = (godowns as any[])[0];
-      const chosen = main ?? first;
-      if (chosen) setH("godownId", String(chosen.id));
-    }
-  }, [godowns, viewMode, header.godownId]);
-
   // ── Item & UOM lookup helpers ────────────────────────────────────────────
 
   const itemMap = useMemo(() => {
@@ -340,9 +325,38 @@ export default function Issues() {
     return (projects as any[]).filter((p) => Number(p.company_id) === cid);
   }, [projects, header.companyId]);
 
+  // Godown is only opened once a Company AND a Project are both selected,
+  // scoped to whichever godown is tagged to that exact company + project.
+  const filteredGodowns = useMemo(() => {
+    if (!header.companyId || !header.projectId) return [];
+    const cid = Number(header.companyId);
+    const pid = Number(header.projectId);
+    return (godowns as any[]).filter(
+      (g) => Number(g.companyId) === cid && Number(g.projectId) === pid,
+    );
+  }, [godowns, header.companyId, header.projectId]);
+
+  // Auto-select the (single) godown tagged to the chosen company+project —
+  // there's normally exactly one, so no need to make the user pick again.
+  useEffect(() => {
+    if (filteredGodowns.length === 1 && header.godownId !== String(filteredGodowns[0].id)) {
+      setH("godownId", String(filteredGodowns[0].id));
+      setCart([blankCartItem()]);
+    } else if (filteredGodowns.length !== 1 && header.godownId) {
+      setH("godownId", "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredGodowns]);
+
   const handleCompanyChange = (v: string) => {
     setH("companyId", v);
     setH("projectId", ""); // reset project when company changes
+    setH("godownId", "");
+  };
+
+  const handleProjectChange = (v: string) => {
+    setH("projectId", v);
+    setH("godownId", "");
   };
 
   // ── Cart helpers ─────────────────────────────────────────────────────────
@@ -954,79 +968,6 @@ export default function Issues() {
               )}
             </div>
 
-            {/* ── Godown selector — prominent, full-width banner ── */}
-            <div className="rounded-xl border-2 border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.05] to-emerald-500/10 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Warehouse size={16} className="text-emerald-600 dark:text-emerald-400" />
-                <span className="text-sm font-semibold text-foreground">
-                  Source Godown
-                </span>
-                <span className="text-destructive text-sm">*</span>
-                <span className="text-xs text-muted-foreground ml-1">
-                  Stock will be deducted from this godown
-                </span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                <div className="flex-1 min-w-0">
-                  <div className="relative">
-                    <select
-                      value={header.godownId}
-                      onChange={(e) => handleGodownChange(e.target.value)}
-                      className={`${selectCls} border-emerald-500/30 focus:ring-emerald-500/30`}
-                    >
-                      <option value="">
-                        {loadingGodowns ? "Loading godowns…" : "Select godown"}
-                      </option>
-                      {(godowns as any[]).map((g) => (
-                        <option key={g.id} value={String(g.id)}>
-                          {g.name}
-                          {g.code ? ` (${g.code})` : ""}
-                          {g.isMain ? " · Main" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Stock summary for selected godown */}
-                {selectedGodown && !loadingItems && (
-                  <div className="flex items-center gap-3 shrink-0 text-xs">
-                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-background border border-border">
-                      <Layers size={12} className="text-muted-foreground" />
-                      <span className="text-muted-foreground">Items:</span>
-                      <span className="font-semibold text-foreground">
-                        {(itemOptions as any[]).length}
-                      </span>
-                    </div>
-                    {lowStockItems > 0 && (
-                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-                        <AlertTriangle
-                          size={12}
-                          className="text-amber-600 dark:text-amber-400"
-                        />
-                        <span className="text-amber-700 dark:text-amber-400 font-medium">
-                          {lowStockItems} out of stock
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Hint: changing godown resets cart */}
-              {cart.some((ci) => ci.ItemId) && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
-                  <AlertTriangle size={10} />
-                  Changing the godown will reset all added items
-                </p>
-              )}
-            </div>
-
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <Field label="Company" required>
@@ -1056,7 +997,7 @@ export default function Issues() {
                 <div className="relative">
                   <select
                     value={header.projectId}
-                    onChange={(e) => setH("projectId", e.target.value)}
+                    onChange={(e) => handleProjectChange(e.target.value)}
                     className={selectCls}
                   >
                     <option value="">
@@ -1115,6 +1056,90 @@ export default function Issues() {
                   />
                 </div>
               </Field>
+            </div>
+
+            {/* ── Godown selector — prominent, full-width banner. Only opens
+                once Company + Project are both picked, scoped to the godown
+                tagged to that exact company + project. ── */}
+            <div className="rounded-xl border-2 border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.05] to-emerald-500/10 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Warehouse size={16} className="text-emerald-600 dark:text-emerald-400" />
+                <span className="text-sm font-semibold text-foreground">
+                  Source Godown
+                </span>
+                <span className="text-destructive text-sm">*</span>
+                <span className="text-xs text-muted-foreground ml-1">
+                  {header.companyId && header.projectId
+                    ? "Stock will be deducted from this godown"
+                    : "Select a company and project to open its godown"}
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                <div className="flex-1 min-w-0">
+                  <div className="relative">
+                    <select
+                      value={header.godownId}
+                      onChange={(e) => handleGodownChange(e.target.value)}
+                      disabled={!header.companyId || !header.projectId}
+                      className={`${selectCls} border-emerald-500/30 focus:ring-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed`}
+                    >
+                      <option value="">
+                        {!header.companyId || !header.projectId
+                          ? "Select company & project first"
+                          : loadingGodowns
+                            ? "Loading godowns…"
+                            : filteredGodowns.length === 0
+                              ? "No godown tagged to this company/project"
+                              : "Select godown"}
+                      </option>
+                      {filteredGodowns.map((g) => (
+                        <option key={g.id} value={String(g.id)}>
+                          {g.name}
+                          {g.code ? ` (${g.code})` : ""}
+                          {g.isMain ? " · Main" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Stock summary for selected godown */}
+                {selectedGodown && !loadingItems && (
+                  <div className="flex items-center gap-3 shrink-0 text-xs">
+                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-background border border-border">
+                      <Layers size={12} className="text-muted-foreground" />
+                      <span className="text-muted-foreground">Items:</span>
+                      <span className="font-semibold text-foreground">
+                        {(itemOptions as any[]).length}
+                      </span>
+                    </div>
+                    {lowStockItems > 0 && (
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                        <AlertTriangle
+                          size={12}
+                          className="text-amber-600 dark:text-amber-400"
+                        />
+                        <span className="text-amber-700 dark:text-amber-400 font-medium">
+                          {lowStockItems} out of stock
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Hint: changing godown resets cart */}
+              {cart.some((ci) => ci.ItemId) && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+                  <AlertTriangle size={10} />
+                  Changing the godown will reset all added items
+                </p>
+              )}
             </div>
 
             {/* Row 2: Issued To | Cost Center */}

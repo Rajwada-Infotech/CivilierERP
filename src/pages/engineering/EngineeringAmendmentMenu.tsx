@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1277,20 +1278,11 @@ export default function EngineeringAmendmentMenu() {
     <>
       <Breadcrumbs items={["Engineering", "Amendment"]} />
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-xl font-heading font-bold text-foreground">
-            <FilePenLine size={20} className="text-orange-500" />
-            Engineering Amendment Centre
-          </h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Select a Work Order, Work Done entry, or BOQ to raise or review
-            amendments — full audit trail.
-          </p>
-        </div>
-      </div>
-
+      <EngineeringShell
+        title="Engineering Amendment Centre"
+        subtitle="Select a Work Order, Work Done entry, or BOQ to raise or review amendments — full audit trail."
+        icon={FilePenLine}
+      >
       {/* ── Stats ───────────────────────────────────────────────────────────── */}
       <StatsRow
         woCount={stats.woCount}
@@ -1359,6 +1351,7 @@ export default function EngineeringAmendmentMenu() {
         canEdit={rights.canEdit}
         canDelete={rights.canDelete}
       />
+      </EngineeringShell>
 
       {/* ── Amendment Form Dialog ────────────────────────────────────────────── */}
       <AmendFormDialog

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,31 +74,30 @@ export default function RemindersManager() {
   );
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+    <div className="max-w-[1400px] mx-auto">
       {/* Header */}
       <Breadcrumbs items={[{ label: "DBA Console" }, { label: "Reminders" }]} />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <BellRing size={20} className="text-amber-500" /> Reminders Manager
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Live tenant subscription and collection monitoring.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={loadData}
-          disabled={loading}
-          className="gap-1.5 text-xs"
-        >
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-          Sync Live
-        </Button>
-      </div>
-
+      <DbaShell
+        title="Reminders Manager"
+        subtitle="Live tenant subscription and collection monitoring."
+        icon={BellRing}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadData}
+            disabled={loading}
+            className="group gap-1.5 text-xs active:scale-90 transition-transform"
+          >
+            <RefreshCw
+              size={12}
+              className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
+            />
+            Sync Live
+          </Button>
+        }
+      >
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Card>
@@ -265,6 +265,7 @@ export default function RemindersManager() {
           </div>
         </CardContent>
       </Card>
+      </DbaShell>
     </div>
   );
 }
