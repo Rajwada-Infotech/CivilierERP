@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
@@ -650,6 +651,7 @@ export default function AdminTicketPanel() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Support Tickets"]} />
+      <AdminShell title="Support Tickets" icon={MessageCircle}>
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {/* ── Header ── */}
         <div className="flex items-center justify-between gap-3 px-[18px] py-3.5 border-b border-border">
@@ -849,6 +851,7 @@ export default function AdminTicketPanel() {
           />
         )}
       </div>
+      </AdminShell>
     </>
   );
 }

@@ -7,22 +7,22 @@ import { useAppVersion } from "@/hooks/useAppVersion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import {
-  BarChart3,
+  Chart2,
   Calendar,
-  ChevronLeft,
+  ArrowLeft2,
   Crown,
-  Database,
-  Landmark,
-  MessageSquare,
-  Package,
-  ShieldCheck,
-  ShelvingUnit,
+  Data,
+  Bank,
+  Message2,
+  Box,
+  ShieldTick,
+  Shop,
   Archive,
   User,
-  Wrench,
-  Pickaxe,
-  Megaphone,
-} from "lucide-react";
+  Setting2,
+  Buildings2,
+  Volume,
+} from "iconsax-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
@@ -42,7 +42,7 @@ import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/home", isDashboard: true },
+  { label: "Dashboard", icon: Chart2, path: "/home", isDashboard: true },
 ];
 
 // ── Module header metadata ────────────────────────────────────────────────────
@@ -58,14 +58,14 @@ const MODULE_HEADER: Record<
 > = {
   finance: {
     label: "Finance",
-    icon: Landmark,
+    icon: Bank,
     color: "#6366f1",
     from: "from-indigo-500/30",
     to: "to-indigo-500/0",
   },
   material: {
     label: "Material",
-    icon: Package,
+    icon: Box,
     color: "#10b981",
     from: "from-emerald-500/30",
     to: "to-emerald-500/0",
@@ -79,21 +79,21 @@ const MODULE_HEADER: Record<
   },
   engineering: {
     label: "Engineering",
-    icon: Wrench,
+    icon: Setting2,
     color: "#f97316",
     from: "from-orange-500/30",
     to: "to-orange-500/0",
   },
   ticket: {
     label: "Ticket",
-    icon: MessageSquare,
+    icon: Message2,
     color: "#ec4899",
     from: "from-pink-500/30",
     to: "to-pink-500/0",
   },
   sales: {
     label: "Sales",
-    icon: ShelvingUnit,
+    icon: Shop,
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",
@@ -107,21 +107,21 @@ const MODULE_HEADER: Record<
   },
   civilworkdpr: {
     label: "Civil Work DPR",
-    icon: Pickaxe,
+    icon: Buildings2,
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",
   },
   "sales-automation": {
     label: "Sales Automation",
-    icon: Megaphone,
+    icon: Volume,
     color: "#f59e0b",
     from: "from-amber-500/30",
     to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
-    icon: ShieldCheck,
+    icon: ShieldTick,
     color: "#3b82f6",
     from: "from-blue-500/30",
     to: "to-blue-500/0",
@@ -135,7 +135,7 @@ const MODULE_HEADER: Record<
   },
   dba: {
     label: "DBA",
-    icon: Database,
+    icon: Data,
     color: "#10b981",
     from: "from-emerald-500/30",
     to: "to-emerald-500/0",
@@ -280,7 +280,7 @@ export const AppSidebar = () => {
   const getNavItems = (): NavItem[] => {
     if (isCustomerPage)
       return [
-        { label: "My Tickets", icon: MessageSquare, path: "/customer-portal" },
+        { label: "My Tickets", icon: Message2, path: "/customer-portal" },
         { label: "My Profile", icon: User, path: "/user/profile" },
       ];
     if (isSuperAdminPage) return superAdminNavItems;
@@ -443,6 +443,9 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2"
         >
+          <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+            Menu
+          </p>
           <SidebarNav
             items={getNavItems()}
             collapsed={false}
@@ -497,7 +500,7 @@ export const AppSidebar = () => {
                 delay: 0.32,
               }}
             />
-            <ChevronLeft size={13} strokeWidth={2.4} />
+            <ArrowLeft2 size={13} />
           </motion.button>
         </div>
       </aside>

@@ -1,27 +1,14 @@
-import {
-  BarChart3,
-  Users,
-  Shield,
-  CheckCircle2,
-  ShieldCheck,
-  MessageSquare,
-  Building2,
-  TrendingUp,
-  FileText,
-  Ticket,
-  Plug,
-  Layers,
-} from "lucide-react";
+import { Chart2, Profile2User, Shield, TickCircle, ShieldTick, Message2, Building, TrendUp, DocumentText, Ticket, Cpu, Layer } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 1. Dashboard ───────────────────────────────────────────────────────────
-  { label: "Control Center", icon: BarChart3, path: "/admin/dashboard", isDashboard: true },
+  { label: "Control Center", icon: Chart2, path: "/admin/dashboard", isDashboard: true },
 
   // ── 2. Data Entry — Master Setup (things you configure before using the system)
   {
     label: "Enterprise",
-    icon: Building2,
+    icon: Building,
     children: [
       { label: "Enterprise", path: "/admin/masters/business-unit" },
       { label: "Company", path: "/admin/masters/company" },
@@ -30,7 +17,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   },
   {
     label: "Masters",
-    icon: Layers,
+    icon: Layer,
     children: [
       {
         label: "Contractor Categories",
@@ -44,7 +31,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 3. User & Access Control ───────────────────────────────────────────────
   {
     label: "User Control",
-    icon: Users,
+    icon: Profile2User,
     children: [
       { label: "Manage Users", path: "/users" },
       { label: "Activity Browser", path: "/admin/activity-browser" },
@@ -61,7 +48,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   },
   {
     label: "Security",
-    icon: ShieldCheck,
+    icon: ShieldTick,
     children: [
       { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
@@ -70,7 +57,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 4. Approval Workflow ───────────────────────────────────────────────────
   {
     label: "Approval",
-    icon: CheckCircle2,
+    icon: TickCircle,
     children: [
       {
         label: "Inbox",
@@ -85,7 +72,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 5. Integrations & Communications ──────────────────────────────────────
   {
     label: "Communicator",
-    icon: MessageSquare,
+    icon: Message2,
     children: [
       { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
       { label: "Email Setup", path: "/admin/communicator/email-setup" },
@@ -96,16 +83,16 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       },
     ],
   },
-  { label: "API Integration", icon: Plug, path: "/admin/api-integration" },
+  { label: "Integrations", icon: Cpu, path: "/admin/api-integration" },
 
   // ── 6. Monitoring & Support ────────────────────────────────────────────────
-  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
+  { label: "Live Metrics", icon: TrendUp, path: "/admin/metrics" },
   {
-    label: "Support Tickets",
+    label: "Tickets",
     icon: Ticket,
     children: [{ label: "Resolution", path: "/admin/tickets/resolution" }],
   },
 
   // ── 7. Miscellaneous ───────────────────────────────────────────────────────
-  { label: "Signature", icon: FileText, path: "/admin/signature" },
+  { label: "Signature", icon: DocumentText, path: "/admin/signature" },
 ];

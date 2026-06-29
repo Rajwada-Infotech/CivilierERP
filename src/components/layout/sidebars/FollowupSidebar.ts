@@ -1,15 +1,12 @@
-import {
-  LayoutDashboard, Users, FileText, IndianRupee,
-  HardHat, CheckCircle2, MessageSquare, BellRing,
-} from "lucide-react";
+import { Category2, Profile2User, DocumentText, Wallet1, Building3, TickCircle, Message2, Notification } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const followupNavItems: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/followup", pageKey: "followup-dashboard", isDashboard: true },
+  { label: "Dashboard", icon: Category2, path: "/followup", pageKey: "followup-dashboard", isDashboard: true },
 
   {
     label: "Sales",
-    icon: Users,
+    icon: Profile2User,
     children: [
       { label: "Applications",           path: "/followup/sales/applications",           pageKey: "followup-applications" },
       { label: "Applicants Pipeline",    path: "/followup/sales/pipeline/applicants",    pageKey: "followup-applicants" },
@@ -22,7 +19,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "Agreement",
-    icon: FileText,
+    icon: DocumentText,
     children: [
       { label: "Agreements",         path: "/followup/agreement/agreements",     pageKey: "followup-agreements" },
       { label: "Agreement Workflow", path: "/followup/agreement/workflow",       pageKey: "followup-agreements" },
@@ -34,7 +31,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "Finance",
-    icon: IndianRupee,
+    icon: Wallet1,
     children: [
       { label: "Demands",  path: "/followup/finance/demands",  pageKey: "followup-demands" },
       { label: "Payments", path: "/followup/finance/payments", pageKey: "followup-payments" },
@@ -43,7 +40,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "Construction",
-    icon: HardHat,
+    icon: Building3,
     children: [
       { label: "Updates", path: "/followup/construction/updates", pageKey: "followup-construction-updates" },
     ],
@@ -51,7 +48,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "Closure",
-    icon: CheckCircle2,
+    icon: TickCircle,
     children: [
       { label: "NOC",               path: "/followup/closure/noc",                pageKey: "followup-noc" },
       { label: "Bank NOC",          path: "/followup/closure/bank-noc",           pageKey: "followup-noc" },
@@ -64,7 +61,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "CRM",
-    icon: MessageSquare,
+    icon: Message2,
     children: [
       { label: "Tasks",        path: "/followup/follow-ups/tasks", pageKey: "followup-tasks" },
       { label: "Follow-Up Log",path: "/followup/follow-ups/log",   pageKey: "followup-tasks" },
@@ -73,7 +70,7 @@ export const followupNavItems: NavItem[] = [
 
   {
     label: "Reminders",
-    icon: BellRing,
+    icon: Notification,
     children: [
       { label: "PO Reminders",  path: "/followup/follow-ups/po-reminders",  pageKey: "followup-reminders" },
       { label: "WO Reminders",  path: "/followup/follow-ups/wo-reminders",  pageKey: "followup-reminders" },

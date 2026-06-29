@@ -54,7 +54,7 @@ router.use(checkPermissionForMethod("Material", "VehicleInOut"));
 // ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|gif|webp|pdf|heic/i;
     const okExt = allowed.test(file.originalname);

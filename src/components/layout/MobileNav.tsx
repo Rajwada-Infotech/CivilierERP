@@ -38,6 +38,7 @@ import {
   Activity,
   Pickaxe,
   DoorOpen,
+  Target,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -226,6 +227,18 @@ const financeSetupItems: SetupItem[] = [
     path: "/masters/tds",
     color: "text-emerald-500",
   },
+  {
+    icon: Target,
+    label: "Cost Center",
+    path: "/masters/cost-center",
+    color: "text-pink-500",
+  },
+  {
+    icon: TrendingUp,
+    label: "Profit Center",
+    path: "/masters/profit-center",
+    color: "text-teal-500",
+  },
 ];
 
 const materialSetupItems: SetupItem[] = [
@@ -347,6 +360,12 @@ const engineeringSetupItems: SetupItem[] = [
 
 const adminSetupItems: SetupItem[] = [
   {
+    icon: LayoutGrid,
+    label: "Menu Types",
+    path: "/admin/masters/menu-types",
+    color: "text-emerald-500",
+  },
+  {
     icon: Tag,
     label: "Entry Type",
     path: "/masters/named-entry-type",
@@ -363,12 +382,6 @@ const adminSetupItems: SetupItem[] = [
     label: "Role Master",
     path: "/admin/masters/role-master",
     color: "text-blue-400",
-  },
-  {
-    icon: LayoutGrid,
-    label: "Menu Types",
-    path: "/admin/masters/menu-types",
-    color: "text-emerald-500",
   },
 ];
 

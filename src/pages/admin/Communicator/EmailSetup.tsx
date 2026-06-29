@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Mail, Save, Loader2 } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 // ─── Config shape stored in dbo.CommunicatorConfig.ConfigJson ─────────────────
 interface EmailConfig {
@@ -68,22 +69,12 @@ export default function EmailSetup() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-3xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-primary/10">
-          <Mail className="h-5 w-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Email Configuration
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            SMTP settings for system-wide email notifications
-          </p>
-        </div>
-      </div>
-
+    <div className="max-w-3xl mx-auto">
+      <AdminShell
+        title="Email Configuration"
+        subtitle="SMTP settings for system-wide email notifications"
+        icon={Mail}
+      >
       <Card>
         <CardHeader>
           <CardTitle className="text-base">SMTP &amp; Sender Details</CardTitle>
@@ -210,6 +201,7 @@ export default function EmailSetup() {
           )}
         </CardContent>
       </Card>
+      </AdminShell>
     </div>
   );
 }

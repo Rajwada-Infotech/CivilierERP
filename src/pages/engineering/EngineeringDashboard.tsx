@@ -288,10 +288,10 @@ export default function EngineeringDashboard() {
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
+            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 active:scale-90 disabled:opacity-50"
             style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
           >
-            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
             Refresh
           </button>
         }

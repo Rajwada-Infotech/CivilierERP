@@ -3649,6 +3649,9 @@ export default function MaterialExpenseBooking() {
                               <TableHead className="text-xs font-heading w-[16%]">
                                 Vendor
                               </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] hidden xl:table-cell">
+                                Company / Project
+                              </TableHead>
                               <TableHead className="text-xs font-heading w-[10%] text-right">
                                 Basic Amt
                               </TableHead>
@@ -3750,6 +3753,14 @@ export default function MaterialExpenseBooking() {
                                   </TableCell>
                                   <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
                                     {rec.supplier || "—"}
+                                  </TableCell>
+                                  <TableCell className="hidden xl:table-cell py-3">
+                                    <p className="text-xs truncate max-w-[110px]">
+                                      {rec.companyName || "—"}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">
+                                      {rec.projectName || "—"}
+                                    </p>
                                   </TableCell>
                                   <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
                                     {rec.status === "Draft" ? (

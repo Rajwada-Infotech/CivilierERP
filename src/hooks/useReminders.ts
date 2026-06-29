@@ -84,7 +84,7 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
           dueDate: inst.dueDate,
           urgency,
           amount: inst.amount,
-          path: "/material/expense-booking",
+          path: `/material/expense-booking?view=${row.Eid}`,
         });
       }
     }
@@ -124,7 +124,7 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
           subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
           dueDate,
           urgency,
-          path: "/material/material-request",
+          path: `/material/material-request?view=${r.MRId}`,
         };
       });
   } catch {
@@ -193,41 +193,92 @@ export async function fetchAllReminders(
     maybeFetch("/api/work-orders", "work_order"),
   ]);
 
+  const toList = async (res: PromiseSettledResult<Response | null>) => {
+    if (res.status !== "fulfilled" || !res.value || !res.value.ok) return [];
+    const raw = await res.value.json();
+    return Array.isArray(raw) ? raw : (raw.data ?? []);
+  };
+  const grnList: any[] = await toList(grnRes);
+
+  // PO/GRN reminders are a "build the next document" nudge — a PO reminder
+  // is still relevant until a GRN exists against it, and a GRN reminder is
+  // still relevant until an Invoice/Expense Booking exists against it,
+  // *regardless* of the PO/GRN's own Approved status. Once that next link
+  // in the chain has actually been created, the reminder has done its job
+  // and should drop off — it no longer matters whether that next document
+  // has itself been paid.
+  const poIdsWithGrn = new Set<string>();
+  for (const grn of grnList) {
+    if (grn.POID) poIdsWithGrn.add(String(grn.POID));
+  }
+
+  const invoicedSources = new Set<string>();
+  try {
+    const ebRes = await fetchWithAuth("/api/expense-booking?limit=200");
+    if (ebRes.ok) {
+      const ebRaw = await ebRes.json();
+      const ebList: any[] = Array.isArray(ebRaw) ? ebRaw : (ebRaw.data ?? []);
+      for (const eb of ebList) {
+        const sourceType = String(eb.ESourceType || eb.eSourceType || "").toUpperCase();
+        const sourceId = eb.ESourceId ?? eb.eSourceId;
+        if (!sourceId) continue;
+        if (sourceType === "PO" || sourceType === "WO_PO") {
+          invoicedSources.add(`purchase_order-${sourceId}`);
+        } else if (sourceType === "GRN") {
+          invoicedSources.add(`grn-${sourceId}`);
+        }
+      }
+    }
+  } catch {
+    // Best-effort — if this fails, PO/GRN reminders just fall back to the
+    // chain-link check below (GRN existence for PO) rather than blocking
+    // the whole bell.
+  }
+
   const items: ReminderItem[] = [];
-  const process = async (
-    res: PromiseSettledResult<Response | null>,
+  const process = (
+    list: any[],
     type: ReminderType,
     idKey: string,
     titlePre: string,
     route: string,
   ) => {
-    if (res.status === "fulfilled" && res.value && res.value.ok) {
-      const raw = await res.value.json();
-      const list = Array.isArray(raw) ? raw : (raw.data ?? []);
-      list.forEach((obj: any) => {
-        const d =
-          obj.ExpectedDeliveryDate ||
-          obj.PODate ||
-          obj.GRNDate ||
-          obj.ChequeDate ||
-          obj.DueDate;
-        const recordId = obj[idKey];
-        if (!d || !recordId) return;
+    list.forEach((obj: any) => {
+      const d =
+        obj.ExpectedDeliveryDate ||
+        obj.PODate ||
+        obj.GRNDate ||
+        obj.ChequeDate ||
+        obj.DueDate;
+      const recordId = obj[idKey];
+      if (!d || !recordId) return;
 
-        const urgency = classifyUrgency(d);
+      // PO: drop once a GRN has been built against it.
+      // GRN: drop once an Invoice/Expense Booking has been built against it.
+      if (type === "purchase_order" && poIdsWithGrn.has(String(recordId))) return;
+      if (
+        (type === "purchase_order" || type === "grn") &&
+        invoicedSources.has(`${type}-${recordId}`)
+      )
+        return;
 
-        items.push({
-          id: `${type}-${recordId}`,
-          type,
-          title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || recordId}`,
-          subtitle: obj.SupplierName || obj.PartyName || "Civilier System",
-          dueDate: d,
-          urgency,
-          amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
-          path: `${route}`,
-        });
+      const urgency = classifyUrgency(d);
+
+      // PO/GRN pages support `?view=<id>` deep-linking; cheque/TDS/work
+      // order pages don't yet, so they keep landing on the plain list.
+      const deepLinkable = type === "purchase_order" || type === "grn";
+
+      items.push({
+        id: `${type}-${recordId}`,
+        type,
+        title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || recordId}`,
+        subtitle: obj.SupplierName || obj.PartyName || "Civilier System",
+        dueDate: d,
+        urgency,
+        amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
+        path: deepLinkable ? `${route}?view=${recordId}` : route,
       });
-    }
+    });
   };
 
   const FINANCE_ROLES = [
@@ -238,20 +289,20 @@ export async function fetchAllReminders(
     "branch_manager",
   ];
   const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
+  const [poList, chequeList, tdsList, woList] = await Promise.all([
+    toList(poRes),
+    toList(chequeRes),
+    toList(tdsRes),
+    toList(woRes),
+  ]);
   const [, emiItems, mrItems] = await Promise.all([
-    Promise.all([
-      process(
-        poRes,
-        "purchase_order",
-        "PurchaseOrderID",
-        "PO",
-        "/material/purchase-order",
-      ),
-      process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
-      process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
-      process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
-      process(woRes, "work_order", "Id", "WO", "/material/work-order"),
-    ]),
+    Promise.resolve().then(() => {
+      process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
+      process(grnList, "grn", "GRNID", "GRN", "/material/grn");
+      process(chequeList, "cheque", "CId", "CHQ", "/masters/cheque");
+      process(tdsList, "tds", "Id", "TDS", "/masters/tds");
+      process(woList, "work_order", "Id", "WO", "/material/work-order");
+    }),
     (hasFinanceAccess
       ? fetchEmiReminders()
       : Promise.resolve([] as ReminderItem[])

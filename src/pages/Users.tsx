@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   Search,
   Edit,
@@ -433,26 +434,20 @@ const Users = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
 
-      <div className="relative space-y-6 mt-6">
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            User Master
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage system users and access roles
-          </p>
-        </div>
-        <button
-          onClick={openAddDrawer}
-          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
-        >
-          <UserPlus size={15} />
-          Add User
-        </button>
-      </div>
-
+      <AdminShell
+        title="User Master"
+        subtitle="Manage system users and access roles"
+        icon={UsersIcon}
+        action={
+          <button
+            onClick={openAddDrawer}
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+          >
+            <UserPlus size={15} />
+            Add User
+          </button>
+        }
+      >
       {/* ── Stats strip ── */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -504,7 +499,7 @@ const Users = () => {
         />
       </div>
 
-      </div>
+      </AdminShell>
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (

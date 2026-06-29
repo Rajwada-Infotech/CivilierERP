@@ -30,6 +30,8 @@ export const getGodowns = async () => {
       code: string;
       shortDesc: string;
       isMain: boolean;
+      companyId: number | null;
+      projectId: number | null;
     }[]
   >;
 };

@@ -1,67 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 import Lottie from "lottie-react";
+import signalAnimationRaw from "@/assets/mobile-signal.json";
 
-// Free wifi-signal animation from LottieFiles (lottie.host CDN)
-const WIFI_LOTTIE_URL =
-  "https://lottie.host/4db68bbd-31f6-4cd8-84eb-189de081159a/IGmMCqhzpt.lottie";
+const AMBER = [1, 0.706, 0, 1];
 
-// Fallback: simple pulsing wifi SVG if Lottie fails to load
-function WifiFallback() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-      <style>{`
-        @keyframes wf { 0%,100%{opacity:.25} 50%{opacity:1} }
-        .wa{animation:wf 1.4s ease-in-out infinite}
-        .wb{animation:wf 1.4s ease-in-out .25s infinite}
-        .wc{animation:wf 1.4s ease-in-out .5s infinite}
-      `}</style>
-      <path
-        className="wa"
-        d="M2.05 7.95a11.31 11.31 0 0 1 15.9 0"
-        stroke="#FFB400"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <path
-        className="wb"
-        d="M5.05 10.95a7.07 7.07 0 0 1 9.9 0"
-        stroke="#FFB400"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <path
-        className="wc"
-        d="M8.18 13.82a2.6 2.6 0 0 1 3.64 0"
-        stroke="#FFB400"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <circle cx="10" cy="17" r="1.5" fill="#FFB400" />
-    </svg>
-  );
+// The bundled animation is authored in black; recolor every stroke to the
+// banner's amber accent so it actually reads on the dark glass background.
+function recolorToAmber(data: any) {
+  const clone = JSON.parse(JSON.stringify(data));
+  for (const layer of clone.layers ?? []) {
+    for (const group of layer.shapes ?? []) {
+      for (const item of group.it ?? []) {
+        if (item.ty === "st" && item.c?.k) item.c.k = AMBER;
+      }
+    }
+  }
+  return clone;
 }
 
-function WifiLottie() {
-  const [animationData, setAnimationData] = useState<object | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    fetch(WIFI_LOTTIE_URL)
-      .then((r) => r.json())
-      .then(setAnimationData)
-      .catch(() => setFailed(true));
-  }, []);
-
-  if (failed) return <WifiFallback />;
-  if (!animationData) return <div style={{ width: 22, height: 22 }} />;
-
+function SignalLottie() {
+  const animationData = useMemo(
+    () => recolorToAmber(signalAnimationRaw),
+    [],
+  );
   return (
     <Lottie
       animationData={animationData}
       loop
       autoplay
-      style={{ width: 22, height: 22, flexShrink: 0 }}
+      style={{ width: 24, height: 24, flexShrink: 0 }}
     />
   );
 }
@@ -199,10 +167,10 @@ export default function SlowConnectionBanner() {
           userSelect: "none",
         }}
       >
-        <WifiLottie />
+        <SignalLottie />
 
         <span style={{ color: "rgba(255,255,255,0.85)" }}>
-          Slow or spotty connection
+          Slow or spotty connection — hang in there
         </span>
 
         <div

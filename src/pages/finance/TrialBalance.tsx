@@ -868,9 +868,9 @@ export default function TrialBalance() {
         {/* ── Main card ───────────────────────────────────────────────────── */}
         <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-3 px-4 py-3 border-b border-border bg-muted/20">
-            {/* Row 1 — Entity selects + Search + Generate + Export aligned right */}
-            <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-3.5 px-4 py-3.5 border-b border-border bg-muted/20">
+            {/* Row 1 — Scope: Enterprise / Company / Project / Search, all in one consistent group */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <FilterSelect
                 label="Enterprise"
                 icon={Building}
@@ -895,46 +895,65 @@ export default function TrialBalance() {
                 options={projects}
                 placeholder="All projects"
               />
-
-              {/* Search + Export — full-width on mobile, auto-right on sm+ */}
-              <div className="w-full sm:w-auto sm:ml-auto flex items-end gap-2">
-                {/* Hide-empty toggle */}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
-                    &nbsp;
-                  </span>
-                  <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={!hideEmpty}
-                      onChange={(e) => setHideEmpty(!e.target.checked)}
-                      className="accent-primary"
-                    />
-                    Show all accounts
-                  </label>
+              {/* Search — scopes the Account / Description column, so it
+                  lives in the same row as the other scoping filters */}
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+                  <Search size={9} /> Search Account / Description
+                </span>
+                <div className="relative">
+                  <Search
+                    size={12}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search accounts…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-8 pl-8 pr-3 w-full rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                 </div>
+              </div>
+            </div>
 
-                {/* Search */}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
-                    Search
-                  </span>
-                  <div className="relative">
-                    <Search
-                      size={12}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Search accounts…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="h-8 pl-8 pr-3 w-full sm:w-44 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
-                </div>
+            {/* Row 2 — Period mode tabs (left) + view options (right) */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 mr-1 shrink-0">
+                  Filter by:
+                </span>
+                <ModeTab
+                  active={filterMode === "fy"}
+                  onClick={() => switchMode("fy")}
+                  icon={Calendar}
+                  label="Financial Year"
+                />
+                <ModeTab
+                  active={filterMode === "range"}
+                  onClick={() => switchMode("range")}
+                  icon={CalendarRange}
+                  label="Date Range"
+                />
+                <ModeTab
+                  active={filterMode === "ason"}
+                  onClick={() => switchMode("ason")}
+                  icon={CalendarCheck}
+                  label="As On Date"
+                />
+              </div>
 
-                {/* Export */}
+              <div className="flex items-center gap-2 shrink-0">
+                <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={!hideEmpty}
+                    onChange={(e) => setHideEmpty(!e.target.checked)}
+                    className="accent-primary"
+                  />
+                  Show all accounts
+                </label>
+
                 <ExportMenu
                   data={exportData}
                   columns={TB_EXPORT_COLUMNS}
@@ -950,31 +969,6 @@ export default function TrialBalance() {
                   }}
                 />
               </div>
-            </div>
-
-            {/* Row 2 — Mode selector */}
-            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 mr-1 shrink-0">
-                Filter by:
-              </span>
-              <ModeTab
-                active={filterMode === "fy"}
-                onClick={() => switchMode("fy")}
-                icon={Calendar}
-                label="Financial Year"
-              />
-              <ModeTab
-                active={filterMode === "range"}
-                onClick={() => switchMode("range")}
-                icon={CalendarRange}
-                label="Date Range"
-              />
-              <ModeTab
-                active={filterMode === "ason"}
-                onClick={() => switchMode("ason")}
-                icon={CalendarCheck}
-                label="As On Date"
-              />
             </div>
 
             {/* Row 3 — Period inputs (vary by mode) */}

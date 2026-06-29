@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import type { ActivityActionType } from "@/api/userActivityApi";
 import type { SessionEvent } from "@/api/userActivityApi";
@@ -573,41 +574,37 @@ const ActivityBrowser: React.FC = () => {
         ]}
       />
 
-      <div className="relative space-y-6 mt-6">
-
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Activity Browser
-          </h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Real-time audit of user sessions, IP addresses, devices and all
-            tracked actions
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-            title="Refresh"
-          >
-            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
-            Refresh
-          </button>
-          <button
-            onClick={() => setConfirmClearOpen(true)}
-            className="flex items-center gap-2 rounded-xl border border-destructive/40 bg-card px-3 py-2 text-xs font-medium text-destructive/70 transition-colors hover:border-destructive hover:text-destructive"
-          >
-            <Trash2 size={13} />
-            Clear History
-          </button>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-            {activity.total} records
+      <AdminShell
+        title="Activity Browser"
+        subtitle="Real-time audit of user sessions, IP addresses, devices and all tracked actions"
+        icon={Activity}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw
+                size={13}
+                className={`transition-transform duration-500 ${refreshing ? "animate-spin" : "group-hover:rotate-180"}`}
+              />
+              Refresh
+            </button>
+            <button
+              onClick={() => setConfirmClearOpen(true)}
+              className="flex items-center gap-2 rounded-xl border border-destructive/40 bg-card px-3 py-2 text-xs font-medium text-destructive/70 transition-colors hover:border-destructive hover:text-destructive"
+            >
+              <Trash2 size={13} />
+              Clear History
+            </button>
+            <div className="rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+              {activity.total} records
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      >
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -962,7 +959,7 @@ const ActivityBrowser: React.FC = () => {
           </div>
         </div>
       )}
-      </div>
+      </AdminShell>
     </>
   );
 };

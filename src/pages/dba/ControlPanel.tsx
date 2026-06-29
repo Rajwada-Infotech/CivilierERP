@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -316,7 +317,7 @@ export default function ControlPanel() {
   };
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+    <div className="max-w-[1400px] mx-auto">
       <Breadcrumbs
         items={[
           { label: "DBA Console" },
@@ -325,25 +326,20 @@ export default function ControlPanel() {
         ]}
       />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <ShieldCheck size={20} className="text-emerald-500" /> DB Access
-            Control Panel
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage tenant database access, plans & expiry
-          </p>
-        </div>
-        <Button
-          size="sm"
-          className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
-          onClick={() => setGrantOpen(true)}
-        >
-          <Plus size={13} /> Grant Access
-        </Button>
-      </div>
-
+      <DbaShell
+        title="DB Access Control Panel"
+        subtitle="Manage tenant database access, plans & expiry"
+        icon={ShieldCheck}
+        action={
+          <Button
+            size="sm"
+            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
+            onClick={() => setGrantOpen(true)}
+          >
+            <Plus size={13} /> Grant Access
+          </Button>
+        }
+      >
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
@@ -558,6 +554,7 @@ export default function ControlPanel() {
           </div>
         </CardContent>
       </Card>
+      </DbaShell>
 
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>

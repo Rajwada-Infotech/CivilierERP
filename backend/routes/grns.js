@@ -612,6 +612,8 @@ router.get("/:id", async (req, res) => {
           p.SourceWDDocNo,
           p.ProjectId,
           p.CompanyId,
+          co.name AS CompanyName,
+          pr.name AS ProjectName,
           p.GST AS ParentGST,
           p.TotalAmount    AS POTotalAmount,
           p.SubtotalAmount AS POSubtotalAmount,
@@ -621,6 +623,8 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
+        LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
         WHERE grn.GRNID = @GRNID
       `);
 
