@@ -2,7 +2,7 @@ import { BarChart3, Receipt, ClipboardList, FilePenLine } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const engineeringNavItems: NavItem[] = [
-  { label: "Dashboard", icon: BarChart3, path: "/engineering", pageKey: "engineering-dashboard" },
+  { label: "Dashboard", icon: BarChart3, path: "/engineering", pageKey: "engineering-dashboard", isDashboard: true },
   {
     label: "Transaction",
     icon: Receipt,

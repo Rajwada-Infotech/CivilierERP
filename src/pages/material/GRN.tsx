@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -738,6 +739,7 @@ export default function GRN() {
   const rights = usePageRights("grn-master");
   _canDelete = rights.canDelete;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -1303,6 +1305,17 @@ export default function GRN() {
       setViewingGrn(grn);
     }
   };
+
+  // Deep-link support — Linked Documents panels navigate here as
+  // /material/grn?view=<GRNID> to open this exact GRN.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    onView({ GRNID: Number(viewId) });
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   onEdit = async (grn: any) => {
     let fullGrn = grn;
@@ -2378,6 +2391,8 @@ export default function GRN() {
                           </div>
                         ))}
                       </div>
+
+                      <DocumentChainPanel docType="grn" id={viewingGrn.GRNID} />
 
                       {/* Items */}
                       <div>

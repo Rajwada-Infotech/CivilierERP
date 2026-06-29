@@ -148,6 +148,7 @@ interface MasterPageProps {
    * so the page can open a print layout or window.print().
    */
   onPrint?: (row: RecordWithId) => void;
+  rowActions?: (row: RecordWithId, data: RecordWithId[]) => React.ReactNode;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -191,6 +192,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   hideTable,
   viewConfig,
   onPrint,
+  rowActions,
   canCreate = true,
   canEdit = true,
   canDelete = true,
@@ -787,6 +789,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                   <Printer size={13} />
                                 </button>
                               )}
+                              {rowActions?.(row, data)}
                               {canEdit && (
                               <button
                                 onClick={() => handleEdit(row._id)}

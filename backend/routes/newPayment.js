@@ -101,8 +101,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dateParam = req.query.date ? req.query.date.trim() : "";
     const dueDate = req.query.dueDate ? req.query.dueDate.trim() : "";
     const remarks = req.query.remarks ? req.query.remarks.trim() : "";
+    const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
 
     const conditions = [];
+    if (idFilter) conditions.push(`PPaymentID = @idFilter`);
     if (search) {
       conditions.push(`(PPaymentName LIKE @search
           OR DocNo LIKE @search
@@ -128,6 +130,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       : "";
 
     const request = pool.request();
+    if (idFilter) request.input("idFilter", sql.Int, idFilter);
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
     if (project) request.input("project", sql.NVarChar(200), `%${project}%`);
@@ -148,6 +151,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit);
+    if (idFilter) dataRequest.input("idFilter", sql.Int, idFilter);
     if (search) dataRequest.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
     if (project)
@@ -706,10 +710,28 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
   const { id } = req.params;
   try {
     const pool = getPool();
-    await pool
+
+    // ── Guard: matched in BRS ──────────────────────────────────────────────
+    // Mirrors expenseBooking.js's BRS guard — a reconciled payment must be
+    // un-matched in the BRS before it can be deleted, not silently dropped.
+    const brsCheck = await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.BankReconciliation
+      WHERE SourceType = 'PAYMENT' AND SourceID = @PPaymentID AND IsMatched = 1
+    `);
+    if (Number(brsCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "brs_matched",
+        message: "This payment is matched in the Bank Reconciliation Statement. Unmatch/reverse it in the BRS before deleting.",
+      });
+    }
+
+    const result = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
       .query("DELETE FROM dbo.NewPayment WHERE PPaymentID=@PPaymentID");
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment deleted successfully" });
   } catch (err) {

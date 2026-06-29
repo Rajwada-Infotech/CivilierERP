@@ -21,6 +21,7 @@ import {
   User,
   Wrench,
   Pickaxe,
+  Megaphone,
 } from "lucide-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -35,12 +36,13 @@ import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/home" },
+  { label: "Dashboard", icon: BarChart3, path: "/home", isDashboard: true },
 ];
 
 // ── Module header metadata ────────────────────────────────────────────────────
@@ -109,6 +111,13 @@ const MODULE_HEADER: Record<
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",
+  },
+  "sales-automation": {
+    label: "Sales Automation",
+    icon: Megaphone,
+    color: "#f59e0b",
+    from: "from-amber-500/30",
+    to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
@@ -300,6 +309,9 @@ export const AppSidebar = () => {
       case "civilworkdpr":
         raw = civilWorkDprNavItems;
         break;
+      case "sales-automation":
+        raw = salesAutomationNavItems;
+        break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);
         break;
@@ -424,7 +436,7 @@ export const AppSidebar = () => {
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
-          className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
+          className="relative z-10 flex-1 overflow-y-auto p-2"
         >
           <SidebarNav
             items={getNavItems()}

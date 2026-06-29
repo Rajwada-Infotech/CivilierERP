@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -6,6 +7,12 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   RefreshCw,
   ChevronRight,
@@ -24,6 +31,9 @@ import {
   Calendar,
   CalendarRange,
   CalendarCheck,
+  Loader2,
+  Receipt,
+  X,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -59,6 +69,27 @@ interface TBResponse {
   asOf: string;
   from: string;
   to: string;
+}
+
+// ─── Drill-down (Level 2/3) ─────────────────────────────────────────────────
+interface TBTransaction {
+  entryId: number;
+  voucherNo: string | null;
+  date: string | null;
+  debit: number;
+  credit: number;
+  narration: string | null;
+  sourceType: string | null;
+  sourceId: number | null;
+  invoiceNo: string | null;
+  payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
+}
+
+interface TBTransactionsResponse {
+  entity: { id: number; name: string; type: string };
+  from: string;
+  to: string;
+  transactions: TBTransaction[];
 }
 
 interface Option {
@@ -218,10 +249,12 @@ function TBRow({
   node,
   expanded,
   onToggle,
+  onDrill,
 }: {
   node: TBNode;
   expanded: Set<number>;
   onToggle: (id: number) => void;
+  onDrill: (node: TBNode) => void;
 }) {
   const isOpen = expanded.has(node.id);
   const hasKids = node.children.length > 0;
@@ -232,15 +265,19 @@ function TBRow({
     node.transactions.debit > 0 ||
     node.transactions.credit > 0;
   const dot = node.type ? TYPE_DOT[node.type] : null;
+  // Leaf (non-group) rows are clickable — Level 2 of the drill-down opens
+  // the transaction list for that entity. Groups already expand/collapse.
+  const isDrillable = !node.isGroup;
 
   return (
     <tr
+      onClick={isDrillable ? () => onDrill(node) : undefined}
       className={`border-b border-border/40 transition-colors ${
         node.isGroup
           ? node.level === 0
             ? "bg-muted/35 hover:bg-muted/50"
             : "bg-muted/15 hover:bg-muted/28"
-          : "hover:bg-muted/10"
+          : "hover:bg-primary/5 cursor-pointer"
       }`}
     >
       <td className="py-2.5 pr-3" style={{ paddingLeft: `${indent + 14}px` }}>
@@ -482,6 +519,12 @@ export default function TrialBalance() {
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
+  const navigate = useNavigate();
+
+  // ── drill-down (Level 2: entity transactions) ───────────────────────────
+  const [drillNode, setDrillNode] = useState<TBNode | null>(null);
+  const [drillData, setDrillData] = useState<TBTransactionsResponse | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
 
   // ── load fin years ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -592,6 +635,40 @@ export default function TrialBalance() {
     if (filterMode === "ason") return { f: from, t: asOn || to, ao: asOn };
     return { f: from, t: to, ao: "" };
   }
+
+  // ── drill-down: Level 1 (ledger) → Level 2 (entity transactions) ─────────
+  // Reuses the exact same filters (FY/date range/company/project) the main
+  // report is showing, so the transaction list never drifts from what's on
+  // screen.
+  const openDrillDown = useCallback(
+    async (node: TBNode) => {
+      setDrillNode(node);
+      setDrillData(null);
+      setDrillLoading(true);
+      try {
+        const { f, t, ao } = getEffectiveParams();
+        const effectiveTo = ao || t;
+        let url = `/api/trial-balance/${node.id}/transactions?from=${f}&to=${effectiveTo}`;
+        if (selCompany?.id) url += `&companyId=${selCompany.id}`;
+        if (selProject?.id) url += `&projectId=${selProject.id}`;
+        const res = await fetchWithAuth(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setDrillData(await res.json());
+      } catch {
+        setDrillData(null);
+      } finally {
+        setDrillLoading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filterMode, from, to, asOn, selCompany, selProject],
+  );
+
+  // Level 3 — open the exact payment receipt, preserving this report's
+  // filters so the back button returns here unchanged.
+  const openPaymentReceipt = (paymentId: number) => {
+    navigate(`/payments?view=${paymentId}`);
+  };
 
   // ── export/refresh disabled? ──────────────────────────────────────────────
   const notReady =
@@ -1115,6 +1192,7 @@ export default function TrialBalance() {
                       node={node}
                       expanded={expanded}
                       onToggle={toggle}
+                      onDrill={openDrillDown}
                     />
                   ))
                 )}
@@ -1161,6 +1239,77 @@ export default function TrialBalance() {
           </div>
         </div>
       </FinanceShell>
+
+      {/* ── Drill-down dialog — Level 2: entity transactions, Level 3: open receipt ── */}
+      <Dialog open={!!drillNode} onOpenChange={(open) => !open && setDrillNode(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 border border-primary/20">
+                <Receipt size={16} className="text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="font-heading text-base">{drillNode?.name}</DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {drillNode?.type ? TYPE_LABEL[drillNode.type] ?? drillNode.type : ""} · transactions in the selected period
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {drillLoading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+              <Loader2 size={16} className="animate-spin" /> Loading transactions...
+            </div>
+          ) : !drillData || drillData.transactions.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground text-sm">
+              No transactions found for this entity in the selected period.
+            </div>
+          ) : (
+            <div className="overflow-x-auto max-h-[60vh]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-card">
+                  <tr className="border-b border-border text-left text-muted-foreground uppercase text-[10px] tracking-wide">
+                    <th className="px-3 py-2">Voucher No.</th>
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Payment Receipt</th>
+                    <th className="px-3 py-2">Invoice No.</th>
+                    <th className="px-3 py-2">Mode</th>
+                    <th className="px-3 py-2 text-right">Debit</th>
+                    <th className="px-3 py-2 text-right">Credit</th>
+                    <th className="px-3 py-2">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drillData.transactions.map((t) => (
+                    <tr
+                      key={t.entryId}
+                      onClick={() => t.payment && openPaymentReceipt(t.payment.id)}
+                      className={`border-b border-border/40 ${t.payment ? "cursor-pointer hover:bg-primary/5" : ""}`}
+                      title={t.payment ? "Open this Payment Receipt" : undefined}
+                    >
+                      <td className="px-3 py-2 font-mono">{t.voucherNo || "—"}</td>
+                      <td className="px-3 py-2">{t.date ? fmtDate(t.date) : "—"}</td>
+                      <td className="px-3 py-2">
+                        {t.payment ? (
+                          <span className="text-primary font-medium underline">{t.payment.docNo || `#${t.payment.id}`}</span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2">{t.invoiceNo || "—"}</td>
+                      <td className="px-3 py-2">{t.payment?.mode || "—"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-rose-400">{fmt(t.debit)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-400">{fmt(t.credit)}</td>
+                      <td className="px-3 py-2 text-muted-foreground truncate max-w-[160px]">{t.narration || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

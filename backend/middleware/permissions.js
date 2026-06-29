@@ -157,6 +157,9 @@ const PERMISSION_PAGE_KEYS = {
   "user control:manage users": ["users"],
   "useractivity:list": ["user-activity", "activity-browser"],
   "users:list": ["users"],
+  "salesautomation:socialmedia": ["sa-social-media"],
+  "salesautomation:campaigns": ["sa-campaigns"],
+  "salesautomation:ads": ["sa-ads"],
 };
 
 function compact(value) {

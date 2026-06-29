@@ -456,10 +456,14 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
-          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName (party), fallback -> EName
+          -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
+          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
+          -- booking/item label) is only ever a last-resort fallback — it
+          -- must never stand in for an actual supplier/contractor.
           CASE
             WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
@@ -481,6 +485,12 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.GoodsReceiptNotes grn
           ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.PurchaseOrders po_supp_opt_po
+          ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_opt_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster po_supp_opt ON po_supp_opt.LHeadId = po_supp_opt_po.SupplierID
+        LEFT JOIN dbo.WorkDone wd_supp_opt_wd
+          ON eb.ESourceType = 'WORK_DONE' AND wd_supp_opt_wd.ID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wd_supp_opt ON wd_supp_opt.LHeadId = wd_supp_opt_wd.SupplierId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
@@ -506,10 +516,12 @@ router.get("/options", async (req, res) => {
           ei.Status                    AS status,
           COALESCE(proj2.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')         AS partyName,
-          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName, fallback -> EName
+          -- Supplier name: see bookingsResult above — PO/WO_PO/WORK_DONE
+          -- resolve via their own supplier/contractor reference, not EName.
           CASE
             WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_emi.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_emi.LHeadName, ISNULL(eb.EName, ''))
             ELSE ISNULL(eb.EName, '')
           END                          AS supplierName,
           eb.ECompanyId                AS companyId,
@@ -532,6 +544,12 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.GoodsReceiptNotes grn2
           ON eb.ESourceType = 'GRN' AND grn2.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
+        LEFT JOIN dbo.PurchaseOrders po_supp_emi_po
+          ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_emi_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster po_supp_emi ON po_supp_emi.LHeadId = po_supp_emi_po.SupplierID
+        LEFT JOIN dbo.WorkDone wd_supp_emi_wd
+          ON eb.ESourceType = 'WORK_DONE' AND wd_supp_emi_wd.ID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wd_supp_emi ON wd_supp_emi.LHeadId = wd_supp_emi_wd.SupplierId
         WHERE
           eb.EEmiPayment = 1
           AND eb.EStatus = 'Approved'
@@ -647,9 +665,14 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
             ELSE NULL
           END AS sourceDocNo,
-          -- Supplier name: from GRN supplier for GRN-linked, else from EName
+          -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
+          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
+          -- booking/item label) only as a last-resort fallback — never the
+          -- supplier itself.
           CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN grn_supp_list.LHeadName
+            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN ISNULL(grn_supp_list.LHeadName, eb.EName)
+            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_list.LHeadName, eb.EName)
+            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_list.LHeadName, eb.EName)
             ELSE eb.EName
           END AS ESupplierName,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
@@ -671,6 +694,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
+        LEFT JOIN dbo.PurchaseOrders po_supp_list_po
+          ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_list_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster po_supp_list ON po_supp_list.LHeadId = po_supp_list_po.SupplierID
+        LEFT JOIN dbo.WorkDone wd_supp_list_wd
+          ON eb.ESourceType = 'WORK_DONE' AND wd_supp_list_wd.ID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wd_supp_list ON wd_supp_list.LHeadId = wd_supp_list_wd.SupplierId
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid DESC
@@ -893,8 +922,14 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
                  ELSE NULL
                END AS sourceDocNo,
+               -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's
+               -- own SupplierID; WORK_DONE -> the WorkDone's contractor.
+               -- EName (the booking/item label) only as a last-resort
+               -- fallback — never the supplier itself.
                CASE
-                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN grn_supp_det.LHeadName
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN ISNULL(grn_supp_det.LHeadName, eb.EName)
+                 WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_det.LHeadName, eb.EName)
+                 WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_det.LHeadName, eb.EName)
                  ELSE eb.EName
                END AS ESupplierName,
                -- Live GRN total (incl. GST) so detail modal always shows current value
@@ -916,9 +951,13 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.PurchaseOrders po_det ON grn_det.POID = po_det.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj2 ON epo_proj2.id = po_det.ProjectId
         LEFT JOIN dbo.PurchaseOrders po_direct
-          ON eb.ESourceType = 'PO' AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+          ON eb.ESourceType IN ('PO','WO_PO') AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.enterprise epo_direct ON epo_direct.id = po_direct.ProjectId
         LEFT JOIN dbo.AccountHeadMaster grn_supp_det ON grn_supp_det.LHeadId = grn_det.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster po_supp_det ON po_supp_det.LHeadId = po_direct.SupplierID
+        LEFT JOIN dbo.WorkDone wd_det
+          ON eb.ESourceType = 'WORK_DONE' AND wd_det.ID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wd_supp_det ON wd_supp_det.LHeadId = wd_det.SupplierId
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)
@@ -2381,7 +2420,16 @@ router.get("/:id/payment-summary", async (req, res) => {
           grn.GRNNo, grn.GRNID,
           -- PO info via GRN or direct
           po.PurchaseOrderNo, po.PurchaseOrderID,
-          po.SourceMRDocNo
+          po.SourceMRDocNo, po.SupplierID,
+          -- Supplier (vendor) master, resolved via the PO
+          ahm.LHeadId       AS SupplierLHeadId,
+          ahm.LHeadName     AS SupplierName,
+          ahm.LHeadCode     AS SupplierCode,
+          ahm.LHeadAddress  AS SupplierAddress,
+          ahm.LHeadPhone    AS SupplierPhone,
+          ahm.LHeadEmail    AS SupplierEmail,
+          ahm.LGST          AS SupplierGST,
+          ahm.LHeadPan      AS SupplierPAN
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.GoodsReceiptNotes grn
           ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
@@ -2390,6 +2438,7 @@ router.get("/:id/payment-summary", async (req, res) => {
             (eb.ESourceType = 'GRN' AND po.PurchaseOrderID = grn.POID)
             OR (eb.ESourceType IN ('PO','WO_PO','WORK_DONE') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT))
           )
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
         WHERE eb.Eid = @Eid
       `);
 
@@ -2447,6 +2496,18 @@ router.get("/:id/payment-summary", async (req, res) => {
           ? String(eb.EVendorInvoiceDate).slice(0, 10)
           : null,
       },
+      supplier: eb.SupplierLHeadId
+        ? {
+            id: eb.SupplierLHeadId,
+            name: eb.SupplierName || null,
+            code: eb.SupplierCode || null,
+            address: eb.SupplierAddress || null,
+            phone: eb.SupplierPhone || null,
+            email: eb.SupplierEmail || null,
+            gst: eb.SupplierGST || null,
+            pan: eb.SupplierPAN || null,
+          }
+        : null,
     });
   } catch (err) {
     console.error("payment-summary error:", err.message);

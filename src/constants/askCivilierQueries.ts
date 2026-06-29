@@ -612,6 +612,7 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
   ],
   records: [],
   civilworkdpr: [],
+  "sales-automation": [],
 };
 
 // ─── Final fallback ─────────────────────────────────────────────────────
@@ -708,6 +709,7 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   sales: "Sales",
   records: "Records",
   civilworkdpr: "Civil Work DPR",
+  "sales-automation": "Sales Automation",
   admin: "Admin",
 };
 

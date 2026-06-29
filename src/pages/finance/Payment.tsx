@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -8,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPayments,
+  getPaymentById,
   addPayment,
   updatePayment,
   deletePayment,
@@ -440,6 +442,16 @@ interface ChainSummary {
     vendorInvoiceNo: string | null;
     vendorInvoiceDate: string | null;
   };
+  supplier: {
+    id: number;
+    name: string | null;
+    code: string | null;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    gst: string | null;
+    pan: string | null;
+  } | null;
 }
 
 const fetchPaymentSummary = async (
@@ -2054,10 +2066,33 @@ const Payment: React.FC = () => {
     }
   };
 
+  // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
+  // /payments?view=<PPaymentID>, so this payment's receipt should open
+  // automatically in view mode, regardless of which page it's on.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    const id = parseInt(viewId, 10);
+    if (!Number.isFinite(id)) return;
+    getPaymentById(id)
+      .then((row) => {
+        if (row) openViewRec(dbToRecord(row));
+        else toast.error(`Payment #${id} not found`);
+      })
+      .catch(() => toast.error("Failed to load the linked payment"))
+      .finally(() => {
+        searchParams.delete("view");
+        setSearchParams(searchParams, { replace: true });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Print/PDF payment voucher
   const handlePrintPayment = (
     rec: PaymentRecord,
     companyDetail: CompanyDetail | null,
+    chain: ChainSummary | null = null,
   ) => {
     const logoHtml = companyDetail?.logo
       ? `<img src="${companyDetail.logo}" alt="Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
@@ -2065,8 +2100,10 @@ const Payment: React.FC = () => {
 
     const companyAddress = [
       companyDetail?.address,
+      companyDetail?.address_line2,
       companyDetail?.city,
       companyDetail?.state,
+      companyDetail?.pincode,
     ]
       .filter(Boolean)
       .join(", ");
@@ -2093,57 +2130,114 @@ const Payment: React.FC = () => {
     const field = (label: string, value: string | null | undefined) =>
       value
         ? `<tr>
-            <td style="padding:7px 12px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;width:140px;">${label}</td>
+            <td style="padding:7px 12px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;width:160px;">${label}</td>
             <td style="padding:7px 12px;font-size:13px;font-weight:500;color:#111827;">${value}</td>
            </tr>`
         : "";
 
-    const rows = [
+    const sectionTitle = (label: string) =>
+      `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#4f46e5;margin:20px 0 8px;">${label}</div>`;
+
+    const supplier = chain?.supplier ?? null;
+    const docChain = chain?.chain ?? null;
+
+    const supplierRows = supplier
+      ? [
+          field("Supplier Name", supplier.name),
+          field("Supplier Code", supplier.code),
+          field("Address", supplier.address),
+          field("Contact No.", supplier.phone),
+          field("Email", supplier.email),
+          field("GST No.", supplier.gst),
+          field("PAN No.", supplier.pan),
+        ].join("")
+      : "";
+
+    const docRefRows = [
+      field("Invoice No.", docChain?.vendorInvoiceNo || null),
+      field("Invoice Date", docChain?.vendorInvoiceDate || null),
+      field("Purchase Order Ref.", docChain?.poNo || null),
+      field("GRN Ref.", docChain?.grnNo || null),
+      field("Material Request Ref.", docChain?.mrDocNo || null),
+      field("Expense Booking Ref.", docChain?.expenseDocNo || rec.expenseRef || null),
+    ].join("");
+
+    const paymentRows = [
       field("Payment Ref", rec.docNo || "—"),
       field("Payment Name", rec.paymentName),
-      field("Amount", formatINR(rec.amount ?? 0)),
       field("Date", rec.date || "—"),
       field("Mode", rec.mode || "—"),
+      field("Bank Account", rec.bankName || null),
+      field("Reference / Txn ID", rec.chequeNo ? `Cheque #${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference || null),
+      field("Cheque Date", rec.chequeDate || null),
+      field("Cheque Lot", rec.chequeLotNumber || null),
+      field("Card Used", rec.cardDisplay || null),
       field("Company", rec.company || "—"),
       field("Project", rec.project || "—"),
       field("Project Site", rec.projectSite || null),
-      field("Expense Ref", rec.expenseRef || null),
       field("Parent Doc", rec.parentDocNo || null),
-      field("Bank", rec.bankName || null),
-      field("Cheque No.", rec.chequeNo ? `#${rec.chequeNo}` : null),
-      field("Cheque Date", rec.chequeDate || null),
-      field("Cheque Lot", rec.chequeLotNumber || null),
-      field("NEFT Ref.", rec.neftNumber || null),
-      field("UPI Txn ID", rec.upiTransactionId || null),
-      field("RTGS Ref.", rec.rtgsReference || null),
-      field("IMPS Ref.", rec.impsReference || null),
-      field("Card Ref.", rec.cardReference || null),
-      field("Card Used", rec.cardDisplay || null),
     ].join("");
+
+    const baseAmount = rec.baseAmount ?? null;
+    const cgstRate = rec.cgstRate ?? null;
+    const sgstRate = rec.sgstRate ?? null;
+    const igstRate = rec.igstRate ?? null;
+    const hasTaxDetails = baseAmount != null && (cgstRate || sgstRate || igstRate);
+    const cgstAmt = hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
+    const sgstAmt = hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
+    const igstAmt = hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
+
+    const taxRows = hasTaxDetails
+      ? [
+          field("Taxable Amount", formatINR(baseAmount!)),
+          cgstRate ? field(`CGST (${cgstRate}%)`, formatINR(cgstAmt)) : "",
+          sgstRate ? field(`SGST (${sgstRate}%)`, formatINR(sgstAmt)) : "",
+          igstRate ? field(`IGST (${igstRate}%)`, formatINR(igstAmt)) : "",
+        ].join("")
+      : "";
+
+    const printedAt = new Date().toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const signBlock = (label: string) =>
+      `<div style="flex:1;text-align:center;">
+         <div style="border-top:1px solid #9ca3af;margin:36px 12px 6px;"></div>
+         <div style="font-size:11px;color:#6b7280;">${label}</div>
+       </div>`;
 
     const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Payment Voucher — ${rec.docNo || rec.paymentName}</title>
+  <title>Payment Receipt — ${rec.docNo || rec.paymentName}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
-    table { border-collapse: collapse; }
+    table { border-collapse: collapse; width: 100%; }
     tr:nth-child(even) { background: #f9fafb; }
     @media print { body { padding: 16px; } button { display: none !important; } }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #4f46e5;margin-bottom:24px;">
+  <!-- Company header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #4f46e5;margin-bottom:8px;">
     <div>
       ${logoHtml}
-      ${companyAddress ? `<div style="margin-top:6px;font-size:11px;color:#6b7280;">${companyAddress}</div>` : ""}
-      ${companyDetail?.email ? `<div style="font-size:11px;color:#6b7280;">${companyDetail.email}</div>` : ""}
+      ${companyAddress ? `<div style="margin-top:6px;font-size:11px;color:#6b7280;max-width:340px;">${companyAddress}</div>` : ""}
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
+        ${[companyDetail?.phone_number, companyDetail?.email].filter(Boolean).join("  ·  ")}
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
+        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan_no ? `PAN: ${companyDetail.pan_no}` : null].filter(Boolean).join("  ·  ")}
+      </div>
     </div>
     <div style="text-align:right;">
-      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PAYMENT VOUCHER</div>
+      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PAYMENT RECEIPT</div>
       <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
       <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
@@ -2157,7 +2251,7 @@ const Payment: React.FC = () => {
   </div>
 
   <!-- Amount highlight -->
-  <div style="margin-bottom:24px;padding:16px 20px;background:linear-gradient(135deg,#4f46e510,#7c3aed10);border-radius:12px;border:1px solid #4f46e520;display:flex;align-items:center;justify-content:space-between;">
+  <div style="margin:18px 0 8px;padding:16px 20px;background:linear-gradient(135deg,#4f46e510,#7c3aed10);border-radius:12px;border:1px solid #4f46e520;display:flex;align-items:center;justify-content:space-between;">
     <div>
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Amount</div>
       <div style="font-size:28px;font-weight:800;color:#4f46e5;font-family:monospace;">${formatINR(rec.amount ?? 0)}</div>
@@ -2168,17 +2262,28 @@ const Payment: React.FC = () => {
     </div>
   </div>
 
-  <!-- Details table -->
+  ${supplierRows ? sectionTitle("Supplier / Vendor Information") : ""}
+  ${supplierRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${supplierRows}</tbody></table></div>` : ""}
+
+  ${sectionTitle("Payment Information")}
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
-    <table style="width:100%;">
-      <tbody>${rows}</tbody>
-    </table>
+    <table><tbody>${paymentRows}${docRefRows}</tbody></table>
+  </div>
+
+  ${taxRows ? sectionTitle("Tax Details") : ""}
+  ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
+
+  <!-- Signatories -->
+  <div style="display:flex;gap:8px;margin-top:48px;">
+    ${signBlock("Prepared By")}
+    ${signBlock("Approved By")}
+    ${signBlock("Authorized Signatory")}
   </div>
 
   <!-- Footer -->
-  <div style="margin-top:36px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
-    <span>Generated by CivilierERP</span>
-    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+  <div style="margin-top:28px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;">
+    <span>This is a system-generated receipt and does not require a physical signature.</span>
+    <span>Printed: ${printedAt}</span>
   </div>
 </body>
 </html>`;
@@ -4855,6 +4960,71 @@ const Payment: React.FC = () => {
                 )}
               </div>
 
+              {/* Company info */}
+              {viewingCompanyDetail && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 flex items-center gap-3">
+                  {viewingCompanyDetail.logo ? (
+                    <img
+                      src={viewingCompanyDetail.logo}
+                      alt="Company logo"
+                      className="h-9 w-auto max-w-[110px] object-contain shrink-0"
+                    />
+                  ) : (
+                    <div className="p-1.5 rounded-lg bg-primary/10 shrink-0">
+                      <Receipt size={14} className="text-primary" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-heading font-semibold text-foreground truncate">
+                      {viewingCompanyDetail.name || viewingRec.company}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {[viewingCompanyDetail.address, viewingCompanyDetail.city, viewingCompanyDetail.state]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {[
+                        viewingCompanyDetail.phone_number,
+                        viewingCompanyDetail.email,
+                        viewingCompanyDetail.gst_no ? `GSTIN: ${viewingCompanyDetail.gst_no}` : null,
+                        viewingCompanyDetail.pan_no ? `PAN: ${viewingCompanyDetail.pan_no}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join("  ·  ")}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Supplier / Vendor info */}
+              {viewingChain?.supplier && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-1.5">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <Building2 size={9} className="text-primary" /> Supplier / Vendor
+                  </p>
+                  <p className="text-xs font-medium text-foreground">
+                    {viewingChain.supplier.name}
+                    {viewingChain.supplier.code ? (
+                      <span className="text-muted-foreground font-normal"> · {viewingChain.supplier.code}</span>
+                    ) : null}
+                  </p>
+                  {viewingChain.supplier.address && (
+                    <p className="text-[10px] text-muted-foreground">{viewingChain.supplier.address}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">
+                    {[
+                      viewingChain.supplier.phone,
+                      viewingChain.supplier.email,
+                      viewingChain.supplier.gst ? `GSTIN: ${viewingChain.supplier.gst}` : null,
+                      viewingChain.supplier.pan ? `PAN: ${viewingChain.supplier.pan}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join("  ·  ")}
+                  </p>
+                </div>
+              )}
+
               {/* Traceability chain */}
               {viewingChain && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-2.5">
@@ -5055,7 +5225,7 @@ const Payment: React.FC = () => {
               {rights.canPrint && (
                 <button
                   onClick={() =>
-                    handlePrintPayment(viewingRec, viewingCompanyDetail)
+                    handlePrintPayment(viewingRec, viewingCompanyDetail, viewingChain)
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >

@@ -5,7 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -1489,6 +1489,7 @@ const PAGE_SIZE = 20;
 export default function MaterialExpenseBooking() {
   const rights = usePageRights("expense-booking");
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
   const activeFinYears = finYears
     .filter((fy) => fy.status === "Active")
@@ -1593,6 +1594,19 @@ export default function MaterialExpenseBooking() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Deep-link support — Linked Documents panels navigate here as
+  // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    apiFetch(`${API}/${viewId}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch(() => toast.error(`Booking #${viewId} not found`));
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchBookedSources = useCallback(async () => {
