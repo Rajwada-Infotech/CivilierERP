@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesShell } from "@/components/sales/SalesShell";
 import {
   IndianRupee,
   CreditCard,
@@ -649,21 +650,11 @@ export default function Payment() {
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Payment"]} />
 
-      <div className="flex items-center gap-3 mb-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500/10">
-          <CreditCard size={18} className="text-violet-600" />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground leading-tight">
-            Payment
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            Record payment against a sale order — posts directly to bank ledger
-            in Trial Balance
-          </p>
-        </div>
-      </div>
-
+      <SalesShell
+        title="Payment"
+        subtitle="Record payment against a sale order — posts directly to bank ledger in Trial Balance"
+        icon={CreditCard}
+      >
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* ── Left: Form ────────────────────────────────────────────────────── */}
         <div className="lg:col-span-3 space-y-5">
@@ -995,6 +986,7 @@ export default function Payment() {
         </div>
         <PaymentHistoryTable records={paymentHistory} />
       </div>
+      </SalesShell>
     </>
   );
 }

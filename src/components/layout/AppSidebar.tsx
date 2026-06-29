@@ -42,7 +42,7 @@ import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/home" },
+  { label: "Dashboard", icon: BarChart3, path: "/home", isDashboard: true },
 ];
 
 // ── Module header metadata ────────────────────────────────────────────────────
@@ -436,7 +436,7 @@ export const AppSidebar = () => {
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
-          className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
+          className="relative z-10 flex-1 overflow-y-auto p-2"
         >
           <SidebarNav
             items={getNavItems()}

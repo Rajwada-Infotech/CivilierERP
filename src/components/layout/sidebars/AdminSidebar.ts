@@ -16,7 +16,7 @@ import { NavItem } from "./SidebarPrimitives";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 1. Dashboard ───────────────────────────────────────────────────────────
-  { label: "Control Center", icon: BarChart3, path: "/admin/dashboard" },
+  { label: "Control Center", icon: BarChart3, path: "/admin/dashboard", isDashboard: true },
 
   // ── 2. Data Entry — Master Setup (things you configure before using the system)
   {

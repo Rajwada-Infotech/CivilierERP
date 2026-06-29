@@ -9,7 +9,7 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
-  { label: "Proceeding", icon: BarChart3, path: "/material", pageKey: "material-dashboard" },
+  { label: "Proceeding", icon: BarChart3, path: "/material", pageKey: "material-dashboard", isDashboard: true },
   {
     label: "Transaction",
     icon: Receipt,

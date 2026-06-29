@@ -114,6 +114,9 @@ const DependencyTracker = lazy(
 const ContractorRegister = lazy(
   () => import("./pages/civilworkdpr/ContractorRegister"),
 );
+const WorkerAttendance = lazy(
+  () => import("./pages/civilworkdpr/WorkerAttendance"),
+);
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
@@ -685,6 +688,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-contractor-register">
             <ContractorRegister />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/worker-attendance"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-worker-attendance">
+            <WorkerAttendance />
           </ProtectedRoute>
         }
       />

@@ -25,11 +25,11 @@ import {
   AlertCircle,
   Edit,
   FileText,
-  ArrowRight,
   Wallet,
   Printer,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import {
   computeBreakdown,
@@ -305,9 +305,9 @@ export function ExpenseBookingPreviewModal({
           }
         `}</style>
         <DialogHeader>
-          <DialogTitle>Expense Booking Preview</DialogTitle>
+          <DialogTitle>Invoice Preview</DialogTitle>
           <DialogDescription>
-            Details for booking {previewRecord?.bookingReference}
+            Details for invoice {previewRecord?.bookingReference}
           </DialogDescription>
         </DialogHeader>
 
@@ -1102,94 +1102,23 @@ export function ExpenseBookingPreviewModal({
             </div>
           )}
 
-          {/* ── Section 7b: Traceability Chain ── */}
-          <div className="border-t border-border/60 pt-4">
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <ArrowRight
-                size={10}
-                className="text-emerald-600 dark:text-emerald-400"
-              />{" "}
-              Document Chain
-            </p>
-            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-              {previewRecord.workDoneRef && (
-                <>
-                  <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    WD: {previewRecord.workDoneRef}
-                  </span>
-                  <ArrowRight
-                    size={10}
-                    className="text-muted-foreground shrink-0"
-                  />
-                </>
-              )}
-              {(previewRecord.purchaseOrderId ||
-                previewRecord.eSourceType === "PO" ||
-                previewRecord.eSourceType === "WO_PO") && (
-                <>
-                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    {previewRecord.eSourceType === "WO_PO" ? "WO_PO" : "PO"}
-                    {previewRecord.purchaseOrderId
-                      ? ` #${previewRecord.purchaseOrderId}`
-                      : ""}
-                  </span>
-                  <ArrowRight
-                    size={10}
-                    className="text-muted-foreground shrink-0"
-                  />
-                </>
-              )}
-              {previewRecord.eSourceType === "GRN" &&
-                previewRecord.eSourceId && (
-                  <>
-                    <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                      {previewRecord.sourceDocNo ||
-                        `GRN #${previewRecord.eSourceId}`}
-                    </span>
-                    <ArrowRight
-                      size={10}
-                      className="text-muted-foreground shrink-0"
-                    />
-                  </>
-                )}
-              {previewRecord.bookingReference && (
-                <>
-                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    {previewRecord.bookingReference}
-                  </span>
-                  {previewRecord.billStatus && (
-                    <ArrowRight
-                      size={10}
-                      className="text-muted-foreground shrink-0"
-                    />
-                  )}
-                </>
-              )}
-              {previewRecord.billStatus && (
-                <span
-                  className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
-                    previewRecord.billStatus === "Paid"
-                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                      : previewRecord.billStatus === "Partially Paid"
-                        ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                        : "bg-muted border-border text-muted-foreground"
-                  }`}
-                >
-                  {previewRecord.billStatus}
-                </span>
-              )}
-              {!previewRecord.workDoneRef &&
-                !previewRecord.purchaseOrderId &&
-                previewRecord.eSourceType !== "GRN" &&
-                previewRecord.eSourceType !== "PO" &&
-                previewRecord.eSourceType !== "WO_PO" &&
-                !previewRecord.billStatus && (
-                  <span className="text-muted-foreground italic">
-                    No chain data yet
-                  </span>
-                )}
+          {/* ── Section 7b: Traceability Chain — clickable Linked Documents ── */}
+          <DocumentChainPanel docType="expense" id={previewRecord.id ? Number(previewRecord.id) : null} />
+          {previewRecord.billStatus && (
+            <div className="flex items-center gap-1.5 text-[10px] -mt-2">
+              <span
+                className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
+                  previewRecord.billStatus === "Paid"
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                    : previewRecord.billStatus === "Partially Paid"
+                      ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                      : "bg-muted border-border text-muted-foreground"
+                }`}
+              >
+                {previewRecord.billStatus}
+              </span>
             </div>
-          </div>
+          )}
 
           {/* ── Section 8: Billing Terms ── */}
           {billingTerms.length > 0 && (

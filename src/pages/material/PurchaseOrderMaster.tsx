@@ -1,7 +1,8 @@
 import { generateUUID } from '../../utils/cryptoPolyfill';  
 import { useEffect, useState, useMemo } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -325,6 +326,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
 
   // ── MR prefill (when navigated from Material Request "Create PO") ─────────
@@ -1703,6 +1705,17 @@ const PurchaseOrderMaster: React.FC = () => {
     await goToEdit(item);
     setViewMode("view");
   };
+
+  // Deep-link support — Linked Documents panels navigate here as
+  // /material/purchase-order?view=<PurchaseOrderID> to open this exact PO.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    goToView({ _id: viewId } as POListItem);
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const goToAmend = (item: POListItem) => {
     navigate("/material/amendment-menu", {
@@ -3513,6 +3526,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 </div>
               </div>
             )}
+            <DocumentChainPanel docType="po" id={editingId ? Number(editingId) : null} />
           </div>
         )}
 
