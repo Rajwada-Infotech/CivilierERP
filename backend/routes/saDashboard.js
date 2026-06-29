@@ -1,10 +1,29 @@
 const express = require("express");
 const router = express.Router();
-const { getPool } = require("../db");
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+
+router.use(authMiddleware);
+
+// Simple in-memory cache: { key: { data, expiresAt } }
+const _cache = {};
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function cacheGet(key) {
+  const entry = _cache[key];
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { delete _cache[key]; return null; }
+  return entry.data;
+}
+function cacheSet(key, data) {
+  _cache[key] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+}
 
 // GET /api/sa/dashboard/marketing
 router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, res) => {
+  const cached = cacheGet("dashboard:marketing");
+  if (cached) return res.json(cached);
   try {
     const pool = getPool();
 
@@ -62,7 +81,7 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
       ORDER BY COUNT(l.Id) DESC
     `);
 
-    res.json({
+    const payload = {
       totalCampaigns: t.TotalCampaigns,
       activeAds: t.ActiveAds,
       totalLeads: t.TotalLeads,
@@ -74,7 +93,9 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
       bookingsGenerated: t.BookingCount,
       bestCampaign: bestCampaign.recordset[0] || null,
       bestAd: bestAd.recordset[0] || null,
-    });
+    };
+    cacheSet("dashboard:marketing", payload);
+    res.json(payload);
   } catch (err) {
     console.error("[sa-dashboard/marketing] error:", err.message);
     res.status(500).json({ error: err.message });
@@ -83,6 +104,8 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
 
 // GET /api/sa/dashboard/sales
 router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
+  const cached = cacheGet("dashboard:sales");
+  if (cached) return res.json(cached);
   try {
     const pool = getPool();
 
@@ -120,7 +143,7 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
     const bookingCount = bookings.recordset[0].Cnt;
     const conversionPct = total > 0 ? (bookingCount / total) * 100 : 0;
 
-    res.json({
+    const salesPayload = {
       totalLeads: total,
       pendingLeads: statusMap["New"] || 0,
       assignedLeads: statusMap["Assigned"] || 0,
@@ -132,7 +155,9 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
       siteVisitsCompleted: visits.recordset[0].Completed || 0,
       bookingsGenerated: bookingCount,
       conversionPercentage: Math.round(conversionPct * 100) / 100,
-    });
+    };
+    cacheSet("dashboard:sales", salesPayload);
+    res.json(salesPayload);
   } catch (err) {
     console.error("[sa-dashboard/sales] error:", err.message);
     res.status(500).json({ error: err.message });
@@ -141,21 +166,42 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
 
 // GET /api/sa/dashboard/team-lead
 router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
+  const actorUserId = req.user?.userId;
+  const actorRole   = req.user?.role;
+  const isSP = actorRole === "sales_person";
+  const isTL = actorRole === "sales_team_lead";
+  const cached = cacheGet(`dashboard:team-lead:${actorUserId}`);
+  if (cached) return res.json(cached);
   try {
-    const pool = getPool();
+    const pool   = getPool();
+    const userId = actorUserId ? parseInt(actorUserId) : null;
 
-    const received = await pool.request().query(`
-      SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE AssignedTeamLeadId IS NOT NULL
-    `);
-    const assignedToSp = await pool.request().query(`
-      SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE AssignedSalespersonId IS NOT NULL
-    `);
-    const pendingDistribution = await pool.request().query(`
-      SELECT COUNT(*) AS Cnt FROM dbo.SaLead
-      WHERE AssignedTeamLeadId IS NOT NULL AND AssignedSalespersonId IS NULL
-    `);
+    // Helper: build a parameterised request with ActorUserId pre-bound when needed.
+    const makeReq = () => {
+      const r = pool.request();
+      if (userId && (isSP || isTL)) r.input("ActorUserId", sql.Int, userId);
+      return r;
+    };
 
-    const perPerson = await pool.request().query(`
+    // SP scope: own leads only. TL scope: leads assigned to this TL. Admin: all.
+    const scopeClause = isSP
+      ? "AND AssignedSalespersonId = @ActorUserId"
+      : isTL
+        ? "AND AssignedTeamLeadId = @ActorUserId"
+        : "";
+
+    const received           = await makeReq().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE AssignedTeamLeadId IS NOT NULL ${scopeClause}`);
+    const assignedToSp       = await makeReq().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE AssignedSalespersonId IS NOT NULL ${scopeClause}`);
+    const pendingDistribution = await makeReq().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE AssignedTeamLeadId IS NOT NULL AND AssignedSalespersonId IS NULL ${scopeClause}`);
+
+    // Per-salesperson performance: TL sees only their own team members.
+    const spFilter = isSP
+      ? "AND u.id = @ActorUserId"
+      : isTL
+        ? "AND EXISTS (SELECT 1 FROM dbo.SaSalesTeam st WHERE st.TeamLeadUserId = @ActorUserId AND st.MemberUserId = u.id AND st.IsActive = 1)"
+        : "";
+
+    const perPerson = await makeReq().query(`
       SELECT
         u.id AS UserId, u.name AS UserName,
         COUNT(DISTINCT l.Id) AS LeadsAssigned,
@@ -167,11 +213,12 @@ router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
       LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
       WHERE u.id IN (SELECT DISTINCT AssignedSalespersonId FROM dbo.SaLead WHERE AssignedSalespersonId IS NOT NULL)
+        ${spFilter}
       GROUP BY u.id, u.name
       ORDER BY LeadsAssigned DESC
     `);
 
-    res.json({
+    const tlPayload = {
       leadsReceived: received.recordset[0].Cnt,
       leadsAssigned: assignedToSp.recordset[0].Cnt,
       pendingDistribution: pendingDistribution.recordset[0].Cnt,
@@ -184,9 +231,37 @@ router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async
         bookings: r.Bookings,
         conversionRate: r.LeadsAssigned > 0 ? Math.round((r.Bookings / r.LeadsAssigned) * 10000) / 100 : 0,
       })),
-    });
+    };
+    cacheSet(`dashboard:team-lead:${actorUserId}`, tlPayload);
+    res.json(tlPayload);
   } catch (err) {
     console.error("[sa-dashboard/team-lead] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /trends — monthly lead counts for the last 6 completed months + current
+router.get("/trends", async (req, res) => {
+  const cached = cacheGet("dashboard:trends");
+  if (cached) return res.json(cached);
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        FORMAT(CAST(ISNULL(DateGenerated, CreatedAt) AS DATE), 'yyyy-MM') AS Month,
+        COUNT(*) AS LeadCount
+      FROM dbo.SaLead
+      WHERE IsActive = 1
+        AND CAST(ISNULL(DateGenerated, CreatedAt) AS DATE)
+            >= DATEFROMPARTS(YEAR(DATEADD(MONTH, -5, SYSDATETIME())), MONTH(DATEADD(MONTH, -5, SYSDATETIME())), 1)
+      GROUP BY FORMAT(CAST(ISNULL(DateGenerated, CreatedAt) AS DATE), 'yyyy-MM')
+      ORDER BY Month
+    `);
+    const data = result.recordset.map((r) => ({ month: r.Month, count: r.LeadCount }));
+    cacheSet("dashboard:trends", data);
+    res.json(data);
+  } catch (err) {
+    console.error("[sa-dashboard/trends] error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

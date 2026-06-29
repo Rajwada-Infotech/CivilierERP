@@ -14,6 +14,17 @@ import type {
 // ======================
 export const PRIVILEGED_ROLES: UserRole[] = ["super_admin", "admin", "dba"];
 
+// Pages the marketing_head role controls as an admin (full CRUD, no restrictions).
+// Backend mirrors this in requirePageRight.js → isMarketingHeadAllowed().
+export const MARKETING_HEAD_PAGES = new Set<string>([
+  // Sales Automation — all sa- prefixed pages
+  "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
+  "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
+  "sa-distribution-rules", "sa-lead-transfers", "sa-role-master",
+  // Sales module
+  "sale-order", "sale-invoice", "sales-payment",
+]);
+
 // ======================
 // PAGE DEFINITIONS
 // ======================
@@ -86,11 +97,47 @@ export const CUSTOMER_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
 ];
 
+// Sales Team Lead: view+edit leads/visits/inquiry, view-only marketing, view+create distribution/transfers
+export const SALES_TEAM_LEAD_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  { page: "sa-leads", actions: ["view", "edit"] },
+  { page: "sa-inquiry", actions: ["view", "create", "edit"] },
+  { page: "sa-site-visits", actions: ["view", "create", "edit"] },
+  { page: "sa-campaigns", actions: ["view"] },
+  { page: "sa-ads", actions: ["view"] },
+  { page: "sa-marketing-invoices", actions: ["view"] },
+  { page: "sa-social-media", actions: ["view"] },
+  { page: "sa-teams", actions: ["view"] },
+  { page: "sa-lead-distribution", actions: ["view", "create"] },
+  { page: "sa-lead-transfers", actions: ["view", "create"] },
+  { page: "sa-distribution-rules", actions: ["view"] },
+];
+
+// Sales Person: view+edit own leads, log calls, schedule site visits
+export const SALES_PERSON_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  { page: "sa-leads", actions: ["view", "edit"] },
+  { page: "sa-inquiry", actions: ["view", "create", "edit"] },
+  { page: "sa-site-visits", actions: ["view", "create", "edit"] },
+];
+
+// marketing_head: full CRUD on all SA + Sales pages, plus dashboard access
+export const MARKETING_HEAD_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  ...[...MARKETING_HEAD_PAGES].map((page) => ({
+    page,
+    actions: ["view", "create", "edit", "delete", "print", "export"] as PageAction[],
+  })),
+];
+
 // Updated to use centralized PRIVILEGED_ROLES
 export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
   if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
   if (role === "engineer") return ENGINEER_ACCESS;
   if (role === "customer") return CUSTOMER_ACCESS;
+  if (role === "marketing_head") return MARKETING_HEAD_ACCESS;
+  if (role === "sales_team_lead") return SALES_TEAM_LEAD_ACCESS;
+  if (role === "sales_person") return SALES_PERSON_ACCESS;
   return DEFAULT_USER_ACCESS;
 };
 
@@ -118,6 +165,11 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canAccessPage = (page: PageKey): boolean => {
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
+    // marketing_head: full access within their scope, no access outside it
+    if (currentUser.role === "marketing_head") {
+      if (ADMIN_ONLY_PAGES.includes(page)) return false;
+      return MARKETING_HEAD_PAGES.has(page) || page === "dashboard";
+    }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes("view"),
@@ -127,6 +179,11 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canDoAction = (page: PageKey, action: PageAction): boolean => {
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
+    // marketing_head: all actions on their scoped pages
+    if (currentUser.role === "marketing_head") {
+      if (ADMIN_ONLY_PAGES.includes(page)) return false;
+      return MARKETING_HEAD_PAGES.has(page) || page === "dashboard";
+    }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes(action),

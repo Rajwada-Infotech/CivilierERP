@@ -215,6 +215,10 @@ const ALL_ROUTES = [
   { path: "/api/sa/dashboard", file: "./routes/saDashboard" },
   { path: "/api/sa/reports", file: "./routes/saReports" },
   { path: "/api/sa/distribution-rules", file: "./routes/saDistributionRules" },
+  { path: "/api/sa/teams", file: "./routes/saTeams" },
+  { path: "/api/sa/lead-transfers", file: "./routes/saLeadTransfers" },
+  { path: "/api/sa/role-master", file: "./routes/saRoleMaster" },
+  { path: "/api/sa/notifications", file: "./routes/saNotifications" },
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────

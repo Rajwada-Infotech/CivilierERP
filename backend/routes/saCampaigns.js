@@ -63,6 +63,7 @@ router.get(
           c.Budget,
           c.Status,
           c.MarketingManagerId,
+          mgr.name AS MarketingManagerName,
           c.IsActive,
           c.CreatedAt,
           c.UpdatedAt,
@@ -82,6 +83,7 @@ router.get(
           END AS ConversionPct
         FROM dbo.SaCampaign c
         LEFT JOIN dbo.SaSocialMediaPlatform p ON p.Id = c.PlatformId
+        LEFT JOIN dbo.Users mgr ON mgr.id = c.MarketingManagerId
         LEFT JOIN ad_stats a ON a.CampaignId = c.Id
         LEFT JOIN lead_stats l ON l.CampaignId = c.Id
         ORDER BY c.CreatedAt DESC

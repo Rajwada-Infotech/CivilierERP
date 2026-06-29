@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -29,6 +30,8 @@ async function fetchRules(): Promise<any[]> {
 }
 
 const SaLeadDistribution: React.FC = () => {
+  const { canDoAction } = useAuth();
+  const canAutoDistribute = canDoAction("sa-lead-distribution", "edit");
   const queryClient = useQueryClient();
   const [level, setLevel] = useState<1 | 2>(1);
   const [method, setMethod] = useState<"Equal" | "Percentage" | "Manual">("Equal");
@@ -66,8 +69,8 @@ const SaLeadDistribution: React.FC = () => {
   };
 
   const eligibleUsers = useMemo(() => {
-    if (level === 1) return users.filter((u: any) => u.role === "team_leader" || u.role === "admin");
-    return users.filter((u: any) => u.role === "sales_executive" || u.role === "salesperson" || u.role === "staff");
+    if (level === 1) return users.filter((u: any) => u.role === "sales_team_lead" || u.role === "admin" || u.role === "super_admin");
+    return users.filter((u: any) => u.role === "sales_person");
   }, [users, level]);
 
   const toggleLead = (id: number) => {
@@ -77,6 +80,10 @@ const SaLeadDistribution: React.FC = () => {
   const handleDistribute = async () => {
     if (!selectedLeads.length) return toast.error("Select at least one lead");
     if (!eligibleUsers.length) return toast.error("No eligible users found");
+    if (method === "Percentage") {
+      const pctTotal = eligibleUsers.reduce((s: number, u: any) => s + (percentages[u.Id] || 0), 0);
+      if (pctTotal !== 100) return toast.error(`Percentages must sum to 100% (currently ${pctTotal}%)`);
+    }
 
     let assignmentList: { userId: number; leadIdList: number[] }[] = [];
 
@@ -179,26 +186,37 @@ const SaLeadDistribution: React.FC = () => {
                 className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors">
                 Distribute {selectedLeads.length ? `(${selectedLeads.length})` : ""}
               </button>
-              <button onClick={() => handleRunAuto(level)} disabled={runningAuto}
-                className="px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
-                {runningAuto ? "Running..." : `Auto-Distribute L${level}`}
-              </button>
+              {canAutoDistribute && (
+                <button onClick={() => handleRunAuto(level)} disabled={runningAuto}
+                  className="px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
+                  {runningAuto ? "Running..." : `Auto-Distribute L${level}`}
+                </button>
+              )}
             </div>
 
             {/* Percentage inputs */}
-            {method === "Percentage" && (
-              <div className="flex flex-wrap gap-3 p-3 bg-muted/30 rounded-lg">
-                {eligibleUsers.map((u: any) => (
-                  <div key={u.Id} className="flex items-center gap-2">
-                    <span className="text-xs text-foreground">{u.Name}</span>
-                    <input type="number" min={0} max={100} value={percentages[u.Id] || 0}
-                      onChange={(e) => setPercentages((p) => ({ ...p, [u.Id]: parseInt(e.target.value) || 0 }))}
-                      className="w-16 px-2 py-1 text-xs border border-border rounded bg-background" />
-                    <span className="text-xs text-muted-foreground">%</span>
+            {method === "Percentage" && (() => {
+              const pctTotal = eligibleUsers.reduce((s: number, u: any) => s + (percentages[u.Id] || 0), 0);
+              const pctOk = pctTotal === 100;
+              return (
+                <div className="p-3 bg-muted/30 rounded-lg space-y-2">
+                  <div className="flex flex-wrap gap-3">
+                    {eligibleUsers.map((u: any) => (
+                      <div key={u.Id} className="flex items-center gap-2">
+                        <span className="text-xs text-foreground">{u.Name}</span>
+                        <input type="number" min={0} max={100} value={percentages[u.Id] || 0}
+                          onChange={(e) => setPercentages((p) => ({ ...p, [u.Id]: parseInt(e.target.value) || 0 }))}
+                          className="w-16 px-2 py-1 text-xs border border-border rounded bg-background" />
+                        <span className="text-xs text-muted-foreground">%</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                  <p className={`text-xs font-medium ${pctOk ? "text-emerald-600" : "text-amber-500"}`}>
+                    Total: {pctTotal}% {pctOk ? "✓" : `— must equal 100%`}
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Pending leads table */}
             <div className="rounded-lg border border-border overflow-hidden">
