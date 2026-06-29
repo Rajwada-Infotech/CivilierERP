@@ -61,6 +61,22 @@ const ROLE_ALIASES = {
   "end user": "customer",
   "portal user": "customer",
 
+  // marketing head of department
+  marketing_head: "marketing_head",
+  "marketing head": "marketing_head",
+  "marketing head of department": "marketing_head",
+  "marketing department head": "marketing_head",
+  "marketing hod": "marketing_head",
+  mhd: "marketing_head",
+
+  // sales roles
+  sales_team_lead: "sales_team_lead",
+  "sales team lead": "sales_team_lead",
+  "sales team leader": "sales_team_lead",
+  sales_person: "sales_person",
+  "sales person": "sales_person",
+  salesperson: "sales_person",
+
   // general user
   user: "user",
   employee: "user",

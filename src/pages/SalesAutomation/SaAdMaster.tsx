@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -10,6 +11,7 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { LayoutList, BarChart2 } from "lucide-react";
 
 const API = "/api/sa/ads";
 
@@ -20,10 +22,12 @@ async function fetchAds(): Promise<any[]> {
 }
 
 async function fetchCampaignOptions(): Promise<{ value: string; label: string }[]> {
-  const res = await fetchWithAuth(`${API}/campaigns`);
-  if (!res.ok) throw new Error("Failed to fetch campaigns");
-  const data: { Id: number; Name: string; CampaignCode: string }[] = await res.json();
-  return data.map((c) => ({ value: String(c.Id), label: `${c.CampaignCode} - ${c.Name}` }));
+  try {
+    const res = await fetchWithAuth(`${API}/campaigns`);
+    if (!res.ok) return [];
+    const data: { Id: number; Name: string; CampaignCode: string }[] = await res.json();
+    return data.map((c) => ({ value: String(c.Id), label: `${c.CampaignCode} - ${c.Name}` }));
+  } catch { return []; }
 }
 
 const fields: FieldDef[] = [
@@ -96,7 +100,9 @@ function toNumber(value: unknown): number {
 }
 
 const SaAdMaster: React.FC = () => {
+  const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<"list" | "performance">("list");
 
   const { data: ads, isLoading, error } = useQuery({
     queryKey: ["sa-ads"],
@@ -177,18 +183,111 @@ const SaAdMaster: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading ads...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load ads.</div>;
 
+  const totalBudget = mappedData.reduce((s, a) => s + Number(a.budget ?? 0), 0);
+  const totalSpent = mappedData.reduce((s, a) => s + Number(a.costSpent ?? 0), 0);
+  const totalLeads = mappedData.reduce((s, a) => s + Number(a.totalLeadsGenerated ?? 0), 0);
+  const totalBookings = mappedData.reduce((s, a) => s + Number(a.bookingCount ?? 0), 0);
+  const totalRevenue = mappedData.reduce((s, a) => s + Number(a.revenueGenerated ?? 0), 0);
+  const avgROI = mappedData.filter((a) => Number(a.roi) !== 0).length
+    ? mappedData.reduce((s, a) => s + Number(a.roi ?? 0), 0) / mappedData.filter((a) => Number(a.roi) !== 0).length
+    : 0;
+
+  const fmtRs = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const fmtPct = (n: number) => `${n.toFixed(1)}%`;
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Sales Automation", "Ad Master"]} />
-      <div className="space-y-8 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Ad Master</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Manage advertisements running under each campaign</p>
+      <div className="space-y-6 mt-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">Ad Master</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Manage advertisements running under each campaign</p>
+          </div>
+          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
+            {([
+              { key: "list", icon: LayoutList, label: "List" },
+              { key: "performance", icon: BarChart2, label: "Performance" },
+            ] as const).map(({ key, icon: Icon, label }) => (
+              <button key={key} onClick={() => setActiveTab(key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
         </div>
-        <MasterPage
+
+        {/* PERFORMANCE TAB */}
+        {activeTab === "performance" && (
+          <div className="space-y-6">
+            {/* Summary KPI cards */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              {[
+                { label: "Total Budget", value: fmtRs(totalBudget), color: "text-blue-600" },
+                { label: "Total Spent", value: fmtRs(totalSpent), color: "text-orange-600" },
+                { label: "Total Leads", value: String(totalLeads), color: "text-purple-600" },
+                { label: "Total Bookings", value: String(totalBookings), color: "text-emerald-600" },
+                { label: "Revenue", value: fmtRs(totalRevenue), color: "text-green-600" },
+                { label: "Avg ROI", value: fmtPct(avgROI), color: avgROI >= 0 ? "text-emerald-600" : "text-red-500" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className={`text-lg font-bold ${color}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-ad performance table */}
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="px-4 py-2.5 bg-muted/30 border-b border-border">
+                <h3 className="text-sm font-semibold text-foreground">Performance by Ad</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/20">
+                    <tr>
+                      {["Ad Name", "Campaign", "Budget", "Spent", "Leads", "CPL", "Conv %", "Bookings", "Revenue", "ROI %"].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mappedData.length === 0 ? (
+                      <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground text-sm">No ads found</td></tr>
+                    ) : mappedData.map((ad) => {
+                      const roi = Number(ad.roi ?? 0);
+                      return (
+                        <tr key={String(ad._id)} className="border-t border-border hover:bg-muted/10 transition-colors">
+                          <td className="px-3 py-2.5 font-medium text-foreground whitespace-nowrap">{String(ad.name)}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground text-xs whitespace-nowrap">{String(ad.campaignName)}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground text-xs">{fmtRs(Number(ad.budget ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-orange-600 text-xs">{fmtRs(Number(ad.costSpent ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-center font-semibold">{String(ad.totalLeadsGenerated ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{Number(ad.costPerLead) > 0 ? fmtRs(Number(ad.costPerLead)) : "—"}</td>
+                          <td className="px-3 py-2.5 text-xs">{fmtPct(Number(ad.conversionRate ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-center font-semibold text-emerald-600">{String(ad.bookingCount ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-xs text-green-600">{Number(ad.revenueGenerated) > 0 ? fmtRs(Number(ad.revenueGenerated)) : "—"}</td>
+                          <td className="px-3 py-2.5 text-xs">
+                            <span className={`font-semibold ${roi >= 0 ? "text-emerald-600" : "text-red-500"}`}>{fmtPct(roi)}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* LIST TAB */}
+        {activeTab === "list" && <MasterPage
           title="Ad"
           fields={fields}
           columns={columns}
+          canCreate={canDoAction("sa-ads", "create")}
+          canEdit={canDoAction("sa-ads", "edit")}
+          canDelete={canDoAction("sa-ads", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{
@@ -219,7 +318,7 @@ const SaAdMaster: React.FC = () => {
               { key: "isActive", label: "Active" },
             ],
           }}
-        />
+        />}
       </div>
     </>
   );

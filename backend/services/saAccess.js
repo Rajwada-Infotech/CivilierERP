@@ -10,7 +10,8 @@ function normalizeRole(role) {
 
 function isSaAdmin(req) {
   const role = normalizeRole(req.user?.role);
-  return ["super_admin", "sa", "dba", "admin"].includes(role);
+  // marketing_head has admin-level access within Sales Automation
+  return ["super_admin", "sa", "dba", "admin", "marketing_head"].includes(role);
 }
 
 function isSaTeamLead(req) {

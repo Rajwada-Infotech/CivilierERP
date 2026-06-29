@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { resolveDistributionForLead } = require("../services/saDistributionEngine");
+
+router.use(authMiddleware);
 
 // GET all rules with their members
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {

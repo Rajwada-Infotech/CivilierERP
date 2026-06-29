@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./layoutContexts";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
+import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import {
   Calendar,
@@ -42,6 +43,8 @@ import {
   Ruler,
   SlidersHorizontal,
   DoorOpen,
+  Megaphone,
+  UsersRound,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -349,6 +352,37 @@ const civilWorkDprSetupItems = [
   },
 ];
 
+const salesAutomationSetupItems = [
+  {
+    icon: Megaphone,
+    label: "Social Media",
+    path: "/sales-automation/social-media",
+    color: "text-pink-500",
+    pageKey: "sa-social-media",
+  },
+  {
+    icon: SlidersHorizontal,
+    label: "Distribution Rules",
+    path: "/sales-automation/distribution-rules",
+    color: "text-amber-500",
+    pageKey: "sa-distribution-rules",
+  },
+  {
+    icon: UsersRound,
+    label: "Teams",
+    path: "/sales-automation/teams",
+    color: "text-purple-500",
+    pageKey: "sa-teams",
+  },
+  {
+    icon: ShieldCheck,
+    label: "Role Master",
+    path: "/sales-automation/role-master",
+    color: "text-orange-500",
+    pageKey: "sa-role-master",
+  },
+];
+
 const adminSetupItems = [
   {
     icon: Tag,
@@ -642,6 +676,21 @@ const UserMenuContent: React.FC<{
             DBA
           </span>
         )}
+        {currentUser?.role === "marketing_head" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-orange-500/10 text-orange-600">
+            Marketing Head
+          </span>
+        )}
+        {currentUser?.role === "sales_team_lead" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-purple-500/10 text-purple-600">
+            Sales Team Lead
+          </span>
+        )}
+        {currentUser?.role === "sales_person" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-indigo-500/10 text-indigo-600">
+            Sales Person
+          </span>
+        )}
         {currentUser?.role === "user" && (
           <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
             User · {currentUser.pagePermissions?.length || 0} pages
@@ -706,6 +755,7 @@ export const TopNavbar = () => {
 
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
+  const isMarketingHead = currentUser?.role === "marketing_head";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
   const isAdminPage =
     isAdmin &&
@@ -724,19 +774,23 @@ export const TopNavbar = () => {
       ? Database
       : isAdmin
         ? Shield
-        : null;
+        : isMarketingHead
+          ? Megaphone
+          : null;
   const roleBadgeCls = isSuperAdmin
     ? "bg-violet-600"
     : isDba
       ? "bg-emerald-600"
-      : "bg-blue-600";
+      : isMarketingHead
+        ? "bg-orange-500"
+        : "bg-blue-600";
 
   const isPrivilegedUser = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
 
   // Filter setup items by page rights for non-privileged users.
-  // Items without a pageKey are always shown.
+  // marketing_head is privileged within their module scope.
   const filterSetupItems = (items: SetupItem[]): SetupItem[] => {
-    if (isPrivilegedUser) return items;
+    if (isPrivilegedUser || isMarketingHead) return items;
     return items.filter((item) => !item.pageKey || canAccessPage(item.pageKey as any));
   };
 
@@ -789,6 +843,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(financeSetupItems),
         label: "Finance",
         colorStyle: makeColorStyle("finance"),
+        available: true,
+      };
+    if (activeModule === "sales-automation")
+      return {
+        items: filterSetupItems(salesAutomationSetupItems),
+        label: "Sales Automation",
+        colorStyle: makeColorStyle("sales-automation"),
         available: true,
       };
     return {
@@ -1096,6 +1157,7 @@ export const TopNavbar = () => {
             </button>
           </div>
 
+          <SaNotificationBell />
           <ReminderBell />
           <ThemeSwitcher
             open={themeOpen}
@@ -1147,6 +1209,7 @@ export const TopNavbar = () => {
 
         {/* ── Mobile right ── */}
         <div className="flex md:hidden items-center gap-1.5 ml-auto">
+          <SaNotificationBell />
           <ReminderBell />
           <Dropdown
             open={userOpen}

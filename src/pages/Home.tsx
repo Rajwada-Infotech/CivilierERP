@@ -30,6 +30,7 @@ import {
   LineChart,
   ShoppingCart,
   Receipt,
+  Megaphone,
   Pickaxe,
 } from "lucide-react";
 import {
@@ -66,6 +67,21 @@ function getAccessibleModules(role: UserRoleStr) {
       admin: true,
       dba: role === "dba",
       sales: true,
+      salesAutomation: true,
+    };
+  }
+  if (role === "marketing_head") {
+    return {
+      finance: false,
+      material: false,
+      engineering: false,
+      followup: false,
+      ticket: false,
+      approvals: false,
+      admin: false,
+      dba: false,
+      sales: true,
+      salesAutomation: true,
     };
   }
   if (role === "engineer") {
@@ -79,6 +95,7 @@ function getAccessibleModules(role: UserRoleStr) {
       admin: false,
       dba: false,
       sales: false,
+      salesAutomation: false,
     };
   }
   // Fallback — should not be reached for "user" role (handled by deriveUserModuleAccess at call site)
@@ -92,6 +109,7 @@ function getAccessibleModules(role: UserRoleStr) {
     admin: false,
     dba: false,
     sales: false,
+    salesAutomation: false,
   };
 }
 
@@ -658,6 +676,7 @@ export default function HomePage() {
     ],
     ticket: ["ticket-dashboard", "tickets"],
     sales: ["sale-order", "sale-invoice", "sales-payment"],
+    salesAutomation: ["sa-leads", "sa-inquiry", "sa-site-visits", "sa-campaigns", "sa-ads"],
     civilworkdpr: [
       "civilworkdpr-dashboard",
       "civilworkdpr-dependency",
@@ -680,6 +699,7 @@ export default function HomePage() {
     followup: hasModuleAccess("followup"),
     ticket: hasModuleAccess("ticket"),
     sales: hasModuleAccess("sales"),
+    salesAutomation: hasModuleAccess("salesAutomation"),
     civilworkdpr: hasModuleAccess("civilworkdpr"),
     approvals: privileged,
     admin: privileged && !isDba,
@@ -1120,6 +1140,19 @@ export default function HomePage() {
                     icon: TrendingUp,
                   },
                 ]}
+              />
+            )}
+
+            {/* Sales Automation */}
+            {access.salesAutomation && (
+              <ModuleCard
+                title="Sales Automation"
+                href="/sales-automation/leads"
+                icon={Megaphone}
+                accent="#f97316"
+                delay={nextDelay()}
+                loading={isLoading}
+                stats={[]}
               />
             )}
 

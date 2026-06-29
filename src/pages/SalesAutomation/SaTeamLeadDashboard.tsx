@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, GitBranch, Clock } from "lucide-react";
+import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchTeamLeadDashboard(): Promise<any> {
   const res = await fetchWithAuth("/api/sa/dashboard/team-lead");
@@ -42,6 +43,8 @@ const SaTeamLeadDashboard: React.FC = () => {
           <StatCard icon={GitBranch} label="Leads Distributed" value={data?.leadsAssigned ?? 0} />
           <StatCard icon={Clock} label="Pending Distribution" value={data?.pendingDistribution ?? 0} />
         </div>
+
+        <MonthlyLeadTrend />
 
         <div className="rounded-lg border border-border overflow-hidden">
           <div className="px-4 py-2.5 bg-muted/30 border-b border-border">
