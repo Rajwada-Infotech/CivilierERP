@@ -267,4 +267,97 @@ router.get("/", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/trial-balance/:lheadId/transactions?from=&to=&companyId=&projectId=
+ *
+ * Drill-down — every GeneralLedgerEntry posted against one AccountHeadMaster
+ * entity (ledger), within the same filter window as the main report. Entries
+ * sourced from a Payment (SourceType = 'NewPayment') are enriched with the
+ * payment's docNo/mode/expenseRef so the frontend can link straight through
+ * to Finance → Payments → that receipt (Level 3 of the drill-down).
+ */
+router.get("/:lheadId/transactions", async (req, res) => {
+  const lheadId = parseInt(req.params.lheadId, 10);
+  if (!Number.isFinite(lheadId)) {
+    return res.status(400).json({ error: "Invalid ledger id" });
+  }
+
+  try {
+    const pool = getPool();
+
+    const now = new Date();
+    const fyYear =
+      now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const from = req.query.from || `${fyYear}-04-01`;
+    const to = req.query.to || `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId, 10)
+      : null;
+    const projectId = req.query.projectId
+      ? parseInt(req.query.projectId, 10)
+      : null;
+
+    const headRes = await pool
+      .request()
+      .input("LHeadId", sql.Int, lheadId)
+      .query(
+        `SELECT LHeadId AS id, LHeadName AS name, LHeadType AS [type] FROM dbo.AccountHeadMaster WHERE LHeadId = @LHeadId`,
+      );
+    if (!headRes.recordset.length) {
+      return res.status(404).json({ error: "Ledger entity not found" });
+    }
+
+    const entriesRes = await pool
+      .request()
+      .input("LHeadId", sql.Int, lheadId)
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId).query(`
+        SELECT
+          gle.EntryId, gle.VoucherNo, gle.VoucherDate,
+          gle.DebitAmount, gle.CreditAmount, gle.Narration,
+          gle.SourceType, gle.SourceId,
+          np.PPaymentID, np.DocNo AS PaymentDocNo, np.PMode AS PaymentMode,
+          np.PExpenseRef, np.Status AS PaymentStatus,
+          eb.EVendorInvoiceNo
+        FROM dbo.GeneralLedgerEntry gle
+        LEFT JOIN dbo.NewPayment np
+          ON gle.SourceType = 'NewPayment' AND np.PPaymentID = gle.SourceId
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        WHERE gle.LHeadId = @LHeadId
+          AND gle.IsReversed = 0
+          AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+        ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
+      `);
+
+    const transactions = entriesRes.recordset.map((r) => ({
+      entryId: r.EntryId,
+      voucherNo: r.VoucherNo,
+      date: r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : null,
+      debit: Number(r.DebitAmount) || 0,
+      credit: Number(r.CreditAmount) || 0,
+      narration: r.Narration,
+      sourceType: r.SourceType,
+      sourceId: r.SourceId,
+      invoiceNo: r.EVendorInvoiceNo || null,
+      payment: r.PPaymentID
+        ? {
+            id: r.PPaymentID,
+            docNo: r.PaymentDocNo,
+            mode: r.PaymentMode,
+            status: r.PaymentStatus,
+          }
+        : null,
+    }));
+
+    res.json({ entity: headRes.recordset[0], from, to, transactions });
+  } catch (err) {
+    console.error("[trial-balance] transactions error:", err.message, err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

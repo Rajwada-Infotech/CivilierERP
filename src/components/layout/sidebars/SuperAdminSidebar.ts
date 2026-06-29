@@ -13,7 +13,7 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const superAdminNavItems: NavItem[] = [
-  { label: "Control Panel", icon: Crown, path: "/superadmin" },
+  { label: "Control Panel", icon: Crown, path: "/superadmin", isDashboard: true },
   {
     label: "Tenant Management",
     icon: Building2,

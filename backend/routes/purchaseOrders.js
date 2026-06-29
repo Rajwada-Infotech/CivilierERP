@@ -957,6 +957,21 @@ router.delete("/:id", requirePageRight("purchase-orders", "delete"), async (req,
     if (!id) return;
     const pool = getPool();
 
+    // ── Guard: linked Vehicle In/Out records ──────────────────────────────────
+    const vioCheck = await pool
+      .request()
+      .input("POID", sql.Int, id)
+      .query(
+        "SELECT COUNT(*) AS cnt FROM dbo.VehicleInOut WHERE POID = @POID",
+      );
+    if (Number(vioCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_vehicle_in_out",
+        message:
+          "This Purchase Order has linked Vehicle In/Out record(s). Delete them first, then delete the PO.",
+      });
+    }
+
     // ── Guard: linked GRNs ────────────────────────────────────────────────────
     const grnCheck = await pool
       .request()

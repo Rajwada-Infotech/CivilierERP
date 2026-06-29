@@ -1,4 +1,4 @@
-import { BarChart3, GitBranch, HardHat } from "lucide-react";
+import { BarChart3, GitBranch, HardHat, Users2 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const civilWorkDprNavItems: NavItem[] = [
@@ -7,6 +7,7 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: BarChart3,
     path: "/civilworkdpr",
     pageKey: "civilworkdpr-dashboard",
+    isDashboard: true,
   },
   {
     label: "Dependency",
@@ -19,5 +20,11 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: HardHat,
     path: "/civilworkdpr/contractor-register",
     pageKey: "civilworkdpr-contractor-register",
+  },
+  {
+    label: "Worker Attendance",
+    icon: Users2,
+    path: "/civilworkdpr/worker-attendance",
+    pageKey: "civilworkdpr-worker-attendance",
   },
 ];
