@@ -382,7 +382,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
     if (!perms) return;
     const roleMap = roleRightsToMap(normaliseRoleRightsRows(perms.roleRights ?? []));
     setEditMap(effectiveMap(roleMap, {}));
-    setDirty(true);
+    setDirty(false);
   }
 
   function handleExportCSV() {

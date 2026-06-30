@@ -103,7 +103,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-ads] GET error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -133,7 +133,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-ads] GET /dropdown error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -155,7 +155,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-ads] GET /campaigns error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -192,7 +192,7 @@ router.post(
         .request()
         .input("CampaignId", sql.Int, parseInt(CampaignId, 10))
         .input("Name", sql.NVarChar(200), Name)
-        .input("CreativeRef", sql.NVarChar(500), CreativeRef || null)
+        .input("CreativeRef", sql.NVarChar(2000), CreativeRef || null)
         .input("AdType", sql.NVarChar(50), AdType || null)
         .input("Budget", sql.Decimal(18, 2), Budget || 0)
         .input("DailySpend", sql.Decimal(18, 2), DailySpend || 0)
@@ -213,7 +213,7 @@ router.post(
       res.json({ message: "Ad added successfully" });
     } catch (err) {
       console.error("[sa-ads] POST error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -256,7 +256,7 @@ router.put(
         .input("Id", sql.Int, id)
         .input("CampaignId", sql.Int, parseInt(CampaignId, 10))
         .input("Name", sql.NVarChar(200), Name)
-        .input("CreativeRef", sql.NVarChar(500), CreativeRef || null)
+        .input("CreativeRef", sql.NVarChar(2000), CreativeRef || null)
         .input("AdType", sql.NVarChar(50), AdType || null)
         .input("Budget", sql.Decimal(18, 2), Budget || 0)
         .input("DailySpend", sql.Decimal(18, 2), DailySpend || 0)
@@ -285,7 +285,7 @@ router.put(
       res.json({ message: "Ad updated successfully" });
     } catch (err) {
       console.error("[sa-ads] PUT error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -317,13 +317,13 @@ router.delete(
       await pool
         .request()
         .input("Id", sql.Int, id)
-        .query("DELETE FROM dbo.SaAd WHERE Id = @Id");
+        .query("UPDATE dbo.SaAd SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
 
       await bumpCacheVersion("sa-ads");
       res.json({ message: `Ad "${Name}" deleted successfully` });
     } catch (err) {
       console.error("[sa-ads] DELETE error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );

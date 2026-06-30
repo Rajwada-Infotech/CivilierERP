@@ -15,7 +15,7 @@ const cleanStr = (v, len = 500) => {
 // Mirrors workOrder.js's /meta/contractors pattern.
 router.get("/contractors", authMiddleware, async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().query(`
       SELECT
         LHeadId           AS id,
@@ -75,7 +75,7 @@ const JOINS = `
 // ─── GET / — allocation register ──────────────────────────────────────────────
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().query(`
       SELECT ${SELECT_COLUMNS}
       ${JOINS}
@@ -100,7 +100,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
   if (!activityId) return res.status(400).json({ error: "Activity is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("contractorId", sql.Int, contractorId)
       .input("projectId", sql.Int, projectId ?? null)
@@ -143,7 +143,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const existing = await pool.request()
       .input("id", sql.Int, allocId)
       .query(`SELECT AllocationId FROM dbo.ContractorAllocation WHERE AllocationId = @id`);
@@ -188,7 +188,7 @@ router.put("/:id/acknowledge", authMiddleware, requirePageRight("civilworkdpr-co
   if (isNaN(allocId)) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, allocId)
       .query(`UPDATE dbo.ContractorAllocation SET IsAcknowledged = 1 WHERE AllocationId = @id`);
@@ -216,7 +216,7 @@ router.put("/:id/approve", authMiddleware, requirePageRight("civilworkdpr-contra
   }
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, allocId)
       .input("engineerName", sql.NVarChar, cleanStr(engineerName, 150))
@@ -246,7 +246,7 @@ router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-
   if (isNaN(allocId)) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, allocId)
       .query(`DELETE FROM dbo.ContractorAllocation WHERE AllocationId = @id`);
@@ -256,10 +256,11 @@ router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-
     res.json({ success: true });
   } catch (err) {
     console.error("ContractorAllocation DELETE error:", err);
-    // FK from DailyLabourEntry will block deletion if labour entries exist.
-    res.status(409).json({
-      error: "Cannot delete — this allocation has linked daily labour entries.",
-    });
+    // 547 = FK constraint violation in SQL Server
+    if (err.number === 547) {
+      return res.status(409).json({ error: "Cannot delete — this allocation has linked daily labour entries." });
+    }
+    res.status(500).json({ error: "Failed to delete allocation" });
   }
 });
 

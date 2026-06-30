@@ -62,6 +62,7 @@ import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -160,6 +161,14 @@ const MODULE_META: Record<
     icon: Pickaxe,
     label: "Civil Work DPR",
     route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
+  },
+  "sales-automation": {
+    h: 330,
+    s: 70,
+    l: 55,
+    icon: Target,
+    label: "Sales Automation",
+    route: MODULE_DASHBOARD_ROUTES["sales-automation"],
   },
   admin: {
     h: 217,
@@ -532,6 +541,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(recordsNavItems as DesktopNavItem[]);
       case "civilworkdpr":
         return adaptItems(civilWorkDprNavItems as DesktopNavItem[]);
+      case "sales-automation":
+        return adaptItems(salesAutomationNavItems as DesktopNavItem[]);
       default:
         return [];
     }

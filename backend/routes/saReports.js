@@ -3,6 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { isSaAdmin, isSaTeamLead, actorId, applyLeadScope } = require("../services/saAccess");
 
 router.use(authMiddleware);
 
@@ -174,7 +175,23 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
     const pool = getPool();
     const filter = dateRangeFilter(req, "l.CreatedAt");
     const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
-    const r = await pool.request().query(`
+
+    const r2 = pool.request();
+    let userScope = "";
+    if (!isSaAdmin(req)) {
+      const uid = actorId(req);
+      if (!uid) return res.json([]);
+      r2.input("ActorUserId", sql.Int, uid);
+      if (isSaTeamLead(req)) {
+        // TL sees their own salespersons only
+        userScope = "AND u.id IN (SELECT MemberUserId FROM dbo.SaSalesTeam WHERE TeamLeadUserId = @ActorUserId AND IsActive = 1)";
+      } else {
+        // salesperson sees only themselves
+        userScope = "AND u.id = @ActorUserId";
+      }
+    }
+
+    const r = await r2.query(`
       SELECT u.id AS UserId, u.name AS SalespersonName,
         COUNT(DISTINCT l.Id) AS LeadsHandled,
         COUNT(DISTINCT c.Id) AS CallsMade,
@@ -184,6 +201,7 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
       INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id AND l.IsActive = 1 ${whereClause}
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
       LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
+      WHERE 1=1 ${userScope}
       GROUP BY u.id, u.name
       ORDER BY Bookings DESC
     `);
@@ -191,13 +209,25 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 6. Team Leader Performance Report
+// 6. Team Leader Performance Report (admin + marketing_head only)
 router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
+  // Only admins and marketing_head see all TLs; TL sees only themselves; SP sees nothing here.
+  if (!isSaAdmin(req) && !isSaTeamLead(req)) return res.json([]);
   try {
     const pool = getPool();
     const filter = dateRangeFilter(req, "l.CreatedAt");
     const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
-    const r = await pool.request().query(`
+
+    const r2 = pool.request();
+    let userScope = "";
+    if (!isSaAdmin(req)) {
+      const uid = actorId(req);
+      if (!uid) return res.json([]);
+      r2.input("ActorUserId", sql.Int, uid);
+      userScope = "AND u.id = @ActorUserId";
+    }
+
+    const r = await r2.query(`
       SELECT u.id AS UserId, u.name AS TeamLeadName,
         COUNT(DISTINCT l.Id) AS LeadsReceived,
         SUM(CASE WHEN l.AssignedSalespersonId IS NOT NULL THEN 1 ELSE 0 END) AS LeadsDistributed,
@@ -205,6 +235,7 @@ router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", 
         SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS TeamBookings
       FROM dbo.Users u
       INNER JOIN dbo.SaLead l ON l.AssignedTeamLeadId = u.id AND l.IsActive = 1 ${whereClause}
+      WHERE 1=1 ${userScope}
       GROUP BY u.id, u.name
       ORDER BY TeamBookings DESC
     `);
@@ -237,14 +268,16 @@ router.get("/inquiry-status", requirePageRight("sa-inquiry", "view"), async (req
     const pool = getPool();
     const filter = dateRangeFilter(req, "l.CreatedAt");
     const extra = filter ? filter.replace("WHERE ", "AND ") : "";
-    const r = await pool.request().query(`
+    const scopeReq = pool.request();
+    const scopeClause = applyLeadScope(scopeReq, req, "l");
+    const r = await scopeReq.query(`
       SELECT l.Status, COUNT(*) AS Cnt
       FROM dbo.SaLead l
-      WHERE l.IsActive = 1 ${extra}
+      WHERE l.IsActive = 1 AND ${scopeClause} ${extra}
       GROUP BY l.Status
     `);
     res.json(r.recordset);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // 9. Site Visit Report
@@ -252,17 +285,20 @@ router.get("/site-visit", requirePageRight("sa-site-visits", "view"), async (req
   try {
     const pool = getPool();
     const filter = dateRangeFilter(req, "v.PreferredDate");
-    const r = await pool.request().query(`
-      SELECT v.Id, v.ProjectName, v.PreferredDate, v.Status, l.CustomerName, l.Mobile,
+    const extra = filter ? filter.replace("WHERE ", "AND ") : "";
+    const scopeReq = pool.request();
+    const scopeClause = applyLeadScope(scopeReq, req, "l");
+    const r = await scopeReq.query(`
+      SELECT v.Id, v.ProjectName, v.PreferredDate, v.Status,
         ex.name AS ExecutiveName
       FROM dbo.SaSiteVisit v
       JOIN dbo.SaLead l ON v.LeadId = l.Id
       LEFT JOIN dbo.Users ex ON v.ExecutiveId = ex.id
-      ${filter}
+      WHERE ${scopeClause} ${extra}
       ORDER BY v.PreferredDate DESC
     `);
     res.json(r.recordset);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
 // 10. Booking Conversion Report

@@ -80,6 +80,11 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         ? rawDate
         : new Date().toISOString().slice(0, 10);
 
+    const rawDateFrom = req.query.dateFrom;
+    const rawDateTo   = req.query.dateTo;
+    const dateFrom = rawDateFrom && /^\d{4}-\d{2}-\d{2}$/.test(rawDateFrom) ? rawDateFrom : null;
+    const dateTo   = rawDateTo   && /^\d{4}-\d{2}-\d{2}$/.test(rawDateTo)   ? rawDateTo   : targetDate;
+
     const rawGodownId = req.query.godownId;
     const rawProjectId = req.query.projectId;
     let godownId = rawGodownId ? parseInt(rawGodownId, 10) : null;
@@ -131,34 +136,40 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     }
 
     // ── Date filter expressions ──────────────────────────────────────────────
+    // When dateFrom/dateTo are supplied: opening = before dateFrom, period = dateFrom..dateTo
+    // Otherwise fall back to single-date mode (opening = before targetDate, period = targetDate)
     const openingExpr = ledgerDateExpr
       ? `ISNULL(SUM(CASE
-           WHEN CAST(${ledgerDateExpr} AS DATE) < @targetDate
+           WHEN CAST(${ledgerDateExpr} AS DATE) < ${dateFrom ? "@dateFrom" : "@targetDate"}
            THEN CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END
            ELSE 0
          END), 0)`
       : "0";
 
-    const stockInExpr = ledgerDateExpr
-      ? `ISNULL(SUM(CASE
-           WHEN CAST(${ledgerDateExpr} AS DATE) = @targetDate AND sl.Type = 'IN'
-           THEN sl.Qty ELSE 0
-         END), 0)`
+    const periodFilter = ledgerDateExpr
+      ? dateFrom
+        ? `CAST(${ledgerDateExpr} AS DATE) >= @dateFrom AND CAST(${ledgerDateExpr} AS DATE) <= @dateTo`
+        : `CAST(${ledgerDateExpr} AS DATE) = @targetDate`
+      : null;
+
+    const stockInExpr = periodFilter
+      ? `ISNULL(SUM(CASE WHEN ${periodFilter} AND sl.Type = 'IN' THEN sl.Qty ELSE 0 END), 0)`
       : "0";
 
-    const stockOutExpr = ledgerDateExpr
-      ? `ISNULL(SUM(CASE
-           WHEN CAST(${ledgerDateExpr} AS DATE) = @targetDate AND sl.Type = 'OUT'
-           THEN sl.Qty ELSE 0
-         END), 0)`
+    const stockOutExpr = periodFilter
+      ? `ISNULL(SUM(CASE WHEN ${periodFilter} AND sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)`
       : "0";
 
     const dateRangeFilter = ledgerDateExpr
-      ? `AND (${ledgerDateExpr} IS NULL OR CAST(${ledgerDateExpr} AS DATE) <= @targetDate)`
+      ? `AND (${ledgerDateExpr} IS NULL OR CAST(${ledgerDateExpr} AS DATE) <= ${dateFrom ? "@dateTo" : "@targetDate"})`
       : "";
 
     // ── Build & run query ────────────────────────────────────────────────────
     const request = pool.request().input("targetDate", sql.Date, targetDate);
+    if (dateFrom) {
+      request.input("dateFrom", sql.Date, dateFrom);
+      request.input("dateTo",   sql.Date, dateTo);
+    }
     if (hasGodownCol && godownId) {
       request.input("godownId", sql.Int, godownId);
     }
@@ -189,7 +200,8 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         ${uomSelect},
         ${openingExpr}                           AS OpeningStock,
         ${stockInExpr}                           AS StockIn,
-        ${stockOutExpr}                          AS StockOut
+        ${stockOutExpr}                          AS StockOut,
+        NULL                                     AS CustomerRate
       FROM dbo.Item_Master_Group img
       LEFT JOIN dbo.Item_Master_Group grp
         ON grp.M_Id = img.Parent_Id
@@ -210,6 +222,7 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       OpeningStock: Number(r.OpeningStock || 0),
       StockIn: Number(r.StockIn || 0),
       StockOut: Number(r.StockOut || 0),
+      CustomerRate: r.CustomerRate != null ? Number(r.CustomerRate) : null,
       ClosingStock:
         Number(r.OpeningStock || 0) +
         Number(r.StockIn || 0) -

@@ -16,12 +16,24 @@ async function fetchLeads(): Promise<any[]> {
   if (!res.ok) throw new Error("Failed to fetch leads");
   return res.json();
 }
-async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
+async function fetchTeamLeadOptions(): Promise<{ value: string; label: string }[]> {
   try {
     const res = await fetchWithAuth(`${API}/users`);
     if (!res.ok) return [];
     const data: { Id: number; Name: string; role: string }[] = await res.json();
-    return data.map((u) => ({ value: String(u.Id), label: `${u.Name} (${u.role})` }));
+    return data
+      .filter((u) => u.role === "sales_team_lead")
+      .map((u) => ({ value: String(u.Id), label: u.Name }));
+  } catch { return []; }
+}
+async function fetchSalespersonOptions(): Promise<{ value: string; label: string }[]> {
+  try {
+    const res = await fetchWithAuth(`${API}/users`);
+    if (!res.ok) return [];
+    const data: { Id: number; Name: string; role: string }[] = await res.json();
+    return data
+      .filter((u) => u.role === "sales_person")
+      .map((u) => ({ value: String(u.Id), label: u.Name }));
   } catch { return []; }
 }
 async function fetchPlatformOptions(): Promise<{ value: string; label: string }[]> {
@@ -58,8 +70,8 @@ const fields: FieldDef[] = [
   { name: "PlatformId", label: "Source Platform", type: "select", asyncOptions: fetchPlatformOptions },
   { name: "CampaignId", label: "Campaign", type: "select", asyncOptions: fetchCampaignOptions },
   { name: "AdId", label: "Advertisement", type: "select", asyncOptions: fetchAdOptions },
-  { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchUserOptions },
-  { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchUserOptions },
+  { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
+  { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
   { name: "Status", label: "Lead Status", type: "select", options: ["New","Assigned","Contacted","FollowUp","VisitScheduled","Visited","Booking","Lost"], defaultValue: "New" },
   { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
   { name: "CustomerRemarks", label: "Customer Remarks", type: "textarea", fullWidth: true },
@@ -124,7 +136,7 @@ const SaLeadManagement: React.FC = () => {
       const r = await fetchWithAuth("/api/sa/leads/users");
       if (!r.ok) return [];
       const data: any[] = await r.json();
-      return data.filter((u) => u.role === "sales_team_lead" && u.Id !== currentUser?.id);
+      return data.filter((u) => u.role === "sales_team_lead" && u.id !== currentUser?.id);
     },
     staleTime: 5 * 60_000,
     enabled: isTL,
@@ -468,7 +480,7 @@ const SaLeadManagement: React.FC = () => {
                         <td className="p-3">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600">{String(l.Status)}</span>
                         </td>
-                        <td className="p-3 text-muted-foreground">{String(l.SalespersonName) || "—"}</td>
+                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -500,8 +512,8 @@ const SaLeadManagement: React.FC = () => {
                         <td className="p-3 font-medium text-foreground">{String(l.CustomerName)}</td>
                         <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
                         <td className="p-3 text-xs font-mono text-amber-600">{String(l.BookingId)}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.CampaignName) || "—"}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.SalespersonName) || "—"}</td>
+                        <td className="p-3 text-muted-foreground">{(l.CampaignName as string) || "—"}</td>
+                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -534,7 +546,7 @@ const SaLeadManagement: React.FC = () => {
               <div className="rounded-lg border border-border overflow-hidden">
                 <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-foreground">
-                    Audit Trail — {mappedData.find((l) => l._id === auditLeadId)?.LeadUid ?? ""}
+                    Audit Trail — {String(mappedData.find((l) => l._id === auditLeadId)?.LeadUid ?? "")}
                   </h3>
                   <span className="text-xs text-muted-foreground">{auditLog.length} change{auditLog.length !== 1 ? "s" : ""}</span>
                 </div>

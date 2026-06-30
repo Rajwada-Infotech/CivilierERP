@@ -15,7 +15,115 @@ import {
   Receipt,
   CheckCircle2,
   ChevronDown,
+  Plus,
+  Trash2,
 } from "lucide-react";
+
+// ─── Line Item types & renderer ───────────────────────────────────────────────
+interface DebitNoteItem {
+  Description: string;
+  Quantity: string;
+  UOMSymbol: string;
+  Rate: string;
+  Amount: string;
+}
+
+const emptyItem = (): DebitNoteItem => ({
+  Description: "", Quantity: "", UOMSymbol: "", Rate: "", Amount: "",
+});
+
+function calcAmount(qty: string, rate: string): string {
+  const q = parseFloat(qty), r = parseFloat(rate);
+  if (!isNaN(q) && !isNaN(r)) return (q * r).toFixed(2);
+  return "";
+}
+
+function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: (v: DebitNoteItem[]) => void }) {
+  const items: DebitNoteItem[] = Array.isArray(value) && value.length ? value : [emptyItem()];
+
+  const update = (idx: number, field: keyof DebitNoteItem, val: string) => {
+    const next = items.map((it, i) => {
+      if (i !== idx) return it;
+      const updated = { ...it, [field]: val };
+      if (field === "Quantity" || field === "Rate")
+        updated.Amount = calcAmount(
+          field === "Quantity" ? val : it.Quantity,
+          field === "Rate" ? val : it.Rate,
+        );
+      return updated;
+    });
+    onChange(next);
+  };
+
+  const addRow = () => onChange([...items, emptyItem()]);
+  const removeRow = (idx: number) => {
+    const next = items.filter((_, i) => i !== idx);
+    onChange(next.length ? next : [emptyItem()]);
+  };
+
+  const total = items.reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
+  const thCls = "text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 py-1.5";
+  const inp = "w-full text-xs rounded border border-border px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30";
+
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40 border-b border-border">
+            <tr>
+              <th className={thCls + " w-8"}>#</th>
+              <th className={thCls}>Description *</th>
+              <th className={thCls + " w-20"}>Qty</th>
+              <th className={thCls + " w-16"}>UOM</th>
+              <th className={thCls + " w-24"}>Rate</th>
+              <th className={thCls + " w-24"}>Amount</th>
+              <th className={thCls + " w-8"}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, idx) => (
+              <tr key={idx} className="border-b border-border/50">
+                <td className="px-2 py-1 text-muted-foreground text-center">{idx + 1}</td>
+                <td className="px-2 py-1">
+                  <input className={inp} value={it.Description} onChange={(e) => update(idx, "Description", e.target.value)} placeholder="Item / description" />
+                </td>
+                <td className="px-2 py-1">
+                  <input className={inp + " text-right"} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
+                </td>
+                <td className="px-2 py-1">
+                  <input className={inp} value={it.UOMSymbol} onChange={(e) => update(idx, "UOMSymbol", e.target.value)} placeholder="Nos" />
+                </td>
+                <td className="px-2 py-1">
+                  <input className={inp + " text-right"} type="number" value={it.Rate} onChange={(e) => update(idx, "Rate", e.target.value)} placeholder="0.00" step="any" min={0} />
+                </td>
+                <td className="px-2 py-1">
+                  <input className={inp + " text-right bg-muted/30"} value={it.Amount} onChange={(e) => update(idx, "Amount", e.target.value)} placeholder="0.00" />
+                </td>
+                <td className="px-2 py-1 text-center">
+                  <button type="button" onClick={() => removeRow(idx)} className="p-1 rounded text-red-400 hover:bg-red-500/10">
+                    <Trash2 size={11} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t border-border bg-muted/20">
+            <tr>
+              <td colSpan={5} className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Total</td>
+              <td className="px-2 py-1.5 text-right text-xs font-bold text-foreground">
+                ₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <button type="button" onClick={addRow} className="flex items-center gap-1.5 text-xs text-emerald-600 hover:text-emerald-700 font-medium">
+        <Plus size={13} /> Add Row
+      </button>
+    </div>
+  );
+}
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getDebitNotes,
@@ -465,6 +573,15 @@ const DebitNoteMaster: React.FC = () => {
           finalAmount: null,
         } as BillDiscountGroup,
         status: Boolean(item.is_active),
+        items: Array.isArray(item.items)
+          ? item.items.map((i: any) => ({
+              Description: i.Description || "",
+              Quantity: String(i.Quantity ?? ""),
+              UOMSymbol: i.UOMSymbol || "",
+              Rate: String(i.Rate ?? ""),
+              Amount: String(i.Amount ?? ""),
+            }))
+          : [],
         docTypeId: item.doc_type_id ?? null,
         docNo: item.doc_no ?? "",
         docTypePrefix: item.doc_type_prefix ?? "",
@@ -482,6 +599,8 @@ const DebitNoteMaster: React.FC = () => {
   // Convert form to payload
   const toPayload = (formData: Record<string, unknown>) => {
     const g = formData.billDiscountGroup as BillDiscountGroup | undefined;
+    const rawItems = formData.items as DebitNoteItem[] | undefined;
+    const items = (rawItems ?? []).filter((it) => it.Description.trim());
     return {
       company_id: idByLabel(COMPANY_OPTIONS, formData.company as string),
       project_id: idByLabel(PROJECT_OPTIONS, formData.project as string),
@@ -489,6 +608,7 @@ const DebitNoteMaster: React.FC = () => {
       bill_id: g?.billNumber ? billIdByValue(g.billNumber) : null,
       is_active: formData.status !== false,
       finYear: selectedFinYear || null,
+      items,
     };
   };
 
@@ -615,6 +735,15 @@ const DebitNoteMaster: React.FC = () => {
       options: SUPPLIER_OPTIONS.map((o) => o.label),
     },
     { name: "status", label: "Status", type: "toggle", defaultValue: true },
+    {
+      name: "items",
+      label: "Line Items",
+      type: "custom",
+      fullWidth: true,
+      render: ({ value, onChange }: any) => (
+        <ItemsRenderer value={value as DebitNoteItem[]} onChange={onChange} />
+      ),
+    },
   ];
 
   const columns: ColumnDef[] = [

@@ -185,7 +185,9 @@ async function buildGrnGstData(pool, grnId) {
 
   const itemMasterMap = new Map();
   if (itemIds.length > 0) {
-    const itemResult = await pool.request().query(`
+    const itemReq = pool.request();
+    const itemParams = itemIds.map((id, i) => { itemReq.input(`iid${i}`, sql.NVarChar(100), String(id)); return `@iid${i}`; });
+    const itemResult = await itemReq.query(`
       SELECT
         CONVERT(NVARCHAR(100), img.M_Id) AS ItemId,
         img.M_Name,
@@ -195,9 +197,7 @@ async function buildGrnGstData(pool, grnId) {
         h.HIGST
       FROM dbo.Item_Master_Group img
       LEFT JOIN dbo.HSN h ON h.HCode = img.M_HSN AND h.HStatus = 1
-      WHERE CONVERT(NVARCHAR(100), img.M_Id) IN (${itemIds
-        .map((id) => `'${id.replace(/'/g, "''")}'`)
-        .join(",")})
+      WHERE CONVERT(NVARCHAR(100), img.M_Id) IN (${itemParams.join(",")})
     `);
     itemResult.recordset.forEach((row) => {
       itemMasterMap.set(String(row.ItemId), row);
@@ -399,22 +399,23 @@ async function handleChainStatus(req, res) {
       });
     }
 
-    const expenseDocNos = expenses
-      .map((e) => e.EDocNo)
-      .filter(Boolean)
-      .map((d) => `'${d.replace(/'/g, "''")}'`)
-      .join(",");
+    const docNoList = expenses.map((e) => e.EDocNo).filter(Boolean);
 
     let paymentCount = 0;
     let latestPaymentAmount = null;
     let isPaid = false;
 
-    if (expenseDocNos.length > 0) {
-      const payResult = await pool.request().query(`
+    if (docNoList.length > 0) {
+      const payReq = pool.request();
+      const paramList = docNoList.map((d, i) => {
+        payReq.input(`dn${i}`, sql.NVarChar(100), d);
+        return `@dn${i}`;
+      });
+      const payResult = await payReq.query(`
           SELECT COUNT(*) AS payCount,
                  SUM(PAmount) AS totalPaid
           FROM dbo.NewPayment
-          WHERE PExpenseRef IN (${expenseDocNos})
+          WHERE PExpenseRef IN (${paramList.join(",")})
         `);
       paymentCount = parseInt(payResult.recordset[0]?.payCount) || 0;
       latestPaymentAmount = payResult.recordset[0]?.totalPaid
@@ -606,6 +607,18 @@ router.get("/options", async (req, res) => {
   }
 });
 
+// Cached flag — avoid sys.columns hit on every request
+let _ebHasPaymentTermId = null;
+async function ebHasPaymentTermId(pool) {
+  if (_ebHasPaymentTermId !== null) return _ebHasPaymentTermId;
+  const r = await pool.request()
+    .input("T", sql.NVarChar(128), "ExpenseBooking")
+    .input("C", sql.NVarChar(128), "PaymentTermId")
+    .query("SELECT 1 AS f FROM sys.columns WHERE object_id=OBJECT_ID(@T) AND name=@C");
+  _ebHasPaymentTermId = !!r.recordset[0];
+  return _ebHasPaymentTermId;
+}
+
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -613,6 +626,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
+
+    const hasPaymentTermId = await ebHasPaymentTermId(pool);
 
     // Run status counts and paginated list in parallel
     const [countResult, result] = await Promise.all([
@@ -651,6 +666,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
+          ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
@@ -1129,9 +1145,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     ECostCenter,
     EGLAccount,
     EWorkDoneRef,
+    PaymentTermId,
   } = req.body;
 
   const pool = getPool();
+  const hasPayTermCol = await ebHasPaymentTermId(pool);
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -1437,7 +1455,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       finalDocNo = `ExB/${finalDocNo}`;
     }
 
-    const insertResult = await transaction
+    const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
@@ -1525,7 +1543,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null).query(`
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+
+    if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+
+    const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -1538,6 +1560,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
           ECostCenter, EGLAccount, EWorkDoneRef
+          ${hasPayTermCol ? ", PaymentTermId" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -1550,6 +1573,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
           @ECostCenter, @EGLAccount, @EWorkDoneRef
+          ${hasPayTermCol ? ", @PaymentTermId" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -2042,10 +2066,12 @@ router.put(
       ECostCenter,
       EGLAccount,
       EWorkDoneRef,
+      PaymentTermId: PaymentTermIdPut,
     } = req.body;
 
     try {
       const pool = getPool();
+      const hasPayTermColPut = await ebHasPaymentTermId(pool);
       let bookingAmount = EAmount;
       let bookingNetAmount = ENetAmount;
       let bookingCgstRate = ECgstRate;
@@ -2082,7 +2108,7 @@ router.put(
         );
       }
 
-      const result = await pool
+      const putReq = pool
         .request()
         .input("Eid", sql.Int, numericId)
         .input("EName", sql.NVarChar(200), EName || null)
@@ -2168,7 +2194,11 @@ router.put(
         )
         .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null).query(`
+        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+
+      if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
+
+      const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -2184,6 +2214,7 @@ router.put(
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef
+          ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
         WHERE Eid = @Eid
       `);
 
@@ -2346,7 +2377,7 @@ router.put("/:id/submit", requirePageRight("expense-booking", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("expense-booking", "approve"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -2370,6 +2401,7 @@ router.put("/:id/approve", async (req, res) => {
 
 router.put(
   "/:id/reject",
+  requirePageRight("expense-booking", "approve"),
   validateBody(expenseRejectSchema),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);

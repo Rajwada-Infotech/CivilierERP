@@ -1008,6 +1008,7 @@ const ContractorRegister: React.FC = () => {
                         onChange={(e) => {
                           const id = e.target.value ? Number(e.target.value) : "";
                           setLabourProjectId(id);
+                          setSelectedAllocationIds([]);
                           setLabour("allocationId", 0);
                           setLabour("blockId", null);
                           setLabour("unitId", null);

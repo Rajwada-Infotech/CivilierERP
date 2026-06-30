@@ -363,6 +363,12 @@ interface TCOption {
   Name: string;
   TermsAndCondition?: string;
 }
+interface CostCenterOption {
+  id: number;
+  label: string;
+  code: string;
+  projectId: number | null;
+}
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
 const SECTION_ICONS: Record<string, React.ElementType> = {
@@ -1576,6 +1582,8 @@ export default function MaterialExpenseBooking() {
   >([]);
   const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
+  const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
+  const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
 
   const isEditing = editingId !== null;
 
@@ -1789,12 +1797,31 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/tc-master")
       .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
       .catch(() => {});
+    apiFetch("/api/cost-center/options")
+      .then((list: CostCenterOption[]) =>
+        setCostCenterOptions(Array.isArray(list) ? list : []),
+      )
+      .catch(() => {});
+    apiFetch("/api/payment-plan-master")
+      .then((list: any) => setPaymentTermOptions(Array.isArray(list) ? list : []))
+      .catch(() => {});
   }, [fetchRecords]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const resolveCostCenterForProject = useCallback(
+    (projectId?: number | null) => {
+      if (!projectId) return "";
+      const match = costCenterOptions.find(
+        (cc) => cc.projectId != null && Number(cc.projectId) === Number(projectId),
+      );
+      return match ? `${match.code} - ${match.label}` : "";
+    },
+    [costCenterOptions],
+  );
 
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
@@ -1870,6 +1897,7 @@ export default function MaterialExpenseBooking() {
     }
 
     const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
+    const autoCostCenter = resolveCostCenterForProject(doc.projectId);
     setForm((prev) => ({
       ...prev,
       bookingReference: doc.docNo,
@@ -1883,6 +1911,7 @@ export default function MaterialExpenseBooking() {
       companyId: doc.companyId ?? prev.companyId,
       projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
       supplier: doc.vendorLabel ?? prev.supplier,
+      costCenter: autoCostCenter || prev.costCenter,
       materialCategory:
         doc.kind === "PO"
           ? "PO"
@@ -2035,6 +2064,8 @@ export default function MaterialExpenseBooking() {
               projectSite: po.ProjectId
                 ? String(po.ProjectId)
                 : prev.projectSite,
+              costCenter:
+                prev.costCenter || resolveCostCenterForProject(po.ProjectId),
             }));
           }
         };
@@ -2071,6 +2102,8 @@ export default function MaterialExpenseBooking() {
               projectSite: wd.ProjectId
                 ? String(wd.ProjectId)
                 : prev.projectSite,
+              costCenter:
+                prev.costCenter || resolveCostCenterForProject(wd.ProjectId),
             }));
           }
         };
@@ -2110,6 +2143,8 @@ export default function MaterialExpenseBooking() {
               projectSite: po.ProjectId
                 ? String(po.ProjectId)
                 : prev.projectSite,
+              costCenter:
+                prev.costCenter || resolveCostCenterForProject(po.ProjectId),
             }));
           }
         };
@@ -2733,6 +2768,34 @@ export default function MaterialExpenseBooking() {
                       onChange={(val) => set("bookingDate", val)}
                     />
                   </Field>
+                  <Field label="Payment Term">
+                    <select
+                      className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
+                      value={form.paymentTermId ?? ""}
+                      onChange={(e) => {
+                        const termId = e.target.value ? parseInt(e.target.value, 10) : null;
+                        set("paymentTermId", termId);
+                        if (termId && form.bookingDate) {
+                          const term = paymentTermOptions.find((t) => t.Id === termId);
+                          if (term && term.CreditDays != null) {
+                            const base = new Date(form.bookingDate);
+                            base.setDate(base.getDate() + term.CreditDays);
+                            set("dueDate", base.toISOString().split("T")[0]);
+                          }
+                        }
+                      }}
+                    >
+                      <option value="">— Select Payment Term —</option>
+                      {paymentTermOptions.map((t) => (
+                        <option key={t.Id} value={t.Id}>
+                          {t.TermName}{t.CreditDays != null ? ` (${t.CreditDays} days)` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div /> {/* spacer */}
                   <Field label="Due Date">
                     <DateField
                       value={form.dueDate}
@@ -2750,6 +2813,61 @@ export default function MaterialExpenseBooking() {
                         }
                         set("dueDate", val);
                       }}
+                    />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Vendor Invoice No">
+                    <Input
+                      value={form.vendorInvoiceNo ?? ""}
+                      onChange={(e) => set("vendorInvoiceNo", e.target.value)}
+                      placeholder="Supplier invoice number"
+                    />
+                  </Field>
+                  <Field label="Vendor Invoice Date">
+                    <DateField
+                      value={form.vendorInvoiceDate ?? ""}
+                      onChange={(val) => set("vendorInvoiceDate", val)}
+                      placeholder="Select invoice date..."
+                    />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Cost Center"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Auto-filled from the selected document's project when a matching cost center exists"
+                        : "Select a cost center for expense allocation"
+                    }
+                  >
+                    <Select
+                      value={form.costCenter || "__none__"}
+                      onValueChange={(val) =>
+                        set("costCenter", val === "__none__" ? "" : val)
+                      }
+                    >
+                      <SelectTrigger className={selectTriggerCls}>
+                        <SelectValue placeholder="Select cost center..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">-- None --</SelectItem>
+                        {costCenterOptions.map((cc) => {
+                          const value = `${cc.code} - ${cc.label}`;
+                          return (
+                            <SelectItem key={cc.id} value={value}>
+                              {value}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="GL Account">
+                    <Input
+                      value={form.glAccount ?? ""}
+                      onChange={(e) => set("glAccount", e.target.value)}
+                      placeholder="Optional GL account"
                     />
                   </Field>
                 </div>

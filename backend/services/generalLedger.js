@@ -88,40 +88,50 @@ async function postVoucher(pool, {
     throw new Error("postVoucher requires at least 2 legs");
   }
 
-  const totalDebit = legs.reduce((s, l) => s + (l.debit || 0), 0);
-  const totalCredit = legs.reduce((s, l) => s + (l.credit || 0), 0);
+  const totalDebit  = Math.round(legs.reduce((s, l) => s + (l.debit  || 0), 0) * 100) / 100;
+  const totalCredit = Math.round(legs.reduce((s, l) => s + (l.credit || 0), 0) * 100) / 100;
   if (Math.abs(totalDebit - totalCredit) > 0.01) {
     throw new Error(
       `Voucher ${voucherNo} does not balance: debit ${totalDebit} !== credit ${totalCredit}`,
     );
   }
 
-  for (const leg of legs) {
-    if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
-    const debit = Math.round((leg.debit || 0) * 100) / 100;
-    const credit = Math.round((leg.credit || 0) * 100) / 100;
-    if (debit === 0 && credit === 0) continue; // skip zero-amount legs (e.g. no billing-term delta)
+  // All legs must be inserted atomically — a partial write leaves the ledger
+  // unbalanced and hasPosting() then blocks any retry. Use a transaction.
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    for (const leg of legs) {
+      if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
+      const debit = Math.round((leg.debit || 0) * 100) / 100;
+      const credit = Math.round((leg.credit || 0) * 100) / 100;
+      if (debit === 0 && credit === 0) continue;
 
-    await pool
-      .request()
-      .input("VoucherNo", sql.NVarChar(50), voucherNo)
-      .input("VoucherDate", sql.Date, voucherDate)
-      .input("LHeadId", sql.Int, leg.lHeadId)
-      .input("DebitAmount", sql.Decimal(18, 2), debit)
-      .input("CreditAmount", sql.Decimal(18, 2), credit)
-      .input("Narration", sql.NVarChar(255), leg.narration || null)
-      .input("SourceType", sql.NVarChar(30), sourceType)
-      .input("SourceId", sql.Int, sourceId)
-      .input("CompanyId", sql.Int, companyId)
-      .input("ProjectId", sql.Int, projectId)
-      .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
-        INSERT INTO dbo.GeneralLedgerEntry
-          (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-           SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
-        VALUES
-          (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-           @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
-      `);
+      await tx
+        .request()
+        .input("VoucherNo", sql.NVarChar(50), voucherNo)
+        .input("VoucherDate", sql.Date, voucherDate)
+        .input("LHeadId", sql.Int, leg.lHeadId)
+        .input("DebitAmount", sql.Decimal(18, 2), debit)
+        .input("CreditAmount", sql.Decimal(18, 2), credit)
+        .input("Narration", sql.NVarChar(255), leg.narration || null)
+        .input("SourceType", sql.NVarChar(30), sourceType)
+        .input("SourceId", sql.Int, sourceId)
+        .input("CompanyId", sql.Int, companyId)
+        .input("ProjectId", sql.Int, projectId)
+        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+          INSERT INTO dbo.GeneralLedgerEntry
+            (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
+             SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
+          VALUES
+            (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
+        `);
+    }
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
   }
 }
 
@@ -386,9 +396,13 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
 
   let supplierHeadId = null;
   if (payment.PExpenseRef) {
+    // EMI payments store PExpenseRef as "{parentEDocNo}-EMI-{n}".
+    // Strip the suffix to resolve the parent booking for GL purposes.
+    const lookupRef = payment.PExpenseRef.replace(/-EMI-\d+$/i, "");
+
     const ebResult = await pool
       .request()
-      .input("EDocNo", sql.NVarChar(100), payment.PExpenseRef)
+      .input("EDocNo", sql.NVarChar(100), lookupRef)
       .query(`
         SELECT eb.ESourceType, eb.ESourceId, eb.EName
         FROM dbo.ExpenseBooking eb

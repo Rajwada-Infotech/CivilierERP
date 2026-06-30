@@ -32,7 +32,7 @@ router.get("/users", verifyToken, guard, async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("[saRoleMaster] /users:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -70,7 +70,7 @@ router.get("/roles", verifyToken, guard, async (req, res) => {
     res.json(Object.values(byRole));
   } catch (err) {
     console.error("[saRoleMaster] /roles:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -103,9 +103,19 @@ router.get("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     res.json({ roleId, roleRights: roleRights.recordset, customRights });
   } catch (err) {
     console.error("[saRoleMaster] /user/:id/permissions:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// Page-key prefixes and explicit keys this endpoint is allowed to write.
+// Explicit allowed page key prefixes for SA role master endpoint.
+// "sale-" and "sales-" are intentionally excluded — those keys belong to the
+// Sales (CRM) module and marketing_head should not be able to grant them.
+const SA_ALLOWED_PREFIXES = ["sa-"];
+function isAllowedSaPageKey(key) {
+  const k = String(key).toLowerCase();
+  return SA_ALLOWED_PREFIXES.some((p) => k.startsWith(p));
+}
 
 // ── PUT /api/sa/role-master/user/:id/permissions ──────────────────────────────
 router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
@@ -114,7 +124,26 @@ router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     const { rights } = req.body; // [{page, actions:[...]}]
     if (!Array.isArray(rights)) return res.status(400).json({ error: "rights must be an array" });
 
+    // Only SA/Sales page keys are writable through this endpoint.
+    const invalidKeys = rights.filter((r) => !isAllowedSaPageKey(r?.page));
+    if (invalidKeys.length > 0) {
+      return res.status(400).json({ error: "Only SA/Sales page rights may be set via this endpoint" });
+    }
+
+    // Target user must be an SA-role user.
     const pool = getPool();
+    const userCheck = await pool.request()
+      .input("UserId", sql.Int, userId)
+      .query(`
+        SELECT u.id FROM dbo.Users u
+        JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE u.id = @UserId AND u.discontinue = 0
+          AND r.RName IN ('marketing_head', 'sales_team_lead', 'sales_person')
+      `);
+    if (!userCheck.recordset.length) {
+      return res.status(403).json({ error: "Target user is not an SA-role user" });
+    }
+
     const json = JSON.stringify(rights);
 
     await pool.request()
@@ -134,7 +163,7 @@ router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     res.json({ message: "Permissions saved" });
   } catch (err) {
     console.error("[saRoleMaster] PUT /user/:id/permissions:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
