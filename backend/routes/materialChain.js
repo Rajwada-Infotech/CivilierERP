@@ -72,7 +72,7 @@ async function getGRN(pool, id) {
 }
 
 async function getExpensesForGRN(pool, grnId) {
-  const r = await pool.request().input("grnId", sql.Int, String(grnId)).query(`
+  const r = await pool.request().input("grnId", sql.Int, parseInt(grnId, 10)).query(`
     SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo
     FROM dbo.ExpenseBooking
     WHERE ESourceType = 'GRN' AND ESourceId = @grnId
