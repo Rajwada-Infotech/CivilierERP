@@ -91,7 +91,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-campaigns] GET error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -113,7 +113,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-campaigns] GET /platforms error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -135,7 +135,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-campaigns] GET /dropdown error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -203,7 +203,7 @@ router.post(
         return res.status(400).json({ error: "Campaign code already exists" });
       }
       console.error("[sa-campaigns] POST error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -285,7 +285,7 @@ router.put(
         return res.status(400).json({ error: "Campaign code already exists" });
       }
       console.error("[sa-campaigns] PUT error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -303,17 +303,6 @@ router.delete(
     try {
       const pool = getPool();
 
-      const linked = await pool
-        .request()
-        .input("Id", sql.Int, id)
-        .query("SELECT COUNT(*) AS Cnt FROM dbo.SaAd WHERE CampaignId = @Id");
-
-      if (linked.recordset[0].Cnt > 0) {
-        return res.status(400).json({
-          error: "Cannot delete - one or more ads reference this campaign",
-        });
-      }
-
       const existing = await pool
         .request()
         .input("Id", sql.Int, id)
@@ -325,16 +314,25 @@ router.delete(
 
       const { Name } = existing.recordset[0];
 
-      await pool
-        .request()
-        .input("Id", sql.Int, id)
-        .query("DELETE FROM dbo.SaCampaign WHERE Id = @Id");
+      // Check for linked ads and deactivate atomically to avoid TOCTOU.
+      const result = await pool.request().input("Id", sql.Int, id).query(`
+        IF EXISTS (SELECT 1 FROM dbo.SaAd WHERE CampaignId = @Id AND IsActive = 1)
+          SELECT 'linked' AS outcome;
+        ELSE BEGIN
+          UPDATE dbo.SaCampaign SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @Id;
+          SELECT 'deleted' AS outcome;
+        END
+      `);
+
+      if (result.recordset[0]?.outcome === "linked") {
+        return res.status(400).json({ error: "Cannot delete - one or more ads reference this campaign" });
+      }
 
       await bumpCacheVersion("sa-campaigns");
       res.json({ message: `Campaign "${Name}" deleted successfully` });
     } catch (err) {
       console.error("[sa-campaigns] DELETE error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Failed to delete campaign" });
     }
   },
 );

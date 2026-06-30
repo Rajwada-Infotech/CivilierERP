@@ -43,7 +43,7 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-social-media] GET error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -80,7 +80,7 @@ router.post(
       res.json({ message: "Social media platform added successfully" });
     } catch (err) {
       console.error("[sa-social-media] POST error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -128,7 +128,7 @@ router.put(
       res.json({ message: "Social media platform updated successfully" });
     } catch (err) {
       console.error("[sa-social-media] PUT error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   },
 );
@@ -146,38 +146,30 @@ router.delete(
     try {
       const pool = getPool();
 
-      const linked = await pool
-        .request()
-        .input("Id", sql.Int, id)
-        .query("SELECT COUNT(*) AS Cnt FROM dbo.SaCampaign WHERE PlatformId = @Id");
-
-      if (linked.recordset[0].Cnt > 0) {
-        return res.status(400).json({
-          error: "Cannot delete - one or more campaigns reference this platform",
-        });
-      }
-
-      const existing = await pool
-        .request()
-        .input("Id", sql.Int, id)
+      const existing = await pool.request().input("Id", sql.Int, id)
         .query("SELECT Name FROM dbo.SaSocialMediaPlatform WHERE Id = @Id");
-
-      if (!existing.recordset.length) {
-        return res.status(404).json({ error: "Platform not found" });
-      }
-
+      if (!existing.recordset.length) return res.status(404).json({ error: "Platform not found" });
       const { Name } = existing.recordset[0];
 
-      await pool
-        .request()
-        .input("Id", sql.Int, id)
-        .query("DELETE FROM dbo.SaSocialMediaPlatform WHERE Id = @Id");
+      // Check for linked campaigns and deactivate atomically to avoid TOCTOU.
+      const result = await pool.request().input("Id", sql.Int, id).query(`
+        IF EXISTS (SELECT 1 FROM dbo.SaCampaign WHERE PlatformId = @Id AND IsActive = 1)
+          SELECT 'linked' AS outcome;
+        ELSE BEGIN
+          UPDATE dbo.SaSocialMediaPlatform SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @Id;
+          SELECT 'deleted' AS outcome;
+        END
+      `);
+
+      if (result.recordset[0]?.outcome === "linked") {
+        return res.status(400).json({ error: "Cannot delete - one or more campaigns reference this platform" });
+      }
 
       await bumpCacheVersion("sa-social-media");
       res.json({ message: `Platform "${Name}" deleted successfully` });
     } catch (err) {
       console.error("[sa-social-media] DELETE error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Failed to delete platform" });
     }
   },
 );

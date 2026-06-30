@@ -305,6 +305,7 @@ const DependencyTracker: React.FC = () => {
           activityId: Number(assignActivityId),
           projectId: activeProjectId,
         });
+        if (!created?.id) throw new Error("Allocation creation did not return an id");
         await addWorkProgress({ ...form, allocationId: created.id });
         toast.success("Worker assigned and progress logged ✓");
         await queryClient.invalidateQueries({ queryKey: ["contractorAllocations"] });

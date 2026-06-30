@@ -217,7 +217,7 @@ const WorkerAttendance: React.FC = () => {
 
   const { data: calendarData, isLoading: calendarLoading } = useQuery({
     queryKey: ["workerCalendar", calendarWorker?.id, month],
-    queryFn: () => getWorkerCalendar(calendarWorker!.id, month),
+    queryFn: () => getWorkerCalendar(calendarWorker?.id as number, month),
     enabled: !!calendarWorker,
   });
 

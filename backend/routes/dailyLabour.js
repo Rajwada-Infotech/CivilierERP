@@ -54,7 +54,7 @@ const JOINS = `
 // ─── GET / — optionally filtered by allocationId / date range ────────────────
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const allocationId = req.query.allocationId ? parseInt(req.query.allocationId, 10) : null;
     const from = req.query.from || null;
     const to = req.query.to || null;
@@ -92,7 +92,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
   if (!entryDate) return res.status(400).json({ error: "Date is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
       .input("entryDate", sql.Date, entryDate)
@@ -139,7 +139,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const existing = await pool.request()
       .input("id", sql.Int, entryId)
       .query(`SELECT EntryId FROM dbo.DailyLabourEntry WHERE EntryId = @id`);
@@ -185,7 +185,7 @@ router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, entryId)
       .query(`DELETE FROM dbo.DailyLabourEntry WHERE EntryId = @id`);

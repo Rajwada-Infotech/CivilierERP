@@ -62,7 +62,7 @@ const JOINS = `
 // ─── GET / — progress entries, optionally filtered by project/allocation ────
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const allocationId = req.query.allocationId ? parseInt(req.query.allocationId, 10) : null;
 
@@ -95,7 +95,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "cr
   if (!allocationId) return res.status(400).json({ error: "Allocation is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
       .input("workDescription", sql.NVarChar, cleanStr(workDescription))
@@ -140,7 +140,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-dependency", "
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const existing = await pool.request()
       .input("id", sql.Int, id)
       .query(`SELECT WorkProgressId FROM dbo.WorkProgress WHERE WorkProgressId = @id`);
@@ -192,7 +192,7 @@ router.put("/:id/review", authMiddleware, requirePageRight("civilworkdpr-depende
   }
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, id)
       .input("reviewedBy", sql.NVarChar, cleanStr(reviewedBy, 150))
@@ -220,7 +220,7 @@ router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-dependency"
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, id)
       .query(`DELETE FROM dbo.WorkProgress WHERE WorkProgressId = @id`);
