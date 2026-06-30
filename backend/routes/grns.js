@@ -146,7 +146,7 @@ router.get("/grn-gst-data", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "grnId is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // ── 1. Fetch GRN header + linked PO/supplier/company context ────────────
     const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
@@ -442,7 +442,7 @@ router.get("/filtered", async (req, res) => {
 // The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
@@ -557,7 +557,7 @@ router.get("/by-po/:poId", async (req, res) => {
     return res.status(400).json({ error: "Invalid PO ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("POID", sql.Int, poId).query(`
       SELECT
         grn.GRNID,
@@ -589,7 +589,7 @@ router.get("/:id", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
         SELECT
           grn.GRNID,
@@ -669,7 +669,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       .json({ error: "GRNDate and SupplierID are required" });
   }
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: a GRN can only be raised against an Approved PO ────────────────
   // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
@@ -930,7 +930,7 @@ router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodyS
   } = req.body;
   const grnId = parseInt(req.params.id, 10);
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
   if (poId) {
@@ -1043,7 +1043,7 @@ router.get("/:id/can-delete", async (req, res) => {
   if (!Number.isFinite(grnId) || grnId <= 0)
     return res.status(400).json({ error: "Invalid id" });
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // ── 1. Linked expense bookings ────────────────────────────────────────────
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
@@ -1061,21 +1061,19 @@ router.get("/:id/can-delete", async (req, res) => {
       status: e.EStatus,
     }));
 
-    const expDocNos = expCheck.recordset
-      .map((e) => e.EDocNo)
-      .filter(Boolean)
-      .map((d) => `'${d.replace(/'/g, "''")}'`)
-      .join(",");
+    const docNoList = expCheck.recordset.map((e) => e.EDocNo).filter(Boolean);
 
     // ── 2. BRS-cleared payments ───────────────────────────────────────────────
-    if (expDocNos.length > 0) {
-      const brsCheck = await pool.request().query(`
+    if (docNoList.length > 0) {
+      const brsReq = pool.request();
+      const brsParams = docNoList.map((d, i) => { brsReq.input(`dn${i}`, sql.NVarChar(100), d); return `@dn${i}`; });
+      const brsCheck = await brsReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
         FROM dbo.NewPayment np
         JOIN dbo.BankReconciliation brc
           ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
         JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-        WHERE np.PExpenseRef IN (${expDocNos})
+        WHERE np.PExpenseRef IN (${brsParams.join(",")})
       `);
       if (brsCheck.recordset.length > 0) {
         return res.json({
@@ -1093,11 +1091,13 @@ router.get("/:id/can-delete", async (req, res) => {
       }
 
       // ── 3. Uncleared payments ─────────────────────────────────────────────
-      const payCheck = await pool.request().query(`
+      const payReq = pool.request();
+      const payParams = docNoList.map((d, i) => { payReq.input(`pdn${i}`, sql.NVarChar(100), d); return `@pdn${i}`; });
+      const payCheck = await payReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
         FROM dbo.NewPayment np
         JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-        WHERE np.PExpenseRef IN (${expDocNos})
+        WHERE np.PExpenseRef IN (${payParams.join(",")})
       `);
       if (payCheck.recordset.length > 0) {
         return res.json({
@@ -1129,7 +1129,7 @@ router.get("/:id/can-delete", async (req, res) => {
 // DELETE
 router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: linked expense bookings ────────────────────────────────────────
   const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
@@ -1327,7 +1327,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // Fetch GRN row for its items JSON
     const grnResult = await pool
@@ -1488,7 +1488,7 @@ router.get("/:id/pending-items", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     const grnResult = await pool.request().input("GRNID", sql.Int, grnId)
       .query(`
@@ -1576,7 +1576,7 @@ router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create
     return res.status(400).json({ error: "Invalid transferId" });
   }
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── 1. Fetch transfer ──────────────────────────────────────────────────────
   let transfer;
@@ -1784,7 +1784,7 @@ router.get("/by-transfer/:transferId", async (req, res) => {
     return res.status(400).json({ error: "Invalid transferId" });
   }
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool
       .request()
       .input("SourceTransferID", sql.Int, transferId).query(`

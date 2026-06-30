@@ -47,7 +47,7 @@ router.get("/", requirePageRight("sa-lead-transfers", "view"), async (req, res) 
     res.json(result.recordset);
   } catch (err) {
     console.error("[sa-lead-transfers] GET error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -83,7 +83,7 @@ router.get("/:id/items", requirePageRight("sa-lead-transfers", "view"), async (r
     res.json(result.recordset);
   } catch (err) {
     console.error("[sa-lead-transfers] GET /:id/items error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -265,7 +265,7 @@ router.post("/:id/reject", requirePageRight("sa-lead-transfers", "edit"), async 
     res.json({ message: "Transfer request rejected" });
   } catch (err) {
     console.error("[sa-lead-transfers] POST /reject error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

@@ -96,32 +96,42 @@ async function postVoucher(pool, {
     );
   }
 
-  for (const leg of legs) {
-    if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
-    const debit = Math.round((leg.debit || 0) * 100) / 100;
-    const credit = Math.round((leg.credit || 0) * 100) / 100;
-    if (debit === 0 && credit === 0) continue; // skip zero-amount legs (e.g. no billing-term delta)
+  // All legs must be inserted atomically — a partial write leaves the ledger
+  // unbalanced and hasPosting() then blocks any retry. Use a transaction.
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    for (const leg of legs) {
+      if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
+      const debit = Math.round((leg.debit || 0) * 100) / 100;
+      const credit = Math.round((leg.credit || 0) * 100) / 100;
+      if (debit === 0 && credit === 0) continue;
 
-    await pool
-      .request()
-      .input("VoucherNo", sql.NVarChar(50), voucherNo)
-      .input("VoucherDate", sql.Date, voucherDate)
-      .input("LHeadId", sql.Int, leg.lHeadId)
-      .input("DebitAmount", sql.Decimal(18, 2), debit)
-      .input("CreditAmount", sql.Decimal(18, 2), credit)
-      .input("Narration", sql.NVarChar(255), leg.narration || null)
-      .input("SourceType", sql.NVarChar(30), sourceType)
-      .input("SourceId", sql.Int, sourceId)
-      .input("CompanyId", sql.Int, companyId)
-      .input("ProjectId", sql.Int, projectId)
-      .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
-        INSERT INTO dbo.GeneralLedgerEntry
-          (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-           SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
-        VALUES
-          (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-           @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
-      `);
+      await tx
+        .request()
+        .input("VoucherNo", sql.NVarChar(50), voucherNo)
+        .input("VoucherDate", sql.Date, voucherDate)
+        .input("LHeadId", sql.Int, leg.lHeadId)
+        .input("DebitAmount", sql.Decimal(18, 2), debit)
+        .input("CreditAmount", sql.Decimal(18, 2), credit)
+        .input("Narration", sql.NVarChar(255), leg.narration || null)
+        .input("SourceType", sql.NVarChar(30), sourceType)
+        .input("SourceId", sql.Int, sourceId)
+        .input("CompanyId", sql.Int, companyId)
+        .input("ProjectId", sql.Int, projectId)
+        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+          INSERT INTO dbo.GeneralLedgerEntry
+            (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
+             SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
+          VALUES
+            (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
+        `);
+    }
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
   }
 }
 

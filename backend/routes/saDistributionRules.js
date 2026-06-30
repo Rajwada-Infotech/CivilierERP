@@ -36,7 +36,7 @@ router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, re
     res.json(result);
   } catch (err) {
     console.error("[sa-distribution-rules] GET error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -45,6 +45,8 @@ router.post("/", requirePageRight("sa-lead-distribution", "create"), async (req,
   const { Level, ScopeType, ScopeId, Method, members } = req.body;
   if (!Level || !ScopeType || !Method || !Array.isArray(members) || !members.length)
     return res.status(400).json({ error: "Level, ScopeType, Method, and at least one member are required" });
+  if (["Campaign", "TeamLead"].includes(ScopeType) && !ScopeId)
+    return res.status(400).json({ error: `ScopeId is required when ScopeType is '${ScopeType}'` });
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -84,7 +86,7 @@ router.post("/", requirePageRight("sa-lead-distribution", "create"), async (req,
     }
   } catch (err) {
     console.error("[sa-distribution-rules] POST error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -106,7 +108,7 @@ router.put("/:id", requirePageRight("sa-lead-distribution", "edit"), async (req,
       `);
     res.json({ message: "Rule updated" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -142,7 +144,7 @@ router.put("/:id/members", requirePageRight("sa-lead-distribution", "edit"), asy
       throw err;
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -155,7 +157,7 @@ router.delete("/:id", requirePageRight("sa-lead-distribution", "delete"), async 
       .query("UPDATE dbo.SaDistributionRule SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     res.json({ message: "Rule deactivated" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -177,34 +179,44 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
       const result = await resolveDistributionForLead(pool, lead, level);
       if (!result) continue;
 
-      await pool.request()
-        .input("lid", sql.Int, lead.Id)
-        .input("fuid", sql.Int, distributedBy)
-        .input("tuid", sql.Int, result.userId)
-        .input("lvl", sql.Int, level)
-        .input("dby", sql.Int, distributedBy)
-        .query(`
-          INSERT INTO dbo.SaLeadDistribution (LeadId, FromUserId, ToUserId, Level, Method, DistributedAt, DistributedBy)
-          VALUES (@lid, @fuid, @tuid, @lvl, 'Auto', SYSDATETIME(), @dby)
-        `);
+      // Wrap the distribution log INSERT and lead UPDATE atomically so a crash
+      // between them can't leave an orphaned distribution row with a stale lead status.
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("lid", sql.Int, lead.Id)
+          .input("fuid", sql.Int, distributedBy)
+          .input("tuid", sql.Int, result.userId)
+          .input("lvl", sql.Int, level)
+          .input("dby", sql.Int, distributedBy)
+          .query(`
+            INSERT INTO dbo.SaLeadDistribution (LeadId, FromUserId, ToUserId, Level, Method, DistributedAt, DistributedBy)
+            VALUES (@lid, @fuid, @tuid, @lvl, 'Auto', SYSDATETIME(), @dby)
+          `);
 
-      if (level === 1) {
-        await pool.request()
-          .input("lid", sql.Int, lead.Id)
-          .input("tuid", sql.Int, result.userId)
-          .query(`UPDATE dbo.SaLead SET AssignedTeamLeadId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
-      } else {
-        await pool.request()
-          .input("lid", sql.Int, lead.Id)
-          .input("tuid", sql.Int, result.userId)
-          .query(`UPDATE dbo.SaLead SET AssignedSalespersonId = @tuid, UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
+        if (level === 1) {
+          await tx.request()
+            .input("lid", sql.Int, lead.Id)
+            .input("tuid", sql.Int, result.userId)
+            .query(`UPDATE dbo.SaLead SET AssignedTeamLeadId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
+        } else {
+          await tx.request()
+            .input("lid", sql.Int, lead.Id)
+            .input("tuid", sql.Int, result.userId)
+            .query(`UPDATE dbo.SaLead SET AssignedSalespersonId = @tuid, UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
+        }
+        await tx.commit();
+        distributedCount++;
+      } catch (txErr) {
+        await tx.rollback();
+        console.error(`[sa-distribution-rules] run-now tx failed for lead ${lead.Id}:`, txErr.message);
       }
-      distributedCount++;
     }
     res.json({ message: `Auto-distributed ${distributedCount} of ${pending.length} eligible leads`, distributedCount, eligibleCount: pending.length });
   } catch (err) {
     console.error("[sa-distribution-rules] run-now error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

@@ -32,7 +32,7 @@ router.get("/users", verifyToken, guard, async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("[saRoleMaster] /users:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -70,7 +70,7 @@ router.get("/roles", verifyToken, guard, async (req, res) => {
     res.json(Object.values(byRole));
   } catch (err) {
     console.error("[saRoleMaster] /roles:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -103,7 +103,7 @@ router.get("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     res.json({ roleId, roleRights: roleRights.recordset, customRights });
   } catch (err) {
     console.error("[saRoleMaster] /user/:id/permissions:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -160,7 +160,7 @@ router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     res.json({ message: "Permissions saved" });
   } catch (err) {
     console.error("[saRoleMaster] PUT /user/:id/permissions:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

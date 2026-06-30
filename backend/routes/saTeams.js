@@ -3,6 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { isSaAdmin, actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
 
@@ -101,6 +102,11 @@ router.post("/:teamLeadId/members", requirePageRight("sa-teams", "edit"), async 
     const { memberId } = req.body;
     if (!memberId) return res.status(400).json({ error: "memberId required" });
 
+    // Non-admin TL can only manage their own team
+    if (!isSaAdmin(req) && actorId(req) !== teamLeadId) {
+      return res.status(403).json({ error: "You can only manage your own team" });
+    }
+
     // Verify team lead exists and has correct role
     const tlCheck = await pool.request()
       .input("id", sql.Int, teamLeadId)
@@ -134,6 +140,10 @@ router.post("/:teamLeadId/members", requirePageRight("sa-teams", "edit"), async 
 router.delete("/:teamLeadId/members/:memberId", requirePageRight("sa-teams", "edit"), async (req, res) => {
   try {
     const pool = getPool();
+    const teamLeadId = parseInt(req.params.teamLeadId);
+    if (!isSaAdmin(req) && actorId(req) !== teamLeadId) {
+      return res.status(403).json({ error: "You can only manage your own team" });
+    }
     await pool.request()
       .input("tlid", sql.Int, parseInt(req.params.teamLeadId))
       .input("mid", sql.Int, parseInt(req.params.memberId))

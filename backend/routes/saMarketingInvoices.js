@@ -42,7 +42,7 @@ router.get("/", cache("sa-marketing-invoices", 300), async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("[sa-marketing-invoices] GET error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -83,7 +83,7 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
     if (err.number === 2627 || err.number === 2601)
       return res.status(409).json({ error: "Invoice Number already exists" });
     console.error("[sa-marketing-invoices] POST error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -126,7 +126,7 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
     if (err.number === 2627 || err.number === 2601)
       return res.status(409).json({ error: "Invoice Number already exists" });
     console.error("[sa-marketing-invoices] PUT error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -150,7 +150,7 @@ router.delete("/:id", requirePageRight("sa-marketing-invoices", "delete"), async
     res.json({ message: `Invoice "${InvoiceNumber}" deleted successfully` });
   } catch (err) {
     console.error("[sa-marketing-invoices] DELETE error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -183,7 +183,7 @@ router.post("/:id/approve", requirePageRight("sa-marketing-invoices", "edit"), a
     res.json({ message: "Invoice approved" });
   } catch (err) {
     console.error("[sa-marketing-invoices] POST /approve error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -214,7 +214,7 @@ router.post("/:id/reject", requirePageRight("sa-marketing-invoices", "edit"), as
     res.json({ message: "Invoice rejected" });
   } catch (err) {
     console.error("[sa-marketing-invoices] POST /reject error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

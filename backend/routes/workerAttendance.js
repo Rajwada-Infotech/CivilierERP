@@ -23,7 +23,7 @@ const cleanStr = (v, len = 300) => {
 //     attendance summary + search + pagination ────────────────────────────
 router.get("/workers", authMiddleware, async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const contractorId = req.query.contractorId ? parseInt(req.query.contractorId, 10) : null;
@@ -129,7 +129,7 @@ router.get("/workers/:id/calendar", authMiddleware, async (req, res) => {
   }
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("workerId", sql.Int, workerId)
       .input("from", sql.Date, `${month}-01`)
@@ -186,7 +186,7 @@ router.post(
     }
 
     try {
-      const pool = await getPool();
+      const pool = getPool();
 
       let workerRow = await pool.request()
         .input("name", sql.NVarChar, cleanStr(name, 150))
