@@ -107,6 +107,13 @@ router.get("/user/:id/permissions", verifyToken, guard, async (req, res) => {
   }
 });
 
+// Page-key prefixes and explicit keys this endpoint is allowed to write.
+const SA_ALLOWED_PREFIXES = ["sa-", "sale-", "sales-"];
+function isAllowedSaPageKey(key) {
+  const k = String(key).toLowerCase();
+  return SA_ALLOWED_PREFIXES.some((p) => k.startsWith(p));
+}
+
 // ── PUT /api/sa/role-master/user/:id/permissions ──────────────────────────────
 router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
   try {
@@ -114,7 +121,26 @@ router.put("/user/:id/permissions", verifyToken, guard, async (req, res) => {
     const { rights } = req.body; // [{page, actions:[...]}]
     if (!Array.isArray(rights)) return res.status(400).json({ error: "rights must be an array" });
 
+    // Only SA/Sales page keys are writable through this endpoint.
+    const invalidKeys = rights.filter((r) => !isAllowedSaPageKey(r?.page));
+    if (invalidKeys.length > 0) {
+      return res.status(400).json({ error: "Only SA/Sales page rights may be set via this endpoint" });
+    }
+
+    // Target user must be an SA-role user.
     const pool = getPool();
+    const userCheck = await pool.request()
+      .input("UserId", sql.Int, userId)
+      .query(`
+        SELECT u.id FROM dbo.Users u
+        JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE u.id = @UserId AND u.discontinue = 0
+          AND r.RName IN ('marketing_head', 'sales_team_lead', 'sales_person')
+      `);
+    if (!userCheck.recordset.length) {
+      return res.status(403).json({ error: "Target user is not an SA-role user" });
+    }
+
     const json = JSON.stringify(rights);
 
     await pool.request()

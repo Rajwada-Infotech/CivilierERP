@@ -399,22 +399,23 @@ async function handleChainStatus(req, res) {
       });
     }
 
-    const expenseDocNos = expenses
-      .map((e) => e.EDocNo)
-      .filter(Boolean)
-      .map((d) => `'${d.replace(/'/g, "''")}'`)
-      .join(",");
+    const docNoList = expenses.map((e) => e.EDocNo).filter(Boolean);
 
     let paymentCount = 0;
     let latestPaymentAmount = null;
     let isPaid = false;
 
-    if (expenseDocNos.length > 0) {
-      const payResult = await pool.request().query(`
+    if (docNoList.length > 0) {
+      const payReq = pool.request();
+      const paramList = docNoList.map((d, i) => {
+        payReq.input(`dn${i}`, sql.NVarChar(100), d);
+        return `@dn${i}`;
+      });
+      const payResult = await payReq.query(`
           SELECT COUNT(*) AS payCount,
                  SUM(PAmount) AS totalPaid
           FROM dbo.NewPayment
-          WHERE PExpenseRef IN (${expenseDocNos})
+          WHERE PExpenseRef IN (${paramList.join(",")})
         `);
       paymentCount = parseInt(payResult.recordset[0]?.payCount) || 0;
       latestPaymentAmount = payResult.recordset[0]?.totalPaid
