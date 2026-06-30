@@ -14,7 +14,7 @@ export interface Supplier {
   LHeadType?: string;
 }
 
-// PO line item — mirrors POLineItem in purchaseOrdersApi.ts
+// PO line item â€” mirrors POLineItem in purchaseOrdersApi.ts
 export interface POLineItem {
   itemId?: string;
   itemName?: string;
@@ -40,7 +40,7 @@ export interface PurchaseOrder {
   Unit?: string;
   Rate?: number;
   TotalAmount?: number;
-  // Multi-item field — JSON blob stored on PO row
+  // Multi-item field â€” JSON blob stored on PO row
   POItems?: POLineItem[];
   // Normalised child table rows (returned by GET /:id only)
   // Fields: ItemId, ItemName, Quantity, UomName, Rate (PascalCase from SQL)
@@ -73,10 +73,10 @@ export interface UOM {
  * Represents one line item inside a GRN.
  *
  * Fields added in migration 034:
- *   rate        — unit rate (₹) for this item
- *   quantity    — billing quantity (may differ from receivedQty when partial
+ *   rate        â€” unit rate (â‚¹) for this item
+ *   quantity    â€” billing quantity (may differ from receivedQty when partial
  *                 billing is allowed)
- *   totalAmount — derived as rate × quantity; stored for audit / reporting
+ *   totalAmount â€” derived as rate Ã— quantity; stored for audit / reporting
  *                 so downstream modules (Expense Booking, etc.) don't need
  *                 to recompute it.
  */
@@ -87,11 +87,11 @@ export interface GRNItemLine {
   receivedQty: number;
   remainingQty: number;
   uom: string;
-  /** Unit rate in ₹.  Defaults to 0. */
+  /** Unit rate in â‚¹.  Defaults to 0. */
   rate: number;
   /** Billing quantity. Separate from receivedQty so partial billing works. */
   quantity: number;
-  /** Computed: rate × quantity. Stored for audit trail. */
+  /** Computed: rate Ã— quantity. Stored for audit trail. */
   totalAmount: number;
 }
 
@@ -110,12 +110,14 @@ export interface GRNFormDataPayload {
   finYear?: string | null;
   /** DocNo of the parent PO or WO (used to resolve correct GRN prefix). */
   parentDocNo?: string | null;
-  /** Root ExB DocNo — present when this GRN is under an Expense Booking. */
+  /** Root ExB DocNo â€” present when this GRN is under an Expense Booking. */
   rootExBDocNo?: string | null;
   /** Optional project this GRN is associated with. */
   projectId?: number | null;
   /** Godown where received stock is credited. */
   godownId?: number | null;
+  /** IDs of attachments uploaded via /api/grns/upload, to link on save. */
+  attachmentIds?: number[];
 }
 
 export interface DocNumberPreview {
@@ -224,6 +226,68 @@ export const deleteGRN = async (id: string) => {
   return res.json();
 };
 
+// ── Attachments ────────────────────────────────────────────────────────────
+
+export interface GRNAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
+
+/**
+ * Upload one or more files for a GRN. Can be called before the GRN itself
+ * is saved (GRNID is NULL on the server until linked) -- same flow as
+ * Vehicle In/Out attachments. Returns the uploaded attachment records;
+ * pass their `id`s back as `attachmentIds` on create/update.
+ */
+export const uploadGRNAttachments = async (
+  files: File[],
+): Promise<GRNAttachment[]> => {
+  const form = new FormData();
+  files.forEach((f) => form.append("file", f));
+  const res = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+      // NOTE: do NOT set Content-Type -- the browser sets the multipart boundary
+    },
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to upload attachment(s)");
+  }
+  const data = await res.json();
+  return data.attachments as GRNAttachment[];
+};
+
+export const deleteGRNAttachment = async (attachmentId: number) => {
+  const res = await fetch(`${BASE}/attachment/${attachmentId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete attachment");
+  }
+  return res.json();
+};
+
+export const getGRNAttachments = async (
+  grnId: number | string,
+): Promise<GRNAttachment[]> => {
+  const res = await fetch(`${BASE}/${grnId}/attachments`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch attachments");
+  }
+  return res.json();
+};
+
 export const previewNextGRNNumber = async (
   parentDocNo?: string | null,
 ): Promise<DocNumberPreview> => {
@@ -237,7 +301,7 @@ export const previewNextGRNNumber = async (
   return res.json();
 };
 
-// ── Dropdown fetches ──────────────────────────────────────────────────────────
+// â”€â”€ Dropdown fetches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
   const res = await fetch("/api/account-head?type=S", {
@@ -294,7 +358,7 @@ export const getProjects = async (): Promise<
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data = await res.json();
-  // /enterprises/options returns { id, label, belongs_to } — normalise to { id, name }
+  // /enterprises/options returns { id, label, belongs_to } â€” normalise to { id, name }
   return Array.isArray(data)
     ? (data as { id: number; label: string; short_name?: string | null }[]).map(
         (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null }),
@@ -302,7 +366,7 @@ export const getProjects = async (): Promise<
     : [];
 };
 
-// ── GRN from Stock Transfer ───────────────────────────────────────────────────
+// â”€â”€ GRN from Stock Transfer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface GRNFromTransferPayload {
   remarks?: string;
@@ -320,7 +384,7 @@ export interface GRNFromTransferResult {
 
 /**
  * Create a GRN directly from a Stock Transfer document.
- * The backend maps TransferItems → GRNItems and targets ToGodownID.
+ * The backend maps TransferItems â†’ GRNItems and targets ToGodownID.
  */
 export const createGRNFromTransfer = async (
   transferId: number,

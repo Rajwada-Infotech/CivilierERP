@@ -224,6 +224,7 @@ const WorkerAttendance: React.FC = () => {
   const openCalendar = (worker: WorkerSummary) => {
     const d = new Date();
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setSelectedDay(null);
     setCalendarWorker(worker);
   };
 

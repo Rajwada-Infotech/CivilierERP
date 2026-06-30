@@ -145,6 +145,8 @@ export interface ExpenseRecord {
   // ── Bill Status (Step 7 spec) ────────────────────────────────────────────────
   /** Payment Due | Partially Paid | Paid — set by syncBillStatus after each payment */
   billStatus?: BillStatus | null;
+  /** PaymentTermId from PaymentTermMaster — drives auto-calculated due date */
+  paymentTermId?: number | null;
   /** Sum of all Approved payments against this booking */
   totalPaid?: number;
   /** ENetAmount - totalPaid */

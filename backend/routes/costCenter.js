@@ -51,7 +51,11 @@ router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT CostCenterId AS id, Name AS label, Code AS code
+      SELECT
+        CostCenterId AS id,
+        Name AS label,
+        Code AS code,
+        ProjectId AS projectId
       FROM dbo.CostCenter
       WHERE IsActive = 1
       ORDER BY Name

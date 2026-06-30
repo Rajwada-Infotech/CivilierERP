@@ -353,7 +353,7 @@ export default function TicketDashboard() {
                     sub: `${stats.urgent} urgent · ${stats.high} high priority`,
                     icon: Clock,
                     accentColor: "#f59e0b",
-                    trend: (stats.pending + stats.inProgress > 0 ? "down" : "neutral") as const,
+                    trend: (stats.pending + stats.inProgress > 0 ? "down" : "neutral") as "down" | "neutral" | "up",
                     onClick: () => navigate("/ticket/pending"),
                   },
                   {
@@ -371,7 +371,7 @@ export default function TicketDashboard() {
                     sub: `${stats.urgent} urgent · ${stats.high} high`,
                     icon: Flame,
                     accentColor: "#ef4444",
-                    trend: (stats.urgent + stats.high > 0 ? "down" : "neutral") as const,
+                    trend: (stats.urgent + stats.high > 0 ? "down" : "neutral") as "down" | "neutral" | "up",
                     onClick: () => navigate("/ticket/pending"),
                   },
                 ].map((s) => <GlassCard key={s.label} {...s} />)}

@@ -8,7 +8,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 
-router.get("/", cache("account-group", 300), async (req, res) => {
+router.get("/", authenticateToken, cache("account-group", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -110,7 +110,7 @@ router.put("/:id", authenticateToken, requirePageRight("account-group", "edit"),
   }
 });
 
-router.delete("/:id", requirePageRight("account-group", "delete"), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePageRight("account-group", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ error: "Invalid account group id" });

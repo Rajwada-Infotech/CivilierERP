@@ -12,6 +12,7 @@ export const materialNavItems: NavItem[] = [
       { label: "Vehicle In/Out",   path: "/material/vehicle-in-out",   pageKey: "vehicle-in-out" },
       { label: "GRN",              path: "/material/grn",              pageKey: "grn-master" },
       { label: "Issues",           path: "/material/issues",           pageKey: "material-issues" },
+      { label: "Issue Return",     path: "/material/issue-return",     pageKey: "material-issue-return" },
       { label: "Invoice",          path: "/material/expense-booking",  pageKey: "expense-booking" },
     ],
   },

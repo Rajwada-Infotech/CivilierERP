@@ -109,10 +109,11 @@ const SaLeadDistribution: React.FC = () => {
         }
       }
     } else {
-      for (const [leadId, userId] of Object.entries(assignments)) {
-        const existing = assignmentList.find((a) => a.userId === userId);
+      for (const [leadId, userIdStr] of Object.entries(assignments)) {
+        const uid = Number(userIdStr);
+        const existing = assignmentList.find((a) => a.userId === uid);
         if (existing) existing.leadIdList.push(parseInt(leadId));
-        else assignmentList.push({ userId, leadIdList: [parseInt(leadId)] });
+        else assignmentList.push({ userId: uid, leadIdList: [parseInt(leadId)] });
       }
     }
 

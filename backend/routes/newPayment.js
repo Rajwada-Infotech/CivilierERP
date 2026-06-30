@@ -495,7 +495,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
       .input("PMode", sql.VarChar, PMode || "")
-      .input("PAmount", sql.Decimal(18, 2), PAmount || null)
+      .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
@@ -638,7 +638,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PPaymentID", sql.Int, id)
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
       .input("PMode", sql.VarChar, PMode || "")
-      .input("PAmount", sql.Decimal(18, 2), PAmount || null)
+      .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
@@ -697,6 +697,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
         WHERE PPaymentID = @PPaymentID
       `);
 
+    // Sync bill status since amount may have changed
+    const updatedRef = await pool.request().input("id", sql.Int, id)
+      .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @id");
+    if (updatedRef.recordset[0]?.PExpenseRef) {
+      await syncBillStatus(pool, updatedRef.recordset[0].PExpenseRef);
+    }
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment updated successfully" });
   } catch (err) {
@@ -725,6 +731,10 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       });
     }
 
+    const refRow = await pool.request().input("PPaymentID", sql.Int, id)
+      .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
+    const expenseRef = refRow.recordset[0]?.PExpenseRef || null;
+
     const result = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
@@ -732,6 +742,7 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "Payment not found" });
     }
+    if (expenseRef) await syncBillStatus(pool, expenseRef);
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment deleted successfully" });
   } catch (err) {
@@ -766,7 +777,7 @@ router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, r
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("new-payment", "approve"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -876,7 +887,7 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", requirePageRight("new-payment", "approve"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
