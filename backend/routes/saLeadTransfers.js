@@ -2,7 +2,7 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId, isSaAdmin, isSaTeamLead } = require("../services/saAccess");
+const { actorId, isSaAdmin, isSaTeamLead, applyLeadScope } = require("../services/saAccess");
 
 const router = express.Router();
 router.use(authMiddleware);

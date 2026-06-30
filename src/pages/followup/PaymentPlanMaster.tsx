@@ -30,6 +30,7 @@ interface PaymentTerm {
   TermName: string;
   ValueType: ValueType;
   TermValue: number;
+  CreditDays: number | null;
   IsActive: boolean;
   CreatedAt: string;
   UpdatedAt: string | null;
@@ -39,12 +40,14 @@ interface DraftRow {
   TermName: string;
   ValueType: ValueType;
   TermValue: string;
+  CreditDays: string;
 }
 
 const EMPTY_DRAFT: DraftRow = {
   TermName: "",
   ValueType: "percent",
   TermValue: "",
+  CreditDays: "",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,6 +157,11 @@ const PaymentPlanMaster: React.FC = () => {
     if (isNaN(v) || v < 0) return "Value must be a positive number";
     if (d.ValueType === "percent" && v > 100)
       return "Percent cannot exceed 100";
+    if (d.CreditDays !== "") {
+      const days = parseInt(d.CreditDays, 10);
+      if (!Number.isFinite(days) || days < 0)
+        return "Credit days must be zero or more";
+    }
     return null;
   };
 
@@ -173,6 +181,8 @@ const PaymentPlanMaster: React.FC = () => {
           TermName: draft.TermName.trim(),
           ValueType: draft.ValueType,
           TermValue: parseFloat(draft.TermValue),
+          CreditDays:
+            draft.CreditDays === "" ? null : parseInt(draft.CreditDays, 10),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Failed");
@@ -194,6 +204,7 @@ const PaymentPlanMaster: React.FC = () => {
       TermName: t.TermName,
       ValueType: t.ValueType,
       TermValue: String(t.TermValue),
+      CreditDays: t.CreditDays == null ? "" : String(t.CreditDays),
     });
     setShowAddRow(false);
   }, []);
@@ -213,6 +224,10 @@ const PaymentPlanMaster: React.FC = () => {
           TermName: editDraft.TermName.trim(),
           ValueType: editDraft.ValueType,
           TermValue: parseFloat(editDraft.TermValue),
+          CreditDays:
+            editDraft.CreditDays === ""
+              ? null
+              : parseInt(editDraft.CreditDays, 10),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Failed");
@@ -392,6 +407,16 @@ const PaymentPlanMaster: React.FC = () => {
                 }
                 className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
               />
+              <input
+                type="number"
+                min={0}
+                placeholder="Credit days"
+                value={draft.CreditDays}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, CreditDays: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
+              />
               <div className="flex gap-2">
                 <button
                   onClick={handleAdd}
@@ -469,6 +494,19 @@ const PaymentPlanMaster: React.FC = () => {
                         }
                         className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
                       />
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="Credit days"
+                        value={editDraft.CreditDays}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({
+                            ...d,
+                            CreditDays: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
                       <div className="flex gap-2">
                         <button
                           onClick={handleEdit}
@@ -505,6 +543,11 @@ const PaymentPlanMaster: React.FC = () => {
                           <span className="font-mono font-semibold text-sm text-foreground">
                             {formatValue(term)}
                           </span>
+                          {term.CreditDays != null && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {term.CreditDays} credit days
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -552,6 +595,9 @@ const PaymentPlanMaster: React.FC = () => {
                 </th>
                 <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-right w-36">
                   Value
+                </th>
+                <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-right w-32">
+                  Credit Days
                 </th>
                 <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-center w-20">
                   Active
@@ -606,6 +652,24 @@ const PaymentPlanMaster: React.FC = () => {
                       className="w-full px-3 py-1.5 rounded-lg text-sm text-right bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={draft.CreditDays}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          CreditDays: e.target.value,
+                        }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAdd();
+                      }}
+                      className="w-full px-3 py-1.5 rounded-lg text-sm text-right bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </td>
                   <td />
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1.5">
@@ -637,14 +701,14 @@ const PaymentPlanMaster: React.FC = () => {
               {/* Data rows */}
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="py-16 text-center">
+                  <td colSpan={6} className="py-16 text-center">
                     <Loader2 className="w-6 h-6 animate-spin text-muted-foreground mx-auto" />
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="py-16 text-center text-muted-foreground"
                   >
                     <Landmark className="w-10 h-10 opacity-20 mx-auto mb-2" />
@@ -726,6 +790,29 @@ const PaymentPlanMaster: React.FC = () => {
                         ) : (
                           <span className="font-mono font-semibold text-foreground">
                             {formatValue(term)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={editDraft.CreditDays}
+                            onChange={(e) =>
+                              setEditDraft((d) => ({
+                                ...d,
+                                CreditDays: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleEdit();
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg text-sm text-right bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        ) : (
+                          <span className="font-mono text-foreground">
+                            {term.CreditDays ?? "-"}
                           </span>
                         )}
                       </td>

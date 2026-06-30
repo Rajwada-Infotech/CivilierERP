@@ -554,11 +554,16 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
     const existing = await pool
       .request()
       .input("id", sql.Int, id)
-      .query("SELECT DocNo FROM dbo.MaterialIssues WHERE IssueId = @id");
+      .query("SELECT DocNo, Status FROM dbo.MaterialIssues WHERE IssueId = @id");
     if (existing.recordset.length === 0)
       return res.status(404).json({ error: "Issue not found" });
 
-    const docNo = existing.recordset[0].DocNo;
+    const { DocNo: docNo, Status: currentStatus } = existing.recordset[0];
+    if (!["Draft", "Rejected"].includes(currentStatus)) {
+      return res.status(400).json({
+        error: `Cannot edit an issue with status "${currentStatus}". Only Draft or Rejected issues can be edited.`,
+      });
+    }
 
     const resolvedGodownId = GodownId
       ? parseInt(GodownId, 10)

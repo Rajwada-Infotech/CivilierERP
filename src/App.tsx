@@ -386,6 +386,7 @@ const ProjectStatusReportPage = lazy(() =>
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
+const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
   () => import("./pages/material/MaterialRequest"),
 );
@@ -601,7 +602,7 @@ function AppRoutes() {
         path="/transactions"
         element={
           <ProtectedRoute pageKey="transactions">
-            <TrialBalance />
+            <Transactions />
           </ProtectedRoute>
         }
       />
@@ -1234,6 +1235,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="material-issues">
             <Issues />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/issue-return"
+        element={
+          <ProtectedRoute pageKey="material-issue-return">
+            <IssueReturn />
           </ProtectedRoute>
         }
       />

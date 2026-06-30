@@ -157,6 +157,9 @@ interface POForm {
   docTypeId: number | null;
   docNo: string;
   status: string;
+  costCenterId: string;
+  vendorInvoiceDate: string;
+  vendorInvoiceNo: string;
 }
 
 interface DropdownOption {
@@ -246,6 +249,9 @@ const EMPTY_FORM = (): POForm => ({
   docTypeId: null,
   docNo: "",
   status: "Draft",
+  costCenterId: "",
+  vendorInvoiceDate: "",
+  vendorInvoiceNo: "",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -515,6 +521,15 @@ const PurchaseOrderMaster: React.FC = () => {
     queryFn: getEnterprises,
   });
 
+  const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["cost-centers-po"],
+    queryFn: () =>
+      fetch("/api/cost-center/options", { credentials: "include" }).then((r) => {
+        if (!r.ok) throw new Error(`cost-center/options ${r.status}`);
+        return r.json();
+      }),
+  });
+
   // ── Normalise data ────────────────────────────────────────────────────────
   const suppliers = useMemo(
     () =>
@@ -730,7 +745,7 @@ const PurchaseOrderMaster: React.FC = () => {
       ${supGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${supGST}</span></div>` : ""}
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company</div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Billing Details</div>
       <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${company}</div>
       ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
       ${compPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${compPhone}</div>` : ""}
@@ -1351,6 +1366,9 @@ const PurchaseOrderMaster: React.FC = () => {
           ? (listData.find((r) => r._id === editingId)?.status ?? "Draft")
           : "Draft",
       Remarks: form.remarks || null,
+      CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
+      VendorInvoiceDate: form.vendorInvoiceDate || null,
+      VendorInvoiceNo: form.vendorInvoiceNo || null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
         ? null
@@ -1597,6 +1615,9 @@ const PurchaseOrderMaster: React.FC = () => {
       docTypeId,
       docNo,
       status: raw.Status ?? "Draft",
+      costCenterId: String(raw.CostCenterId ?? ""),
+      vendorInvoiceDate: raw.VendorInvoiceDate ? raw.VendorInvoiceDate.slice(0, 10) : "",
+      vendorInvoiceNo: raw.VendorInvoiceNo ?? "",
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2802,6 +2823,50 @@ const PurchaseOrderMaster: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* Cost Center */}
+            <div>
+              <FieldLabel>Cost Center</FieldLabel>
+              <select
+                value={form.costCenterId}
+                onChange={(e) => setField("costCenterId", e.target.value)}
+                disabled={isReadOnly}
+                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              >
+                <option value="">— Select Cost Center —</option>
+                {costCenters.map((cc) => (
+                  <option key={cc.id} value={cc.id}>{cc.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Vendor Invoice No */}
+            <div>
+              <FieldLabel>Vendor Invoice No</FieldLabel>
+              <input
+                type="text"
+                placeholder="Vendor invoice number"
+                value={form.vendorInvoiceNo}
+                onChange={(e) => setField("vendorInvoiceNo", e.target.value)}
+                readOnly={isReadOnly}
+                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              />
+            </div>
+
+            {/* Vendor Invoice Date */}
+            <div>
+              <FieldLabel>Vendor Invoice Date</FieldLabel>
+              <div className="relative">
+                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <input
+                  type="date"
+                  value={form.vendorInvoiceDate}
+                  onChange={(e) => setField("vendorInvoiceDate", e.target.value)}
+                  readOnly={isReadOnly}
+                  className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                />
+              </div>
+            </div>
           </div>
         </div>
         {/* ── Supplier, Company & Project Info Panels (auto-fetched on selection) ──── */}
@@ -2872,12 +2937,12 @@ const PurchaseOrderMaster: React.FC = () => {
               </div>
             )}
 
-            {/* Company info */}
+            {/* Billing details */}
             {companyDetails && (
               <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
                   <CircleDollarSign size={11} className="text-emerald-600 dark:text-emerald-400" />
-                  Company Details
+                  Billing Details
                 </h3>
                 <dl className="space-y-2 text-sm">
                   {(companyDetails.address || companyDetails.city) && (
@@ -3124,12 +3189,13 @@ const PurchaseOrderMaster: React.FC = () => {
                     <td className="px-3 py-2">
                       {isReadOnly ? (
                         <span className="text-sm font-medium">
-                          {li.quantity}
+                          {Number.isFinite(li.quantity) ? li.quantity.toLocaleString("en-IN", { maximumFractionDigits: 4 }) : "0"}
                         </span>
                       ) : (
                         <input
                           type="number"
                           min={0}
+                          step="any"
                           value={li.quantity}
                           onChange={(e) =>
                             updateLine(idx, {
@@ -3191,12 +3257,13 @@ const PurchaseOrderMaster: React.FC = () => {
                     <td className="px-3 py-2">
                       {isReadOnly ? (
                         <span className="text-sm text-right block font-mono">
-                          ₹{li.rate.toLocaleString("en-IN")}
+                          ₹{Number.isFinite(li.rate) ? li.rate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
                         </span>
                       ) : (
                         <input
                           type="number"
                           min={0}
+                          step="any"
                           value={li.rate}
                           onChange={(e) =>
                             updateLine(idx, {
@@ -3239,7 +3306,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     <td className="px-3 py-2 text-right">
                       <span className="text-sm font-semibold font-mono text-foreground">
                         ₹
-                        {li.amount.toLocaleString("en-IN", {
+                        {(Number.isFinite(li.amount) ? li.amount : 0).toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}

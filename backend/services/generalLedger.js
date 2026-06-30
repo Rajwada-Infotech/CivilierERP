@@ -88,8 +88,8 @@ async function postVoucher(pool, {
     throw new Error("postVoucher requires at least 2 legs");
   }
 
-  const totalDebit = legs.reduce((s, l) => s + (l.debit || 0), 0);
-  const totalCredit = legs.reduce((s, l) => s + (l.credit || 0), 0);
+  const totalDebit  = Math.round(legs.reduce((s, l) => s + (l.debit  || 0), 0) * 100) / 100;
+  const totalCredit = Math.round(legs.reduce((s, l) => s + (l.credit || 0), 0) * 100) / 100;
   if (Math.abs(totalDebit - totalCredit) > 0.01) {
     throw new Error(
       `Voucher ${voucherNo} does not balance: debit ${totalDebit} !== credit ${totalCredit}`,

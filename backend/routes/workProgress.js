@@ -60,7 +60,7 @@ const JOINS = `
 `;
 
 // ─── GET / — progress entries, optionally filtered by project/allocation ────
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
@@ -185,8 +185,8 @@ router.put("/:id/review", authMiddleware, requirePageRight("civilworkdpr-depende
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
-  const { reviewedBy, reviewStatus, reviewRemarks } = req.body;
-  if (!reviewedBy) return res.status(400).json({ error: "Reviewer name is required" });
+  const { reviewStatus, reviewRemarks } = req.body;
+  const reviewedBy = req.user?.name || req.user?.email || "system";
   if (!["Approved", "Rejected"].includes(reviewStatus)) {
     return res.status(400).json({ error: "reviewStatus must be Approved or Rejected" });
   }

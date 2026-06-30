@@ -191,8 +191,32 @@ const syncLineItems = async (
 };
 
 // ─── SELECT columns shared by GET / and GET /:id ─────────────────────────────
+// Built lazily on first use — migration-148 columns may not exist yet.
 
-const PO_SELECT = `
+let _poCols = null;
+let _poSelect = null;
+
+async function getPOCols(pool) {
+  if (_poCols) return _poCols;
+  const check = async (col) => {
+    const r = await pool.request()
+      .input("T", sql.NVarChar(128), "PurchaseOrders")
+      .input("C", sql.NVarChar(128), col)
+      .query("SELECT 1 AS f FROM sys.columns WHERE object_id=OBJECT_ID(@T) AND name=@C");
+    return !!r.recordset[0];
+  };
+  const [hasCC, hasVID, hasVIN] = await Promise.all([
+    check("CostCenterId"), check("VendorInvoiceDate"), check("VendorInvoiceNo"),
+  ]);
+  _poCols = { hasCC, hasVID, hasVIN };
+  return _poCols;
+}
+
+async function getPOSelect(pool) {
+  if (_poSelect) return _poSelect;
+  const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
+
+  _poSelect = `
   SELECT
     po.PurchaseOrderID,
     po.PurchaseOrderNo,
@@ -250,6 +274,10 @@ const PO_SELECT = `
     po.SourceSaleInvoiceId,
     po.SourceSaleInvoiceDocNo,
     po.POType,
+    ${hasCC ? "po.CostCenterId" : "CAST(NULL AS INT) AS CostCenterId"},
+    ${hasVID ? "po.VendorInvoiceDate" : "CAST(NULL AS DATE) AS VendorInvoiceDate"},
+    ${hasVIN ? "po.VendorInvoiceNo" : "CAST(NULL AS NVARCHAR(100)) AS VendorInvoiceNo"},
+    ${hasCC ? "cc.Name" : "CAST(NULL AS NVARCHAR(200))"} AS CostCenterName,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
   FROM dbo.PurchaseOrders po
@@ -258,7 +286,10 @@ const PO_SELECT = `
   LEFT JOIN dbo.enterprise        pr ON pr.id         = po.ProjectId
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
+  ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
 `;
+  return _poSelect;
+}
 
 const mapRow = (po) => ({
   ...po,
@@ -305,6 +336,7 @@ router.get(
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
 
+      const PO_SELECT = await getPOSelect(pool);
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
@@ -347,6 +379,7 @@ router.get("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
+    const PO_SELECT = await getPOSelect(pool);
     const result = await pool.request().input("PurchaseOrderID", sql.Int, id)
       .query(`
         ${PO_SELECT}
@@ -424,6 +457,9 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     SourceSaleOrderDocNo,
     SourceSaleInvoiceId,
     SourceSaleInvoiceDocNo,
+    CostCenterId,
+    VendorInvoiceDate,
+    VendorInvoiceNo,
   } = req.body;
 
   const poItemsArray = Array.isArray(POItems)
@@ -491,6 +527,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
 
     const uomMap = await buildUomMap(pool);
     const fyId = await resolveFyId(pool, finYear);
+    const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -518,7 +555,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
       });
     }
 
-    const result = await transaction
+    const insertReq = transaction
       .request()
       .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo)
       .input("PODate", sql.Date, PODate || null)
@@ -598,7 +635,13 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
             ? "WO_PO"
             : "Direct"),
       )
-      .input("FyId", sql.Int, fyId).query(`
+      .input("FyId", sql.Int, fyId);
+
+    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+    if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
+    if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
+
+    const result = await insertReq.query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
@@ -612,6 +655,9 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
           SourceSaleOrderId, SourceSaleOrderDocNo,
           SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
           POType, fy_id
+          ${hasCC ? ", CostCenterId" : ""}
+          ${hasVID ? ", VendorInvoiceDate" : ""}
+          ${hasVIN ? ", VendorInvoiceNo" : ""}
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -627,6 +673,9 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
           @SourceSaleOrderId, @SourceSaleOrderDocNo,
           @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
           @POType, @FyId
+          ${hasCC ? ", @CostCenterId" : ""}
+          ${hasVID ? ", @VendorInvoiceDate" : ""}
+          ${hasVIN ? ", @VendorInvoiceNo" : ""}
         )
       `);
 
@@ -721,6 +770,9 @@ router.put(
       POItems,
       Discount,
       GST,
+      CostCenterId,
+      VendorInvoiceDate,
+      VendorInvoiceNo,
     } = req.body;
 
     const poItemsArray = Array.isArray(POItems)
@@ -744,11 +796,12 @@ router.put(
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
+      const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
 
       transaction = pool.transaction();
       await transaction.begin();
 
-      const result = await transaction
+      const updateReq = transaction
         .request()
         .input("PurchaseOrderID", sql.Int, id)
         .input("PurchaseOrderNo", sql.NVarChar(100), PurchaseOrderNo || null)
@@ -788,7 +841,13 @@ router.put(
         .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
         .input("Discount", sql.NVarChar(sql.MAX), discountJson)
         .input("GST", sql.NVarChar(sql.MAX), gstJson)
-        .input("FyId", sql.Int, fyId).query(`
+        .input("FyId", sql.Int, fyId);
+
+      if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+      if (hasVID) updateReq.input("VendorInvoiceDate2", sql.Date, VendorInvoiceDate || null);
+      if (hasVIN) updateReq.input("VendorInvoiceNo2", sql.NVarChar(100), VendorInvoiceNo || null);
+
+      const result = await updateReq.query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo       = @PurchaseOrderNo,
           PODate                = @PODate,
@@ -816,6 +875,9 @@ router.put(
           Discount              = @Discount,
           GST                   = @GST,
           fy_id                 = COALESCE(@FyId, fy_id)
+          ${hasCC ? ", CostCenterId = @CostCenterId2" : ""}
+          ${hasVID ? ", VendorInvoiceDate = @VendorInvoiceDate2" : ""}
+          ${hasVIN ? ", VendorInvoiceNo = @VendorInvoiceNo2" : ""}
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
@@ -1108,7 +1170,7 @@ router.put("/:id/submit", requirePageRight("purchase-orders", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("purchase-orders", "approve"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1130,7 +1192,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", requirePageRight("purchase-orders", "approve"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const { note } = req.body;

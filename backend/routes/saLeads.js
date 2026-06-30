@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { promoteLeadToFollowup, promoteLeadToBooking } = require("../services/saHandoff");
-const { applyLeadScope, actorId } = require("../services/saAccess");
+const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
 const crypto = require("crypto");
 
@@ -174,6 +174,15 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
     }
     const old = currentResult.recordset[0];
 
+    // Scope check — non-admins can only edit leads within their own scope
+    if (!isSaAdmin(req)) {
+      const scopeReq = pool.request();
+      const scope = applyLeadScope(scopeReq, req, "l");
+      const scopeCheck = await scopeReq.input("lid", sql.Int, leadId)
+        .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+      if (!scopeCheck.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
+
     // Validate status transition
     if (b.Status && b.Status !== old.Status) {
       const allowed = STATUS_TRANSITIONS[old.Status] || [];
@@ -193,7 +202,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       .input("aid", sql.Int,           b.AdId || null)
       .input("dg",  sql.Date,          b.DateGenerated || null)
       .input("rem", sql.NVarChar(sql.MAX), b.CustomerRemarks || null)
-      .input("st",  sql.NVarChar(30),  b.Status || "New")
+      .input("st",  sql.NVarChar(30),  b.Status !== undefined ? b.Status : old.Status)
       .input("cl",  sql.NVarChar(30),  b.Classification || null)
       .input("tl",  sql.Int,           b.AssignedTeamLeadId || null)
       .input("sp",  sql.Int,           b.AssignedSalespersonId || null)
@@ -263,8 +272,17 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
 router.get("/:id/audit", requirePageRight("sa-leads", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const leadId = parseInt(req.params.id, 10);
+    // Verify caller has scope access to this lead before returning its audit trail
+    if (!isSaAdmin(req)) {
+      const scopeReq = pool.request();
+      const scope = applyLeadScope(scopeReq, req, "l");
+      const check = await scopeReq.input("lid", sql.Int, leadId)
+        .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+      if (!check.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
     const result = await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, leadId)
       .query(`
         SELECT a.Id, a.LeadId, a.Field, a.OldValue, a.NewValue,
                a.ChangedAt, u.name AS ChangedByName
@@ -284,8 +302,16 @@ router.get("/:id/audit", requirePageRight("sa-leads", "view"), async (req, res) 
 router.delete("/:id", requirePageRight("sa-leads", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const leadId = parseInt(req.params.id, 10);
+    if (!isSaAdmin(req)) {
+      const scopeReq = pool.request();
+      const scope = applyLeadScope(scopeReq, req, "l");
+      const check = await scopeReq.input("lid", sql.Int, leadId)
+        .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+      if (!check.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, leadId)
       .query("UPDATE dbo.SaLead SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

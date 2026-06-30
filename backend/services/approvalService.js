@@ -149,7 +149,7 @@ async function getWorkflow(module) {
       SELECT TOP 1 Id, LevelsData AS LevelsJson
       FROM dbo.ApprovalWorkflows
       WHERE active = 1
-        AND modules LIKE '%' + @WorkflowId + '%'
+        AND modules LIKE '%"' + @WorkflowId + '"%'
       ORDER BY CreatedAt DESC
     `);
   const row = result.recordset[0];
@@ -161,7 +161,7 @@ async function getWorkflow(module) {
   } catch {
     levels = [];
   }
-  return { Id: row.Id, Levels: levels.length || 1 };
+  return { Id: row.Id, Levels: (Array.isArray(levels) ? levels.length : Number(levels)) || 1 };
 }
 
 /**

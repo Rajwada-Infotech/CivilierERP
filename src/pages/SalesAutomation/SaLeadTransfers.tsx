@@ -74,13 +74,14 @@ const SaLeadTransfers: React.FC = () => {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Failed");
       toast.success(data.message);
+      const resolvedId = actionDialog.id;
       setActionDialog(null);
       setAdminNotes("");
       await qc.invalidateQueries({ queryKey: ["sa-lead-transfers"] });
       await qc.invalidateQueries({ queryKey: ["sa-leads"] });
       // Refresh items cache for this request
-      const items = await fetchItems(actionDialog.id);
-      setLoadedItems((prev) => ({ ...prev, [actionDialog.id]: items }));
+      const items = await fetchItems(resolvedId);
+      setLoadedItems((prev) => ({ ...prev, [resolvedId]: items }));
     } catch (e: any) {
       toast.error(e.message);
     } finally {

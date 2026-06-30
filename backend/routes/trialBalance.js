@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 60, validate: false }));
+const authenticateToken = require("../middleware/auth");
+router.use(authenticateToken);
 const { getPool, sql } = require("../db");
 
 /**
@@ -97,7 +99,10 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
-          ), 0) AS opening_debit,
+          ), 0)
+          -- Banks: add manually-entered opening cash balance on the debit (asset) side
+          + CASE WHEN ahm.LHeadType = 'B' THEN ISNULL(ahm.BankOpeningBalance, 0) ELSE 0 END
+            AS opening_debit,
 
           ISNULL((
             SELECT SUM(gle.CreditAmount)
@@ -107,12 +112,7 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
-          ), 0)
-          -- Banks keep their manually-entered opening cash balance — the
-          -- ledger only knows postings from 2026-06-28 onward, it has no
-          -- way to derive what was actually in the bank before that.
-          + CASE WHEN ahm.LHeadType = 'B' THEN ISNULL(ahm.BankOpeningBalance, 0) ELSE 0 END
-            AS opening_credit,
+          ), 0) AS opening_credit,
 
           ISNULL((
             SELECT SUM(gle.DebitAmount)

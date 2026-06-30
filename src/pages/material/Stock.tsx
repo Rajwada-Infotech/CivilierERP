@@ -212,10 +212,16 @@ function SummaryRow({
 }
 
 // ─── Stock Details Table ──────────────────────────────────────────────────────
-function StockDetailsTable({ godownId }: { godownId: number }) {
+function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
+  godownId: number;
+  dateFrom?: string;
+  dateTo?: string;
+  projectName?: string;
+}) {
+  const queryDate = dateTo || today;
   const { data, isLoading } = useQuery({
-    queryKey: ["inventory-master", today, godownId],
-    queryFn: () => getInventoryMaster(today, godownId),
+    queryKey: ["inventory-master", queryDate, godownId, dateFrom, dateTo],
+    queryFn: () => getInventoryMaster(queryDate, godownId, dateFrom, dateTo),
     staleTime: 60_000,
   });
 
@@ -247,10 +253,10 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
         <div className="px-5 py-3 border-b border-border flex items-center justify-between">
           <div>
             <p className="text-sm font-heading font-semibold text-foreground">
-              Stock Details
+              Stock Details{projectName ? ` — ${projectName}` : ""}
             </p>
             <p className="text-xs text-muted-foreground">
-              As of {today} · {rows.length} item{rows.length !== 1 ? "s" : ""}
+              {dateFrom ? `${dateFrom} to ` : "As of "}{queryDate} · {rows.length} item{rows.length !== 1 ? "s" : ""}
             </p>
           </div>
         </div>
@@ -282,13 +288,19 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
                 <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
                   Closing
                 </th>
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                  Customer Rate
+                </th>
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                  Stock Value
+                </th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="border-b border-border">
-                    {Array.from({ length: 8 }).map((_, j) => (
+                    {Array.from({ length: 10 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-3 bg-muted rounded animate-pulse" />
                       </td>
@@ -298,7 +310,7 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
                     No stock data found for this godown.
@@ -372,6 +384,14 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
                         {fmtNum(row.ClosingStock)}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">
+                      {(row as any).CustomerRate != null ? `₹${fmtNum((row as any).CustomerRate)}` : "—"}
+                    </td>
+                    <td className={`px-4 py-2.5 text-right ${(row as any).CustomerRate != null && row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                      {(row as any).CustomerRate != null && row.ClosingStock !== 0
+                        ? `₹${fmtNum(row.ClosingStock * (row as any).CustomerRate)}`
+                        : "—"}
+                    </td>
                   </tr>
                 ))
               )}
@@ -397,6 +417,10 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
                   <td className="px-4 py-3 text-right font-bold text-foreground">
                     {fmtNum(totals.closing)}
                   </td>
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3 text-right font-bold text-foreground">
+                    ₹{fmtNum(rows.reduce((s, r) => s + ((r as any).CustomerRate != null ? r.ClosingStock * (r as any).CustomerRate : 0), 0))}
+                  </td>
                 </tr>
               </tfoot>
             )}
@@ -413,6 +437,8 @@ export default function Stock() {
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>(today);
 
   // ── Load data ─────────────────────────────────────────────────────────────
   const { data: godownsData, isLoading: godownsLoading } = useQuery({
@@ -536,13 +562,34 @@ export default function Stock() {
               disabled={godownsLoading}
             />
           </div>
+          {/* Date range filter */}
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground block">From Date</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground block">To Date</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Godown details + stock */}
         {selectedGodown ? (
           <>
             <GodownInfoCard godown={selectedGodown} />
-            <StockDetailsTable godownId={selectedGodown.GodownID} />
+            <StockDetailsTable godownId={selectedGodown.GodownID} dateFrom={dateFrom} dateTo={dateTo} projectName={selectedGodown.ProjectName ?? undefined} />
           </>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-muted/20 py-20 text-center">

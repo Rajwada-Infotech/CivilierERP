@@ -108,7 +108,10 @@ router.get("/user/:id/permissions", verifyToken, guard, async (req, res) => {
 });
 
 // Page-key prefixes and explicit keys this endpoint is allowed to write.
-const SA_ALLOWED_PREFIXES = ["sa-", "sale-", "sales-"];
+// Explicit allowed page key prefixes for SA role master endpoint.
+// "sale-" and "sales-" are intentionally excluded — those keys belong to the
+// Sales (CRM) module and marketing_head should not be able to grant them.
+const SA_ALLOWED_PREFIXES = ["sa-"];
 function isAllowedSaPageKey(key) {
   const k = String(key).toLowerCase();
   return SA_ALLOWED_PREFIXES.some((p) => k.startsWith(p));
