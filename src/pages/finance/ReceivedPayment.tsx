@@ -1024,7 +1024,7 @@ export default function ReceivedPaymentPage() {
                           {p.docNo}
                         </td>
                         <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
-                          {format(new Date(p.docDate), "dd/MM/yyyy")}
+                          {p.docDate ? format(new Date(p.docDate), "dd/MM/yyyy") : "—"}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs">
                           {p.finYear || "—"}
@@ -1133,7 +1133,7 @@ export default function ReceivedPaymentPage() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {p.projectName} ·{" "}
-                          {format(new Date(p.docDate), "dd/MM/yyyy")}
+                          {p.docDate ? format(new Date(p.docDate), "dd/MM/yyyy") : "—"}
                         </p>
                       </div>
                       <div className="text-right shrink-0">

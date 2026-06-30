@@ -584,6 +584,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     sgstRate: null,
     igstRate: null,
     billingTermsData: null,
+    paidTo: "",
   };
 }
 
@@ -2462,7 +2463,7 @@ const Payment: React.FC = () => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
-      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef))
+      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef + " ") || o.label.startsWith(rest.expenseRef + " —"))
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);

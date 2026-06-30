@@ -42,7 +42,7 @@ router.get("/", cache("sa-marketing-invoices", 300), async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("[sa-marketing-invoices] GET error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -83,20 +83,21 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
     if (err.number === 2627 || err.number === 2601)
       return res.status(409).json({ error: "Invoice Number already exists" });
     console.error("[sa-marketing-invoices] POST error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // PUT
 router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount, DueDate, PaymentStatus, Notes, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
   const computedTotal = (parseFloat(Amount) || 0) + (parseFloat(GstAmount) || 0);
   try {
     const pool = getPool();
     await pool.request()
-      .input("Id", sql.Int, parseInt(id))
+      .input("Id", sql.Int, id)
       .input("InvoiceNumber", sql.NVarChar(50), InvoiceNumber)
       .input("VendorName", sql.NVarChar(200), VendorName || null)
       .input("CampaignId", sql.Int, CampaignId || null)
@@ -126,7 +127,7 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
     if (err.number === 2627 || err.number === 2601)
       return res.status(409).json({ error: "Invoice Number already exists" });
     console.error("[sa-marketing-invoices] PUT error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -150,7 +151,7 @@ router.delete("/:id", requirePageRight("sa-marketing-invoices", "delete"), async
     res.json({ message: `Invoice "${InvoiceNumber}" deleted successfully` });
   } catch (err) {
     console.error("[sa-marketing-invoices] DELETE error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -183,7 +184,7 @@ router.post("/:id/approve", requirePageRight("sa-marketing-invoices", "edit"), a
     res.json({ message: "Invoice approved" });
   } catch (err) {
     console.error("[sa-marketing-invoices] POST /approve error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -198,6 +199,10 @@ router.post("/:id/reject", requirePageRight("sa-marketing-invoices", "edit"), as
     const check = await pool.request().input("Id", sql.Int, id)
       .query("SELECT Id, ApprovalStatus FROM dbo.SaMarketingInvoice WHERE Id = @Id");
     if (!check.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    if (check.recordset[0].ApprovalStatus === "Approved")
+      return res.status(400).json({ error: "Approved invoice cannot be rejected" });
+    if (check.recordset[0].ApprovalStatus === "Rejected")
+      return res.status(400).json({ error: "Invoice is already rejected" });
     await pool.request()
       .input("Id", sql.Int, id)
       .input("ApprovedBy", sql.Int, actorId)
@@ -214,7 +219,7 @@ router.post("/:id/reject", requirePageRight("sa-marketing-invoices", "edit"), as
     res.json({ message: "Invoice rejected" });
   } catch (err) {
     console.error("[sa-marketing-invoices] POST /reject error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

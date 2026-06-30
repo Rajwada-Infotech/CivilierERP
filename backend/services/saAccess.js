@@ -1,3 +1,5 @@
+const { sql } = require("../db");
+
 function actorId(req) {
   const id = req.user?.userId ?? req.user?.id;
   const numeric = Number(id);
@@ -26,7 +28,7 @@ function applyLeadScope(request, req, alias = "l") {
   if (isSaAdmin(req)) return "1=1";
   const id = actorId(req);
   if (!id) return "1=0";
-  request.input("ActorUserId", id);
+  request.input("ActorUserId", sql.Int, id);
   if (isSaTeamLead(req)) {
     // Team lead sees all leads assigned to them OR any of their salespersons
     return `(${alias}.AssignedTeamLeadId = @ActorUserId OR ${alias}.AssignedSalespersonId IN (SELECT MemberUserId FROM dbo.SaSalesTeam WHERE TeamLeadUserId = @ActorUserId AND IsActive = 1))`;

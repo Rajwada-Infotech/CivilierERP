@@ -17,7 +17,7 @@ router.get("/", authMiddleware, async (req, res) => {
   if (!activityId) return res.status(400).json({ error: "activityId is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("activityId", sql.Int, activityId).query(`
       SELECT
         ai.ActivityItemId AS id,
@@ -49,7 +49,7 @@ router.post("/", authMiddleware, requirePageRight("activity-master", "edit"), as
   if (!itemId) return res.status(400).json({ error: "itemId is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     const dup = await pool.request()
       .input("activityId", sql.Int, activityId)
@@ -81,7 +81,7 @@ router.delete("/:id", authMiddleware, requirePageRight("activity-master", "edit"
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request()
       .input("id", sql.Int, id)
       .query(`DELETE FROM dbo.ActivityItems WHERE ActivityItemId = @id`);

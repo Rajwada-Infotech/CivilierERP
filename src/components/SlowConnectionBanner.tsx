@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
-import Lottie from "lottie-react";
+import { useLottie } from "lottie-react";
 import signalAnimationRaw from "@/assets/mobile-signal.json";
 
 const AMBER = [1, 0.706, 0, 1];
@@ -20,18 +20,14 @@ function recolorToAmber(data: any) {
 }
 
 function SignalLottie() {
-  const animationData = useMemo(
-    () => recolorToAmber(signalAnimationRaw),
-    [],
-  );
-  return (
-    <Lottie
-      animationData={animationData}
-      loop
-      autoplay
-      style={{ width: 24, height: 24, flexShrink: 0 }}
-    />
-  );
+  const animationData = useMemo(() => recolorToAmber(signalAnimationRaw), []);
+  const { View } = useLottie({
+    animationData,
+    loop: true,
+    autoplay: true,
+    style: { width: 24, height: 24, flexShrink: 0 },
+  });
+  return <>{View}</>;
 }
 
 // ─── slow-connection hook ─────────────────────────────────────────────────────

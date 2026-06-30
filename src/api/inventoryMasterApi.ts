@@ -13,6 +13,7 @@ export interface InventoryMasterRow {
   StockIn: number;
   StockOut: number;
   ClosingStock: number;
+  CustomerRate?: number | null;
 }
 
 export interface InventoryMasterResponse {
@@ -26,9 +27,13 @@ export interface InventoryMasterResponse {
 export const getInventoryMaster = async (
   date: string,
   godownId?: number | null,
+  dateFrom?: string,
+  dateTo?: string,
 ): Promise<InventoryMasterResponse> => {
   const qs = new URLSearchParams({ date });
   if (godownId != null) qs.set("godownId", String(godownId));
+  if (dateFrom) qs.set("dateFrom", dateFrom);
+  if (dateTo) qs.set("dateTo", dateTo);
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch inventory: ${res.status}`);
   return res.json();

@@ -57,6 +57,14 @@ function resolveTermAmount(term, totalValue) {
   return 0;
 }
 
+function addDaysISO(baseDate, days) {
+  if (!baseDate || days === null || days === undefined) return null;
+  const dt = new Date(`${String(baseDate).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setUTCDate(dt.getUTCDate() + (parseInt(days, 10) || 0));
+  return dt.toISOString().slice(0, 10);
+}
+
 function getPayload(body) {
   const applicantId = normalizeNumber(body?.ApplicantId);
   const unitSelectionId = normalizeNumber(body?.UnitSelectionId);
@@ -140,8 +148,19 @@ async function fetchTermsByIds(pool, termIds) {
     req.input(`tid${i}`, sql.Int, id);
     return `@tid${i}`;
   });
+  const hasCreditDays = await pool
+    .request()
+    .query(`
+      SELECT 1 AS found
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PaymentTermMaster')
+        AND name = 'CreditDays'
+    `);
+  const creditDaysSelect = hasCreditDays.recordset[0]
+    ? "CreditDays"
+    : "CAST(NULL AS INT) AS CreditDays";
   const result = await req.query(`
-    SELECT TermID, TermName, ValueType, TermValue, IsActive
+    SELECT TermID, TermName, ValueType, TermValue, ${creditDaysSelect}, IsActive
     FROM dbo.PaymentTermMaster
     WHERE TermID IN (${placeholders.join(",")})
   `);
@@ -160,13 +179,15 @@ async function upsertBookingPaymentTerms(
   bookingNo,
   termIds,
   totalValue,
+  bookingDate,
 ) {
   // Delete existing
   await new sql.Request(transaction)
     .input("BookingID", sql.Int, bookingId)
     .query("DELETE FROM dbo.BookingPaymentTerms WHERE BookingID = @BookingID");
 
-  if (!termIds || termIds.length === 0) return 0;
+  if (!termIds || termIds.length === 0)
+    return { totalComputed: 0, paymentPlanSummary: null };
 
   // Fetch term details
   const pool = getPool();
@@ -183,17 +204,19 @@ async function upsertBookingPaymentTerms(
     totalComputed += computed;
     termNames.push(term.TermName);
     const docRef = `PMT-${bookingNo}-${String(i + 1).padStart(3, "0")}`;
+    const dueDate = addDaysISO(bookingDate, term.CreditDays);
 
     await new sql.Request(transaction)
       .input("BookingID", sql.Int, bookingId)
       .input("TermID", sql.Int, termId)
       .input("ComputedAmount", sql.Decimal(18, 2), computed)
       .input("DocRef", sql.NVarChar(50), docRef)
-      .input("SortOrder", sql.Int, i + 1).query(`
+      .input("SortOrder", sql.Int, i + 1)
+      .input("DueDate", sql.Date, dueDate).query(`
         INSERT INTO dbo.BookingPaymentTerms
-          (BookingID, TermID, ComputedAmount, DocRef, SortOrder)
+          (BookingID, TermID, ComputedAmount, DocRef, SortOrder, DueDate)
         VALUES
-          (@BookingID, @TermID, @ComputedAmount, @DocRef, @SortOrder)
+          (@BookingID, @TermID, @ComputedAmount, @DocRef, @SortOrder, @DueDate)
       `);
   }
   return { totalComputed, paymentPlanSummary: termNames.join(", ") || null };
@@ -506,6 +529,7 @@ router.post(
             bookingNo,
             payload.PaymentTermIds,
             payload.TotalValue,
+            payload.BookingDate,
           );
         await new sql.Request(transaction)
           .input("Id", sql.Int, id)
@@ -629,6 +653,7 @@ router.put(
           bookingNo,
           payload.PaymentTermIds,
           payload.TotalValue,
+          payload.BookingDate,
         );
       if (payload.PaymentTermIds && payload.PaymentTermIds.length > 0) {
         await new sql.Request(transaction)

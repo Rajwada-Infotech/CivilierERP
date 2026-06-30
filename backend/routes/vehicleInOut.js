@@ -139,7 +139,7 @@ async function getAttachmentsFor(pool, vehicleInOutId) {
 // ── GET /next-number ─────────────────────────────────────────────────────────
 router.get("/next-number", async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const docTypeId = await resolveDocTypeId(pool, sql, "VEH");
     const preview = await previewNextDocNumber(pool, sql, docTypeId);
     res.json({ nextDocNo: preview.nextDocNo });
@@ -151,7 +151,7 @@ router.get("/next-number", async (req, res) => {
 // ── GET / — paginated list ────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
     const limit = Math.min(parseInt(req.query.limit || "20", 10), 100);
     const offset = (page - 1) * limit;
@@ -236,7 +236,7 @@ router.get("/", async (req, res) => {
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const id = parseInt(req.params.id, 10);
     const result = await pool.request().input("ID", sql.Int, id).query(`
         SELECT
@@ -286,7 +286,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
 
-  const pool = await getPool();
+  const pool = getPool();
   let recordId = null;
 
   try {
@@ -406,7 +406,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     return res.status(400).json({ error: "vehicleNo is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     await pool
       .request()
       .input("ID", sql.Int, id)
@@ -481,7 +481,7 @@ router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("vehicle-in-out", "approve"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -506,7 +506,7 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", requirePageRight("vehicle-in-out", "approve"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -541,7 +541,7 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
 
   const id = parseInt(req.params.id, 10);
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const check = await pool
       .request()
       .input("ID", sql.Int, id)
@@ -593,7 +593,7 @@ router.post("/upload", requirePageRight("vehicle-in-out", "edit"), upload.array(
     return res.status(400).json({ error: "No file uploaded" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const results = [];
 
     for (const file of files) {
@@ -638,7 +638,7 @@ router.get("/attachment/:attachId", async (req, res) => {
     if (isNaN(attachId))
       return res.status(400).json({ error: "Invalid attachment id" });
 
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("AttachmentId", sql.Int, attachId)
       .query(`
         SELECT AttachmentId, FileName, MimeType, FileData
@@ -674,7 +674,7 @@ router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delet
     if (isNaN(attachId))
       return res.status(400).json({ error: "Invalid attachment id" });
 
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool
       .request()
       .input("AttachmentId", sql.Int, attachId)

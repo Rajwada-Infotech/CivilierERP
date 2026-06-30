@@ -13,6 +13,16 @@ const logger = require("./logger");
 const { getPool, sql } = require("./db");
 const { normalizeRole } = require("./middleware/role");
 const { ALLOWED_ORIGINS } = require("./config/origins");
+const { redisGetStrict } = require("./redis");
+const BLACKLIST_PREFIX = "bl:";
+async function isTokenBlacklisted(token) {
+  try {
+    const val = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
+    return val === "1";
+  } catch {
+    return true; // fail-closed: if Redis is down, deny
+  }
+}
 
 /** @type {import('socket.io').Server | null} */
 let io = null;
@@ -63,12 +73,9 @@ function initSocket(httpServer) {
   });
 
   // ── JWT handshake ────────────────────────────────────────────────────────
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     // Clients send token via auth object: socket({ auth: { token } })
-    const token =
-      socket.handshake.auth?.token ||
-      socket.handshake.query?.token ||
-      null;
+    const token = socket.handshake.auth?.token || null;
 
     if (!token) {
       return next(new Error("Authentication required"));
@@ -76,6 +83,8 @@ function initSocket(httpServer) {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const blacklisted = await isTokenBlacklisted(token);
+      if (blacklisted) return next(new Error("Token has been revoked"));
       socket.data.user = decoded;
       next();
     } catch (err) {

@@ -97,7 +97,7 @@ async function promoteLeadToFollowup(pool, leadId, userId) {
       .input("aid", sql.Int, applicantId)
       .query(`
         UPDATE dbo.SaLead
-        SET FollowupCustomerId = @aid, Status = 'Visited', UpdatedAt = SYSDATETIME()
+        SET FollowupCustomerId = @aid, Status = 'InFollowup', UpdatedAt = SYSDATETIME()
         WHERE Id = @lid
       `);
 
@@ -167,7 +167,7 @@ async function promoteLeadToBooking(pool, leadId, bookingData, userId) {
       .input("bid", sql.Int, bookingId)
       .query(`
         UPDATE dbo.SaLead
-        SET BookingId = @bid, Status = 'Booking', UpdatedAt = SYSDATETIME()
+        SET BookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
         WHERE Id = @lid
       `);
 

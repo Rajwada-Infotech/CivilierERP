@@ -123,8 +123,12 @@ export interface CompanyDetail {
   email: string | null;
   phone_number: string | null;
   address: string | null;
+  address_line2?: string | null;
   city: string | null;
   state: string | null;
+  pincode?: string | null;
+  gst_no?: string | null;
+  pan_no?: string | null;
 }
 
 export const getCompanyById = async (id: number): Promise<CompanyDetail> => {

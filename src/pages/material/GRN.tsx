@@ -962,7 +962,7 @@ export default function GRN() {
   const filteredGrns = grns.filter((grn: any) => {
     if (selectedFinYear && grn.FinYear && grn.FinYear !== selectedFinYear)
       return false;
-    if (grnStatusFilter !== "All" && grn.EStatus !== grnStatusFilter)
+    if (grnStatusFilter !== "All" && grn.Status !== grnStatusFilter)
       return false;
     if (!search) return true;
     const q = search.toLowerCase();

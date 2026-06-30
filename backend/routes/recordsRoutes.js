@@ -185,6 +185,43 @@ async function fetchVaultDocuments(pool, actor) {
   }));
 }
 
+async function fetchGRNAttachments(pool, actor) {
+  if (actor.role === "customer") return [];
+  const tableCheck = await pool.request().query(
+    "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.GRNAttachments')"
+  );
+  if (!tableCheck.recordset[0]) return [];
+  const result = await pool.request().query(`
+    SELECT
+      a.AttachmentId,
+      a.GRNID,
+      g.DocNo        AS GRNDocNo,
+      g.GRNNo        AS GRNNo,
+      a.FileName,
+      a.MimeType,
+      a.FileSize,
+      a.UploadedBy,
+      a.UploadedAt
+    FROM dbo.GRNAttachments a
+    LEFT JOIN dbo.GoodsReceiptNotes g ON g.GRNID = a.GRNID
+    WHERE a.GRNID IS NOT NULL
+    ORDER BY a.UploadedAt DESC
+  `);
+  return result.recordset.map((r) => ({
+    source: "grn",
+    sourceId: r.AttachmentId,
+    module: "GRN",
+    docRef: r.GRNDocNo || r.GRNNo || `GRN-${r.GRNID}`,
+    docLabel: r.GRNDocNo || r.GRNNo || `GRN #${r.GRNID}`,
+    filename: r.FileName,
+    mimeType: r.MimeType,
+    size: r.FileSize,
+    uploadedBy: r.UploadedBy || null,
+    uploadedAt: r.UploadedAt,
+    url: `/api/grns/attachment/${r.AttachmentId}`,
+  }));
+}
+
 // ─── Registry of sources ─────────────────────────────────────────────────────
 // To wire in a future module's attachments, add { key, label, fetch } here —
 // nothing else in this file needs to change.
@@ -192,6 +229,7 @@ const SOURCES = [
   { key: "ticket", label: "Ticket", fetch: fetchTicketAttachments },
   { key: "vehicle", label: "Vehicle In/Out", fetch: fetchVehicleAttachments },
   { key: "vault", label: "Document Vault", fetch: fetchVaultDocuments },
+  { key: "grn", label: "GRN", fetch: fetchGRNAttachments },
 ];
 
 // ─── GET /api/records — unified list ─────────────────────────────────────────

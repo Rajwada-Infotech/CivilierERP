@@ -10,5 +10,4 @@ README.md
 coverage
 *.log
 dist
-worker.js
 tmp

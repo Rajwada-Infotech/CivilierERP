@@ -6,6 +6,12 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { grnBodySchema } = require("../validation/financialRouteSchemas");
+const multer = require("multer");
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
+});
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
@@ -146,7 +152,7 @@ router.get("/grn-gst-data", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "grnId is required" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // ── 1. Fetch GRN header + linked PO/supplier/company context ────────────
     const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
@@ -442,7 +448,7 @@ router.get("/filtered", async (req, res) => {
 // The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
@@ -557,7 +563,7 @@ router.get("/by-po/:poId", async (req, res) => {
     return res.status(400).json({ error: "Invalid PO ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("POID", sql.Int, poId).query(`
       SELECT
         grn.GRNID,
@@ -589,7 +595,7 @@ router.get("/:id", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
         SELECT
           grn.GRNID,
@@ -669,7 +675,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       .json({ error: "GRNDate and SupplierID are required" });
   }
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: a GRN can only be raised against an Approved PO ────────────────
   // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
@@ -800,6 +806,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
+    await linkGRNAttachments(transaction, grnId, parseIdList(req.body.attachmentIds));
 
     // IMPORTANT: use transaction.request() not pool.request() — the GRN row
     // only exists inside this uncommitted transaction; pool sees nothing yet.
@@ -930,7 +937,7 @@ router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodyS
   } = req.body;
   const grnId = parseInt(req.params.id, 10);
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
   if (poId) {
@@ -1020,6 +1027,7 @@ router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodyS
       putGodownId,
     );
     await transaction.commit();
+    await linkGRNAttachments(pool, grnId, parseIdList(req.body.attachmentIds));
 
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
@@ -1043,7 +1051,7 @@ router.get("/:id/can-delete", async (req, res) => {
   if (!Number.isFinite(grnId) || grnId <= 0)
     return res.status(400).json({ error: "Invalid id" });
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // ── 1. Linked expense bookings ────────────────────────────────────────────
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
@@ -1061,21 +1069,19 @@ router.get("/:id/can-delete", async (req, res) => {
       status: e.EStatus,
     }));
 
-    const expDocNos = expCheck.recordset
-      .map((e) => e.EDocNo)
-      .filter(Boolean)
-      .map((d) => `'${d.replace(/'/g, "''")}'`)
-      .join(",");
+    const docNoList = expCheck.recordset.map((e) => e.EDocNo).filter(Boolean);
 
     // ── 2. BRS-cleared payments ───────────────────────────────────────────────
-    if (expDocNos.length > 0) {
-      const brsCheck = await pool.request().query(`
+    if (docNoList.length > 0) {
+      const brsReq = pool.request();
+      const brsParams = docNoList.map((d, i) => { brsReq.input(`dn${i}`, sql.NVarChar(100), d); return `@dn${i}`; });
+      const brsCheck = await brsReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
         FROM dbo.NewPayment np
         JOIN dbo.BankReconciliation brc
           ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
         JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-        WHERE np.PExpenseRef IN (${expDocNos})
+        WHERE np.PExpenseRef IN (${brsParams.join(",")})
       `);
       if (brsCheck.recordset.length > 0) {
         return res.json({
@@ -1093,11 +1099,13 @@ router.get("/:id/can-delete", async (req, res) => {
       }
 
       // ── 3. Uncleared payments ─────────────────────────────────────────────
-      const payCheck = await pool.request().query(`
+      const payReq = pool.request();
+      const payParams = docNoList.map((d, i) => { payReq.input(`pdn${i}`, sql.NVarChar(100), d); return `@pdn${i}`; });
+      const payCheck = await payReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
         FROM dbo.NewPayment np
         JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-        WHERE np.PExpenseRef IN (${expDocNos})
+        WHERE np.PExpenseRef IN (${payParams.join(",")})
       `);
       if (payCheck.recordset.length > 0) {
         return res.json({
@@ -1129,7 +1137,7 @@ router.get("/:id/can-delete", async (req, res) => {
 // DELETE
 router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── Guard: linked expense bookings ────────────────────────────────────────
   const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
@@ -1268,7 +1276,7 @@ router.put("/:id/submit", requirePageRight("grn-master", "edit"), async (req, re
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("grns", "approve"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -1292,7 +1300,7 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", requirePageRight("grns", "approve"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
@@ -1327,7 +1335,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     // Fetch GRN row for its items JSON
     const grnResult = await pool
@@ -1488,7 +1496,7 @@ router.get("/:id/pending-items", async (req, res) => {
   if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
 
   try {
-    const pool = await getPool();
+    const pool = getPool();
 
     const grnResult = await pool.request().input("GRNID", sql.Int, grnId)
       .query(`
@@ -1576,7 +1584,7 @@ router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create
     return res.status(400).json({ error: "Invalid transferId" });
   }
 
-  const pool = await getPool();
+  const pool = getPool();
 
   // ── 1. Fetch transfer ──────────────────────────────────────────────────────
   let transfer;
@@ -1784,7 +1792,7 @@ router.get("/by-transfer/:transferId", async (req, res) => {
     return res.status(400).json({ error: "Invalid transferId" });
   }
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool
       .request()
       .input("SourceTransferID", sql.Int, transferId).query(`
@@ -1799,5 +1807,181 @@ router.get("/by-transfer/:transferId", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
+// ─── GRN Attachments ──────────────────────────────────────────────────────────
+// Mirrors the Vehicle In/Out attachment pattern: files stored as binary in
+// the DB (not disk), uploaded while the form is still being filled out
+// (GRNID = NULL), then linked to the GRN once it's actually saved.
+
+function attachmentRowToDto(a) {
+  return {
+    id: a.AttachmentId,
+    filename: a.FileName,
+    mimeType: a.MimeType,
+    size: a.FileSize,
+    url: `/api/grns/attachment/${a.AttachmentId}`,
+  };
+}
+
+let _grnAttachTableExists = null;
+async function grnAttachTableExists(pool) {
+  if (_grnAttachTableExists !== null) return _grnAttachTableExists;
+  const r = await pool.request().query(
+    "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.GRNAttachments')"
+  );
+  _grnAttachTableExists = !!r.recordset[0];
+  return _grnAttachTableExists;
+}
+
+async function linkGRNAttachments(pool, grnId, attachmentIds) {
+  if (!attachmentIds.length) return;
+  if (!await grnAttachTableExists(pool)) return;
+  for (const attachId of attachmentIds) {
+    await pool
+      .request()
+      .input("AttachmentId", sql.Int, attachId)
+      .input("GRNID", sql.Int, grnId).query(`
+        UPDATE dbo.GRNAttachments
+        SET GRNID = @GRNID
+        WHERE AttachmentId = @AttachmentId AND GRNID IS NULL
+      `);
+  }
+}
+
+async function getGRNAttachmentsFor(pool, grnId) {
+  if (!await grnAttachTableExists(pool)) return [];
+  const result = await pool
+    .request()
+    .input("GRNID", sql.Int, grnId).query(`
+      SELECT AttachmentId, FileName, MimeType, FileSize
+      FROM dbo.GRNAttachments
+      WHERE GRNID = @GRNID
+      ORDER BY UploadedAt ASC
+    `);
+  return result.recordset.map(attachmentRowToDto);
+}
+
+function parseIdList(raw) {
+  if (Array.isArray(raw))
+    return raw.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed))
+        return parsed.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+// ── POST /upload — GRN attachments (stored in DB, not disk) ──────────────────
+// Accepts multiple files at once (images, videos, documents, etc).
+router.post(
+  "/upload",
+  requirePageRight("grn-master", "edit"),
+  upload.array("file", 20),
+  async (req, res) => {
+    const userEmail = req.user?.email;
+    if (!userEmail) return res.status(401).json({ error: "User context missing" });
+
+    const files = req.files;
+    if (!files || files.length === 0)
+      return res.status(400).json({ error: "No file uploaded" });
+
+    try {
+      const pool = getPool();
+      if (!await grnAttachTableExists(pool))
+        return res.status(503).json({ error: "GRN attachments not yet available. Please run pending database migrations." });
+      const results = [];
+
+      for (const file of files) {
+        const insertResult = await pool
+          .request()
+          .input("FileName", sql.NVarChar(255), file.originalname)
+          .input("MimeType", sql.NVarChar(100), file.mimetype)
+          .input("FileSize", sql.Int, file.size)
+          .input("FileData", sql.VarBinary(sql.MAX), file.buffer)
+          .input("UploadedBy", sql.NVarChar(150), userEmail).query(`
+            INSERT INTO dbo.GRNAttachments
+              (GRNID, FileName, MimeType, FileSize, FileData, UploadedBy)
+            OUTPUT INSERTED.AttachmentId
+            VALUES
+              (NULL, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy)
+          `);
+
+        const attachId = insertResult.recordset[0].AttachmentId;
+        results.push({
+          id: attachId,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size,
+          url: `/api/grns/attachment/${attachId}`,
+        });
+      }
+
+      res.json({ success: true, attachments: results, ids: results.map((r) => r.id) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── GET /attachment/:attachId — stream binary from DB ─────────────────────────
+router.get("/attachment/:attachId", async (req, res) => {
+  try {
+    const attachId = parseInt(req.params.attachId, 10);
+    if (isNaN(attachId)) return res.status(400).json({ error: "Invalid attachment id" });
+
+    const pool = getPool();
+    if (!await grnAttachTableExists(pool)) return res.status(404).json({ error: "Attachment not found" });
+    const result = await pool.request().input("AttachmentId", sql.Int, attachId).query(`
+        SELECT AttachmentId, FileName, MimeType, FileData
+        FROM dbo.GRNAttachments
+        WHERE AttachmentId = @AttachmentId
+      `);
+
+    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+
+    const attachment = result.recordset[0];
+    res.setHeader("Content-Type", attachment.MimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${encodeURIComponent(attachment.FileName)}"`,
+    );
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.send(attachment.FileData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /attachment/:attachId — remove a single attachment ────────────────
+router.delete(
+  "/attachment/:attachId",
+  requirePageRight("grn-master", "delete"),
+  async (req, res) => {
+    try {
+      const attachId = parseInt(req.params.attachId, 10);
+      if (isNaN(attachId)) return res.status(400).json({ error: "Invalid attachment id" });
+
+      const pool = getPool();
+      const result = await pool
+        .request()
+        .input("AttachmentId", sql.Int, attachId)
+        .query(`DELETE FROM dbo.GRNAttachments WHERE AttachmentId = @AttachmentId`);
+
+      if (result.rowsAffected[0] === 0)
+        return res.status(404).json({ error: "Attachment not found" });
+
+      await bumpCacheVersion("grns");
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 module.exports = router;

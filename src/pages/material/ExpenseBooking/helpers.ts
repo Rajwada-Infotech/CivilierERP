@@ -160,7 +160,7 @@ export function computeGrnNetWithTerms(
 
   // Derive effective GST rates from basicAmount (base) and grnTotal (incl-GST)
   const base = basicAmount ?? 0;
-  const gst = grnTotal - base;
+  const gst = Math.max(0, grnTotal - base);
   const effectiveGSTRate = base > 0 ? (gst / base) * 100 : 0;
   // Split GST rate evenly for CGST/SGST (used for recomputation)
   const effectiveCGSTRate = effectiveGSTRate / 2;
@@ -281,6 +281,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     glAccount: "",
     workDoneRef: "",
     additionalCharges: [],
+    paymentTermId: null,
   };
 }
 
@@ -414,6 +415,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     costCenter: row.ECostCenter ?? "",
     glAccount: row.EGLAccount ?? "",
     workDoneRef: row.EWorkDoneRef ?? "",
+    paymentTermId: row.PaymentTermId ?? null,
     additionalCharges: (() => {
       try {
         if (!row.EAdditionalCharges) return [];
@@ -495,5 +497,6 @@ export function recordToDb(
     ECostCenter: form.costCenter || null,
     EGLAccount: form.glAccount || null,
     EWorkDoneRef: form.workDoneRef || null,
+    PaymentTermId: form.paymentTermId ?? null,
   };
 }

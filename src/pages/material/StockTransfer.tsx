@@ -648,7 +648,7 @@ function TransferHistory() {
           /* non-fatal */
         });
     });
-  }, [transfers.length]);
+  }, [transfers]);
 
   const handleGRNSuccess = (grnNo: string) => {
     setSuccessGrnNo(grnNo);
@@ -826,8 +826,11 @@ export default function StockTransfer() {
   const [activeTab, setActiveTab] = useState<"transfer" | "history">(
     "transfer",
   );
+  const [transferMode, setTransferMode] = useState<"intra" | "inter">("intra");
+  const [viaBank, setViaBank] = useState(false);
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterProjectId, setFilterProjectId] = useState("");
+  const [toCompanyId, setToCompanyId] = useState("");
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
   const [items, setItems] = useState<TItem[]>([emptyItem()]);
@@ -944,7 +947,7 @@ export default function StockTransfer() {
   const canTransfer =
     !!fromGodownId &&
     !!toGodownId &&
-    fromGodownId !== toGodownId &&
+    (transferMode === "inter" || fromGodownId !== toGodownId) &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
     !hasOverLimit &&
     !transferMut.isPending;
@@ -964,7 +967,11 @@ export default function StockTransfer() {
       FromGodownID: fromGodownId!,
       ToGodownID: toGodownId!,
       TransferItems: validItems,
-      Remarks: remarks,
+      Remarks: [
+        remarks,
+        transferMode === "inter" ? "[Inter-Company]" : "[Intra-Company]",
+        viaBank ? "[Via Dummy Bank]" : "",
+      ].filter(Boolean).join(" "),
     });
   };
 
@@ -976,10 +983,16 @@ export default function StockTransfer() {
     setErrorMsg("");
   };
 
+  const toCompanyGodowns = useMemo(() => {
+    if (transferMode === "intra") return companyGodowns;
+    if (!toCompanyId) return allGodowns.filter((g) => g.EnterpriseID != null && String(g.EnterpriseID) !== filterCompanyId);
+    return allGodowns.filter((g) => String(g.EnterpriseID ?? "") === toCompanyId);
+  }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns]);
+
   const fromGodown =
     companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
-    companyGodowns.find((g) => g.GodownID === toGodownId) || null;
+    (transferMode === "intra" ? companyGodowns : toCompanyGodowns).find((g) => g.GodownID === toGodownId) || null;
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -1044,6 +1057,58 @@ export default function StockTransfer() {
                 </button>
               </div>
             )}
+
+            {/* ── Transfer Mode Toggle ─────────────────────────────────────────── */}
+            <div className="rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+                <button
+                  onClick={() => {
+                    setTransferMode("intra");
+                    setToCompanyId("");
+                    setToGodownId(null);
+                    setViaBank(false);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    transferMode === "intra"
+                      ? "bg-card shadow text-foreground border border-border"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Intra-Company
+                </button>
+                <button
+                  onClick={() => {
+                    setTransferMode("inter");
+                    setToGodownId(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    transferMode === "inter"
+                      ? "bg-card shadow text-foreground border border-border"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Inter-Company
+                </button>
+              </div>
+              {transferMode === "inter" && (
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <div
+                    onClick={() => setViaBank((v) => !v)}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${viaBank ? "bg-amber-500" : "bg-muted border border-border"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${viaBank ? "translate-x-4" : ""}`} />
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    Route via Dummy Bank{viaBank && <span className="ml-1 text-amber-600 font-medium">(enabled)</span>}
+                  </span>
+                </label>
+              )}
+              <span className="text-xs text-muted-foreground/60 sm:ml-auto">
+                {transferMode === "intra"
+                  ? "Transfer between godowns within the same company"
+                  : "Transfer stock between different companies"}
+              </span>
+            </div>
 
             {/* ── Filters + Transfer Route ──────────────────────────────────────── */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
@@ -1114,12 +1179,23 @@ export default function StockTransfer() {
                   variant="from"
                   placeholder="Select source godown…"
                 />
+                {transferMode === "inter" && (
+                  <FilterSelect
+                    icon={Building2}
+                    label="To Company"
+                    value={toCompanyId}
+                    onChange={(v) => { setToCompanyId(v); setToGodownId(null); }}
+                    options={companyOptions.filter((o) => o.value !== filterCompanyId)}
+                    placeholder="Select destination company"
+                    color="blue"
+                  />
+                )}
                 <GodownSelect
                   label="To"
                   value={toGodownId}
                   onChange={setToGodownId}
-                  godowns={companyGodowns}
-                  exclude={fromGodownId}
+                  godowns={toCompanyGodowns}
+                  exclude={transferMode === "intra" ? fromGodownId : undefined}
                   variant="to"
                   placeholder="Select destination godown…"
                 />
@@ -1281,6 +1357,14 @@ export default function StockTransfer() {
                       className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-emerald-500/30"
                     />
                   </div>
+                  {viaBank && transferMode === "inter" && (
+                    <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-400/30 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+                      <AlertCircle size={13} className="mt-0.5 shrink-0" />
+                      <span>
+                        <strong>Dummy Bank routing enabled.</strong> This transfer will be recorded as two legs: a stock-out debit to a dummy bank account at the source company, and a stock-in credit from the same dummy bank at the destination company. Ensure the dummy bank GL account is configured before executing.
+                      </span>
+                    </div>
+                  )}
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="hidden sm:block text-xs text-muted-foreground">
                       Review items and godowns before executing.

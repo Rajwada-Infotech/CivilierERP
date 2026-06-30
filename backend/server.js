@@ -117,6 +117,7 @@ const ALL_ROUTES = [
   { path: "/api/civilworkdpr-dashboard", file: "./routes/civilworkdprDashboard" },
   { path: "/api/engineering", file: "./routes/engineering" },
   { path: "/api/material-issues", file: "./routes/materialIssues" },
+  { path: "/api/material-issue-returns", file: "./routes/issueReturn" },
   { path: "/api/material-requests", file: "./routes/materialRequests" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },

@@ -22,7 +22,7 @@ async function fetchCampaigns(): Promise<any[]> {
 
 async function fetchPlatformOptions(): Promise<{ value: string; label: string }[]> {
   try {
-    const res = await fetchWithAuth(`${API}/platforms`);
+    const res = await fetchWithAuth("/api/sa/social-media");
     if (!res.ok) return [];
     const data: { Id: number; Name: string }[] = await res.json();
     return data.map((p) => ({ value: String(p.Id), label: p.Name }));

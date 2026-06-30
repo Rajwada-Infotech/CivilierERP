@@ -36,7 +36,7 @@ export const getCostCenters = async (): Promise<CostCenterRow[]> => {
 };
 
 export const getCostCenterOptions = async (): Promise<
-  { id: number; label: string; code: string }[]
+  { id: number; label: string; code: string; projectId: number | null }[]
 > => {
   const res = await fetchWithAuth(`${BASE}/options`);
   return handle(res);

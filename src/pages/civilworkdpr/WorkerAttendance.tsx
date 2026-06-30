@@ -217,13 +217,14 @@ const WorkerAttendance: React.FC = () => {
 
   const { data: calendarData, isLoading: calendarLoading } = useQuery({
     queryKey: ["workerCalendar", calendarWorker?.id, month],
-    queryFn: () => getWorkerCalendar(calendarWorker!.id, month),
+    queryFn: () => getWorkerCalendar(calendarWorker?.id as number, month),
     enabled: !!calendarWorker,
   });
 
   const openCalendar = (worker: WorkerSummary) => {
     const d = new Date();
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setSelectedDay(null);
     setCalendarWorker(worker);
   };
 

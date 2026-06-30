@@ -441,7 +441,7 @@ export const AppSidebar = () => {
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
-          className="relative z-10 flex-1 overflow-y-auto p-2"
+          className="relative z-10 flex-1 overflow-y-auto p-2 sidebar-scroll"
         >
           <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
             Menu
