@@ -386,9 +386,13 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
 
   let supplierHeadId = null;
   if (payment.PExpenseRef) {
+    // EMI payments store PExpenseRef as "{parentEDocNo}-EMI-{n}".
+    // Strip the suffix to resolve the parent booking for GL purposes.
+    const lookupRef = payment.PExpenseRef.replace(/-EMI-\d+$/i, "");
+
     const ebResult = await pool
       .request()
-      .input("EDocNo", sql.NVarChar(100), payment.PExpenseRef)
+      .input("EDocNo", sql.NVarChar(100), lookupRef)
       .query(`
         SELECT eb.ESourceType, eb.ESourceId, eb.EName
         FROM dbo.ExpenseBooking eb
