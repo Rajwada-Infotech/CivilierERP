@@ -7,11 +7,13 @@ const { applyLeadScope, actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
 
-// GET / — full distribution history
+// GET / — distribution history scoped by role
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const r = await pool.request().query(`
+    const req2 = pool.request();
+    const scope = applyLeadScope(req2, req, "l");
+    const r = await req2.query(`
       SELECT
         d.Id, d.LeadId, d.FromUserId, d.ToUserId, d.Level, d.Method,
         d.DistributedAt, d.DistributedBy,
@@ -22,6 +24,7 @@ router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, re
       JOIN  dbo.SaLead l ON d.LeadId = l.Id
       LEFT JOIN dbo.Users fu ON d.FromUserId = fu.id
       LEFT JOIN dbo.Users tu ON d.ToUserId = tu.id
+      WHERE ${scope}
       ORDER BY d.DistributedAt DESC
     `);
     res.json(r.recordset);

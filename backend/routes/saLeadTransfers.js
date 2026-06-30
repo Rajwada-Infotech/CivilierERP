@@ -58,9 +58,10 @@ router.get("/:id/items", requirePageRight("sa-lead-transfers", "view"), async (r
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
-    const result = await pool.request()
-      .input("RequestId", sql.Int, id)
-      .query(`
+    // Verify the caller owns this transfer request (non-admins can only see their own)
+    const ownerReq = pool.request().input("RequestId", sql.Int, id);
+    const ownerScope = applyLeadScope(ownerReq, req, "l");
+    const result = await ownerReq.query(`
         SELECT
           i.Id,
           i.LeadId,
@@ -76,6 +77,7 @@ router.get("/:id/items", requirePageRight("sa-lead-transfers", "view"), async (r
         JOIN dbo.SaLead l ON l.Id = i.LeadId
         LEFT JOIN dbo.Users sp ON sp.id = l.AssignedToUserId
         WHERE i.TransferRequestId = @RequestId
+          AND ${ownerScope}
         ORDER BY l.CustomerName
       `);
     res.json(result.recordset);
