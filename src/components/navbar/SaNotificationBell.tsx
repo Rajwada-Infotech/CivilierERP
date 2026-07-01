@@ -17,7 +17,7 @@ function timeAgo(isoDate: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export const SaNotificationNotification: React.FC = () => {
+export const SaNotificationBell: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { notifications, unreadCount, markRead, markAllRead } = useSaNotifications();
