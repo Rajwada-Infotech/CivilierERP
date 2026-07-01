@@ -6,9 +6,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { resolveDistributionForLead } = require("../services/saDistributionEngine");
 
 const rateLimit = require("express-rate-limit");
-
-router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(authMiddleware);
 
 // GET all rules with their members
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {

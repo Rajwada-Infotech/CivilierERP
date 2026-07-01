@@ -44,9 +44,8 @@ async function emitNotification(pool, userId, type, title, body, refId) {
 }
 
 const rateLimit = require("express-rate-limit");
-
-router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(authMiddleware);
 
 function genUid() {
   return "LEAD-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
