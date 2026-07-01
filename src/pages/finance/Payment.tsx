@@ -4910,7 +4910,7 @@ const Payment: React.FC = () => {
       {/* Payment detail view modal */}
       {viewingRec && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => {
             setViewingRec(null);
             setViewingChain(null);
@@ -5277,7 +5277,7 @@ const Payment: React.FC = () => {
 
       {/* Delete confirm */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg bg-destructive/10 shrink-0">

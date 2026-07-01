@@ -633,7 +633,7 @@ export default function PostApprovalRights() {
 
       {/* ── Slide-over permissions panel ──────────────────────────────── */}
       {showPanel && (
-        <div className="fixed inset-0 z-50 flex">
+        <div className="fixed inset-0 z-[60] flex">
           {/* Backdrop */}
           <div
             className="flex-1 bg-black/40 backdrop-blur-sm"

@@ -178,7 +178,7 @@ function GodownDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-[60] flex">
       {/* Backdrop */}
       <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
@@ -384,7 +384,7 @@ function DeleteDialog({
   if (!godown) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
         <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
           <Trash2 size={20} className="text-red-500" />
