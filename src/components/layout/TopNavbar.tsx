@@ -14,15 +14,10 @@ import {
   FileText,
   Settings,
   BarChart3,
-  LogOut,
-  User,
   LayoutGrid,
   PanelLeftClose,
   PanelLeftOpen,
   Puzzle,
-  ShieldCheck,
-  Crown,
-  Shield,
   Receipt,
   Truck,
   Users,
@@ -38,7 +33,6 @@ import {
   FileType2,
   Activity,
   ChevronDown,
-  Database,
   ClipboardList,
   Ruler,
   SlidersHorizontal,
@@ -47,7 +41,15 @@ import {
   TrendingUp,
   Megaphone,
   UsersRound,
+  ShieldCheck,
 } from "lucide-react";
+import {
+  Crown,
+  Data,
+  Shield,
+  Profile,
+  Logout,
+} from "iconsax-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
@@ -763,14 +765,14 @@ const UserMenuContent: React.FC<{
         style={cascade(2)}
         className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-lg hover:bg-muted transition-colors text-foreground"
       >
-        <User size={14} /> Profile
+        <Profile size={14} /> Profile
       </button>
       <button
         onMouseDown={handleLogout}
         style={cascade(3)}
         className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
       >
-        <LogOut size={14} /> Sign Out
+        <Logout size={14} /> Sign Out
       </button>
     </>
   );
@@ -828,7 +830,7 @@ export const TopNavbar = () => {
   const RoleIcon = isSuperAdmin
     ? Crown
     : isDba
-      ? Database
+      ? Data
       : isAdmin
         ? Shield
         : isMarketingHead
