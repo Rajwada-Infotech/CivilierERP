@@ -480,7 +480,12 @@ const SetupDropdown = ({
               : modVars
           }
         >
-          <Setting2 size={13} variant="Outline" color="currentColor" />
+          <Setting2
+            size={13}
+            variant="Outline"
+            color="currentColor"
+            className={`transition-transform duration-500 ${open ? "rotate-90" : ""}`}
+          />
           <span>Setup</span>
           <ChevronDown
             size={12}
