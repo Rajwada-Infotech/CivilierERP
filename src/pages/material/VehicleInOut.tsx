@@ -562,11 +562,6 @@ export default function VehicleInOut() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [filterFY, setFilterFY] = useState("");
-  // Pre-select active FY once finYears are loaded
-  React.useEffect(() => {
-    if (activeFinYear && filterFY === "") setFilterFY(activeFinYear);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFinYear]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);

@@ -85,6 +85,14 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const isMobile = useIsMobile();
   const { moduleSwitching, activeModule } = useModule();
   const isHome = useIsHomePage();
+  const location = useLocation();
+
+  // Pages that have their own sidebar content even without an activeModule
+  const SPECIAL_SIDEBAR_PREFIXES = ["/admin", "/dba", "/superadmin", "/user/profile", "/masters/named-entry-type", "/masters/type-of-doc"];
+  const isSpecialSidebarPage = SPECIAL_SIDEBAR_PREFIXES.some((p) => location.pathname.startsWith(p));
+
+  // Hide nav panel when no module is selected and we're not on a special page
+  const hideNavPanel = isHome || (!activeModule && !isSpecialSidebarPage);
 
   useModuleActivityLogger();
 
@@ -113,7 +121,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const NAV_W = 200;
   const mainML = isMobile
     ? 0
-    : isHome
+    : hideNavPanel
       ? STRIP_W
       : sidebarCollapsed
         ? STRIP_W
@@ -155,7 +163,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                     reminders, etc.) — that remount cost was the source of
                     the laggy/clunky open-close feel. ── */}
                 <AnimatePresence>
-                  {!isHome && (
+                  {!hideNavPanel && (
                     <motion.div
                       key="nav-panel"
                       initial={{ x: -NAV_W, opacity: 0 }}
