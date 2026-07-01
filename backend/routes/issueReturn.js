@@ -145,7 +145,7 @@ router.post("/", requirePageRight("material-issue-return", "create"), async (req
         .input("GodownId", sql.Int, GodownId ? parseInt(GodownId) : null)
         .input("Reason", sql.NVarChar(500), Reason || null)
         .input("Remarks", sql.NVarChar(1000), Remarks || null)
-        .input("CreatedBy", sql.Int, req.user?.id || null)
+        .input("CreatedBy", sql.Int, req.user?.userId || null)
         .query(`
           INSERT INTO dbo.MaterialIssueReturn
             (DocNo, ReturnDate, IssueId, CompanyId, ProjectId, GodownId, Reason, Remarks, Status, CreatedBy, CreatedAt)
@@ -159,8 +159,10 @@ router.post("/", requirePageRight("material-issue-return", "create"), async (req
         const qty = parseFloat(i.Quantity ?? i.quantity);
         return (i.M_Id || i.itemName || i.ItemName) && Number.isFinite(qty) && qty > 0;
       });
-      if (validItems.length === 0)
+      if (validItems.length === 0) {
+        await tx.rollback();
         return res.status(400).json({ error: "At least one item with a valid positive quantity is required" });
+      }
 
       for (const item of validItems) {
         await tx.request()
@@ -231,8 +233,10 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
         const qty = parseFloat(i.Quantity ?? i.quantity);
         return (i.M_Id || i.itemName || i.ItemName) && Number.isFinite(qty) && qty > 0;
       });
-      if (validItems.length === 0)
+      if (validItems.length === 0) {
+        await tx.rollback();
         return res.status(400).json({ error: "At least one item with a valid positive quantity is required" });
+      }
 
       for (const item of validItems) {
         await tx.request()
