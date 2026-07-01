@@ -369,20 +369,25 @@ router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, r
     const isFinalLevel = approvedSoFar + 1 >= totalLevels;
 
     if (isFinalLevel) {
-      const headerRes = await pool
-        .request()
-        .input("id", sql.Int, id)
-        .query(
-          `SELECT FromGodownID, ToGodownID, SaleItems, PostedToStock, DocNo FROM dbo.SaleOrders WHERE SaleOrderID=@id`,
-        );
-      const header = headerRes.recordset[0];
-      if (!header) throw new Error("Sale order not found");
+      // Lock the sale-order row for the whole stock-posting transaction so two
+      // concurrent final approvals can't both read PostedToStock=0 and both
+      // post stock (double OUT/IN movement). The second blocks on the UPDLOCK,
+      // then sees PostedToStock=1 and skips.
+      const transaction = pool.transaction();
+      await transaction.begin();
+      try {
+        const headerRes = await transaction
+          .request()
+          .input("id", sql.Int, id)
+          .query(
+            `SELECT FromGodownID, ToGodownID, SaleItems, PostedToStock, DocNo
+             FROM dbo.SaleOrders WITH (UPDLOCK, HOLDLOCK) WHERE SaleOrderID=@id`,
+          );
+        const header = headerRes.recordset[0];
+        if (!header) throw new Error("Sale order not found");
 
-      if (!header.PostedToStock) {
-        const items = parseItems(header.SaleItems);
-        const transaction = pool.transaction();
-        await transaction.begin();
-        try {
+        if (!header.PostedToStock) {
+          const items = parseItems(header.SaleItems);
           // Re-validate stock availability now, since time may have passed
           // since the order was submitted and stock could have moved elsewhere.
           for (const item of items) {
@@ -438,16 +443,16 @@ router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, r
             .query(
               `UPDATE dbo.SaleOrders SET PostedToStock = 1 WHERE SaleOrderID = @id`,
             );
-
-          await transaction.commit();
-        } catch (postErr) {
-          try {
-            await transaction.rollback();
-          } catch {}
-          // Stock posting failed — do NOT call transition(). The record
-          // stays at its current (Pending) status so it can be retried.
-          throw postErr;
         }
+
+        await transaction.commit();
+      } catch (postErr) {
+        try {
+          await transaction.rollback();
+        } catch {}
+        // Stock posting failed — do NOT call transition(). The record
+        // stays at its current (Pending) status so it can be retried.
+        throw postErr;
       }
     }
 

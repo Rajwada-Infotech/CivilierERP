@@ -423,6 +423,31 @@ router.patch("/payment-logs/:id/status", async (req, res) => {
   }
 });
 
+// ─── GL reconciliation ────────────────────────────────────────────────────────
+// Approved documents whose ledger posting was skipped or failed. This is the
+// actionable output of the GLPostingLog introduced in migration 154: it turns
+// "an approval silently didn't post" into a concrete, filterable work queue.
+// Defaults to only skipped/failed; pass ?outcome=all to see every attempt.
+router.get("/gl-posting-failures", async (req, res) => {
+  try {
+    const pool = getPool();
+    const showAll = req.query.outcome === "all";
+    const result = await pool.request().query(`
+      SELECT TOP 500
+        LogId, Module, RecordId, Outcome, Reason, ApproverEmail, CreatedAt
+      FROM dbo.GLPostingLog
+      ${showAll ? "" : "WHERE Outcome IN ('skipped', 'failed')"}
+      ORDER BY CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    // Table may not exist yet on an un-migrated DB — degrade to empty list.
+    if (String(err.message).includes("Invalid object name")) return res.json([]);
+    console.error("Error fetching GL posting failures:", err);
+    res.status(500).json({ error: "Failed to fetch GL posting failures" });
+  }
+});
+
 module.exports = router;
 
 
