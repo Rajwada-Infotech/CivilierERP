@@ -2,6 +2,7 @@ import { generateUUID } from '../../utils/cryptoPolyfill';
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -628,34 +629,44 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Print handler — uses Blob URL so base64 logo renders correctly ─────────
   const handlePrint = () => {
-    const supplier =
-      suppliers.find((s) => s.id === form.supplierId)?.name ?? "—";
-    const company = companies.find((c) => c.id === form.companyId)?.name ?? "—";
-    const project =
-      allProjects.find((p) => p.id === form.projectId)?.name ?? "—";
+    // All of these snapshots are interpolated into the print HTML below, so
+    // they are HTML-escaped at the source to prevent stored data (supplier
+    // names, addresses, remarks, etc.) from injecting markup/script into the
+    // print window (which is same-origin and can read the auth token).
+    const supplier = escapeHtml(
+      suppliers.find((s) => s.id === form.supplierId)?.name ?? "—",
+    );
+    const company = escapeHtml(
+      companies.find((c) => c.id === form.companyId)?.name ?? "—",
+    );
+    const project = escapeHtml(
+      allProjects.find((p) => p.id === form.projectId)?.name ?? "—",
+    );
 
     // Supplier & company detail snapshots for print
-    const supAddr = supplierDetails?.LHeadAddress ?? "";
-    const supContact = supplierDetails?.LHeadContactPerson ?? "";
-    const supGST = supplierDetails?.LGST ?? "";
-    const supPhone = supplierDetails?.LHeadPhone ?? "";
-    const supEmail = supplierDetails?.LHeadEmail ?? "";
-    const compAddr = [
-      companyDetails?.address,
-      companyDetails?.address_line2,
-      companyDetails?.city,
-      companyDetails?.state,
-      companyDetails?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
-    const compGST = companyDetails?.gst_no ?? "";
-    const compEmail = companyDetails?.email ?? "";
-    const compPhone = companyDetails?.phone_number ?? "";
+    const supAddr = escapeHtml(supplierDetails?.LHeadAddress ?? "");
+    const supContact = escapeHtml(supplierDetails?.LHeadContactPerson ?? "");
+    const supGST = escapeHtml(supplierDetails?.LGST ?? "");
+    const supPhone = escapeHtml(supplierDetails?.LHeadPhone ?? "");
+    const supEmail = escapeHtml(supplierDetails?.LHeadEmail ?? "");
+    const compAddr = escapeHtml(
+      [
+        companyDetails?.address,
+        companyDetails?.address_line2,
+        companyDetails?.city,
+        companyDetails?.state,
+        companyDetails?.pincode,
+      ]
+        .filter(Boolean)
+        .join(", "),
+    );
+    const compGST = escapeHtml(companyDetails?.gst_no ?? "");
+    const compEmail = escapeHtml(companyDetails?.email ?? "");
+    const compPhone = escapeHtml(companyDetails?.phone_number ?? "");
 
     // Logo: company-specific logo first, then enterprise fallback
     const logoHtml = activeLogo
-      ? `<img src="${activeLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
+      ? `<img src="${escapeHtml(activeLogo)}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
       : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${company}</span>`;
 
     // PO status badge for print
@@ -670,11 +681,11 @@ const PurchaseOrderMaster: React.FC = () => {
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${escapeHtml(poStatus.toUpperCase())}</span>`;
 
     const itemRows = lineItems
       .map(
-        (li, i) => `
+        (li, i) => safeHtml`
       <tr style="border-bottom:1px solid #e5e7eb;">
         <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
         <td style="padding:8px 10px;font-weight:500;">${li.itemName || "—"}</td>
@@ -703,7 +714,7 @@ const PurchaseOrderMaster: React.FC = () => {
     const tcHtml = form.paymentTerms
       ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div>
-           <div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${form.paymentTerms}</div>
+           <div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${escapeHtml(form.paymentTerms)}</div>
          </div>`
       : "";
 
@@ -711,7 +722,7 @@ const PurchaseOrderMaster: React.FC = () => {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>PO — ${form.poNumber || "—"}</title>
+  <title>PO — ${escapeHtml(form.poNumber || "—")}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
@@ -729,7 +740,7 @@ const PurchaseOrderMaster: React.FC = () => {
     <div>${logoHtml}</div>
     <div style="text-align:right;">
       <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${form.poNumber || "—"}</div>
+      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${escapeHtml(form.poNumber || "—")}</div>
       <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(form.poDate)}</strong></div>
       ${form.expectedDate ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(form.expectedDate)}</strong></div>` : ""}
       ${statusHtml}
@@ -794,7 +805,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   ${tcHtml}
 
-  ${form.remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${form.remarks}</div></div>` : ""}
+  ${form.remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${escapeHtml(form.remarks)}</div></div>` : ""}
 
   <!-- Footer -->
   <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
@@ -2711,7 +2722,7 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   ? "New Purchase Order"
                   : viewMode === "edit"
                     ? "Edit Purchase Order"
-                    : `Purchase Order — ${form.poNumber || "—"}`}
+                    : `Purchase Order — ${escapeHtml(form.poNumber || "—")}`}
                 {viewMode === "view" && form.status && (
                   <StatusChip status={form.status} />
                 )}

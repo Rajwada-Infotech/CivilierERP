@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { safeHtml, raw } from "@/utils/escapeHtml";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
   HardHat,
@@ -622,7 +623,7 @@ const ContractorRegister: React.FC = () => {
     const location = [row.blockName, row.unitName, row.roomName, row.floor ? `Floor ${row.floor}` : null]
       .filter(Boolean)
       .join(" / ") || "—";
-    win.document.write(`
+    win.document.write(safeHtml`
       <html>
         <head>
           <title>Attendance Register — ${row.entryDate?.slice(0, 10)}</title>
@@ -646,12 +647,14 @@ const ContractorRegister: React.FC = () => {
           <table>
             <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Status</th></tr></thead>
             <tbody>
-              ${rows
-                .map(
-                  (r, i) =>
-                    `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.type}</td><td class="${STATUS_PRINT_CLS[r.status]}">${STATUS_LABEL[r.status]}</td></tr>`,
-                )
-                .join("")}
+              ${raw(
+                rows
+                  .map(
+                    (r, i) =>
+                      safeHtml`<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.type}</td><td class="${STATUS_PRINT_CLS[r.status]}">${STATUS_LABEL[r.status]}</td></tr>`,
+                  )
+                  .join(""),
+              )}
             </tbody>
           </table>
         </body>
