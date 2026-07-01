@@ -4,8 +4,10 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
+const rateLimit = require("express-rate-limit");
 
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 
 // GET / — distribution history scoped by role
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
