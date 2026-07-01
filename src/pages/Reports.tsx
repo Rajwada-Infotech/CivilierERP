@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { exportToCsv } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -1383,23 +1384,15 @@ const Reports: React.FC = () => {
     <div className="flex flex-col min-h-0">
       <Breadcrumbs items={["Dashboard", "Reports"]} />
 
-      {/* Page header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-          <BarChart3 size={18} className="text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground leading-tight">
-            Reports
-          </h1>
-          <p className="text-[11px] text-muted-foreground">
-            {openSection
-              ? `${MODULE_SECTIONS.find((s) => s.id === openSection)?.label} · ${MODULE_SECTIONS.find((s) => s.id === openSection)?.reportIds.length} reports available`
-              : "Select a module to explore reports"}
-          </p>
-        </div>
-      </div>
-
+      <AdminShell
+        title="Reports"
+        subtitle={
+          openSection
+            ? `${MODULE_SECTIONS.find((s) => s.id === openSection)?.label} · ${MODULE_SECTIONS.find((s) => s.id === openSection)?.reportIds.length} reports available`
+            : "Select a module to explore reports"
+        }
+        icon={BarChart3}
+      >
       {/* Module sections */}
       <div className="space-y-3">
         {MODULE_SECTIONS.map((section) => {
@@ -1542,6 +1535,7 @@ const Reports: React.FC = () => {
           );
         })}
       </div>
+      </AdminShell>
     </div>
   );
 };

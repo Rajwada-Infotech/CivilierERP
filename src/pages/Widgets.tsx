@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   getWidgetCatalog,
   getWidgetsDashboard,
@@ -855,6 +856,11 @@ const Widgets = () => {
     <>
       <Breadcrumbs items={["Dashboard", safeSelected || "Widgets"]} />
 
+      <AdminShell
+        title={selectedWidget ? selectedWidget.label : "Widgets"}
+        subtitle={selectedWidget ? "Viewing widget" : "Select a widget to view"}
+        icon={Puzzle}
+      >
       {loading ? (
         // Skeleton while loading rights — avoid flash
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
@@ -903,20 +909,6 @@ const Widgets = () => {
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 mb-6">
-            <Puzzle size={20} className="text-primary" />
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Widgets
-            </h1>
-            {allowedSet &&
-              allowedSet.size > 0 &&
-              allowedSet.size < catalog.length && (
-                <span className="ml-2 text-xs text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full">
-                  {allowedSet.size} available
-                </span>
-              )}
-          </div>
-
           {visibleWidgets.length === 0 ? (
             <div className="text-center py-16 space-y-3">
               <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
@@ -949,6 +941,7 @@ const Widgets = () => {
           )}
         </>
       )}
+      </AdminShell>
     </>
   );
 };
