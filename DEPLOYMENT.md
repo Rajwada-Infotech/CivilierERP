@@ -93,6 +93,30 @@ command if the health check fails), then runs the same build/migrate/start
 sequence as before. See the comments at the top of
 `scripts/deploy-from-artifact.sh` for the full walkthrough.
 
+> ### ⚠️ ONE-TIME: baseline the migration tracker before the first migrate
+>
+> The deploy runs `node migrate.js up`. That is only safe if `dbo.__Migrations`
+> already records the migrations whose schema is live. On any database that was
+> built/restored **without** umzug (its `__Migrations` table is empty or
+> missing while the schema is fully applied), `migrate.js up` will try to
+> **re-run every migration** — including non-idempotent drops/renames — and
+> will fail or corrupt the schema.
+>
+> Before the first deploy against such a database (this was the case on the
+> dev `Civilier` DB — see the migration-tracker note), run **once**:
+>
+> ```bash
+> cd backend
+> node scripts/baseline-migrations.js            # dry-run: preview
+> node scripts/baseline-migrations.js --apply    # mark applied (tracking only)
+> node migrate.js status                         # expect Pending (0)
+> ```
+>
+> This writes only to `dbo.__Migrations` (tracking rows) — never to schema or
+> data — and is reversible. After baselining, `migrate.js up` applies only
+> genuinely new migrations. Only run it against a DB whose schema you have
+> confirmed already reflects the migrations being baselined.
+
 The old `scripts/deploy.sh` (live `git pull` on the box) still exists and
 still works if you ever want it, but nothing triggers it automatically
 anymore — GitHub Actions no longer has AWS credentials or talks to this box
