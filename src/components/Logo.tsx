@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { motion } from "framer-motion";
 import { useAppVersion } from "@/hooks/useAppVersion";
 
 // ─── Matrix version scramble ──────────────────────────────────────────────────
@@ -75,7 +76,7 @@ function useMatrixCycle(targets: string[]) {
 
 export function LogoIcon({ size = 32 }: { size?: number }) {
   return (
-    <img
+    <motion.img
       src="/Civilier.png"
       alt="CivilierERP"
       width={size}
@@ -83,6 +84,9 @@ export function LogoIcon({ size = 32 }: { size?: number }) {
       className="object-contain"
       loading="eager"
       decoding="sync"
+      initial={{ rotate: -180, scale: 0, opacity: 0 }}
+      animate={{ rotate: 0, scale: 1, opacity: 1 }}
+      transition={{ type: "spring", stiffness: 320, damping: 22, duration: 0.6 }}
     />
   );
 }
