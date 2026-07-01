@@ -12,6 +12,14 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
+const { recordGLPosting } = require("../services/approvalService");
+const allowRoles = require("../middleware/role");
+
+// Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
+// approval engine (services/approvalService.js). Without this, any user with
+// ReceivedPayments "edit" permission could approve a receipt and post it to
+// the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
+const APPROVER_ROLES = ["admin", "super_admin", "dba"];
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -562,67 +570,124 @@ router.patch("/:id/submit", requirePageRight("received-payment", "edit"), async 
   }
 });
 
-// ── PUT /:id/approve (admin only — called from Approval Inbox) ───────────────
-router.put("/:id/approve", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const actor = req.user?.name || req.user?.email || null;
-    const pool = getPool();
+// ── PUT /:id/approve (approver roles only — called from Approval Inbox) ──────
+router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
+  const pid = parseInt(req.params.id, 10);
+  if (!Number.isFinite(pid))
+    return res.status(400).json({ error: "Invalid id" });
+  const actor = req.user?.name || req.user?.email || null;
+  const pool = getPool();
 
-    await pool
+  // Lock + guard the status change: only a Pending receipt can be approved,
+  // and the row lock serialises concurrent approvals so the same receipt
+  // can't be approved twice (which would otherwise re-run GL posting).
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    const cur = await tx.request().input("id", sql.Int, pid).query(`
+      SELECT RPStatus FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
+      WHERE RPPaymentID=@id
+    `);
+    if (!cur.recordset.length) {
+      await tx.rollback();
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+    const status = cur.recordset[0].RPStatus;
+    if (status !== "Pending") {
+      await tx.rollback();
+      return res
+        .status(400)
+        .json({ error: `Cannot approve from status "${status}"` });
+    }
+    await tx
       .request()
-      .input("id", sql.Int, id)
+      .input("id", sql.Int, pid)
       .input("by", sql.NVarChar(150), actor).query(`
         UPDATE dbo.ReceivedPayment
         SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE()
         WHERE RPPaymentID=@id
       `);
-
-    try {
-      await postReceivedPaymentApproval(pool, parseInt(id, 10), actor);
-    } catch (glErr) {
-      // Ledger posting must never block the approval itself.
-      // `id` is passed as a separate argument (not interpolated into the
-      // format string) so it can never be misread as a format specifier.
-      console.error(
-        "[generalLedger] posting failed for received-payment #%s:",
-        id,
-        glErr.message,
-      );
-    }
-
-    await invalidateReceivedPaymentWorkflowCaches();
-    res.json({ success: true });
+    await tx.commit();
   } catch (err) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* best-effort */
+    }
     console.error("PUT /:id/approve error:", err);
-    res.status(500).json({ error: "Approval failed" });
+    return res.status(500).json({ error: "Approval failed" });
   }
+
+  // GL posting AFTER the status commit (postVoucher has its own transaction),
+  // with the outcome recorded so an approved-but-unposted receipt is findable
+  // (dbo.GLPostingLog — see migration 154), mirroring the approval engine.
+  try {
+    const outcome = await postReceivedPaymentApproval(pool, pid, actor);
+    await recordGLPosting("received-payment", pid, outcome, actor);
+  } catch (glErr) {
+    await recordGLPosting(
+      "received-payment",
+      pid,
+      { failed: true, reason: glErr.message },
+      actor,
+    );
+  }
+
+  await invalidateReceivedPaymentWorkflowCaches();
+  res.json({ success: true });
 });
 
-// ── PUT /:id/reject (admin only — called from Approval Inbox) ────────────────
-router.put("/:id/reject", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { note } = req.body;
-    const actor = req.user?.name || req.user?.email || null;
-    const pool = getPool();
+// ── PUT /:id/reject (approver roles only — called from Approval Inbox) ───────
+router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
+  const pid = parseInt(req.params.id, 10);
+  if (!Number.isFinite(pid))
+    return res.status(400).json({ error: "Invalid id" });
+  const { note } = req.body;
+  const actor = req.user?.name || req.user?.email || null;
+  const pool = getPool();
 
-    await pool
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    const cur = await tx.request().input("id", sql.Int, pid).query(`
+      SELECT RPStatus FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
+      WHERE RPPaymentID=@id
+    `);
+    if (!cur.recordset.length) {
+      await tx.rollback();
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+    const status = cur.recordset[0].RPStatus;
+    // A receipt already posted to the ledger must not be silently rejected —
+    // that would strand the GL entry. Only Pending can be rejected.
+    if (status !== "Pending") {
+      await tx.rollback();
+      return res
+        .status(400)
+        .json({ error: `Cannot reject from status "${status}"` });
+    }
+    await tx
       .request()
-      .input("id", sql.Int, id)
+      .input("id", sql.Int, pid)
       .input("by", sql.NVarChar(150), actor)
       .input("note", sql.NVarChar(500), note || null).query(`
         UPDATE dbo.ReceivedPayment
         SET RPStatus='Rejected', RPRejectedBy=@by, RPRejectedAt=GETDATE(), RPRejectionNote=@note
         WHERE RPPaymentID=@id
       `);
-
-    await invalidateReceivedPaymentWorkflowCaches();
-    res.json({ success: true });
+    await tx.commit();
   } catch (err) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* best-effort */
+    }
     console.error("PUT /:id/reject error:", err);
-    res.status(500).json({ error: "Rejection failed" });
+    return res.status(500).json({ error: "Rejection failed" });
   }
+
+  await invalidateReceivedPaymentWorkflowCaches();
+  res.json({ success: true });
 });
 
 module.exports = router;

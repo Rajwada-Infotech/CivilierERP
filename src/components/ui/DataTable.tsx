@@ -176,7 +176,13 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Table ── */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-max text-sm">
+        {(() => {
+          const allCols = table.getAllLeafColumns();
+          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 0), 0);
+          const pctOf = (size: number | undefined) =>
+            totalSize > 0 && size ? `${((size / totalSize) * 100).toFixed(2)}%` : undefined;
+          return (
+        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -187,6 +193,7 @@ export function DataTable<TData extends RowData>({
                     <th
                       key={header.id}
                       colSpan={header.colSpan}
+                      style={{ width: pctOf(header.column.columnDef.size) }}
                       className={`px-4 py-3 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${header.column.id === "actions" ? "text-right" : "text-left"} ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
@@ -257,7 +264,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-4 py-3 text-foreground text-sm whitespace-nowrap"
+                      className="px-4 py-3 text-foreground text-sm overflow-hidden"
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
@@ -270,6 +277,8 @@ export function DataTable<TData extends RowData>({
             )}
           </tbody>
         </table>
+          );
+        })()}
       </div>
 
       {/* ── Pagination ── */}

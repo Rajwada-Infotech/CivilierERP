@@ -1,28 +1,29 @@
 import React, { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { MaterialShell, MaterialGlassCard, MaterialSection } from "@/components/material/MaterialShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   CalendarDays, FileText, Save, Search, Trash2, Plus, RefreshCw,
-  X, Edit3, Building2, FolderOpen, RotateCcw, ArrowLeft, Package, CheckCircle2,
+  X, Edit3, Building2, FolderOpen, RotateCcw, ArrowLeft, Package,
+  CheckCircle2, Eye, ChevronDown, ClipboardList, RotateCw,
+  AlertCircle, Hash, TrendingDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/material-issue-returns";
 
-const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
-const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
+const inp =
+  "w-full text-sm rounded-xl border border-border px-3 py-2.5 bg-muted text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
+const sel =
+  "w-full text-sm rounded-xl border border-border px-3 py-2.5 bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 interface ReturnRow {
   ReturnId: number;
@@ -35,58 +36,33 @@ interface ReturnRow {
   ProjectName: string | null;
   CreatedAt: string;
 }
-
-interface IssueOption {
-  IssueId: number;
-  DocNo: string;
-  IssueDate: string;
-}
-
-interface IssueItem {
-  ItemId: number;
-  M_Id: string;
-  ItemName: string;
-  Quantity: number;
-  UOMSymbol: string | null;
-}
-
-interface ReturnItem {
-  origIssueItemId: number | null;
-  M_Id: string;
-  ItemName: string;
-  Quantity: number;
-  UOMSymbol: string;
-  maxQty?: number;
-}
-
-interface FormState {
-  ReturnDate: string;
-  IssueId: string;
-  CompanyId: string;
-  ProjectId: string;
-  Reason: string;
-  Remarks: string;
-  items: ReturnItem[];
-}
+interface IssueOption { IssueId: number; DocNo: string; IssueDate: string; }
+interface IssueItem { ItemId: number; M_Id: string; ItemName: string; Quantity: number; UOMSymbol: string | null; }
+interface ReturnItem { origIssueItemId: number | null; M_Id: string; ItemName: string; Quantity: number; UOMSymbol: string; maxQty?: number; }
+interface FormState { ReturnDate: string; IssueId: string; CompanyId: string; ProjectId: string; Reason: string; Remarks: string; items: ReturnItem[]; }
 
 const today = new Date().toISOString().split("T")[0];
-const emptyForm = (): FormState => ({
-  ReturnDate: today, IssueId: "", CompanyId: "", ProjectId: "",
-  Reason: "", Remarks: "", items: [],
-});
+const emptyForm = (): FormState => ({ ReturnDate: today, IssueId: "", CompanyId: "", ProjectId: "", Reason: "", Remarks: "", items: [] });
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetchWithAuth(url, opts);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as any).error || res.statusText);
-  }
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as any).error || res.statusText); }
   return res.json();
+}
+
+function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+      {children}{required && <span className="text-red-400 ml-0.5">*</span>}
+    </label>
+  );
 }
 
 export default function IssueReturn() {
   const qc = useQueryClient();
   const rights = usePageRights("material-issue-return");
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const [view, setView] = useState<"list" | "form" | "detail">("list");
   const [editId, setEditId] = useState<number | null>(null);
@@ -131,17 +107,13 @@ export default function IssueReturn() {
       editId
         ? apiFetch(`${API}/${editId}`, { method: "PUT", body: JSON.stringify(payload) })
         : apiFetch(API, { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["issue-returns"] });
-      toast.success(editId ? "Updated" : "Created");
-      setView("list"); setEditId(null); setForm(emptyForm());
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success(editId ? "Updated" : "Created"); setView("list"); setEditId(null); setForm(emptyForm()); },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const submitMut = useMutation({
     mutationFn: (id: number) => apiFetch(`${API}/${id}/submit`, { method: "PUT" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success("Submitted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success("Submitted for approval"); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -164,7 +136,7 @@ export default function IssueReturn() {
   });
 
   const filteredProjects = useMemo(
-    () => form.CompanyId ? projects.filter((p: any) => Number(p.company_id) === Number(form.CompanyId)) : projects,
+    () => form.CompanyId ? (projects as any[]).filter((p: any) => Number(p.company_id) === Number(form.CompanyId)) : projects,
     [projects, form.CompanyId]
   );
 
@@ -172,11 +144,7 @@ export default function IssueReturn() {
     if (!issueItems.length) return;
     setForm((f) => ({
       ...f,
-      items: issueItems.map((ii) => ({
-        origIssueItemId: ii.ItemId, M_Id: ii.M_Id,
-        ItemName: ii.ItemName, Quantity: ii.Quantity,
-        UOMSymbol: ii.UOMSymbol || "", maxQty: ii.Quantity,
-      })),
+      items: issueItems.map((ii) => ({ origIssueItemId: ii.ItemId, M_Id: ii.M_Id, ItemName: ii.ItemName, Quantity: ii.Quantity, UOMSymbol: ii.UOMSymbol || "", maxQty: ii.Quantity })),
     }));
   }, [issueItems]);
 
@@ -185,77 +153,76 @@ export default function IssueReturn() {
   const removeItem = (idx: number) => setForm((f) => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
 
   const openNew = () => { setEditId(null); setForm(emptyForm()); setView("form"); };
-
   const openEdit = async (row: ReturnRow) => {
     const rec = await apiFetch<any>(`${API}/${row.ReturnId}`);
     setEditId(rec.ReturnId);
-    setForm({
-      ReturnDate: rec.ReturnDate?.split("T")[0] || today,
-      IssueId: String(rec.IssueId || ""),
-      CompanyId: String(rec.CompanyId || ""),
-      ProjectId: String(rec.ProjectId || ""),
-      Reason: rec.Reason || "",
-      Remarks: rec.Remarks || "",
-      items: (rec.items || []).map((i: any) => ({
-        origIssueItemId: i.OrigIssueItemId,
-        M_Id: i.M_Id || "", ItemName: i.ItemName || "",
-        Quantity: i.Quantity, UOMSymbol: i.UOMSymbol || "",
-      })),
-    });
+    setForm({ ReturnDate: rec.ReturnDate?.split("T")[0] || today, IssueId: String(rec.IssueId || ""), CompanyId: String(rec.CompanyId || ""), ProjectId: String(rec.ProjectId || ""), Reason: rec.Reason || "", Remarks: rec.Remarks || "", items: (rec.items || []).map((i: any) => ({ origIssueItemId: i.OrigIssueItemId, M_Id: i.M_Id || "", ItemName: i.ItemName || "", Quantity: i.Quantity, UOMSymbol: i.UOMSymbol || "" })) });
     setView("form");
   };
-
-  const openDetail = async (row: ReturnRow) => {
-    const rec = await apiFetch<any>(`${API}/${row.ReturnId}`);
-    setDetailRecord(rec); setView("detail");
-  };
+  const openDetail = async (row: ReturnRow) => { const rec = await apiFetch<any>(`${API}/${row.ReturnId}`); setDetailRecord(rec); setView("detail"); };
 
   const handleSave = () => {
     if (!form.ReturnDate) return void toast.error("Return date is required");
     if (!form.items.length) return void toast.error("Add at least one item");
     const overMax = form.items.find(i => i.maxQty != null && i.Quantity > i.maxQty);
     if (overMax) return void toast.error(`Return qty for "${overMax.ItemName}" exceeds issued quantity`);
-    const hasValid = form.items.some(i => i.Quantity > 0);
-    if (!hasValid) return void toast.error("All items have zero quantity");
+    if (!form.items.some(i => i.Quantity > 0)) return void toast.error("All items have zero quantity");
     saveMut.mutate({ ...form });
   };
 
+  // Stats
+  const stats = useMemo(() => ({
+    total: rows.length,
+    draft: rows.filter(r => r.Status === "Draft").length,
+    pending: rows.filter(r => r.Status === "Pending").length,
+    approved: rows.filter(r => r.Status === "Approved").length,
+  }), [rows]);
+
   const columns: ColumnDef<ReturnRow>[] = [
-    { header: "Doc No", cell: ({ row }) => <span className="font-mono text-xs">{row.original.DocNo}</span> },
-    { header: "Date", cell: ({ row }) => row.original.ReturnDate ? format(new Date(row.original.ReturnDate), "dd/MM/yyyy") : "—" },
-    { header: "Issue Ref", cell: ({ row }) => row.original.IssueDocNo || "—" },
-    { header: "Company", cell: ({ row }) => row.original.CompanyName || "—" },
-    { header: "Project", cell: ({ row }) => row.original.ProjectName || "—" },
-    { header: "Status", cell: ({ row }) => <StatusBadge status={row.original.Status} /> },
     {
-      header: "Actions",
+      accessorKey: "DocNo", header: "Doc No", size: 120,
+      cell: ({ getValue }) => <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400 font-semibold">{getValue() as string}</span>,
+    },
+    {
+      accessorKey: "ReturnDate", header: "Date", size: 90,
+      cell: ({ getValue }) => { const v = getValue() as string; return <span className="text-xs text-muted-foreground">{v ? format(new Date(v), "dd/MM/yy") : "—"}</span>; },
+    },
+    {
+      accessorKey: "IssueDocNo", header: "Issue Ref", size: 120,
+      cell: ({ getValue }) => <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{(getValue() as string) || "—"}</span>,
+    },
+    {
+      id: "CompanyProject", header: "Company / Project", size: 200,
+      cell: ({ row }) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-medium truncate">{row.original.CompanyName || "—"}</span>
+          <span className="text-[10px] text-muted-foreground truncate">{row.original.ProjectName || "—"}</span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "Status", header: "Status", size: 100,
+      cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
+    },
+    {
+      id: "actions", header: () => <div className="text-right">Actions</div>, size: 140, enableSorting: false,
       cell: ({ row: { original: r } }) => (
-        <div className="flex gap-1.5">
-          <button className="p-1.5 rounded text-blue-400 hover:bg-blue-500/10" title="View" onClick={() => openDetail(r)}>
-            <Search size={14} />
-          </button>
+        <div className="flex items-center justify-end gap-1">
+          <button className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View" onClick={() => openDetail(r)}><Eye size={14} /></button>
+          {r.Status === "Draft" && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title="Edit" onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
           {r.Status === "Draft" && rights.canEdit && (
-            <button className="p-1.5 rounded text-amber-400 hover:bg-amber-500/10" title="Edit" onClick={() => openEdit(r)}>
-              <Edit3 size={14} />
-            </button>
-          )}
-          {r.Status === "Draft" && rights.canEdit && (
-            <button className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/10" title="Submit" onClick={() => submitMut.mutate(r.ReturnId)}>
+            <button className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Submit for approval" onClick={() => submitMut.mutate(r.ReturnId)}>
               <CheckCircle2 size={14} />
             </button>
           )}
           {r.Status === "Pending" && rights.canEdit && (
             <>
-              <button className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/10" title="Approve" onClick={() => approveMut.mutate(r.ReturnId)}>
-                <CheckCircle2 size={14} />
-              </button>
-              <button className="p-1.5 rounded text-red-400 hover:bg-red-500/10" title="Reject" onClick={() => rejectMut.mutate(r.ReturnId)}>
-                <X size={14} />
-              </button>
+              <button className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Approve" onClick={() => approveMut.mutate(r.ReturnId)}><CheckCircle2 size={14} /></button>
+              <button className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors" title="Reject" onClick={() => rejectMut.mutate(r.ReturnId)}><X size={14} /></button>
             </>
           )}
           {["Draft", "Rejected"].includes(r.Status) && rights.canDelete && (
-            <button className="p-1.5 rounded text-red-400 hover:bg-red-500/10" title="Delete" onClick={() => { if (confirm("Delete this return?")) deleteMut.mutate(r.ReturnId); }}>
+            <button className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors" title="Delete" onClick={() => { if (confirm("Delete this return?")) deleteMut.mutate(r.ReturnId); }}>
               <Trash2 size={14} />
             </button>
           )}
@@ -265,215 +232,338 @@ export default function IssueReturn() {
   ];
 
   const filtered = useMemo(
-    () => rows.filter((r) =>
-      !search ||
-      r.DocNo.toLowerCase().includes(search.toLowerCase()) ||
-      (r.IssueDocNo || "").toLowerCase().includes(search.toLowerCase()) ||
-      (r.CompanyName || "").toLowerCase().includes(search.toLowerCase()) ||
-      (r.ProjectName || "").toLowerCase().includes(search.toLowerCase())
-    ),
+    () => rows.filter((r) => !search || r.DocNo.toLowerCase().includes(search.toLowerCase()) || (r.IssueDocNo || "").toLowerCase().includes(search.toLowerCase()) || (r.CompanyName || "").toLowerCase().includes(search.toLowerCase()) || (r.ProjectName || "").toLowerCase().includes(search.toLowerCase())),
     [rows, search]
   );
 
+  const glassSection = {
+    background: isDark ? "rgba(10,18,15,0.45)" : "rgba(255,255,255,0.72)",
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.18)"}`,
+    backdropFilter: "blur(16px) saturate(160%)",
+    WebkitBackdropFilter: "blur(16px) saturate(160%)",
+    boxShadow: isDark ? "0 4px 24px rgba(0,0,0,0.25)" : "0 4px 24px rgba(16,185,129,0.07)",
+  };
+
   return (
-    <MaterialShell title="Issue Return" subtitle="Return materials from projects to godown">
-      <div className="flex flex-col gap-4 p-4 md:p-6">
-        <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "Issue Return" }]} />
+    <MaterialShell title="Issue Return" subtitle="Return materials from projects back to godown" icon={RotateCw}>
+      <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "Issue Return" }]} />
 
-        {/* ── LIST ── */}
+      <AnimatePresence mode="wait">
+
+        {/* ── LIST ────────────────────────────────────────────────────────── */}
         {view === "list" && (
-          <>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <h1 className="text-xl font-semibold">Issue Returns</h1>
-              <div className="flex gap-2">
-                <div className="relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-8 h-8 text-sm w-52" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
-                </div>
-                {rights.canCreate && (
-                  <Button size="sm" className="gap-1.5" onClick={openNew}><Plus size={14} /> New Return</Button>
-                )}
-                <Button size="sm" variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["issue-returns"] })}>
-                  <RefreshCw size={14} />
-                </Button>
-              </div>
-            </div>
-            <DataTable columns={columns} data={filtered} loading={loading} />
-          </>
-        )}
+          <motion.div key="list" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.22 }} className="space-y-5">
 
-        {/* ── FORM ── */}
-        {view === "form" && (
-          <div className="max-w-4xl mx-auto w-full space-y-4">
-            <div className="flex items-center gap-3">
-              <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" onClick={() => { setView("list"); setEditId(null); setForm(emptyForm()); }}>
-                <ArrowLeft size={18} />
-              </button>
-              <h1 className="text-lg font-semibold">{editId ? "Edit Issue Return" : "New Issue Return"}</h1>
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MaterialGlassCard label="Total Returns" value={stats.total} icon={ClipboardList} accentColor="#10b981" />
+              <MaterialGlassCard label="Draft" value={stats.draft} icon={FileText} accentColor="#f59e0b" />
+              <MaterialGlassCard label="Pending" value={stats.pending} icon={AlertCircle} accentColor="#3b82f6" />
+              <MaterialGlassCard label="Approved" value={stats.approved} icon={CheckCircle2} accentColor="#22c55e" />
             </div>
 
-            <Card>
-              <CardHeader><CardTitle className="text-sm font-medium">Header Details</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Table card */}
+            <div className="rounded-2xl overflow-hidden" style={glassSection}>
+              {/* Toolbar */}
+              <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Return Date *</label>
+                  <h2 className="text-sm font-heading font-bold text-foreground">Issue Returns Register</h2>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
+                </div>
+                <div className="flex items-center gap-2">
                   <div className="relative">
-                    <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <input type="date" className={inputCls + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text" placeholder="Search doc, project…" value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 rounded-xl text-xs bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-44"
+                    />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Company</label>
-                  <div className="relative">
-                    <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={selectCls + " pl-9"} value={form.CompanyId} onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", IssueId: "", items: [] }))}>
-                      <option value="">All Companies</option>
-                      {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Project</label>
-                  <div className="relative">
-                    <FolderOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={selectCls + " pl-9"} value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, IssueId: "", items: [] }))}>
-                      <option value="">All Projects</option>
-                      {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Issue Reference</label>
-                  <div className="relative">
-                    <FileText size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={selectCls + " pl-9"} value={form.IssueId} onChange={(e) => setForm((f) => ({ ...f, IssueId: e.target.value, items: [] }))}>
-                      <option value="">Select Issue</option>
-                      {issues.map((i) => <option key={i.IssueId} value={i.IssueId}>{i.DocNo} — {i.IssueDate?.split("T")[0]}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Reason</label>
-                  <input className={inputCls} placeholder="Reason for return…" value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Remarks</label>
-                  <Textarea rows={2} placeholder="Additional remarks…" value={form.Remarks} onChange={(e) => setForm((f) => ({ ...f, Remarks: e.target.value }))} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium">Return Items</CardTitle>
-                  {form.IssueId && issueItems.length > 0 && (
-                    <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={loadIssueItems}>
-                      <RotateCcw size={12} /> Load from Issue
-                    </Button>
+                  <button
+                    onClick={() => qc.invalidateQueries({ queryKey: ["issue-returns"] })}
+                    className="p-1.5 rounded-xl border border-border bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    title="Refresh"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                  {rights.canCreate && (
+                    <button
+                      onClick={openNew}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition shadow-sm shadow-emerald-500/20"
+                    >
+                      <Plus size={13} /> New Return
+                    </button>
                   )}
                 </div>
-              </CardHeader>
-              <CardContent>
-                {form.items.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    <Package size={32} className="mx-auto mb-2 opacity-30" />
-                    {form.IssueId ? 'Click "Load from Issue" to populate items' : "Select an issue reference first"}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border text-xs text-muted-foreground">
-                          <th className="text-left py-2 pr-3">Item Name</th>
-                          <th className="text-right py-2 pr-3">Return Qty</th>
-                          <th className="text-left py-2 pr-3">UOM</th>
-                          <th className="py-2 w-8"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {form.items.map((item, idx) => (
-                          <tr key={idx} className="border-b border-border/50">
-                            <td className="py-2 pr-3">{item.ItemName}</td>
-                            <td className="py-2 pr-3 text-right">
-                              <input
-                                type="number" min={0.0001} max={item.maxQty} step="any"
-                                className="w-24 text-right rounded border border-border px-2 py-1 bg-background text-sm"
-                                value={item.Quantity}
-                                onChange={(e) => setItemQty(idx, parseFloat(e.target.value) || 0)}
-                              />
-                            </td>
-                            <td className="py-2 pr-3 text-muted-foreground">{item.UOMSymbol || "—"}</td>
-                            <td className="py-2">
-                              <button className="p-1 rounded text-red-400 hover:bg-red-500/10" onClick={() => removeItem(idx)}><X size={12} /></button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              </div>
 
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => { setView("list"); setEditId(null); setForm(emptyForm()); }}>Cancel</Button>
-              <Button className="gap-1.5" onClick={handleSave} disabled={saveMut.isPending}>
-                <Save size={14} /> {editId ? "Update" : "Save"}
-              </Button>
+              <DataTable
+                columns={columns}
+                data={filtered}
+                loading={loading}
+                searchable={false}
+                emptyMessage="No issue return records yet. Click 'New Return' to create one."
+              />
             </div>
-          </div>
+          </motion.div>
         )}
 
-        {/* ── DETAIL ── */}
+        {/* ── FORM ────────────────────────────────────────────────────────── */}
+        {view === "form" && (
+          <motion.div key="form" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5 max-w-4xl">
+
+            {/* Form header */}
+            <div className="rounded-2xl px-5 py-4 flex items-center justify-between gap-3" style={glassSection}>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setView("list"); setEditId(null); setForm(emptyForm()); }} className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground transition-colors">
+                  <ArrowLeft size={16} />
+                </button>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)" }}>
+                  <RotateCw size={14} className="text-emerald-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-heading font-bold text-foreground">{editId ? "Edit Issue Return" : "New Issue Return"}</h2>
+                  <p className="text-[10px] text-muted-foreground">Fill header details and load items from the issue</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setView("list"); setEditId(null); setForm(emptyForm()); }} className="px-3 py-1.5 rounded-xl text-xs border border-border hover:bg-muted transition-colors font-medium">
+                  Cancel
+                </button>
+                <button onClick={handleSave} disabled={saveMut.isPending} className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 transition shadow-sm shadow-emerald-500/20">
+                  <Save size={13} /> {editId ? "Update" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            {/* Header details */}
+            <div className="rounded-2xl overflow-hidden" style={glassSection}>
+              <div className="px-5 py-3 border-b border-border/60 flex items-center gap-2">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
+                  <FileText size={11} className="text-emerald-500" />
+                </div>
+                <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Header Details</h3>
+              </div>
+              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel required>Return Date</FieldLabel>
+                  <div className="relative">
+                    <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input type="date" className={inp + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>Company</FieldLabel>
+                  <div className="relative">
+                    <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <select className={sel + " pl-9"} value={form.CompanyId} onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", IssueId: "", items: [] }))}>
+                      <option value="">— Select Company —</option>
+                      {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>Project / Site</FieldLabel>
+                  <div className="relative">
+                    <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <select className={sel + " pl-9"} value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, IssueId: "", items: [] }))}>
+                      <option value="">— Select Project —</option>
+                      {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>Issue Reference</FieldLabel>
+                  <div className="relative">
+                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <select className={sel + " pl-9"} value={form.IssueId} onChange={(e) => setForm((f) => ({ ...f, IssueId: e.target.value, items: [] }))}>
+                      <option value="">— Select Issue —</option>
+                      {issues.map((i) => <option key={i.IssueId} value={i.IssueId}>{i.DocNo} — {i.IssueDate?.split("T")[0]}</option>)}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>Reason</FieldLabel>
+                  <input className={inp} placeholder="Reason for return…" value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} />
+                </div>
+
+                <div>
+                  <FieldLabel>Remarks</FieldLabel>
+                  <Textarea rows={1} placeholder="Additional remarks…" value={form.Remarks} onChange={(e) => setForm((f) => ({ ...f, Remarks: e.target.value }))} className="rounded-xl text-sm" />
+                </div>
+              </div>
+            </div>
+
+            {/* Items */}
+            <div className="rounded-2xl overflow-hidden" style={glassSection}>
+              <div className="px-5 py-3 border-b border-border/60 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
+                    <Package size={11} className="text-emerald-500" />
+                  </div>
+                  <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Return Items</h3>
+                  {form.items.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">{form.items.length}</span>
+                  )}
+                </div>
+                {form.IssueId && issueItems.length > 0 && (
+                  <button
+                    onClick={loadIssueItems}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                  >
+                    <RotateCcw size={11} /> Load from Issue
+                  </button>
+                )}
+              </div>
+
+              {form.items.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.10)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                    <TrendingDown size={22} className="text-emerald-400 opacity-60" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground/70">No items added</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {form.IssueId ? 'Click "Load from Issue" to pull all items' : "Select an issue reference first"}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        {["Item Name", "Issued Qty", "Return Qty", "UOM", ""].map((h, i) => (
+                          <th key={i} className="px-4 py-2.5 text-left text-[9px] uppercase tracking-widest font-heading text-muted-foreground" style={{ width: i === 0 ? "40%" : i === 4 ? "5%" : "15%" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {form.items.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                          <td className="px-4 py-2.5 text-sm font-medium truncate">{item.ItemName}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground text-right">{item.maxQty ?? "—"}</td>
+                          <td className="px-4 py-2.5">
+                            <input
+                              type="number" min={0.0001} max={item.maxQty} step="any"
+                              className="w-full text-right rounded-lg border border-border px-2.5 py-1.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                              value={item.Quantity}
+                              onChange={(e) => setItemQty(idx, parseFloat(e.target.value) || 0)}
+                            />
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{item.UOMSymbol || "—"}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button onClick={() => removeItem(idx)} className="p-1 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"><X size={12} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── DETAIL ──────────────────────────────────────────────────────── */}
         {view === "detail" && detailRecord && (
-          <div className="max-w-3xl mx-auto w-full space-y-4">
-            <div className="flex items-center gap-3">
-              <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" onClick={() => setView("list")}><ArrowLeft size={18} /></button>
-              <h1 className="text-lg font-semibold">{detailRecord.DocNo}</h1>
+          <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5 max-w-3xl">
+
+            {/* Header */}
+            <div className="rounded-2xl px-5 py-4 flex items-center justify-between gap-3" style={glassSection}>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setView("list")} className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground transition-colors">
+                  <ArrowLeft size={16} />
+                </button>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)" }}>
+                  <RotateCw size={14} className="text-emerald-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-heading font-bold text-foreground font-mono">{detailRecord.DocNo}</h2>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Issue Return</p>
+                </div>
+              </div>
               <StatusBadge status={detailRecord.Status} />
             </div>
-            <Card>
-              <CardContent className="pt-4 grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Return Date: </span>{detailRecord.ReturnDate?.split("T")[0]}</div>
-                <div><span className="text-muted-foreground">Issue Ref: </span>{detailRecord.IssueDocNo || "—"}</div>
-                <div><span className="text-muted-foreground">Company: </span>{detailRecord.CompanyName || "—"}</div>
-                <div><span className="text-muted-foreground">Project: </span>{detailRecord.ProjectName || "—"}</div>
-                {detailRecord.Reason && <div className="col-span-2"><span className="text-muted-foreground">Reason: </span>{detailRecord.Reason}</div>}
-                {detailRecord.Remarks && <div className="col-span-2"><span className="text-muted-foreground">Remarks: </span>{detailRecord.Remarks}</div>}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-sm font-medium">Items</CardTitle></CardHeader>
-              <CardContent>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-xs text-muted-foreground">
-                      <th className="text-left py-2 pr-3">Item</th>
-                      <th className="text-right py-2 pr-3">Qty</th>
-                      <th className="text-left py-2">UOM</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(detailRecord.items || []).map((item: any, idx: number) => (
-                      <tr key={idx} className="border-b border-border/50">
-                        <td className="py-2 pr-3">{item.ItemName}</td>
-                        <td className="py-2 pr-3 text-right">{Number.isFinite(Number(item.Quantity)) ? Number(item.Quantity).toLocaleString("en-IN", { maximumFractionDigits: 4 }) : item.Quantity}</td>
-                        <td className="py-2 text-muted-foreground">{item.UOMSymbol || "—"}</td>
-                      </tr>
+
+            {/* Meta grid */}
+            <div className="rounded-2xl p-5" style={glassSection}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {[
+                  { label: "Return Date", value: detailRecord.ReturnDate?.split("T")[0] || "—" },
+                  { label: "Issue Reference", value: detailRecord.IssueDocNo || "—", color: "text-blue-600 dark:text-blue-400 font-mono" },
+                  { label: "Company", value: detailRecord.CompanyName || "—" },
+                  { label: "Project / Site", value: detailRecord.ProjectName || "—" },
+                  { label: "Reason", value: detailRecord.Reason || "—" },
+                  { label: "Created", value: detailRecord.CreatedAt ? format(new Date(detailRecord.CreatedAt), "dd MMM yyyy") : "—" },
+                ].map(({ label, value, color }: any) => (
+                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className={`text-xs font-semibold truncate ${color || "text-foreground"}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              {detailRecord.Remarks && (
+                <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                  <p className="text-xs text-foreground">{detailRecord.Remarks}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Items */}
+            <div className="rounded-2xl overflow-hidden" style={glassSection}>
+              <div className="px-5 py-3 border-b border-border/60 flex items-center gap-2">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
+                  <Package size={11} className="text-emerald-500" />
+                </div>
+                <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Return Items</h3>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">{(detailRecord.items || []).length}</span>
+              </div>
+              <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    {["Item Name", "Qty", "UOM"].map((h, i) => (
+                      <th key={h} className="px-4 py-2.5 text-left text-[9px] uppercase tracking-widest font-heading text-muted-foreground" style={{ width: i === 0 ? "60%" : "20%" }}>{h}</th>
                     ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          </div>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {(detailRecord.items || []).map((item: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-2.5 text-sm font-medium truncate">{item.ItemName}</td>
+                      <td className="px-4 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                        {Number.isFinite(Number(item.Quantity)) ? Number(item.Quantity).toLocaleString("en-IN", { maximumFractionDigits: 4 }) : item.Quantity}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{item.UOMSymbol || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Actions for detail */}
+            {detailRecord.Status === "Draft" && rights.canEdit && (
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => openEdit(detailRecord)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border border-border hover:bg-muted transition-colors">
+                  <Edit3 size={14} /> Edit
+                </button>
+                <button onClick={() => { submitMut.mutate(detailRecord.ReturnId); setView("list"); }} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition shadow-sm">
+                  <CheckCircle2 size={14} /> Submit for Approval
+                </button>
+              </div>
+            )}
+          </motion.div>
         )}
-      </div>
+
+      </AnimatePresence>
     </MaterialShell>
   );
 }
