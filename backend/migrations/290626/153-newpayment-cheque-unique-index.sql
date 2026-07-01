@@ -24,13 +24,18 @@ IF EXISTS (
   HAVING COUNT(*) > 1
 )
 BEGIN
-  DECLARE @dupes NVARCHAR(MAX) = (
-    SELECT STRING_AGG(CONCAT('lot ', PChequeLotId, ' / cheque ', PChequeNo, ' (x', COUNT(*), ')'), '; ')
+  -- Build the list in two steps: COUNT(*) cannot be nested directly inside
+  -- STRING_AGG (SQL Server rejects an aggregate of an aggregate), so the
+  -- per-pair counts are computed in a derived table first, then aggregated.
+  DECLARE @dupes NVARCHAR(MAX);
+  SELECT @dupes = STRING_AGG(txt, '; ')
+  FROM (
+    SELECT CONCAT('lot ', PChequeLotId, ' / cheque ', PChequeNo, ' (x', COUNT(*), ')') AS txt
     FROM dbo.NewPayment
     WHERE PChequeLotId IS NOT NULL AND PChequeNo IS NOT NULL
     GROUP BY PChequeLotId, PChequeNo
     HAVING COUNT(*) > 1
-  );
+  ) d;
   RAISERROR(
     'Cannot add cheque-uniqueness index: duplicate cheque assignments exist and must be reconciled first -> %s',
     16, 1, @dupes
