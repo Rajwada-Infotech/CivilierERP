@@ -190,7 +190,6 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               style={{
                 marginLeft: mainML,
                 transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
-                contain: "layout",
               }}
             >
               {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}
