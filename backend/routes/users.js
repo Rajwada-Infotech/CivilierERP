@@ -19,6 +19,15 @@ const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 5;
 const LOCKOUT_SECONDS = 15 * 60;
 
+// When an email doesn't exist we still run a bcrypt.compare against this hash
+// so the response time matches the "user found, wrong password" path —
+// otherwise the timing difference reveals which emails are registered (user
+// enumeration). Computed once at module load at the same cost factor.
+const dummyHashPromise = bcrypt.hash(
+  "timing-equalizer-not-a-real-password",
+  SALT_ROUNDS,
+);
+
 // ======================
 // ROLE NORMALIZER - Root Cause Fix
 // ======================
@@ -88,6 +97,8 @@ router.post("/login", async (req, res) => {
 
     const user = result.recordset[0];
     if (!user) {
+      // Equalise timing with the wrong-password path to avoid user enumeration.
+      await bcrypt.compare(incomingPassword, await dummyHashPromise);
       if (process.env.NODE_ENV === "development") {
         console.warn("[Login] No user found for email:", normalizedEmail);
       }
@@ -366,13 +377,19 @@ router.delete(
     if (parseInt(id) === req.user?.userId) {
       return res.status(400).json({ error: "Cannot delete yourself" });
     }
+    const pool = getPool();
+    // Reassignment + NULL-out + ownership-delete + final DELETE must be atomic.
+    // Without a transaction, a failure partway (or an unlisted FK) leaves the
+    // user half-deleted: some references reassigned to admin, some rows gone,
+    // but the user row still present — an inconsistent, hard-to-recover state.
+    const tx = new sql.Transaction(pool);
     try {
-      const pool = getPool();
+      await tx.begin();
 
       // Clear nullable audit/assignment references before deleting.
       // Per-user rights rows are deleted because their UserId columns are required.
       // NOT NULL FK columns reassigned to admin; nullable ones set NULL; ownership rows deleted
-      await pool
+      await tx
         .request()
         .input("id", sql.Int, id)
         .input("adminId", sql.Int, req.user.userId).query(`
@@ -415,13 +432,24 @@ router.delete(
         `);
 
       // All FK references cleared — safe to delete
-      await pool
+      const delResult = await tx
         .request()
         .input("id", sql.Int, id)
         .query("DELETE FROM dbo.users WHERE id = @id");
 
+      await tx.commit();
+
+      if (!delResult.rowsAffected[0]) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
       res.json({ message: "User deleted" });
     } catch (err) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* rollback best-effort — original error is what matters */
+      }
       console.error(
         "[DELETE USER] SQL error:",
         err.message,
