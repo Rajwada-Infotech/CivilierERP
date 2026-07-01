@@ -148,6 +148,11 @@ export default function IssueReturn() {
     }));
   }, [issueItems]);
 
+  // Auto-load items when issue is selected (skip when editing an existing return)
+  React.useEffect(() => {
+    if (!editId && issueItems.length > 0) loadIssueItems();
+  }, [issueItems, editId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const setItemQty = (idx: number, qty: number) =>
     setForm((f) => { const items = [...f.items]; items[idx] = { ...items[idx], Quantity: qty }; return { ...f, items }; });
   const removeItem = (idx: number) => setForm((f) => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
