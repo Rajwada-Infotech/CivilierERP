@@ -504,7 +504,7 @@ function ApplicationDrawer({
   // (handled by key prop on parent, but belt-and-suspenders via effect)
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-[60] flex justify-end bg-black/50 backdrop-blur-[2px]">
       <div
         className="h-full w-full max-w-[700px] flex flex-col border-l border-border bg-card shadow-2xl"
         style={{ animation: "slideIn 0.22s cubic-bezier(0.16,1,0.3,1)" }}

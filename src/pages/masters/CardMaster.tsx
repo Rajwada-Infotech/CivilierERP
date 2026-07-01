@@ -1608,7 +1608,7 @@ const CardMaster: React.FC = () => {
 
           {/* Delete Confirm */}
           {deleteId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
               <div className="rounded-xl bg-card border border-border shadow-xl p-6 max-w-sm w-full mx-4">
                 <h3 className="font-heading font-semibold text-foreground mb-2">
                   Delete Card?
@@ -1696,7 +1696,7 @@ const CardMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => {

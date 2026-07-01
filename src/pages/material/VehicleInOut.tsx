@@ -1514,7 +1514,7 @@ export default function VehicleInOut() {
         {/* VIEW MODAL                                                          */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {viewingRec && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
@@ -1712,7 +1712,7 @@ export default function VehicleInOut() {
 
       {/* ── Camera capture modal ── */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">

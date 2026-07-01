@@ -556,7 +556,7 @@ export default function PageDefinitionsAdmin() {
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={closeDrawer}
@@ -754,7 +754,7 @@ export default function PageDefinitionsAdmin() {
 
       {/* ── Delete Confirm ── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setDeleteTarget(null)}
