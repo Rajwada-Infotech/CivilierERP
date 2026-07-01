@@ -1222,10 +1222,10 @@ function ExpenseBookingPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-        Select Expense Booking
+        Select Invoice
       </label>
       <p className="text-[11px] text-muted-foreground -mt-1">
-        Selecting a booking auto-fills project, company, amount &amp; doc type.
+        Selecting an invoice auto-fills project, company, amount &amp; doc type.
       </p>
       <div className="relative" ref={ref}>
         {/* Trigger */}
@@ -1253,7 +1253,7 @@ function ExpenseBookingPicker({
             </span>
           ) : (
             <span className="text-muted-foreground">
-              — Choose expense booking —
+              — Choose invoice —
             </span>
           )}
           <ChevronDown
@@ -2937,6 +2937,7 @@ const Payment: React.FC = () => {
         toast.success("Payment saved.");
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
       cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -4633,6 +4634,7 @@ const Payment: React.FC = () => {
                                 queryKey: ["payments"],
                                 exact: false,
                               });
+                              queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
                               refetchPayments();
                               window.dispatchEvent(
                                 new CustomEvent("approval-action"),
