@@ -476,7 +476,7 @@ export default function FinYearRights() {
           await updateFinYear(editingFY.id, values);
           toast.success(`"${values.year}" updated`);
         } else {
-          await addFinYear(values);
+          await addFinYear(values as Omit<FinYear, "id">);
           toast.success(`"${values.year}" created`);
         }
         closeDialog();
