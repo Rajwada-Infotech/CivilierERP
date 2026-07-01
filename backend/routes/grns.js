@@ -62,6 +62,47 @@ function computeGRNTotal(grnItems) {
   }, 0);
 }
 
+/**
+ * After any GRN create/update/delete: re-sum receivedQty per PO item
+ * across all non-rejected GRNs and write it back to PurchaseOrderItems.ReceivedQty.
+ * This keeps the PO line-item table accurate for the PO modal "Received" column.
+ */
+async function syncPOItemReceivedQty(pool, sql, poId) {
+  if (!poId) return;
+  try {
+    const grns = await pool.request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query("SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE POID = @POID AND Status != 'Rejected'");
+
+    // Sum receivedQty per itemId across all GRNs
+    const sumByItem = {};
+    for (const row of grns.recordset) {
+      const items = parseGRNItems(row.GRNItems);
+      for (const it of items) {
+        const id = String(it.itemId || it.ItemId || "");
+        if (!id) continue;
+        sumByItem[id] = (sumByItem[id] || 0) + Number(it.receivedQty || it.ReceivedQty || 0);
+      }
+    }
+
+    // Fetch all PO items to know their ItemIds
+    const poItems = await pool.request()
+      .input("POID2", sql.Int, parseInt(poId, 10))
+      .query("SELECT Id, ItemId FROM dbo.PurchaseOrderItems WHERE PurchaseOrderID = @POID2");
+
+    for (const poItem of poItems.recordset) {
+      const itemId = String(poItem.ItemId || "");
+      const received = sumByItem[itemId] ?? 0;
+      await pool.request()
+        .input("Id", sql.Int, poItem.Id)
+        .input("ReceivedQty", sql.Decimal(18, 4), received)
+        .query("UPDATE dbo.PurchaseOrderItems SET ReceivedQty = @ReceivedQty WHERE Id = @Id");
+    }
+  } catch (err) {
+    console.warn("syncPOItemReceivedQty failed (non-fatal):", err.message);
+  }
+}
+
 // Normalise the GRNItems field on a raw DB row so the client always
 // receives a parsed array, never a raw JSON string. This prevents the
 // frontend from needing to double-parse and avoids issues with truncated
@@ -880,6 +921,8 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
           poErr.message,
         );
       }
+      // Sync per-item ReceivedQty back to PurchaseOrderItems from all GRNs
+      await syncPOItemReceivedQty(pool, sql, poId);
     }
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
@@ -1239,6 +1282,7 @@ router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res)
           poErr.message,
         );
       }
+      await syncPOItemReceivedQty(pool, sql, linkedPOId);
     }
 
     res.json({ message: "GRN deleted successfully" });
