@@ -15,8 +15,6 @@ import {
   Settings,
   BarChart3,
   LayoutGrid,
-  PanelLeftClose,
-  PanelLeftOpen,
   Puzzle,
   Receipt,
   Truck,
@@ -49,6 +47,7 @@ import {
   Shield,
   Profile,
   Logout,
+  SidebarLeft,
 } from "iconsax-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -1209,9 +1208,9 @@ export const TopNavbar = () => {
               className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all duration-200 active:scale-90 hover:scale-105"
             >
               {navCollapsed ? (
-                <PanelLeftOpen size={15} />
+                <SidebarLeft size={15} variant="Outline" />
               ) : (
-                <PanelLeftClose size={15} />
+                <SidebarLeft size={15} variant="Bold" />
               )}
             </button>
           </div>
