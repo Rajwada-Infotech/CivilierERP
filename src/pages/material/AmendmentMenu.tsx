@@ -78,6 +78,7 @@ import { getPurchaseOrders } from "@/api/purchaseOrdersApi";
 import { getGRNs } from "@/api/grnApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { MaterialShell } from "@/components/material/MaterialShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1553,20 +1554,11 @@ export default function AmendmentMenu() {
     <>
       <Breadcrumbs items={["Material", "Amendment"]} />
 
-      <div className="p-6 space-y-5">
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-xl font-heading font-bold text-foreground">
-            <FilePenLine size={20} className="text-emerald-600 dark:text-emerald-400" />
-            Amendment Centre
-          </h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Select a Purchase Order, GRN, or Expense Booking to raise or review
-            amendments — full audit trail.
-          </p>
-        </div>
-      </div>
+      <MaterialShell
+        title="Amendment Centre"
+        subtitle="Select a Purchase Order, GRN, or Expense Booking to raise or review amendments — full audit trail"
+        icon={FilePenLine}
+      >
 
       {/* ── Stats ───────────────────────────────────────────────────────────── */}
       <StatsRow
@@ -1647,7 +1639,7 @@ export default function AmendmentMenu() {
         canDelete={rights.canDelete}
       />
 
-      </div>
+      </MaterialShell>
 
       {/* ── Amendment Form Dialog ────────────────────────────────────────────── */}
       <AmendFormDialog

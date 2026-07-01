@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/button";
 import {
@@ -481,17 +482,10 @@ export default function FollowupTasks() {
           { label: "Tasks", path: "/followup/follow-ups/tasks" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Follow-Up Tasks
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Live task list filtered to the follow-up module
-            </p>
-          </div>
+      <FollowupShell
+        title="Follow-Up Tasks"
+        icon={ListTodo}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -514,7 +508,8 @@ export default function FollowupTasks() {
               </Button>
             )}
           </div>
-        </div>
+        }
+      >
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -615,7 +610,7 @@ export default function FollowupTasks() {
             </div>
           </div>
         </div>
-      </div>
+      </FollowupShell>
 
       {/* New Task Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

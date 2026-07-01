@@ -22,6 +22,7 @@ import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -625,18 +626,10 @@ export function WelcomeCallsPage() {
         ]}
       />
 
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Welcome Calls
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Log and track welcome call outcomes, bank selection and loan
-              details
-            </p>
-          </div>
+      <FollowupShell
+        title="Welcome Calls"
+        icon={Phone}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -657,7 +650,8 @@ export function WelcomeCallsPage() {
               <Plus size={14} /> Log Call
             </Button>
           </div>
-        </div>
+        }
+      >
 
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -794,7 +788,7 @@ export function WelcomeCallsPage() {
             </div>
           )}
         </div>
-      </div>
+      </FollowupShell>
 
       {/* Log Call Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) { setForm(EMPTY_FORM); setBookingOpen(false); setBookingSearch(""); setDialogOpen(false); } }}>

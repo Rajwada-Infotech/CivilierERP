@@ -457,26 +457,21 @@ function DateField({
   highlight?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
+    <div className={`flex items-center h-8 rounded-lg border text-xs overflow-hidden ${
+      highlight ? "border-primary/50 ring-1 ring-primary/20" : "border-border"
+    } bg-background`}>
+      <span className={`flex items-center gap-1 px-2 h-full border-r text-[9px] font-heading uppercase tracking-wider whitespace-nowrap select-none ${
+        highlight ? "border-primary/30 text-primary/70 bg-primary/5" : "border-border text-muted-foreground/60 bg-muted/40"
+      }`}>
+        <CalendarDays size={10} />
         {label}
       </span>
-      <div className="relative">
-        <CalendarDays
-          size={11}
-          className={`absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${highlight ? "text-primary/70" : "text-muted-foreground/70"}`}
-        />
-        <input
-          type="date"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={`h-8 pl-8 pr-2 rounded-lg text-xs bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
-            highlight
-              ? "border border-primary/50 ring-1 ring-primary/20"
-              : "border border-border"
-          }`}
-        />
-      </div>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-full px-2 text-xs bg-transparent text-foreground focus:outline-none [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+      />
     </div>
   );
 }
@@ -525,6 +520,10 @@ export default function TrialBalance() {
   const [drillNode, setDrillNode] = useState<TBNode | null>(null);
   const [drillData, setDrillData] = useState<TBTransactionsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
+
+  // ── Level 3: payment detail dialog ───────────────────────────────────────
+  const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
+  const [payDetailLoading, setPayDetailLoading] = useState(false);
 
   // ── load fin years ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -585,29 +584,37 @@ export default function TrialBalance() {
   }, []);
 
   // ── cascade handlers ──────────────────────────────────────────────────────
+  // Filters narrow the available options but each is independently selectable.
+  // Selecting Enterprise scopes the Company list; selecting Company scopes the
+  // Project list. But you can also pick a Company or Project without first
+  // choosing a parent — the dropdowns just show their full lists in that case.
   function handleEnterpriseChange(id: number | null, opt: Option | null) {
     setSelEnterprise(opt);
-    setSelCompany(null);
-    setSelProject(null);
-    setCompanies(
-      id ? allCompanies.filter((c) => c.enterprise_id === id) : allCompanies,
-    );
-    setProjects(allProjects);
+    // Narrow child lists but don't force-clear existing selections
+    const filteredCompanies = id ? allCompanies.filter((c) => c.enterprise_id === id) : allCompanies;
+    setCompanies(filteredCompanies);
+    // Only clear company/project if the current selection is no longer in scope
+    if (selCompany && id && !filteredCompanies.some((c) => c.id === selCompany.id)) {
+      setSelCompany(null);
+      setProjects(allProjects);
+      setSelProject(null);
+    }
   }
   function handleCompanyChange(id: number | null, opt: Option | null) {
     setSelCompany(opt);
-    setSelProject(null);
-    setProjects(
-      id
-        ? allProjects.filter((p) => p.company_id === id)
-        : selEnterprise
-          ? allProjects.filter((p) =>
-              allCompanies
-                .filter((c) => c.enterprise_id === selEnterprise.id)
-                .some((c) => c.id === p.company_id),
-            )
-          : allProjects,
-    );
+    const filteredProjects = id
+      ? allProjects.filter((p) => p.company_id === id)
+      : selEnterprise
+        ? allProjects.filter((p) =>
+            allCompanies
+              .filter((c) => c.enterprise_id === selEnterprise.id)
+              .some((c) => c.id === p.company_id),
+          )
+        : allProjects;
+    setProjects(filteredProjects);
+    if (selProject && id && !filteredProjects.some((p) => p.id === selProject.id)) {
+      setSelProject(null);
+    }
   }
 
   // ── FY selection ──────────────────────────────────────────────────────────
@@ -649,6 +656,7 @@ export default function TrialBalance() {
         const { f, t, ao } = getEffectiveParams();
         const effectiveTo = ao || t;
         let url = `/api/trial-balance/${node.id}/transactions?from=${f}&to=${effectiveTo}`;
+        if (selEnterprise?.id) url += `&enterpriseId=${selEnterprise.id}`;
         if (selCompany?.id) url += `&companyId=${selCompany.id}`;
         if (selProject?.id) url += `&projectId=${selProject.id}`;
         const res = await fetchWithAuth(url);
@@ -664,11 +672,45 @@ export default function TrialBalance() {
     [filterMode, from, to, asOn, selCompany, selProject],
   );
 
-  // Level 3 — open the exact payment receipt, preserving this report's
-  // filters so the back button returns here unchanged.
-  const openPaymentReceipt = (paymentId: number) => {
-    navigate(`/payments?view=${paymentId}`);
-  };
+  // Level 3 — open detail dialog for a transaction row.
+  const openSourceEntry = useCallback(async (t: TBTransaction) => {
+    const srcType = (t.sourceType ?? "").toUpperCase();
+    const payId = t.payment?.id ?? (srcType === "NEWPAYMENT" ? t.sourceId : null);
+
+    if (payId) {
+      // Payment: fetch full detail and show inline dialog
+      setPayDetail(null);
+      setPayDetailLoading(true);
+      try {
+        const res = await fetchWithAuth(`/api/new-payment/${payId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setPayDetail(await res.json());
+      } catch {
+        setPayDetail({ _error: true });
+      } finally {
+        setPayDetailLoading(false);
+      }
+      return;
+    }
+
+    // Other source types — navigate to the relevant page
+    if (!t.sourceId) return;
+    switch (srcType) {
+      case "RECEIVED_PAYMENT":
+      case "RECEIPT":
+        navigate(`/received-payments?view=${t.sourceId}`); break;
+      case "PURCHASE_ORDER":
+      case "PO":
+        navigate(`/purchase-orders?view=${t.sourceId}`); break;
+      case "GRN":
+        navigate(`/material/grn?view=${t.sourceId}`); break;
+      case "JOURNAL":
+      case "JV":
+        navigate(`/journal?view=${t.sourceId}`); break;
+      default:
+        break;
+    }
+  }, [navigate]);
 
   // ── export/refresh disabled? ──────────────────────────────────────────────
   const notReady =
@@ -687,6 +729,7 @@ export default function TrialBalance() {
     try {
       const effectiveTo = ao || t;
       let url = `/api/trial-balance?from=${f}&to=${effectiveTo}`;
+      if (selEnterprise?.id) url += `&enterpriseId=${selEnterprise.id}`;
       if (selCompany?.id) url += `&companyId=${selCompany.id}`;
       if (selProject?.id) url += `&projectId=${selProject.id}`;
       const res = await fetchWithAuth(url, { signal: abortRef.current.signal });
@@ -868,9 +911,10 @@ export default function TrialBalance() {
         {/* ── Main card ───────────────────────────────────────────────────── */}
         <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-3.5 px-4 py-3.5 border-b border-border bg-muted/20">
-            {/* Row 1 — Scope: Enterprise / Company / Project / Search, all in one consistent group */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="flex flex-col gap-3 px-4 py-3.5 border-b border-border bg-muted/20">
+
+            {/* Row 1 — Scope filters: Enterprise / Company / Project (equal columns) */}
+            <div className="grid grid-cols-3 gap-3">
               <FilterSelect
                 label="Enterprise"
                 icon={Building}
@@ -895,55 +939,60 @@ export default function TrialBalance() {
                 options={projects}
                 placeholder="All projects"
               />
-              {/* Search — scopes the Account / Description column, so it
-                  lives in the same row as the other scoping filters */}
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
-                  <Search size={9} /> Search Account / Description
-                </span>
-                <div className="relative">
-                  <Search
-                    size={12}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search accounts…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="h-8 pl-8 pr-3 w-full rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </div>
-              </div>
             </div>
 
-            {/* Row 2 — Period mode tabs (left) + view options (right) */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 mr-1 shrink-0">
-                  Filter by:
-                </span>
-                <ModeTab
-                  active={filterMode === "fy"}
-                  onClick={() => switchMode("fy")}
-                  icon={Calendar}
-                  label="Financial Year"
-                />
-                <ModeTab
-                  active={filterMode === "range"}
-                  onClick={() => switchMode("range")}
-                  icon={CalendarRange}
-                  label="Date Range"
-                />
-                <ModeTab
-                  active={filterMode === "ason"}
-                  onClick={() => switchMode("ason")}
-                  icon={CalendarCheck}
-                  label="As On Date"
-                />
-              </div>
+            {/* Row 2 — all period controls on one flat line */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* "Filter by" label */}
+              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0">
+                Period:
+              </span>
 
-              <div className="flex items-center gap-2 shrink-0">
+              {/* Mode tabs */}
+              <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="Financial Year" />
+              <ModeTab active={filterMode === "range"} onClick={() => switchMode("range")} icon={CalendarRange} label="Date Range" />
+              <ModeTab active={filterMode === "ason"}  onClick={() => switchMode("ason")}  icon={CalendarCheck} label="As On Date" />
+
+              {/* Divider */}
+              <div className="w-px h-6 bg-border/60 mx-1" />
+
+              {/* Period input inline — no label, the active tab makes it clear */}
+              {filterMode === "fy" && (
+                <div className="relative">
+                  <select
+                    value={selectedFYId ?? ""}
+                    onChange={(e) => handleFYChange(e.target.value ? Number(e.target.value) : null)}
+                    disabled={finYearsLoading}
+                    className="h-8 pl-2.5 pr-7 rounded-lg text-xs bg-background border border-primary/40 ring-1 ring-primary/20 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
+                  >
+                    <option value="">{finYearsLoading ? "Loading…" : "Select FY"}</option>
+                    {finYears.map((fy) => (
+                      <option key={fy.FId} value={fy.FId}>{fy.FName}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
+              )}
+              {filterMode === "fy" && selectedFY && (
+                <span className="text-[10px] text-muted-foreground/60">
+                  {fmtDate(toDateStr(selectedFY.FStartDate))} – {fmtDate(toDateStr(selectedFY.FEndDate))}
+                </span>
+              )}
+              {filterMode === "range" && (
+                <>
+                  <DateField label="From" value={from} onChange={setFrom} />
+                  <DateField label="To"   value={to}   onChange={setTo} />
+                </>
+              )}
+              {filterMode === "ason" && (
+                <>
+                  <DateField label="FY Start" value={from} onChange={setFrom} />
+                  <DateField label="As On"    value={asOn} onChange={setAsOn} highlight />
+                </>
+              )}
+
+              {/* Push controls to the right */}
+              <div className="ml-auto flex items-center gap-2 shrink-0">
                 <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap">
                   <input
                     type="checkbox"
@@ -953,7 +1002,6 @@ export default function TrialBalance() {
                   />
                   Show all accounts
                 </label>
-
                 <ExportMenu
                   data={exportData}
                   columns={TB_EXPORT_COLUMNS}
@@ -962,108 +1010,33 @@ export default function TrialBalance() {
                   subtitle={exportSubtitle || undefined}
                   disabled={notReady || rows.length === 0 || !rights.canExport}
                   stats={pdfStats}
-                  columnPadding={{
-                    0: {
-                      cellPadding: { top: 5, bottom: 5, left: 2, right: 6 },
-                    },
-                  }}
+                  columnPadding={{ 0: { cellPadding: { top: 5, bottom: 5, left: 2, right: 6 } } }}
                 />
               </div>
-            </div>
-
-            {/* Row 3 — Period inputs (vary by mode) */}
-            <div className="flex flex-wrap items-start gap-3">
-              {filterMode === "fy" && (
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
-                    Financial Year
-                  </span>
-                  <div className="relative">
-                    <select
-                      value={selectedFYId ?? ""}
-                      onChange={(e) =>
-                        handleFYChange(
-                          e.target.value ? Number(e.target.value) : null,
-                        )
-                      }
-                      disabled={finYearsLoading}
-                      className="h-8 pl-2.5 pr-7 rounded-lg text-xs bg-background border border-primary/40 ring-1 ring-primary/20 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
-                    >
-                      <option value="">
-                        {finYearsLoading ? "Loading…" : "Select FY"}
-                      </option>
-                      {finYears.map((fy) => (
-                        <option key={fy.FId} value={fy.FId}>
-                          {fy.FName}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={11}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                  {selectedFY && (
-                    <span className="text-[10px] text-muted-foreground/60 mt-0.5">
-                      {fmtDate(toDateStr(selectedFY.FStartDate))} –{" "}
-                      {fmtDate(toDateStr(selectedFY.FEndDate))}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {filterMode === "range" && (
-                <>
-                  <DateField label="From" value={from} onChange={setFrom} />
-                  <DateField label="To" value={to} onChange={setTo} />
-                </>
-              )}
-
-              {filterMode === "ason" && (
-                <>
-                  <DateField
-                    label="FY Start (opening balance anchor)"
-                    value={from}
-                    onChange={setFrom}
-                  />
-                  <DateField
-                    label="As On Date"
-                    value={asOn}
-                    onChange={setAsOn}
-                    highlight
-                  />
-                </>
-              )}
             </div>
 
             {/* Viewing chips */}
             {(selEnterprise || selCompany || selProject || periodLabel()) && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] text-muted-foreground">
-                  Viewing:
-                </span>
+                <span className="text-[10px] text-muted-foreground">Viewing:</span>
                 {selEnterprise && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
-                    <Building size={9} />
-                    {selEnterprise.label}
+                    <Building size={9} /> {selEnterprise.label}
                   </span>
                 )}
                 {selCompany && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
-                    <Briefcase size={9} />
-                    {selCompany.label}
+                    <Briefcase size={9} /> {selCompany.label}
                   </span>
                 )}
                 {selProject && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
-                    <FolderKanban size={9} />
-                    {selProject.label}
+                    <FolderKanban size={9} /> {selProject.label}
                   </span>
                 )}
                 {periodLabel() && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
-                    <CalendarDays size={9} />
-                    {periodLabel()}
+                    <CalendarDays size={9} /> {periodLabel()}
                   </span>
                 )}
               </div>
@@ -1108,8 +1081,27 @@ export default function TrialBalance() {
             <table className="w-full text-sm min-w-[820px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[38%]">
-                    Account / Description
+                  <th className="px-4 py-2 text-left w-[38%]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                        Account / Description
+                      </span>
+                      <div className="relative">
+                        <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="Search…"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          className="h-6 pl-6 pr-5 rounded-md text-[11px] bg-background border border-border text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
+                        />
+                        {search && (
+                          <button onClick={() => setSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </th>
                   <th
                     colSpan={2}
@@ -1234,6 +1226,90 @@ export default function TrialBalance() {
         </div>
       </FinanceShell>
 
+      {/* ── Level 3: Payment detail dialog ─────────────────────────────────── */}
+      <Dialog open={!!payDetail || payDetailLoading} onOpenChange={(o) => { if (!o) setPayDetail(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 border border-primary/20">
+                <IndianRupee size={15} className="text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="font-heading text-base">
+                  {payDetailLoading ? "Loading…" : payDetail?.DocNo ?? "Payment Detail"}
+                </DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {payDetail?.Status ?? ""}
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {payDetailLoading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+              <Loader2 size={16} className="animate-spin" /> Fetching payment…
+            </div>
+          ) : payDetail?._error ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">Could not load payment details.</div>
+          ) : payDetail ? (
+            <div className="space-y-4">
+              {/* Amount highlight */}
+              <div className="rounded-xl bg-primary/5 border border-primary/15 px-4 py-3 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">Amount Paid</span>
+                <span className="text-xl font-bold text-primary font-heading">{formatINR(Number(payDetail.PAmount) || 0)}</span>
+              </div>
+
+              {/* Detail grid */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs">
+                {[
+                  { label: "Payee / Supplier",  value: payDetail.PSupplierName || payDetail.PPaymentName },
+                  { label: "Payment Date",       value: payDetail.PDate ? fmtDate(String(payDetail.PDate).slice(0, 10)) : "—" },
+                  { label: "Mode",               value: payDetail.PMode || "—" },
+                  { label: "Bank",               value: payDetail.BankAccountName || payDetail.PBankName || "—" },
+                  { label: "Cheque / Ref No.",   value: payDetail.PChequeNo || "—" },
+                  { label: "Cheque Date",        value: payDetail.PChequeDate ? fmtDate(String(payDetail.PChequeDate).slice(0, 10)) : "—" },
+                  { label: "Company",            value: payDetail.PCompanyName || "—" },
+                  { label: "Project",            value: payDetail.PProjectName || "—" },
+                  { label: "Expense Booking",    value: payDetail.RefDoc || "—" },
+                  { label: "EB Date",            value: payDetail.EBDocDate ? fmtDate(String(payDetail.EBDocDate).slice(0, 10)) : "—" },
+                  { label: "Taxable Amount",     value: payDetail.TaxableAmount ? formatINR(Number(payDetail.TaxableAmount)) : "—" },
+                  { label: "Tax Amount",         value: payDetail.TaxAmount ? formatINR(Number(payDetail.TaxAmount)) : "—" },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
+                    <p className="text-foreground font-medium truncate">{value || "—"}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Description */}
+              {payDetail.EBDescription && (
+                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
+                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Description</p>
+                  <p className="text-xs text-foreground">{payDetail.EBDescription}</p>
+                </div>
+              )}
+
+              {/* Narration / remarks */}
+              {payDetail.PRemarks && (
+                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
+                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
+                  <p className="text-xs text-foreground">{payDetail.PRemarks}</p>
+                </div>
+              )}
+
+              {/* Card info */}
+              {payDetail.PCardNumber && (
+                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-xs">
+                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Card</p>
+                  <p>{payDetail.PCardHolderName} · {payDetail.PCardNetwork} ···· {String(payDetail.PCardNumber).slice(-4)}</p>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       {/* ── Drill-down dialog — Level 2: entity transactions, Level 3: open receipt ── */}
       <Dialog open={!!drillNode} onOpenChange={(open) => !open && setDrillNode(null)}>
         <DialogContent className="max-w-3xl">
@@ -1266,7 +1342,7 @@ export default function TrialBalance() {
                   <tr className="border-b border-border text-left text-muted-foreground uppercase text-[10px] tracking-wide">
                     <th className="px-3 py-2">Voucher No.</th>
                     <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Payment Receipt</th>
+                    <th className="px-3 py-2">Source / Entry</th>
                     <th className="px-3 py-2">Invoice No.</th>
                     <th className="px-3 py-2">Mode</th>
                     <th className="px-3 py-2 text-right">Debit</th>
@@ -1278,14 +1354,23 @@ export default function TrialBalance() {
                   {drillData.transactions.map((t) => (
                     <tr
                       key={t.entryId}
-                      onClick={() => t.payment && openPaymentReceipt(t.payment.id)}
-                      className={`border-b border-border/40 ${t.payment ? "cursor-pointer hover:bg-primary/5" : ""}`}
-                      title={t.payment ? "Open this Payment Receipt" : undefined}
+                      onClick={() => (t.sourceId || t.payment) && openSourceEntry(t)}
+                      className={`border-b border-border/40 ${(t.sourceId || t.payment) ? "cursor-pointer hover:bg-primary/5" : ""}`}
+                      title={(t.sourceId || t.payment) ? "Open source entry" : undefined}
                     >
                       <td className="px-3 py-2 font-mono">{t.voucherNo || "—"}</td>
                       <td className="px-3 py-2">{t.date ? fmtDate(t.date) : "—"}</td>
                       <td className="px-3 py-2">
-                        {t.payment ? (
+                        {t.sourceId ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded">
+                              {t.sourceType ?? "entry"}
+                            </span>
+                            <span className="text-primary font-medium underline">
+                              {t.payment?.docNo || `#${t.sourceId}`}
+                            </span>
+                          </span>
+                        ) : t.payment ? (
                           <span className="text-primary font-medium underline">{t.payment.docNo || `#${t.payment.id}`}</span>
                         ) : (
                           "—"

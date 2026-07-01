@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Palette } from "lucide-react";
+import { Brush } from "iconsax-react";
 import { useTheme, THEME_DOTS, type Theme } from "@/contexts/ThemeContext";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
         className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
         title="Change theme"
       >
-        <Palette size={17} />
+        <Brush size={17} variant="Outline" color="hsl(var(--foreground))" />
       </button>
 
       {/* Panel */}

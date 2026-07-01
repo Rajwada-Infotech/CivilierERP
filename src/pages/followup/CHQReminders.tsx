@@ -20,6 +20,7 @@ import {
 
 import { getCheques, type DbCheque } from "@/api/chequeMasterApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -543,23 +544,10 @@ export default function CHQReminders() {
           },
         ]}
       />
-      <div className="relative space-y-6 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-cyan-500/10 shrink-0">
-              <BookOpen size={20} className="text-cyan-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                CHQ Reminders
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Live cheque lot tracker — monitor active lots and low stock
-              </p>
-            </div>
-          </div>
-
+      <FollowupShell
+        title="Cheque Reminders"
+        icon={BookOpen}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -580,7 +568,8 @@ export default function CHQReminders() {
               Open Cheque Master
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── KPI strip + breakdown ── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
@@ -637,7 +626,7 @@ export default function CHQReminders() {
             })}
           </div>
         )}
-      </div>
+      </FollowupShell>
     </>
   );
 }

@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -428,18 +429,10 @@ export default function FollowupReminders() {
   return (
     <>
       <Breadcrumbs items={["Follow-Up", "Reminders"]} />
-      <div className="space-y-6 mt-6">
-        {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Reminders
-            </h1>
-            <p className="text-muted-foreground text-xs mt-0.5">
-              Track and dispatch follow-up reminders across all tenants and modules.
-            </p>
-          </div>
-
+      <FollowupShell
+        title="Reminders"
+        icon={Bell}
+        action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
@@ -457,7 +450,8 @@ export default function FollowupReminders() {
               New Reminder
             </Button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── Stat Cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -629,7 +623,7 @@ export default function FollowupReminders() {
             </div>
           )}
         </div>
-      </div>
+      </FollowupShell>
 
       {/* ── New Reminder Dialog ── */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

@@ -21,6 +21,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -772,17 +773,10 @@ export function UnitSelectionPage() {
           { label: "Unit Selection", path: "/followup/sales/unit-selection" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Unit Selection
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage unit bookings and applicant selections
-            </p>
-          </div>
+      <FollowupShell
+        title="Unit Selection"
+        icon={MapPin}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -800,7 +794,8 @@ export function UnitSelectionPage() {
               <Plus size={14} /> New Selection
             </Button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── KPI strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -952,7 +947,7 @@ export function UnitSelectionPage() {
             </div>
           </div>
         )}
-      </div>
+      </FollowupShell>
 
       {/* Create / Edit Dialog */}
       <FormDialog

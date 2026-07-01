@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -1091,15 +1092,10 @@ export default function ApplicationsPage() {
         ]}
       />
 
-      <div className="space-y-8 mt-6">
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Applications</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Track and manage sales applications before unit selection and booking.
-            </p>
-          </div>
+      <FollowupShell
+        title="Applications"
+        icon={Users}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -1118,7 +1114,8 @@ export default function ApplicationsPage() {
               </Button>
             )}
           </div>
-        </div>
+        }
+      >
 
         {/* ── Stats ───────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1489,7 +1486,7 @@ export default function ApplicationsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </FollowupShell>
 
       <ApplicationDrawer
         key={editing ? `edit-${editing.Id}` : drawerOpen ? "new" : "closed"}

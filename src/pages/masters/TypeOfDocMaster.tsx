@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   FileText,
   Loader2,
@@ -486,29 +487,21 @@ const TypeOfDocMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Admin", "Type of Document"]} />
 
-      {/* ── Page header ── */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FileText className="w-6 h-6 text-primary" />
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Type of Document Master
-            </h1>
-          </div>
-          {rights.canCreate && (
+      <AdminShell
+        title="Type of Document Master"
+        subtitle="Define document number formats tied to entry types, modules, companies and projects"
+        icon={FileText}
+        action={
+          rights.canCreate ? (
             <button
               onClick={() => setDrawerOpen(true)}
               className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-heading hover:bg-primary/90 transition"
             >
               <Plus size={16} /> Add New Type
             </button>
-          )}
-        </div>
-        <p className="text-sm text-muted-foreground mt-1 ml-9">
-          Define document number formats tied to entry types, modules, companies
-          and projects
-        </p>
-      </div>
+          ) : undefined
+        }
+      >
 
       {/* ── Table ── */}
       <div className="bg-card rounded-xl border overflow-hidden">
@@ -1031,6 +1024,7 @@ const TypeOfDocMaster: React.FC = () => {
           </div>
         </div>
       )}
+      </AdminShell>
     </>
   );
 };

@@ -2,19 +2,19 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { ChevronRight } from "lucide-react";
 import {
-  Calendar,
-  ChevronRight,
-  Landmark,
-  MessageSquare,
-  Package,
-  ShelvingUnit,
-  ShieldCheck,
-  Wrench,
+  Bank,
+  Receipt21,
+  Category2,
+  ClipboardText,
+  Message2,
+  ShoppingCart,
+  Building3,
   Archive,
-  Pickaxe,
-  Megaphone,
-} from "lucide-react";
+  VideoPlay,
+  Shield,
+} from "iconsax-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -27,7 +27,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 const MODULES = [
   {
     id: "finance" as Module,
-    icon: Landmark,
+    icon: Bank,
     label: "Finance",
     desc: "Ledger, payments & BRS",
     color: "#6366f1",
@@ -36,7 +36,7 @@ const MODULES = [
   },
   {
     id: "material" as Module,
-    icon: Package,
+    icon: Receipt21,
     label: "Material",
     desc: "GRN, PO & inventory",
     color: "#10b981",
@@ -45,7 +45,7 @@ const MODULES = [
   },
   {
     id: "followup" as Module,
-    icon: Calendar,
+    icon: Category2,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
     color: "#818cf8",
@@ -54,7 +54,7 @@ const MODULES = [
   },
   {
     id: "engineering" as Module,
-    icon: Wrench,
+    icon: ClipboardText,
     label: "Engineering",
     desc: "Projects, work orders & site",
     color: "#f97316",
@@ -63,7 +63,7 @@ const MODULES = [
   },
   {
     id: "ticket" as Module,
-    icon: MessageSquare,
+    icon: Message2,
     label: "Ticket",
     desc: "Support & issue tracking",
     color: "#ec4899",
@@ -72,7 +72,7 @@ const MODULES = [
   },
   {
     id: "sales" as Module,
-    icon: ShelvingUnit,
+    icon: ShoppingCart,
     label: "Sales",
     desc: "Sale orders & payments",
     color: "#a855f7",
@@ -81,13 +81,23 @@ const MODULES = [
   },
   {
     id: "civilworkdpr" as Module,
-    icon: Pickaxe,
+    icon: Building3,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
     bg: "rgba(8,145,178,0.22)",
     ringRgb: "8,145,178",
   },
+  {
+    id: "sales-automation" as Module,
+    icon: VideoPlay,
+    label: "Sales Automation",
+    desc: "Campaigns, leads & bookings",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
+  },
+  // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
     icon: Archive,
@@ -97,20 +107,11 @@ const MODULES = [
     bg: "rgba(245,158,11,0.22)",
     ringRgb: "245,158,11",
   },
-  {
-    id: "sales-automation" as Module,
-    icon: Megaphone,
-    label: "Sales Automation",
-    desc: "Campaigns, leads & bookings",
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.22)",
-    ringRgb: "245,158,11",
-  },
 ];
 
 const ADMIN_MODULE = {
   id: "admin" as Module,
-  icon: ShieldCheck,
+  icon: Shield,
   label: "Admin",
   desc: "Users, rights & configuration",
   color: "#3b82f6",
@@ -582,7 +583,7 @@ function IconButton({
 
         <Icon
           size={18}
-          strokeWidth={isActive ? 2.2 : 1.7}
+          variant={isActive ? "Bold" : "Outline"}
           className="relative z-10 transition-all duration-200"
           style={{
             color: isActive ? color : "hsl(var(--muted-foreground))",

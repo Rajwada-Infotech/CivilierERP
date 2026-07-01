@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/button";
 import {
@@ -411,17 +412,10 @@ export default function FollowupLog() {
           { label: "Log", path: "/followup/follow-ups/log" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Follow-Up Log
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Communication audit trail from the FollowupLog table
-            </p>
-          </div>
+      <FollowupShell
+        title="Follow-Up Log"
+        icon={FileText}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -442,7 +436,8 @@ export default function FollowupLog() {
               New Entry
             </Button>
           </div>
-        </div>
+        }
+      >
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -545,7 +540,7 @@ export default function FollowupLog() {
             )}
           </div>
         </div>
-      </div>
+      </FollowupShell>
 
       {/* New Entry Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

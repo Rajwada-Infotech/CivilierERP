@@ -26,6 +26,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -620,32 +621,31 @@ export default function AgreementWorkflowPage() {
         ]}
       />
 
-      <div className="space-y-8 mt-6">
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Agreement Workflow</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Track and manage agreement workflow steps per applicant</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-            Refresh
-          </button>
-          <Button
-            onClick={() => setDialogOpen(true)}
-            className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-5 py-2 h-auto shrink-0"
-          >
-            <Plus size={15} />
-            <span className="hidden sm:inline">New Workflow</span>
-            <span className="sm:hidden">New</span>
-          </Button>
-        </div>
-      </div>
+      <FollowupShell
+        title="Agreement Workflow"
+        icon={FileText}
+        action={
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              onClick={() => setDialogOpen(true)}
+              className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-5 py-2 h-auto shrink-0"
+            >
+              <Plus size={15} />
+              <span className="hidden sm:inline">New Workflow</span>
+              <span className="sm:hidden">New</span>
+            </Button>
+          </div>
+        }
+      >
+      {/* ── Toolbar ── */}
 
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -1250,7 +1250,7 @@ export default function AgreementWorkflowPage() {
         </DialogContent>
       </Dialog>
 
-      </div> {/* end space-y-5 */}
+      </FollowupShell>
 
       <AuditLogDrawer
         open={!!auditTarget}
