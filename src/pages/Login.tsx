@@ -1046,89 +1046,128 @@ function LogoRing({ size }: { size: number }) {
   );
 }
 
-// ── Welcome back card — slides up once on successful login ─────────────────────
+// ── Welcome screen — full-screen overlay on successful login ──────────────────
 function WelcomeBackCard({ name }: { name?: string }) {
   const firstName = name?.trim().split(/\s+/)[0] || "";
 
   return (
     <motion.div
-      className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none px-4"
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center"
+      style={{ background: "rgba(10,5,30,0.82)", backdropFilter: "blur(18px)" }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.18 } }}
+      exit={{ opacity: 0, transition: { duration: 0.4, ease: "easeIn" } }}
     >
+      {/* Glow orb */}
       <motion.div
-        className="relative flex flex-col items-center gap-3 px-8 py-7 rounded-3xl text-center"
+        className="absolute rounded-full pointer-events-none"
         style={{
-          background: "rgba(255,255,255,0.92)",
-          border: "1px solid rgba(196,181,253,0.6)",
-          boxShadow:
-            "0 20px 60px -10px rgba(124,58,237,0.35), 0 0 0 1px rgba(255,255,255,0.4) inset",
+          width: 480,
+          height: 480,
+          background:
+            "radial-gradient(circle, rgba(124,58,237,0.28) 0%, transparent 70%)",
+          filter: "blur(40px)",
         }}
-        initial={{ y: 48, opacity: 0, scale: 0.94 }}
+        initial={{ scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+      />
+
+      {/* Card */}
+      <motion.div
+        className="relative z-10 flex flex-col items-center gap-5 px-12 py-10 rounded-3xl text-center"
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(139,92,246,0.3)",
+          boxShadow: "0 32px 80px -16px rgba(124,58,237,0.5), 0 0 0 1px rgba(255,255,255,0.06) inset",
+          backdropFilter: "blur(24px)",
+        }}
+        initial={{ y: 40, opacity: 0, scale: 0.92 }}
         animate={{ y: 0, opacity: 1, scale: 1 }}
-        exit={{
-          y: -16,
-          opacity: 0,
-          scale: 0.97,
-          transition: { duration: 0.18 },
-        }}
-        transition={{ type: "spring", stiffness: 340, damping: 26 }}
+        exit={{ y: -20, opacity: 0, scale: 0.96, transition: { duration: 0.3 } }}
+        transition={{ type: "spring", stiffness: 300, damping: 24, delay: 0.05 }}
       >
-        {/* check badge */}
+        {/* Logo */}
+        <motion.img
+          src="/Civilier.png"
+          alt="CivilierERP"
+          width={56}
+          height={56}
+          className="object-contain"
+          initial={{ scale: 0, rotate: -180 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 360, damping: 20, delay: 0.1 }}
+        />
+
+        {/* Check ring */}
         <motion.div
-          className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: "linear-gradient(135deg, #7c3aed, #5b21b6)" }}
+          className="relative w-14 h-14 flex items-center justify-center"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          transition={{
-            type: "spring",
-            stiffness: 420,
-            damping: 18,
-            delay: 0.08,
-          }}
+          transition={{ type: "spring", stiffness: 400, damping: 18, delay: 0.22 }}
         >
-          <motion.svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          {/* Spinning ring */}
+          <motion.div
+            className="absolute inset-0 rounded-full"
+            style={{ border: "2px solid rgba(139,92,246,0.5)" }}
+            initial={{ rotate: 0, opacity: 0 }}
+            animate={{ rotate: 360, opacity: [0, 1, 0] }}
+            transition={{ duration: 0.7, delay: 0.22 }}
+          />
+          <div
+            className="w-14 h-14 rounded-full flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg, #7c3aed, #4c1d95)" }}
           >
-            <motion.path
-              d="M5 13l4 4L19 7"
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: 0.35, delay: 0.18 }}
-            />
-          </motion.svg>
+            <motion.svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <motion.path
+                d="M5 13l4 4L19 7"
+                initial={{ pathLength: 0 }}
+                animate={{ pathLength: 1 }}
+                transition={{ duration: 0.4, delay: 0.38, ease: "easeOut" }}
+              />
+            </motion.svg>
+          </div>
         </motion.div>
 
-        <div>
-          <motion.p
-            className="text-lg font-bold tracking-tight"
+        {/* Text */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45, duration: 0.35 }}
+        >
+          <p
+            className="text-2xl font-bold tracking-tight"
             style={{
-              background: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)",
+              background: "linear-gradient(135deg,#c4b5fd,#a78bfa,#7c3aed)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
             }}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.16, duration: 0.3 }}
           >
             Welcome back{firstName ? `, ${firstName}` : ""}!
-          </motion.p>
-          <motion.p
-            className="text-xs text-slate-500 mt-0.5"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.24, duration: 0.3 }}
-          >
+          </p>
+          <p className="text-sm text-white/40 mt-1 font-mono">
             Taking you to your dashboard…
-          </motion.p>
+          </p>
+        </motion.div>
+
+        {/* Progress bar */}
+        <div className="w-48 h-0.5 rounded-full bg-white/10 overflow-hidden">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: "linear-gradient(90deg, #7c3aed, #a78bfa)" }}
+            initial={{ width: "0%" }}
+            animate={{ width: "100%" }}
+            transition={{ duration: 1.1, delay: 0.5, ease: "easeInOut" }}
+          />
         </div>
       </motion.div>
     </motion.div>
@@ -1177,7 +1216,7 @@ export default function Login() {
           else if (role === "super_admin" || role === "admin")
             navigate(`/home/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
-        }, 1000);
+        }, 1800);
       } else {
         setError(result.error || "Invalid email or password.");
         setIsLoading(false);

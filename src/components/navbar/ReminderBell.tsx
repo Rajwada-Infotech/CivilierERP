@@ -1,8 +1,8 @@
 import React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { Notification } from "iconsax-react";
 import {
-  Bell,
   RefreshCw,
   ShoppingCart,
   HardHat,
@@ -96,7 +96,7 @@ export const ReminderBell = () => {
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [open]);
 
-  const handleBellClick = useCallback(() => {
+  const handleNotificationClick = useCallback(() => {
     setOpen((prev) => {
       if (!prev) refresh(true);
       return !prev;
@@ -145,16 +145,14 @@ export const ReminderBell = () => {
 
       <button
         ref={bellButtonRef}
-        onClick={handleBellClick}
+        onClick={handleNotificationClick}
         className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
       >
-        <Bell
+        <Notification
           size={20}
-          className={
-            badgeCount > 0
-              ? "text-amber-500 animate-jingle-periodic"
-              : "text-muted-foreground"
-          }
+          variant={badgeCount > 0 ? "Bold" : "Outline"}
+          className={badgeCount > 0 ? "animate-jingle-periodic" : ""}
+          color={badgeCount > 0 ? "#f59e0b" : "hsl(var(--muted-foreground))"}
         />
         {badgeCount > 0 && (
           <span className="absolute top-1.5 right-1.5 flex h-4 w-4">
@@ -190,7 +188,7 @@ export const ReminderBell = () => {
               <div className="relative z-10 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-7 h-7 rounded-lg border border-[var(--rb-accent-30)] bg-[var(--rb-accent-10)] flex items-center justify-center shrink-0">
-                    <Bell size={13} className="text-[var(--rb-accent)]" />
+                    <Notification size={13} variant="Bold" color="var(--rb-accent)" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold tracking-wide text-foreground truncate">
@@ -292,7 +290,7 @@ export const ReminderBell = () => {
               {filtered.length === 0 ? (
                 <div className="py-12 px-4 text-center">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-                    <Bell size={18} className="text-emerald-500/60" />
+                    <Notification size={18} variant="Outline" color="rgb(52 211 153 / 0.6)" />
                   </div>
                   <p className="text-xs font-semibold text-foreground">
                     All caught up
