@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
-import { Bell, CheckCheck, Megaphone } from "lucide-react";
+import { Notification } from "iconsax-react";
+import { CheckCheck, Megaphone } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -16,7 +17,7 @@ function timeAgo(isoDate: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export const SaNotificationBell: React.FC = () => {
+export const SaNotificationNotification: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { notifications, unreadCount, markRead, markAllRead } = useSaNotifications();
@@ -42,7 +43,7 @@ export const SaNotificationBell: React.FC = () => {
         className="relative w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all"
         title="SA Notifications"
       >
-        <Bell size={14} />
+        <Notification size={14} variant={unreadCount > 0 ? "Bold" : "Outline"} color="hsl(var(--foreground))" />
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-orange-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
             {unreadCount > 99 ? "99+" : unreadCount}
