@@ -18,6 +18,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import { MaterialShell } from "@/components/material/MaterialShell";
 
 // ─── Line Item types & renderer ───────────────────────────────────────────────
 interface DebitNoteItem {
@@ -832,17 +833,11 @@ const DebitNoteMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Debit Note Master"]}
       />
-      <div className="p-6 space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-          <FileWarning size={20} className="text-orange-500" />
-          Debit Note Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Manage debit notes against expense bookings.
-        </p>
-      </div>
+      <MaterialShell
+        title="Debit Note Master"
+        subtitle="Manage debit notes against expense bookings"
+        icon={FileWarning}
+      >
       {expenseError && (
         <div className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
           ⚠️ Could not load expense documents: {(expenseError as Error).message}
@@ -946,7 +941,7 @@ const DebitNoteMaster: React.FC = () => {
           win.print();
         }}
       />
-      </div>
+      </MaterialShell>
     </>
   );
 };

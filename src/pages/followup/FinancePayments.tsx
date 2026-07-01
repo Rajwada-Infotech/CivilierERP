@@ -57,6 +57,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -513,17 +514,10 @@ export function FinancePaymentsPage() {
           { label: "Payments" },
         ]}
       />
-      <div className="space-y-8 mt-6">
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Payment Collections
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Record receipts and track collections against demanded milestones
-            </p>
-          </div>
+      <FollowupShell
+        title="Payment Collections"
+        icon={IndianRupee}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -534,7 +528,8 @@ export function FinancePaymentsPage() {
               Refresh
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── Summary tiles ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -936,7 +931,7 @@ export function FinancePaymentsPage() {
           )}
         </div>
         </div> {/* end card: rounded-xl border bg-card */}
-      </div> {/* end space-y-8 */}
+      </FollowupShell>
 
       {/* ── Record Payment Dialog ─────────────────────────────────────────── */}
       <Dialog open={!!recordRow} onOpenChange={(o) => !o && setRecordRow(null)}>

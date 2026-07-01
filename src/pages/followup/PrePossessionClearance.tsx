@@ -32,6 +32,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
   Dialog,
   DialogContent,
@@ -875,6 +876,7 @@ export function PrePossessionClearancePage() {
         ]}
       />
 
+      <FollowupShell title="Pre-Possession Clearance">
       <div
         className="pp-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1200,6 +1202,7 @@ export function PrePossessionClearancePage() {
           )}
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog

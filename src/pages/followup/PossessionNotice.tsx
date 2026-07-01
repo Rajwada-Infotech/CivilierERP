@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -850,6 +851,7 @@ export function PossessionNoticePage() {
         ]}
       />
 
+      <FollowupShell title="Possession Notice">
       <div
         className="pn-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1206,6 +1208,7 @@ export function PossessionNoticePage() {
           )}
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog

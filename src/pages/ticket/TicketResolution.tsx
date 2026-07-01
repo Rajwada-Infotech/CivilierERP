@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
@@ -499,35 +500,28 @@ export default function TicketResolution() {
     <>
       <Breadcrumbs items={["Admin", "Support Tickets", "Resolution"]} />
 
-      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                Ticket Resolution
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {allTickets.length} unresolved ticket
-                {allTickets.length !== 1 ? "s" : ""} awaiting admin approval
-                {urgentCount > 0 && (
-                  <span className="text-red-500 ml-1.5 font-medium">
-                    · {urgentCount} urgent
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
-            >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-            </button>
-          </div>
-        </div>
+      <AdminShell
+        title="Ticket Resolution"
+        subtitle={
+          <>
+            {allTickets.length} unresolved ticket{allTickets.length !== 1 ? "s" : ""} awaiting admin approval
+            {urgentCount > 0 && (
+              <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>
+            )}
+          </>
+        }
+        icon={ShieldAlert}
+        action={
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+          </button>
+        }
+      >
+      <div className="max-w-3xl mx-auto space-y-5">
 
         {/* ── Stat pills ── */}
         {!isLoading && (
@@ -693,6 +687,7 @@ export default function TicketResolution() {
           </p>
         )}
       </div>
+      </AdminShell>
 
       {/* ── Resolve dialog ── */}
       {resolveTarget && (

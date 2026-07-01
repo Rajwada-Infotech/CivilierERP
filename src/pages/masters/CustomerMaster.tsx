@@ -21,6 +21,7 @@ import {
   deleteRecord,
 } from "@/api/accountHeadApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
   DataTable,
   type ColumnDef,
@@ -600,23 +601,17 @@ const CustomerMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Masters", "Customer Master"]} />
 
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Customer Master
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage customer accounts with contact, GST and payment details
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
-              {customers.length} Customers
-            </span>
-          </div>
-        </div>
+      <FollowupShell
+        title="Customer Master"
+        subtitle="Manage customer accounts with contact, GST and payment details"
+        icon={User}
+        action={
+          <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
+            {customers.length} Customers
+          </span>
+        }
+      >
+      <div className="relative space-y-8">
 
         {/* ── Form Card ── */}
         {rights.canCreate && (
@@ -1039,6 +1034,7 @@ const CustomerMaster: React.FC = () => {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (

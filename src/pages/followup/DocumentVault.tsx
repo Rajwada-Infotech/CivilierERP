@@ -24,6 +24,7 @@ import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -441,17 +442,10 @@ export default function DocumentVaultPage() {
         ]}
       />
 
-      <div className="space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Document Vault
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Centralized document storage per applicant
-            </p>
-          </div>
+      <FollowupShell
+        title="Document Vault"
+        icon={FolderOpen}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -471,7 +465,8 @@ export default function DocumentVaultPage() {
               <Upload className="w-4 h-4" /> Upload Document
             </Button>
           </div>
-        </div>
+        }
+      >
 
       <div className="dv-page">
         {/* Toolbar */}
@@ -716,7 +711,7 @@ export default function DocumentVaultPage() {
           </div>
         )}
       </div>
-      </div> {/* end space-y-8 */}
+      </FollowupShell>
 
       {/* ── Upload Dialog ───────────────────────────────────────────────── */}
       <Dialog

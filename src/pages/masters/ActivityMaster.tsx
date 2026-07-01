@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
@@ -378,12 +379,11 @@ const ActivityMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <div className="flex items-center gap-3 mb-4">
-        <Activity className="w-5 h-5 text-primary" />
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Activity Master
-        </h1>
-      </div>
+      <AdminShell
+        title="Activity Master"
+        subtitle="Manage activity groups and their individual activities across Engineering and Civil Work DPR modules"
+        icon={Activity}
+      >
 
       {/* ── Form only (table hidden via hideTable prop) ── */}
       <div>
@@ -589,6 +589,8 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
+      </AdminShell>
+
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
         <div className="fixed inset-0 z-50 flex justify-end">
