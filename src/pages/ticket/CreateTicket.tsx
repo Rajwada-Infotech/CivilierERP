@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { TicketShell } from "@/components/ticket/TicketShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { Button } from "@/components/ui/button";
@@ -397,31 +398,12 @@ const CreateTicket = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Tickets", "Create Ticket"]} />
-
-      <div className="max-w-3xl mx-auto pt-6 pb-10">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 rounded-lg"
-            onClick={() => navigate("/ticket")}
-          >
-            <ArrowLeft size={14} />
-          </Button>
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              New Support Ticket
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Fill in the details below to raise a ticket
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-5">
+    <TicketShell
+      title="New Support Ticket"
+      subtitle="Fill in the details below to raise a ticket"
+      icon={Send}
+    >
+      <div className="max-w-3xl mx-auto space-y-5">
           {/* ── Section 1: Context ── */}
           <Section icon={Building2} title="Context">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -676,8 +658,6 @@ const CreateTicket = () => {
             </Button>
           </div>
         </div>
-      </div>
-
       {/* ── Camera modal ── */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -754,7 +734,7 @@ const CreateTicket = () => {
           </div>
         </div>
       )}
-    </>
+    </TicketShell>
   );
 };
 
