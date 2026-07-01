@@ -91,6 +91,7 @@ import {
   Phone,
   Mail,
   MapPin,
+  Building2,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -353,6 +354,9 @@ const PurchaseOrderMaster: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingPO, setViewingPO] = useState<any | null>(null);
+  const [viewingPOSupplier, setViewingPOSupplier] = useState<SupplierDetails | null>(null);
+  const [viewingPOCompany, setViewingPOCompany] = useState<CompanyDetails | null>(null);
+  const [viewingPOProject, setViewingPOProject] = useState<CompanyDetails | null>(null);
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
@@ -1532,6 +1536,157 @@ const PurchaseOrderMaster: React.FC = () => {
     getCompanyDetails(form.projectId).then(setProjectDetails);
   }, [form.projectId]);
 
+  // ── Print from preview modal ──────────────────────────────────────────────
+  const handlePrintFromPreview = () => {
+    if (!viewingPO) return;
+    const sup = viewingPOSupplier;
+    const comp = viewingPOCompany;
+    const proj = viewingPOProject;
+
+    const supplierName = viewingPO.SupplierName ?? viewingPO.supplierName ?? "—";
+    const companyName  = viewingPO.CompanyName  ?? viewingPO.companyName  ?? "—";
+    const projectName  = viewingPO.ProjectName  ?? viewingPO.projectName  ?? "—";
+    const poNumber     = viewingPO.PurchaseOrderNo ?? viewingPO.poNumber   ?? "—";
+    const poDate       = viewingPO.PODate ?? viewingPO.poDate ?? "";
+    const expectedDate = viewingPO.ExpectedDeliveryDate ?? "";
+    const poStatus     = viewingPO.Status ?? viewingPO.status ?? "Draft";
+    const remarks      = viewingPO.Remarks ?? viewingPO.remarks ?? "";
+    const payTerms     = viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "";
+
+    const logoHtml = activeLogo
+      ? `<img src="${activeLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
+      : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${companyName}</span>`;
+
+    const statusColors: Record<string, { bg: string; color: string; border: string }> = {
+      approved: { bg: "#f0fdf4", color: "#166534", border: "#86efac" },
+      pending:  { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
+      draft:    { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" },
+      rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
+    };
+    const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
+
+    const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems) ? viewingPO.LineItems : Array.isArray(viewingPO.POItems) ? viewingPO.POItems : [];
+    const itemRows = lineItemsArr.map((li: any, i: number) => {
+      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
+      const desc = li.itemDescription ?? li.Description ?? "—";
+      const qty  = Number(li.Quantity ?? li.quantity ?? 0);
+      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+      const rate = Number(li.Rate ?? li.rate ?? 0);
+      const tax  = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
+      const amt  = Number(li.LineAmount ?? li.amount ?? qty * rate);
+      return `<tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
+        <td style="padding:8px 10px;font-weight:500;">${name}</td>
+        <td style="padding:8px 10px;color:#6b7280;font-size:12px;">${desc}</td>
+        <td style="padding:8px 10px;text-align:center;">${qty}</td>
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${unit}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        <td style="padding:8px 10px;text-align:center;">${tax > 0 ? tax + "%" : "—"}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${amt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+      </tr>`;
+    }).join("");
+
+    const grandTotal = Number(viewingPO.TotalAmount ?? viewingPO.totalAmount ?? 0);
+    const subtotalVal = lineItemsArr.reduce((s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0), 0);
+
+    const tcHtml = payTerms ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTerms}</div></div>` : "";
+
+    const supAddr    = sup?.LHeadAddress ?? "";
+    const supContact = sup?.LHeadContactPerson ?? "";
+    const supGST     = sup?.LGST ?? "";
+    const supPhone   = sup?.LHeadPhone ?? "";
+    const supEmail   = sup?.LHeadEmail ?? "";
+    const compAddr   = [comp?.address, comp?.address_line2, comp?.city, comp?.state, comp?.pincode].filter(Boolean).join(", ");
+    const compGST    = comp?.gst_no ?? "";
+    const compEmail  = comp?.email ?? "";
+    const compPhone  = comp?.phone_number ?? "";
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumber}</title>
+<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
+<body>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
+  <div>${logoHtml}</div>
+  <div style="text-align:right;">
+    <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
+    <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${poNumber}</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(poDate)}</strong></div>
+    ${expectedDate ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(expectedDate)}</strong></div>` : ""}
+    ${statusHtml}
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
+  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplierName}</div>
+    ${supAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${supAddr}</div>` : ""}
+    ${supContact ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Contact: <strong style="color:#111827;">${supContact}</strong></div>` : ""}
+    ${supPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${supPhone}</div>` : ""}
+    ${supEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${supEmail}</div>` : ""}
+    ${supGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${supGST}</span></div>` : ""}
+  </div>
+  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Billing Details</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${companyName}</div>
+    ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
+    ${compPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${compPhone}</div>` : ""}
+    ${compEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${compEmail}</div>` : ""}
+    ${compGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${compGST}</span></div>` : ""}
+  </div>
+  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
+    <div style="font-weight:600;font-size:13px;">${projectName}</div>
+    ${proj ? [proj.address, proj.city, proj.state].filter(Boolean).join(", ") : ""}
+  </div>
+</div>
+<table><thead><tr>
+  <th style="width:32px;text-align:center;">#</th>
+  <th style="text-align:left;">Item</th>
+  <th style="text-align:left;">Description</th>
+  <th style="text-align:center;">Qty</th>
+  <th style="text-align:center;">UOM</th>
+  <th style="text-align:right;">Rate (₹)</th>
+  <th style="text-align:center;">GST %</th>
+  <th style="text-align:right;">Amount (₹)</th>
+</tr></thead><tbody>${itemRows}</tbody></table>
+<div style="display:flex;justify-content:flex-end;margin-top:16px;">
+  <table style="width:260px;border-collapse:collapse;"><tbody>
+    <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotalVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+    <tr style="border-top:2px solid #4f46e5;"><td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td><td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+  </tbody></table>
+</div>
+${tcHtml}
+${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${remarks}</div></div>` : ""}
+<div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+  <span>Generated by CivilierERP</span>
+  <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+</div>
+</body></html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=960,height=720");
+    if (!win) { URL.revokeObjectURL(blobUrl); toast.error("Pop-up blocked — please allow pop-ups for this site."); return; }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    win.onload = () => { win.focus(); win.print(); };
+  };
+
+  // ── Auto-fetch details for preview pop-out ────────────────────────────────
+  useEffect(() => {
+    if (!viewingPO) {
+      setViewingPOSupplier(null);
+      setViewingPOCompany(null);
+      setViewingPOProject(null);
+      return;
+    }
+    const suppId = viewingPO.SupplierID ?? viewingPO.supplierId;
+    const compId = viewingPO.CompanyID ?? viewingPO.companyId;
+    const projId = viewingPO.ProjectID ?? viewingPO.projectId;
+    if (suppId) getSupplierDetails(suppId).then(setViewingPOSupplier).catch(() => {});
+    if (compId) getCompanyDetails(compId).then(setViewingPOCompany).catch(() => {});
+    if (projId) getCompanyDetails(projId).then(setViewingPOProject).catch(() => {});
+  }, [viewingPO]);
+
   // ── Navigation ────────────────────────────────────────────────────────────
   const goToList = () => {
     setViewMode("list");
@@ -1921,6 +2076,14 @@ const PurchaseOrderMaster: React.FC = () => {
                               WO-PO
                             </span>
                           )}
+                          {item.poType === "Direct" && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                              title="Direct Purchase Order"
+                            >
+                              Direct
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">
@@ -2226,7 +2389,7 @@ const PurchaseOrderMaster: React.FC = () => {
         {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
         {viewingPO && (
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+            <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
@@ -2245,12 +2408,22 @@ const PurchaseOrderMaster: React.FC = () => {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Purchase Order</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePrintFromPreview}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Printer size={13} /> Print
+                  </button>
                   {rights.canEdit && (
                     <button
-                      onClick={() => { setViewingPO(null); goToView({ _id: String(viewingPO.PurchaseOrderID ?? viewingPO._id) } as POListItem); }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors"
+                      onClick={() => {
+                        const item = listData.find((r) => r._id === String(viewingPO.PurchaseOrderID ?? viewingPO._id));
+                        setViewingPO(null);
+                        if (item) goToAmend(item);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
                     >
-                      <FilePenLine size={13} /> Full View
+                      <FilePenLine size={13} /> Amend
                     </button>
                   )}
                   <button
@@ -2268,25 +2441,163 @@ const PurchaseOrderMaster: React.FC = () => {
                   <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                     <FileText size={10} className="text-emerald-500" /> Order Details
                   </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {[
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {([
                       { label: "PO Number", value: viewingPO.PurchaseOrderNo ?? viewingPO.poNumber, mono: true },
+                      { label: "PO Type", value: viewingPO.POType ?? viewingPO.poType ?? "—" },
                       { label: "PO Date", value: viewingPO.PODate ? new Date(viewingPO.PODate).toLocaleDateString("en-IN") : (viewingPO.poDate ?? "—") },
                       { label: "Expected Delivery", value: viewingPO.ExpectedDeliveryDate ? new Date(viewingPO.ExpectedDeliveryDate).toLocaleDateString("en-IN") : "—" },
                       { label: "Supplier", value: viewingPO.SupplierName ?? viewingPO.supplierName },
                       { label: "Company", value: viewingPO.CompanyName ?? viewingPO.companyName },
                       { label: "Project / Site", value: viewingPO.ProjectName ?? viewingPO.projectName },
-                      { label: "Payment Terms", value: viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "—" },
+                      { label: "Cost Center", value: viewingPO.CostCenterName ?? viewingPO.costCenterName ?? "—" },
+                      { label: "Vendor Invoice No", value: viewingPO.VendorInvoiceNo ?? viewingPO.vendorInvoiceNo ?? "—" },
+                      { label: "Vendor Invoice Date", value: viewingPO.VendorInvoiceDate ? new Date(viewingPO.VendorInvoiceDate).toLocaleDateString("en-IN") : "—" },
                       { label: "Total Amount", value: (viewingPO.TotalAmount ?? viewingPO.totalAmount) != null ? `₹${Number(viewingPO.TotalAmount ?? viewingPO.totalAmount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—" },
                       { label: "Status", value: viewingPO.Status ?? viewingPO.status ?? "—" },
-                    ].map(({ label, value, mono }: any) => (
+                    ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
                       <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
                         <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                         <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
                       </div>
                     ))}
                   </div>
+                  {/* Source document references */}
+                  {(viewingPO.SourceMRDocNo || viewingPO.SourceWODocNo || viewingPO.SourceWDDocNo) && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {viewingPO.SourceMRDocNo && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                          <Link2 size={9} /> MR: {viewingPO.SourceMRDocNo}
+                        </span>
+                      )}
+                      {viewingPO.SourceWODocNo && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[10px] font-semibold text-purple-600 dark:text-purple-400">
+                          <Link2 size={9} /> WO: {viewingPO.SourceWODocNo}
+                        </span>
+                      )}
+                      {viewingPO.SourceWDDocNo && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                          <Link2 size={9} /> WD: {viewingPO.SourceWDDocNo}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {/* Payment Terms */}
+                  {(viewingPO.PaymentTerms ?? viewingPO.paymentTerms) && (
+                    <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Payment Terms / T&C</p>
+                      <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">{viewingPO.PaymentTerms ?? viewingPO.paymentTerms}</p>
+                    </div>
+                  )}
                 </div>
+
+                {/* Supplier / Billing / Project panels */}
+                {(viewingPOSupplier || viewingPOCompany || viewingPOProject) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {/* Supplier Details */}
+                    {viewingPOSupplier && (
+                      <div className="rounded-xl border border-border bg-muted/20 p-4">
+                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <Building2 size={9} className="text-emerald-500" /> Supplier Details
+                        </p>
+                        <dl className="space-y-1.5 text-xs">
+                          {viewingPOSupplier.LHeadAddress && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Address</dt>
+                              <dd className="text-foreground font-medium mt-0.5">{viewingPOSupplier.LHeadAddress}</dd>
+                            </div>
+                          )}
+                          {viewingPOSupplier.LHeadContactPerson && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Contact</dt>
+                              <dd className="text-foreground font-medium mt-0.5">{viewingPOSupplier.LHeadContactPerson}</dd>
+                            </div>
+                          )}
+                          {viewingPOSupplier.LHeadPhone && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOSupplier.LHeadPhone}</dd>
+                            </div>
+                          )}
+                          {viewingPOSupplier.LHeadEmail && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Email</dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Mail size={10} className="text-muted-foreground" />{viewingPOSupplier.LHeadEmail}</dd>
+                            </div>
+                          )}
+                          {viewingPOSupplier.LGST && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOSupplier.LGST}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    )}
+                    {/* Billing Details */}
+                    {viewingPOCompany && (
+                      <div className="rounded-xl border border-border bg-muted/20 p-4">
+                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <Building2 size={9} className="text-emerald-500" /> Billing Details
+                        </p>
+                        <dl className="space-y-1.5 text-xs">
+                          {(viewingPOCompany.address || viewingPOCompany.city) && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Address</dt>
+                              <dd className="text-foreground font-medium mt-0.5">{[viewingPOCompany.address, viewingPOCompany.city, viewingPOCompany.state, viewingPOCompany.pincode].filter(Boolean).join(", ")}</dd>
+                            </div>
+                          )}
+                          {viewingPOCompany.phone_number && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOCompany.phone_number}</dd>
+                            </div>
+                          )}
+                          {viewingPOCompany.email && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Email</dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Mail size={10} className="text-muted-foreground" />{viewingPOCompany.email}</dd>
+                            </div>
+                          )}
+                          {viewingPOCompany.gst_no && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOCompany.gst_no}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    )}
+                    {/* Project / Delivery Address */}
+                    {viewingPOProject && (
+                      <div className="rounded-xl border border-border bg-muted/20 p-4">
+                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <MapPin size={9} className="text-emerald-500" /> Project Details
+                        </p>
+                        <dl className="space-y-1.5 text-xs">
+                          {(viewingPOProject.address || viewingPOProject.city) && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery Address</dt>
+                              <dd className="text-foreground font-medium mt-0.5">{[viewingPOProject.address, viewingPOProject.address_line2, viewingPOProject.city, viewingPOProject.state, viewingPOProject.pincode].filter(Boolean).join(", ")}</dd>
+                            </div>
+                          )}
+                          {viewingPOProject.phone_number && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOProject.phone_number}</dd>
+                            </div>
+                          )}
+                          {viewingPOProject.gst_no && (
+                            <div>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOProject.gst_no}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Line items */}
                 {(() => {
@@ -2305,7 +2616,7 @@ const PurchaseOrderMaster: React.FC = () => {
                         <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
                           <thead className="bg-muted/40 border-b border-border">
                             <tr>
-                              {[["Item / Description", "36%"], ["Qty", "10%"], ["Unit", "9%"], ["Rate", "14%"], ["GST%", "9%"], ["Amount", "14%"], ["Received", "8%"]].map(([h, w]) => (
+                              {[["Item / Description", "32%"], ["Qty", "9%"], ["Unit", "9%"], ["Rate", "13%"], ["GST%", "9%"], ["Amount", "13%"], ["Received", "15%"]].map(([h, w]) => (
                                 <th key={h} className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${["Qty","Rate","GST%","Amount","Received"].includes(h) ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
                               ))}
                             </tr>
