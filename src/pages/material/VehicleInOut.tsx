@@ -563,6 +563,11 @@ export default function VehicleInOut() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [filterFY, setFilterFY] = useState("");
+  // Pre-select active FY once finYears are loaded
+  React.useEffect(() => {
+    if (activeFinYear && filterFY === "") setFilterFY(activeFinYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFinYear]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1424,8 +1429,7 @@ export default function VehicleInOut() {
                       className="pl-3 pr-8 py-2 rounded-lg text-xs bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground appearance-none"
                     >
                       <option value="">All Years</option>
-                      {finYears
-                        .filter((fy) => fy.status === "Active" && !fy.locked)
+                      {[...finYears]
                         .sort((a, b) => b.year.localeCompare(a.year))
                         .map((fy) => (
                           <option key={fy.id} value={fy.year}>
