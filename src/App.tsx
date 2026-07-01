@@ -607,6 +607,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/trial-balance"
+        element={
+          <ProtectedRoute pageKey="trial-balance">
+            <TrialBalance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/reports"
         element={
           <ProtectedRoute pageKey="reports">

@@ -18,6 +18,7 @@ import { getMenuMasters } from "@/api/menuMasterApi";
 import { toast } from "sonner";
 import { Tag } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
@@ -378,9 +379,11 @@ const NamedEntryTypeMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Named Entry Type Master"]}
       />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Named Entry Type Master
-      </h1>
+      <AdminShell
+        title="Named Entry Type Master"
+        subtitle="Configure document entry types and auto-generated prefixes per project"
+        icon={Tag}
+      >
 
       {entryTypeOptions.length === 0 && (
         <div className="mb-4 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm font-heading">
@@ -448,6 +451,7 @@ const NamedEntryTypeMaster: React.FC = () => {
           ],
         } : undefined}
       />
+      </AdminShell>
     </>
   );
 };
