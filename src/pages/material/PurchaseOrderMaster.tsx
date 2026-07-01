@@ -383,11 +383,11 @@ const PurchaseOrderMaster: React.FC = () => {
           return !label.startsWith("ExB-PO");
         });
         setPoDocTypes(filtered);
-        // Auto-select first type in create mode when none is set yet
+        // Auto-select DPO for direct POs (no MR/Sale Invoice source yet)
         if (!poDocTypeId && filtered.length > 0) {
-          const first = filtered[0];
-          fetchNextDocNumber(first.TypeOfDocId, selectedFinYear || undefined).then(
-            (docNo) => applyPoDocNumber(first.TypeOfDocId, docNo),
+          const dpo = filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === "DPO") ?? filtered[0];
+          fetchNextDocNumber(dpo.TypeOfDocId, selectedFinYear || undefined).then(
+            (docNo) => applyPoDocNumber(dpo.TypeOfDocId, docNo),
           );
         }
       })
@@ -1255,6 +1255,21 @@ const PurchaseOrderMaster: React.FC = () => {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceWO, selectedFinYear]);
+
+  // ── Auto-switch doc type between PO (MR/Sale Invoice) and DPO (Direct) ───
+  useEffect(() => {
+    if (viewMode !== "create" || sourceWO) return; // WO has its own effect
+    const hasMROrSI = !!(sourceMR || sourceSaleInvoice);
+    const targetPrefix = hasMROrSI ? "PO" : "DPO";
+    const target = poDocTypes.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix);
+    if (!target) return;
+    // Only switch if we're not already on the right type
+    if (poDocTypeId === target.TypeOfDocId) return;
+    fetchNextDocNumber(target.TypeOfDocId, selectedFinYear || undefined).then(
+      (docNo) => applyPoDocNumber(target.TypeOfDocId, docNo),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMR, sourceSaleInvoice, sourceWO, viewMode, poDocTypes]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
