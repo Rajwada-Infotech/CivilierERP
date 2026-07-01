@@ -7,22 +7,13 @@ import {
   Receipt,
   HardHat,
   FileText,
-  Archive,
   Puzzle,
-  LogOut,
-  User,
-  Crown,
-  ShieldCheck,
-  Package,
-  MessageSquare,
   Users,
   ChevronRight,
-  Database,
-  Calendar,
+
   Landmark,
   TrendingUp,
   ClipboardList,
-  Wrench,
   Grip,
   Home,
   Settings,
@@ -36,10 +27,27 @@ import {
   LayoutGrid,
   Ruler,
   Activity,
-  Pickaxe,
   DoorOpen,
   Target,
+  Calendar,
+  Package,
 } from "lucide-react";
+import {
+  Bank,
+  Receipt21,
+  Category2,
+  ClipboardText,
+  Message2,
+  Archive,
+  Building3,
+  VideoPlay,
+  Shield,
+  ShieldTick,
+  Crown,
+  Data,
+  Profile,
+  Logout,
+} from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
@@ -110,7 +118,7 @@ const MODULE_META: Record<
     h: 217,
     s: 91,
     l: 60,
-    icon: TrendingUp,
+    icon: Bank,
     label: "Finance",
     route: MODULE_DASHBOARD_ROUTES.finance,
   },
@@ -118,7 +126,7 @@ const MODULE_META: Record<
     h: 160,
     s: 60,
     l: 45,
-    icon: Package,
+    icon: Receipt21,
     label: "Material",
     route: MODULE_DASHBOARD_ROUTES.material,
   },
@@ -126,7 +134,7 @@ const MODULE_META: Record<
     h: 263,
     s: 70,
     l: 58,
-    icon: Calendar,
+    icon: Category2,
     label: "Follow Up",
     route: MODULE_DASHBOARD_ROUTES.followup,
   },
@@ -134,7 +142,7 @@ const MODULE_META: Record<
     h: 38,
     s: 92,
     l: 50,
-    icon: Wrench,
+    icon: ClipboardText,
     label: "Engineering",
     route: MODULE_DASHBOARD_ROUTES.engineering,
   },
@@ -142,7 +150,7 @@ const MODULE_META: Record<
     h: 330,
     s: 80,
     l: 60,
-    icon: MessageSquare,
+    icon: Message2,
     label: "Ticket",
     route: MODULE_DASHBOARD_ROUTES.ticket,
   },
@@ -158,7 +166,7 @@ const MODULE_META: Record<
     h: 192,
     s: 91,
     l: 36,
-    icon: Pickaxe,
+    icon: Building3,
     label: "Civil Work DPR",
     route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
   },
@@ -166,7 +174,7 @@ const MODULE_META: Record<
     h: 330,
     s: 70,
     l: 55,
-    icon: Target,
+    icon: VideoPlay,
     label: "Sales Automation",
     route: MODULE_DASHBOARD_ROUTES["sales-automation"],
   },
@@ -174,7 +182,7 @@ const MODULE_META: Record<
     h: 217,
     s: 91,
     l: 60,
-    icon: ShieldCheck,
+    icon: Shield,
     label: "Admin",
     route: "/admin/dashboard",
   },
@@ -728,12 +736,12 @@ export const MobileNav: React.FC = () => {
                 )}
                 {!isSuperAdmin && isDba && (
                   <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-600 border-2 border-card flex items-center justify-center">
-                    <Database size={9} className="text-white" />
+                    <Data size={9} className="text-white" />
                   </span>
                 )}
                 {!isSuperAdmin && !isDba && isAdmin && (
                   <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-600 border-2 border-card flex items-center justify-center">
-                    <ShieldCheck size={9} className="text-white" />
+                    <ShieldTick size={9} className="text-white" />
                   </span>
                 )}
               </div>
@@ -763,13 +771,13 @@ export const MobileNav: React.FC = () => {
                   }}
                   className="w-9 h-9 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors"
                 >
-                  <User size={15} className="text-muted-foreground" />
+                  <Profile size={15} className="text-muted-foreground" />
                 </button>
                 <button
                   onClick={handleLogout}
                   className="w-9 h-9 rounded-xl border border-destructive/30 flex items-center justify-center hover:bg-destructive/10 transition-colors"
                 >
-                  <LogOut size={15} className="text-destructive" />
+                  <Logout size={15} className="text-destructive" />
                 </button>
                 <button
                   onClick={() => setOpen(false)}
