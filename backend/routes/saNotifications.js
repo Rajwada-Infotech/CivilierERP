@@ -3,7 +3,10 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 
+const rateLimit = require("express-rate-limit");
+
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 
 // GET / — list user's recent notifications (latest 50)
 router.get("/", async (req, res) => {
