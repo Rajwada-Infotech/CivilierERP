@@ -3,6 +3,7 @@ import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { TicketShell } from "@/components/ticket/TicketShell";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
@@ -853,9 +854,8 @@ const ResolvedTickets: React.FC = () => {
   // ── Detail view ──────────────────────────────────────────────────────────────
   if (selectedTicketId !== null) {
     return (
-      <>
-        <Breadcrumbs items={["Dashboard", "Tickets", "Resolved Tickets", `#${selectedTicketId}`]} />
-        <div className="max-w-3xl mx-auto pt-6 pb-10">
+      <TicketShell title={`Ticket #${selectedTicketId}`} subtitle="Ticket details" icon={CheckCircle2}>
+        <div className="max-w-3xl mx-auto">
           <TicketDetailView
             ticketId={selectedTicketId}
             onBack={() => setSelectedTicketId(null)}
@@ -867,30 +867,21 @@ const ResolvedTickets: React.FC = () => {
             }}
           />
         </div>
-      </>
+      </TicketShell>
     );
   }
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Tickets", "Resolved Tickets"]} />
-
-      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/ticket")} className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground">
-              <ArrowLeft size={14} />
-            </button>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">Resolved Tickets</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">{resolvedCount} resolved · {closedCount} closed</p>
-            </div>
-          </div>
-          <button onClick={() => refetch()} disabled={isFetching} className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50">
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-          </button>
-        </div>
+    <TicketShell
+      title="Resolved Tickets"
+      subtitle={`${resolvedCount} resolved · ${closedCount} closed`}
+      icon={CheckCircle2}
+      action={
+        <button onClick={() => refetch()} disabled={isFetching} className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50">
+          <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+        </button>
+      }
+    >
 
         {isError && (
           <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
@@ -982,8 +973,7 @@ const ResolvedTickets: React.FC = () => {
             Showing {filteredTickets.length} of {activeTab === "Resolved" ? resolvedCount : closedCount} {activeTab.toLowerCase()} tickets
           </p>
         )}
-      </div>
-    </>
+    </TicketShell>
   );
 };
 
