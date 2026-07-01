@@ -176,7 +176,7 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Table ── */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-max text-sm">
+        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -187,6 +187,7 @@ export function DataTable<TData extends RowData>({
                     <th
                       key={header.id}
                       colSpan={header.colSpan}
+                      style={header.column.columnDef.size ? { width: header.column.columnDef.size } : undefined}
                       className={`px-4 py-3 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${header.column.id === "actions" ? "text-right" : "text-left"} ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
