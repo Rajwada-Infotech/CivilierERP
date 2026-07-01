@@ -2377,7 +2377,7 @@ router.put("/:id/submit", requirePageRight("expense-booking", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", requirePageRight("expense-booking", "approve"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -2401,7 +2401,7 @@ router.put("/:id/approve", requirePageRight("expense-booking", "approve"), async
 
 router.put(
   "/:id/reject",
-  requirePageRight("expense-booking", "approve"),
+  requirePageRight("expense-booking", "edit"),
   validateBody(expenseRejectSchema),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);

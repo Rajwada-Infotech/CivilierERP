@@ -778,7 +778,7 @@ router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, r
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", requirePageRight("new-payment", "approve"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -888,7 +888,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "approve"), async (re
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", requirePageRight("new-payment", "approve"), async (req, res) => {
+router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
