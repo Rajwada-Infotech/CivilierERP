@@ -19,6 +19,7 @@ import {
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -538,24 +539,10 @@ export default function TDSReminders() {
           },
         ]}
       />
-      <div className="relative space-y-6 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-violet-500/10 shrink-0">
-              <Percent size={20} className="text-violet-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                TDS Reminders
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Compliance readiness tracker — monitor active rates and
-                deductions
-              </p>
-            </div>
-          </div>
-
+      <FollowupShell
+        title="TDS Reminders"
+        icon={Percent}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -576,7 +563,8 @@ export default function TDSReminders() {
               Open TDS Master
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── KPI strip + breakdown ── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
@@ -633,7 +621,7 @@ export default function TDSReminders() {
             })}
           </div>
         )}
-      </div>
+      </FollowupShell>
     </>
   );
 }
