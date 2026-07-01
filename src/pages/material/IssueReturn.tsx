@@ -315,7 +315,7 @@ export default function IssueReturn() {
 
         {/* ── FORM ────────────────────────────────────────────────────────── */}
         {view === "form" && (
-          <motion.div key="form" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5 max-w-4xl">
+          <motion.div key="form" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5">
 
             {/* Form header */}
             <div className="rounded-2xl px-5 py-4 flex items-center justify-between gap-3" style={glassSection}>
@@ -349,59 +349,60 @@ export default function IssueReturn() {
                 </div>
                 <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Header Details</h3>
               </div>
-              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel required>Return Date</FieldLabel>
-                  <div className="relative">
-                    <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <input type="date" className={inp + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
+              <div className="p-5 space-y-4">
+                {/* Row 1: Return Date | Company | Project / Site | Issue Reference */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <FieldLabel required>Return Date</FieldLabel>
+                    <div className="relative">
+                      <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      <input type="date" className={inp + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Company</FieldLabel>
+                    <div className="relative">
+                      <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      <select className={sel + " pl-9"} value={form.CompanyId} onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", IssueId: "", items: [] }))}>
+                        <option value="">— Select Company —</option>
+                        {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Project / Site</FieldLabel>
+                    <div className="relative">
+                      <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      <select className={sel + " pl-9"} value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, IssueId: "", items: [] }))}>
+                        <option value="">— Select Project —</option>
+                        {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Issue Reference</FieldLabel>
+                    <div className="relative">
+                      <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      <select className={sel + " pl-9"} value={form.IssueId} onChange={(e) => setForm((f) => ({ ...f, IssueId: e.target.value, items: [] }))}>
+                        <option value="">— Select Issue —</option>
+                        {issues.map((i) => <option key={i.IssueId} value={i.IssueId}>{i.DocNo} — {i.IssueDate?.split("T")[0]}</option>)}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    </div>
                   </div>
                 </div>
-
-                <div>
-                  <FieldLabel>Company</FieldLabel>
-                  <div className="relative">
-                    <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={sel + " pl-9"} value={form.CompanyId} onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", IssueId: "", items: [] }))}>
-                      <option value="">— Select Company —</option>
-                      {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                {/* Row 2: Reason | Remarks */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Reason</FieldLabel>
+                    <input className={inp} placeholder="Reason for return…" value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} />
                   </div>
-                </div>
-
-                <div>
-                  <FieldLabel>Project / Site</FieldLabel>
-                  <div className="relative">
-                    <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={sel + " pl-9"} value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, IssueId: "", items: [] }))}>
-                      <option value="">— Select Project —</option>
-                      {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
-                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <div>
+                    <FieldLabel>Remarks</FieldLabel>
+                    <Textarea rows={1} placeholder="Additional remarks…" value={form.Remarks} onChange={(e) => setForm((f) => ({ ...f, Remarks: e.target.value }))} className="rounded-xl text-sm" />
                   </div>
-                </div>
-
-                <div>
-                  <FieldLabel>Issue Reference</FieldLabel>
-                  <div className="relative">
-                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <select className={sel + " pl-9"} value={form.IssueId} onChange={(e) => setForm((f) => ({ ...f, IssueId: e.target.value, items: [] }))}>
-                      <option value="">— Select Issue —</option>
-                      {issues.map((i) => <option key={i.IssueId} value={i.IssueId}>{i.DocNo} — {i.IssueDate?.split("T")[0]}</option>)}
-                    </select>
-                    <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <FieldLabel>Reason</FieldLabel>
-                  <input className={inp} placeholder="Reason for return…" value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} />
-                </div>
-
-                <div>
-                  <FieldLabel>Remarks</FieldLabel>
-                  <Textarea rows={1} placeholder="Additional remarks…" value={form.Remarks} onChange={(e) => setForm((f) => ({ ...f, Remarks: e.target.value }))} className="rounded-xl text-sm" />
                 </div>
               </div>
             </div>
@@ -479,7 +480,7 @@ export default function IssueReturn() {
 
         {/* ── DETAIL ──────────────────────────────────────────────────────── */}
         {view === "detail" && detailRecord && (
-          <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5 max-w-3xl">
+          <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5">
 
             {/* Header */}
             <div className="rounded-2xl px-5 py-4 flex items-center justify-between gap-3" style={glassSection}>
