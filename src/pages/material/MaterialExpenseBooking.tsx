@@ -2620,10 +2620,13 @@ export default function MaterialExpenseBooking() {
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
               {/* ── 0. Booking Information ─────────────────────────────── */}
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <SectionHeader label="Booking Information" />
-                {/* Row 1: Company | Project / Site | Financial Year */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                {/* ── Sub-section: Party & Project ── */}
+                <div className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Party &amp; Project</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Company" required>
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
@@ -2716,8 +2719,7 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                 </div>
-                {/* Row 2: Supplier / Vendor (full width) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Supplier/Vendor inside Party & Project sub-section */}
                   <Field
                     label={vendorLabel}
                     hint={
@@ -2728,148 +2730,111 @@ export default function MaterialExpenseBooking() {
                   >
                     {selectedDoc?.vendorLabel ? (
                       <div className="relative">
-                        <User
-                          size={13}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                        />
-                        <Input
-                          value={form.supplier}
-                          readOnly
-                          placeholder="Auto-filled from linked order"
-                          className="pl-8 bg-muted/30 cursor-not-allowed"
-                        />
+                        <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <Input value={form.supplier} readOnly placeholder="Auto-filled from linked order" className="pl-8 bg-muted/30 cursor-not-allowed" />
                       </div>
                     ) : (
-                      <Select
-                        value={form.supplier || "__none__"}
-                        onValueChange={(val) =>
-                          set("supplier", val === "__none__" ? "" : val)
-                        }
-                      >
+                      <Select value={form.supplier || "__none__"} onValueChange={(val) => set("supplier", val === "__none__" ? "" : val)}>
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue placeholder="— None —" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none__">— None —</SelectItem>
                           {supplierHeads.map((s) => (
-                            <SelectItem key={s.id} value={s.label}>
-                              {s.label}
-                            </SelectItem>
+                            <SelectItem key={s.id} value={s.label}>{s.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     )}
                   </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Booking Date" required>
-                    <DateField
-                      value={form.bookingDate}
-                      onChange={(val) => set("bookingDate", val)}
-                    />
-                  </Field>
-                  <Field label="Payment Term">
-                    <select
-                      className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
-                      value={form.paymentTermId ?? ""}
-                      onChange={(e) => {
-                        const termId = e.target.value ? parseInt(e.target.value, 10) : null;
-                        set("paymentTermId", termId);
-                        if (termId && form.bookingDate) {
-                          const term = paymentTermOptions.find((t) => t.Id === termId);
-                          if (term && term.CreditDays != null) {
-                            const base = new Date(form.bookingDate);
-                            base.setDate(base.getDate() + term.CreditDays);
-                            set("dueDate", base.toISOString().split("T")[0]);
+                </div>{/* end Party & Project */}
+
+                {/* ── Sub-section: Dates & Payment ── */}
+                <div className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <Field label="Booking Date" required>
+                      <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
+                    </Field>
+                    <Field label="Payment Term">
+                      <select
+                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
+                        value={form.paymentTermId ?? ""}
+                        onChange={(e) => {
+                          const termId = e.target.value ? parseInt(e.target.value, 10) : null;
+                          set("paymentTermId", termId);
+                          if (termId && form.bookingDate) {
+                            const term = paymentTermOptions.find((t) => t.Id === termId);
+                            if (term && term.CreditDays != null) {
+                              const base = new Date(form.bookingDate);
+                              base.setDate(base.getDate() + term.CreditDays);
+                              set("dueDate", base.toISOString().split("T")[0]);
+                            }
                           }
-                        }
-                      }}
+                        }}
+                      >
+                        <option value="">— Select Payment Term —</option>
+                        {paymentTermOptions.map((t) => (
+                          <option key={t.Id} value={t.Id}>
+                            {t.TermName}{t.CreditDays != null ? ` (${t.CreditDays} days)` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Due Date">
+                      <DateField
+                        value={form.dueDate}
+                        min={form.bookingDate || undefined}
+                        onChange={(val) => {
+                          if (form.bookingDate && val && val < form.bookingDate) {
+                            toast.error("Due date cannot be before the booking date.");
+                            return;
+                          }
+                          set("dueDate", val);
+                        }}
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                {/* ── Sub-section: Vendor Invoice ── */}
+                <div className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Vendor Invoice No">
+                      <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
+                    </Field>
+                    <Field label="Vendor Invoice Date">
+                      <DateField value={form.vendorInvoiceDate ?? ""} onChange={(val) => set("vendorInvoiceDate", val)} placeholder="Select invoice date..." />
+                    </Field>
+                  </div>
+                </div>
+
+                {/* ── Sub-section: Accounting ── */}
+                <div className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field
+                      label="Cost Center"
+                      hint={selectedDoc?.projectId ? "Auto-filled from the selected document's project when a matching cost center exists" : "Select a cost center for expense allocation"}
                     >
-                      <option value="">— Select Payment Term —</option>
-                      {paymentTermOptions.map((t) => (
-                        <option key={t.Id} value={t.Id}>
-                          {t.TermName}{t.CreditDays != null ? ` (${t.CreditDays} days)` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div /> {/* spacer */}
-                  <Field label="Due Date">
-                    <DateField
-                      value={form.dueDate}
-                      min={form.bookingDate || undefined}
-                      onChange={(val) => {
-                        if (
-                          form.bookingDate &&
-                          val &&
-                          val < form.bookingDate
-                        ) {
-                          toast.error(
-                            "Due date cannot be before the booking date.",
-                          );
-                          return;
-                        }
-                        set("dueDate", val);
-                      }}
-                    />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Vendor Invoice No">
-                    <Input
-                      value={form.vendorInvoiceNo ?? ""}
-                      onChange={(e) => set("vendorInvoiceNo", e.target.value)}
-                      placeholder="Supplier invoice number"
-                    />
-                  </Field>
-                  <Field label="Vendor Invoice Date">
-                    <DateField
-                      value={form.vendorInvoiceDate ?? ""}
-                      onChange={(val) => set("vendorInvoiceDate", val)}
-                      placeholder="Select invoice date..."
-                    />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="Cost Center"
-                    hint={
-                      selectedDoc?.projectId
-                        ? "Auto-filled from the selected document's project when a matching cost center exists"
-                        : "Select a cost center for expense allocation"
-                    }
-                  >
-                    <Select
-                      value={form.costCenter || "__none__"}
-                      onValueChange={(val) =>
-                        set("costCenter", val === "__none__" ? "" : val)
-                      }
-                    >
-                      <SelectTrigger className={selectTriggerCls}>
-                        <SelectValue placeholder="Select cost center..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">-- None --</SelectItem>
-                        {costCenterOptions.map((cc) => {
-                          const value = `${cc.code} - ${cc.label}`;
-                          return (
-                            <SelectItem key={cc.id} value={value}>
-                              {value}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="GL Account">
-                    <Input
-                      value={form.glAccount ?? ""}
-                      onChange={(e) => set("glAccount", e.target.value)}
-                      placeholder="Optional GL account"
-                    />
-                  </Field>
+                      <Select value={form.costCenter || "__none__"} onValueChange={(val) => set("costCenter", val === "__none__" ? "" : val)}>
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder="Select cost center..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">-- None --</SelectItem>
+                          {costCenterOptions.map((cc) => {
+                            const value = `${cc.code} - ${cc.label}`;
+                            return <SelectItem key={cc.id} value={value}>{value}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="GL Account">
+                      <Input value={form.glAccount ?? ""} onChange={(e) => set("glAccount", e.target.value)} placeholder="Optional GL account" />
+                    </Field>
+                  </div>
                 </div>
               </div>
 
