@@ -261,6 +261,56 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ── GET /:id/po — fetch linked PO details (no PO permission needed) ──────────
+router.get("/:id/po", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    // Resolve POID from this VehicleInOut record
+    const vehResult = await pool.request()
+      .input("ID", sql.Int, id)
+      .query("SELECT POID FROM dbo.VehicleInOut WHERE VehicleInOutID = @ID");
+    const poid = vehResult.recordset[0]?.POID;
+    if (!poid) return res.status(404).json({ error: "No PO linked to this record" });
+
+    // Fetch PO header
+    const poResult = await pool.request()
+      .input("POID", sql.Int, poid)
+      .query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.PODate,
+          po.ExpectedDeliveryDate, po.Status, po.TotalAmount, po.PaymentTerms,
+          po.Remarks,
+          ah.LHeadName AS SupplierName,
+          co.name      AS CompanyName,
+          pr.name      AS ProjectName
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
+        LEFT JOIN dbo.enterprise        co ON co.id      = po.CompanyId
+        LEFT JOIN dbo.enterprise        pr ON pr.id      = po.ProjectId
+        WHERE po.PurchaseOrderID = @POID
+      `);
+    if (!poResult.recordset[0])
+      return res.status(404).json({ error: "PO not found" });
+
+    // Fetch line items
+    const itemsResult = await pool.request()
+      .input("POID2", sql.Int, poid)
+      .query(`
+        SELECT ItemName, Description, Quantity, UomName, Rate, TaxPct, LineAmount
+        FROM dbo.PurchaseOrderItems
+        WHERE PurchaseOrderID = @POID2
+        ORDER BY SortOrder
+      `);
+
+    res.json({ ...poResult.recordset[0], LineItems: itemsResult.recordset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST / — create ───────────────────────────────────────────────────────────
 router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);

@@ -3,6 +3,8 @@ import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { TicketShell } from "@/components/ticket/TicketShell";
+import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
@@ -515,7 +517,7 @@ function openAttachmentViewer(url: string, filename: string) {
       ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
       : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
     win.document.write(
-      `<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`,
+      `<!DOCTYPE html><html><head><title>${escapeHtml(filename)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${escapeHtml(filename)}</span><a class="dl" href="${blobUrl}" download="${escapeHtml(filename)}">⬇ Download</a></header><main>${content}</main></body></html>`,
     );
     win.document.close();
   };
@@ -1634,11 +1636,8 @@ const MyTickets: React.FC = () => {
 
   if (selectedTicketId !== null) {
     return (
-      <>
-        <Breadcrumbs
-          items={["Dashboard", "Tickets", "My Tickets", `#${selectedTicketId}`]}
-        />
-        <div className="max-w-3xl mx-auto pt-6 pb-10">
+      <TicketShell title={`Ticket #${selectedTicketId}`} subtitle="Ticket details" icon={MessageCircle}>
+        <div className="max-w-3xl mx-auto">
           <TicketDetailView
             ticketId={selectedTicketId}
             onBack={() => setSelectedTicketId(null)}
@@ -1650,58 +1649,33 @@ const MyTickets: React.FC = () => {
             }}
           />
         </div>
-      </>
+      </TicketShell>
     );
   }
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Tickets", "My Tickets"]} />
-      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate("/ticket")}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground"
-            >
-              <ArrowLeft size={14} />
-            </button>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                My Tickets
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {openTickets.length} open
-                {allTickets.length !== openTickets.length &&
-                  ` · ${allTickets.length} total`}
-                {urgentCount > 0 && (
-                  <span className="text-red-500 ml-1.5 font-medium">
-                    · {urgentCount} urgent
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/ticket/create")}
-              className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
-            >
-              <Plus size={15} /> New Ticket
-            </button>
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
-            >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
-            </button>
-          </div>
+    <TicketShell
+      title="My Tickets"
+      subtitle={`${openTickets.length} open · ${allTickets.length} total${urgentCount > 0 ? ` · ${urgentCount} urgent` : ""}`}
+      icon={MessageCircle}
+      action={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/ticket/create")}
+            className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
+          >
+            <Plus size={15} /> New Ticket
+          </button>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+          </button>
         </div>
+      }
+    >
 
         {isError && (
           <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
@@ -1843,8 +1817,7 @@ const MyTickets: React.FC = () => {
             Showing {tickets.length} of {allTickets.length} tickets
           </p>
         )}
-      </div>
-    </>
+    </TicketShell>
   );
 };
 

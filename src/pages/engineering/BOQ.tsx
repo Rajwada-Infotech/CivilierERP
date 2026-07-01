@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { safeHtml, raw } from "@/utils/escapeHtml";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
@@ -2344,7 +2345,7 @@ export default function BOQ() {
           const amount = Number(
             row.amount ?? row.LineAmount ?? row.Amount ?? 0,
           );
-          return `<tr>
+          return safeHtml`<tr>
             <td>${idx + 1}</td>
             <td>${name || ""}</td>
             <td>${code || ""}</td>
@@ -2359,7 +2360,7 @@ export default function BOQ() {
 
     const win = window.open("", "_blank", "width=980,height=720");
     if (!win) return;
-    win.document.write(`<!doctype html>
+    win.document.write(safeHtml`<!doctype html>
       <html>
         <head>
           <title>BOQ ${record.BoqNo || record.DocNo || record.BoqID}</title>
@@ -2397,14 +2398,14 @@ export default function BOQ() {
             <div><div class="label">Document No</div><div class="value">${record.DocNo || record.BoqNo || ""}</div></div>
             <div><div class="label">Total</div><div class="value">${fmt(record.TotalAmount || itemTotal + activityTotal)}</div></div>
           </div>
-          ${record.Description ? `<p>${record.Description}</p>` : ""}
+          ${record.Description ? raw(safeHtml`<p>${record.Description}</p>`) : ""}
           <div class="section">
             <h3>Items</h3>
-            <table><thead><tr><th>#</th><th>Item</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${renderRows(items, "item") || '<tr><td colspan="8">No items</td></tr>'}</tbody></table>
+            <table><thead><tr><th>#</th><th>Item</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${raw(renderRows(items, "item") || '<tr><td colspan="8">No items</td></tr>')}</tbody></table>
           </div>
           <div class="section">
             <h3>Activities</h3>
-            <table><thead><tr><th>#</th><th>Activity</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${renderRows(activities, "activity") || '<tr><td colspan="8">No activities</td></tr>'}</tbody></table>
+            <table><thead><tr><th>#</th><th>Activity</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${raw(renderRows(activities, "activity") || '<tr><td colspan="8">No activities</td></tr>')}</tbody></table>
           </div>
           <div class="total">
             <span>Items: ${fmt(itemTotal)}</span>

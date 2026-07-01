@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -773,7 +774,7 @@ const BankMaster: React.FC = () => {
   const handlePrint = (bank: BankRecord) => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
-    win.document.write(`
+    win.document.write(safeHtml`
       <html><head><title>Bank — ${bank.BName}</title>
       <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
       </head><body>
