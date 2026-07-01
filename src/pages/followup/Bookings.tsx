@@ -4,6 +4,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   BookOpen,
@@ -1906,17 +1907,10 @@ export default function BookingsPage() {
           { label: "Bookings", path: "/followup/sales/bookings" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Bookings
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Unit bookings and sales agreements
-            </p>
-          </div>
+      <FollowupShell
+        title="Bookings"
+        icon={BookOpen}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -1939,7 +1933,8 @@ export default function BookingsPage() {
               </Button>
             )}
           </div>
-        </div>
+        }
+      >
 
         {/* KPI Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -2329,7 +2324,7 @@ export default function BookingsPage() {
             )}
           </div>
         )}
-      </div>
+      </FollowupShell>
 
       {/* Slide-over form */}
       {showForm && (

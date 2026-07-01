@@ -55,6 +55,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -351,17 +352,10 @@ export function FinanceDemandsPage() {
           { label: "Demands" },
         ]}
       />
-      <div className="space-y-8 mt-6">
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Payment Demands
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Raise and track milestone payment demand letters for all bookings.
-            </p>
-          </div>
+      <FollowupShell
+        title="Payment Demands"
+        icon={Send}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -372,7 +366,8 @@ export function FinanceDemandsPage() {
               Refresh
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── Summary cards ────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -729,7 +724,7 @@ export function FinanceDemandsPage() {
             </div>
           )}
         </div>
-      </div> {/* end space-y-8 */}
+      </FollowupShell>
 
       {/* ── Raise Demand Dialog ───────────────────────────────────────────── */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => !o && setRaiseRow(null)}>

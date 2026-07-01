@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -646,6 +647,7 @@ export function BankNOCPage() {
         ]}
       />
 
+      <FollowupShell title="Bank NOC">
       <div
         className="bnoc-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1114,6 +1116,7 @@ export function BankNOCPage() {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* Edit Dialog */}
       <Dialog

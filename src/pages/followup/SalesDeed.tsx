@@ -27,6 +27,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -952,6 +953,7 @@ export function SalesDeedPage() {
           { label: "Sales Deed", path: "/followup/closure/sales-deed" },
         ]}
       />
+      <FollowupShell title="Sales Deed">
       <div
         className="sd-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1362,6 +1364,7 @@ export function SalesDeedPage() {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog

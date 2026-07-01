@@ -30,6 +30,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
   Dialog,
   DialogContent,
@@ -1011,6 +1012,7 @@ export function HandoverPage() {
           { label: "Handover", path: "/followup/closure/handover" },
         ]}
       />
+      <FollowupShell title="Handover">
       <div
         className="ho-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1389,6 +1391,7 @@ export function HandoverPage() {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
