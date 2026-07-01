@@ -20,6 +20,7 @@ import {
   CommunicatorLog,
 } from "../../api/followupCommunicatorApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -143,24 +144,20 @@ export default function Communicator() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Follow-Up", path: "/followup" }, { label: "Agreement" }, { label: "Communicator" }]} />
-      <div className="space-y-8 mt-6 max-w-6xl">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Communicator</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Send Email, SMS, or WhatsApp messages to applicants
-          </p>
-        </div>
-        <button
-          onClick={() => logsQuery.refetch()}
-          disabled={logsQuery.isFetching}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
-        >
-          <RefreshCw size={13} className={logsQuery.isFetching ? "animate-spin" : ""} />
-          Refresh
-        </button>
-      </div>
+      <FollowupShell
+        title="Communicator"
+        icon={MessageSquare}
+        action={
+          <button
+            onClick={() => logsQuery.refetch()}
+            disabled={logsQuery.isFetching}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+          >
+            <RefreshCw size={13} className={logsQuery.isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        }
+      >
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -431,7 +428,7 @@ export default function Communicator() {
           )}
         </div>
       </div>
-      </div>
+      </FollowupShell>
     </>
   );
 }

@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -437,6 +438,7 @@ export default function ApplicantTimeline() {
   const TypeIcon = getLogIcon(logForm.type);
 
   return (
+    <FollowupShell title="Applicant Timeline">
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
@@ -825,5 +827,6 @@ export default function ApplicantTimeline() {
         </>
       ) : null}
     </div>
+    </FollowupShell>
   );
 }

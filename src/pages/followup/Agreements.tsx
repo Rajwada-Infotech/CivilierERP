@@ -30,6 +30,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -945,44 +946,37 @@ export function AgreementsPage() {
         ]}
       />
       <div
-        className="ag-page relative space-y-8 mt-6"
+        className="ag-page relative"
         onClick={() => setOpenMenuId(null)}
       >
-        {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Agreements
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {pagination
-                ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}`
-                : "Manage all agreements"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
-              Refresh
-            </button>
-            {rights.canCreate && (
-              <Button
-                size="sm"
-                onClick={openCreate}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+        <FollowupShell
+          title="Agreements"
+          icon={FileText}
+          action={
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
               >
-                <Plus size={14} /> New Agreement
-              </Button>
-            )}
-          </div>
-        </div>
+                <RefreshCw
+                  size={13}
+                  className={isFetching ? "animate-spin" : ""}
+                />
+                Refresh
+              </button>
+              {rights.canCreate && (
+                <Button
+                  size="sm"
+                  onClick={openCreate}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                >
+                  <Plus size={14} /> New Agreement
+                </Button>
+              )}
+            </div>
+          }
+        >
 
         {/* Filter bar */}
         <div className="ag-filter-bar">
@@ -1361,6 +1355,7 @@ export function AgreementsPage() {
             </div>
           )}
         </div>
+        </FollowupShell>
       </div>
 
       {/* ── Create / Edit Dialog ── */}

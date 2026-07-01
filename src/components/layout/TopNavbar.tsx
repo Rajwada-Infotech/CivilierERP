@@ -13,16 +13,7 @@ import {
   Calendar,
   FileText,
   Settings,
-  BarChart3,
-  LogOut,
-  User,
   LayoutGrid,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Puzzle,
-  ShieldCheck,
-  Crown,
-  Shield,
   Receipt,
   Truck,
   Users,
@@ -38,7 +29,6 @@ import {
   FileType2,
   Activity,
   ChevronDown,
-  Database,
   ClipboardList,
   Ruler,
   SlidersHorizontal,
@@ -47,7 +37,19 @@ import {
   TrendingUp,
   Megaphone,
   UsersRound,
+  ShieldCheck,
 } from "lucide-react";
+import {
+  Crown,
+  Data,
+  Shield,
+  Profile,
+  Logout,
+  SidebarLeft,
+  Setting2,
+  Chart,
+  Element4,
+} from "iconsax-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
@@ -478,7 +480,12 @@ const SetupDropdown = ({
               : modVars
           }
         >
-          <SlidersHorizontal size={13} />
+          <Setting2
+            size={13}
+            variant="Outline"
+            color="currentColor"
+            className={`transition-transform duration-500 ${open ? "rotate-90" : ""}`}
+          />
           <span>Setup</span>
           <ChevronDown
             size={12}
@@ -763,14 +770,14 @@ const UserMenuContent: React.FC<{
         style={cascade(2)}
         className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-lg hover:bg-muted transition-colors text-foreground"
       >
-        <User size={14} /> Profile
+        <Profile size={14} /> Profile
       </button>
       <button
         onMouseDown={handleLogout}
         style={cascade(3)}
         className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
       >
-        <LogOut size={14} /> Sign Out
+        <Logout size={14} /> Sign Out
       </button>
     </>
   );
@@ -828,7 +835,7 @@ export const TopNavbar = () => {
   const RoleIcon = isSuperAdmin
     ? Crown
     : isDba
-      ? Database
+      ? Data
       : isAdmin
         ? Shield
         : isMarketingHead
@@ -1172,7 +1179,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
             >
-              <BarChart3 size={13} />
+              <Chart size={13} variant="Outline" color="currentColor" />
               <span>Reports</span>
             </button>
 
@@ -1183,7 +1190,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
             >
-              <Puzzle size={13} />
+              <Element4 size={13} variant="Outline" color="currentColor" />
               <span>Widgets</span>
             </button>
           </div>
@@ -1207,9 +1214,9 @@ export const TopNavbar = () => {
               className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all duration-200 active:scale-90 hover:scale-105"
             >
               {navCollapsed ? (
-                <PanelLeftOpen size={15} />
+                <SidebarLeft size={15} variant="Outline" />
               ) : (
-                <PanelLeftClose size={15} />
+                <SidebarLeft size={15} variant="Bold" />
               )}
             </button>
           </div>

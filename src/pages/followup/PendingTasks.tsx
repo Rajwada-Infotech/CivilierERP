@@ -24,6 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -530,18 +531,10 @@ export default function PendingTasksPage() {
   return (
     <>
       <Breadcrumbs items={["Follow-Up", "Pending Tasks"]} />
-      <div className="space-y-6 mt-6">
-        {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Pending Tasks
-            </h1>
-            <p className="text-muted-foreground text-xs mt-0.5">
-              All follow-up tasks — create, assign, and track to completion.
-            </p>
-          </div>
-
+      <FollowupShell
+        title="Pending Tasks"
+        icon={Clock}
+        action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
@@ -564,7 +557,8 @@ export default function PendingTasksPage() {
               </Button>
             )}
           </div>
-        </div>
+        }
+      >
 
         {/* ── Stat Cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -807,7 +801,7 @@ export default function PendingTasksPage() {
             </div>
           )}
         </div>
-      </div>
+      </FollowupShell>
 
       {/* ── New Task Dialog ── */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

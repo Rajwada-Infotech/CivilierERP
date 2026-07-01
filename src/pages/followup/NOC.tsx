@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -957,6 +958,7 @@ export function NOCPage() {
           { label: "NOC", path: "/followup/closure/noc" },
         ]}
       />
+      <FollowupShell title="No Objection Certificates">
       <div
         className="noc-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1403,6 +1405,7 @@ export function NOCPage() {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog

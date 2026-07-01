@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Button } from "@/components/ui/button";
 import {
@@ -299,27 +300,23 @@ const PaymentPlanMaster: React.FC = () => {
         ]}
       />
 
-      <div className="space-y-8 mt-6">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Payment Plan Master</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Define reusable payment milestone terms for bookings &amp; units
-          </p>
-        </div>
-        <Button
-          size="sm"
-          onClick={() => {
-            setShowAddRow(true);
-            setEditId(null);
-          }}
-          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-        >
-          <Plus size={14} />
-          Add Milestone
-        </Button>
-      </div>
+      <FollowupShell
+        title="Payment Plan Master"
+        icon={Landmark}
+        action={
+          <Button
+            size="sm"
+            onClick={() => {
+              setShowAddRow(true);
+              setEditId(null);
+            }}
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+          >
+            <Plus size={14} />
+            Add Milestone
+          </Button>
+        }
+      >
 
       {/* ── Summary chips ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -890,7 +887,7 @@ const PaymentPlanMaster: React.FC = () => {
           </div>
         )}
       </div>
-      </div> {/* end space-y-8 */}
+      </FollowupShell>
     </>
   );
 };

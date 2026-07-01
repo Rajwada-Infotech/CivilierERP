@@ -255,6 +255,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
   }
 });
 
+// ── GET /:id — full detail for a single payment (used by Trial Balance drill-down) ──
 // ── GET /cheque-lots — fetch active lots, optionally filtered by bankId ────────
 router.get("/cheque-lots", async (req, res) => {
   try {
@@ -911,6 +912,67 @@ router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, r
     console.error("Payment reject error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;
     res.status(status).json({ error: err.message });
+  }
+});
+
+// ── GET /:id — full detail for one payment (Trial Balance Level 3 drill-down) ──
+// Must be last so named routes like /cheque-lots aren't captured by this param.
+router.get("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        np.*,
+        ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
+        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+          ELSE grn2_sup.LHeadName
+        END                                                AS PSupplierName,
+        ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
+        CASE
+          WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
+          THEN ROUND(eb.ENetAmount - eb.EAmount, 2)
+          ELSE 0
+        END                                                AS TaxAmount,
+        ISNULL(eb.EAmount, 0)                              AS TaxableAmount,
+        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        eb.EDocNo                                          AS RefDoc,
+        eb.EDocDate                                        AS EBDocDate,
+        eb.ERemarks                                        AS EBDescription,
+        cmast.card_number                                  AS PCardNumber,
+        cmast.card_network                                 AS PCardNetwork,
+        cmast.card_holder_name                             AS PCardHolderName,
+        ahm.LHeadName                                      AS BankAccountName
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
+      LEFT JOIN dbo.enterprise ec
+        ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
+      LEFT JOIN dbo.enterprise ep
+        ON ep.id = TRY_CAST(eb.EProjectName AS INT) AND ep.business_type = 'P'
+      LEFT JOIN dbo.PurchaseOrders po
+        ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.enterprise po_proj
+        ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+        ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster po_sup  ON po_sup.LHeadId  = po.SupplierID
+      LEFT JOIN dbo.GoodsReceiptNotes grn2
+        ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
+      WHERE np.PPaymentID = @id
+    `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("[new-payment/:id]", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
