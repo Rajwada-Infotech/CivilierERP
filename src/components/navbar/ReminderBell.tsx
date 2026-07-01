@@ -38,7 +38,7 @@ const TYPE_META: Record<string, ReminderMeta> = {
   },
 };
 
-export const ReminderNotification = () => {
+export const ReminderBell = () => {
   const navigate = useNavigate();
   const { activeModule } = useModule();
   const accent = getModuleAccent(activeModule);
