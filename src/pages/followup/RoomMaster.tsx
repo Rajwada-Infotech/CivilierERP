@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
   MasterPage,
@@ -249,7 +250,7 @@ const RoomMaster: React.FC = () => {
         onPrint={(row) => {
           const win = window.open("", "_blank", "width=600,height=400");
           if (!win) return;
-          win.document.write(`
+          win.document.write(safeHtml`
             <html><head><title>Room — ${row.roomName}</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
             </head><body><h2>Room Card</h2><table>
