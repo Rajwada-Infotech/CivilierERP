@@ -425,81 +425,134 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
-    const headerReq = pool.request();
-    headerReq.input("IssueNo", sql.VarChar(100), docNo);
-    headerReq.input("DocNo", sql.NVarChar(100), docNo);
-    headerReq.input("DocTypeId", sql.Int, docTypeId);
-    headerReq.input("DocYear", sql.SmallInt, docYear);
-    headerReq.input("DocSerial", sql.Int, docSerial);
-    headerReq.input("ParentDocNo", sql.NVarChar(100), ParentDocNo);
-    headerReq.input("RootExBDocNo", sql.NVarChar(100), RootExBDocNo);
-    headerReq.input("CompanyId", sql.Int, CompanyId);
-    headerReq.input("ProjectId", sql.Int, ProjectId);
-    headerReq.input("FinYearId", sql.Int, FinYearId || null);
-    headerReq.input("Date", sql.Date, IssueDate);
-    headerReq.input("Reason", sql.NVarChar(sql.MAX), Reason);
-    headerReq.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
-    headerReq.input("CreatedBy", sql.Int, userId);
-    headerReq.input("GodownId", sql.Int, resolvedGodownId);
-    headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
-    headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
-    headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
-    // Legacy NOT NULL columns — populate from first item
-    headerReq.input("ItemId", sql.NVarChar(100), String(items[0].ItemId));
-    headerReq.input(
-      "Quantity",
-      sql.Decimal(18, 2),
-      parseFloat(items[0].Quantity) || 0,
-    );
+    // All writes (header + per-item rows + stock-ledger OUT rows) must be one
+    // atomic unit: a failure partway through the item loop otherwise leaves a
+    // header with only some of its stock movements posted, corrupting the
+    // ledger balance for those items.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let newRecord;
+    let issueId;
+    try {
+      // Enforce stock availability before issuing — an issue must not drive
+      // ledger stock negative. Quantities are aggregated per item so repeated
+      // lines for the same item are checked against a single balance. Read
+      // inside the transaction so it's consistent with the OUT rows written
+      // below. (Note: this closes the gross case — issuing more than exists —
+      // but two truly-simultaneous issues could still race; a per-item lock
+      // would be needed to close that, matching the sale-order limitation.)
+      const requestedByItem = new Map();
+      for (const it of items) {
+        const key = String(it.ItemId);
+        requestedByItem.set(
+          key,
+          (requestedByItem.get(key) || 0) + Number(it.Quantity),
+        );
+      }
+      for (const [checkItemId, requestedQty] of requestedByItem) {
+        const availRes = await tx
+          .request()
+          .input("itemId", sql.NVarChar(100), checkItemId)
+          .input("godownId", sql.Int, resolvedGodownId).query(`
+            SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+            FROM dbo.StockLedger
+            WHERE CONVERT(NVARCHAR(100), ItemID) = @itemId AND GodownID = @godownId
+          `);
+        const available = Number(availRes.recordset[0].Available || 0);
+        if (available < requestedQty) {
+          const err = new Error(
+            `Insufficient stock for item ${checkItemId} in this godown: available ${available}, requested ${requestedQty}.`,
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+      }
 
-    const headerResult = await headerReq.query(`
-      INSERT INTO dbo.MaterialIssues
-        (IssueNo, DocNo, DocTypeId, DocYear, DocSerial,
-         ParentDocNo, RootExBDocNo,
-         CompanyId, ProjectId, FinYearId, Date,
-         Reason, Remarks, CreatedBy,
-         GodownId, IssuedTo, CostCenter, Purpose, ItemId, Quantity)
-      OUTPUT INSERTED.*
-      VALUES
-        (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
-         @ParentDocNo, @RootExBDocNo,
-         @CompanyId, @ProjectId, @FinYearId, @Date,
-         @Reason, @Remarks, @CreatedBy,
-         @GodownId, @IssuedTo, @CostCenter, @Purpose, @ItemId, @Quantity)
-    `);
+      const headerReq = tx.request();
+      headerReq.input("IssueNo", sql.VarChar(100), docNo);
+      headerReq.input("DocNo", sql.NVarChar(100), docNo);
+      headerReq.input("DocTypeId", sql.Int, docTypeId);
+      headerReq.input("DocYear", sql.SmallInt, docYear);
+      headerReq.input("DocSerial", sql.Int, docSerial);
+      headerReq.input("ParentDocNo", sql.NVarChar(100), ParentDocNo);
+      headerReq.input("RootExBDocNo", sql.NVarChar(100), RootExBDocNo);
+      headerReq.input("CompanyId", sql.Int, CompanyId);
+      headerReq.input("ProjectId", sql.Int, ProjectId);
+      headerReq.input("FinYearId", sql.Int, FinYearId || null);
+      headerReq.input("Date", sql.Date, IssueDate);
+      headerReq.input("Reason", sql.NVarChar(sql.MAX), Reason);
+      headerReq.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
+      headerReq.input("CreatedBy", sql.Int, userId);
+      headerReq.input("GodownId", sql.Int, resolvedGodownId);
+      headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
+      headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
+      headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
+      // Legacy NOT NULL columns — populate from first item
+      headerReq.input("ItemId", sql.NVarChar(100), String(items[0].ItemId));
+      headerReq.input(
+        "Quantity",
+        sql.Decimal(18, 2),
+        parseFloat(items[0].Quantity) || 0,
+      );
 
-    const newRecord = headerResult.recordset[0];
-    const issueId = newRecord.IssueId;
+      const headerResult = await headerReq.query(`
+        INSERT INTO dbo.MaterialIssues
+          (IssueNo, DocNo, DocTypeId, DocYear, DocSerial,
+           ParentDocNo, RootExBDocNo,
+           CompanyId, ProjectId, FinYearId, Date,
+           Reason, Remarks, CreatedBy,
+           GodownId, IssuedTo, CostCenter, Purpose, ItemId, Quantity)
+        OUTPUT INSERTED.*
+        VALUES
+          (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
+           @ParentDocNo, @RootExBDocNo,
+           @CompanyId, @ProjectId, @FinYearId, @Date,
+           @Reason, @Remarks, @CreatedBy,
+           @GodownId, @IssuedTo, @CostCenter, @Purpose, @ItemId, @Quantity)
+      `);
 
-    for (const it of items) {
-      const qty = Number(it.Quantity);
-      const itemId = String(it.ItemId);
-      const uomCode = it.UOMCode || null;
+      newRecord = headerResult.recordset[0];
+      issueId = newRecord.IssueId;
 
-      await pool
-        .request()
-        .input("IssueId", sql.Int, issueId)
-        .input("ItemId", sql.NVarChar(100), itemId)
-        .input("UOMCode", sql.NVarChar(20), uomCode)
-        .input("Quantity", sql.Decimal(18, 2), qty)
-        .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
+      for (const it of items) {
+        const qty = Number(it.Quantity);
+        const itemId = String(it.ItemId);
+        const uomCode = it.UOMCode || null;
+
+        await tx
+          .request()
+          .input("IssueId", sql.Int, issueId)
+          .input("ItemId", sql.NVarChar(100), itemId)
+          .input("UOMCode", sql.NVarChar(20), uomCode)
+          .input("Quantity", sql.Decimal(18, 2), qty)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
           INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
           VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
         `);
 
-      await pool
-        .request()
-        .input("ItemID", sql.NVarChar(50), itemId)
-        .input("Qty", sql.Decimal(18, 2), qty)
-        .input("UOM", sql.NVarChar(20), uomCode)
-        .input("Type", sql.NVarChar(10), "OUT")
-        .input("RefType", sql.NVarChar(20), "ISS")
-        .input("RefID", sql.Int, issueId)
-        .input("DocNo", sql.NVarChar(100), docNo)
-        .input("GodownID", sql.Int, resolvedGodownId).query(`
+        await tx
+          .request()
+          .input("ItemID", sql.NVarChar(50), itemId)
+          .input("Qty", sql.Decimal(18, 2), qty)
+          .input("UOM", sql.NVarChar(20), uomCode)
+          .input("Type", sql.NVarChar(10), "OUT")
+          .input("RefType", sql.NVarChar(20), "ISS")
+          .input("RefID", sql.Int, issueId)
+          .input("DocNo", sql.NVarChar(100), docNo)
+          .input("GodownID", sql.Int, resolvedGodownId).query(`
           INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
           VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
     }
 
     await backPatchRecordId(pool, sql, docNo, "MaterialIssues", issueId);
@@ -524,6 +577,11 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
 
     res.status(201).json({ ...newRecord, items, status: "Pending" });
   } catch (error) {
+    // Client-side errors (e.g. insufficient stock) carry a statusCode and a
+    // user-facing message; surface those instead of a generic 500.
+    if (error.statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     console.error("Error creating material issue:", error);
     res.status(500).json({ error: "Failed to create material issue" });
   }

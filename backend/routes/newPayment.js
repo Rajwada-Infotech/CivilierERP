@@ -569,6 +569,16 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       docNo: finalDocNo,
     });
   } catch (err) {
+    // Unique index UX_NewPayment_ChequeLot_ChequeNo — the same cheque number
+    // was assigned to another payment (race between two concurrent creates).
+    if (
+      (err.number === 2601 || err.number === 2627) &&
+      String(err.message).includes("UX_NewPayment_ChequeLot_ChequeNo")
+    ) {
+      return res.status(409).json({
+        error: "Cheque number already used in another payment. Pick a different cheque.",
+      });
+    }
     console.error("PAYMENT INSERT ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -707,6 +717,14 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment updated successfully" });
   } catch (err) {
+    if (
+      (err.number === 2601 || err.number === 2627) &&
+      String(err.message).includes("UX_NewPayment_ChequeLot_ChequeNo")
+    ) {
+      return res.status(409).json({
+        error: "Cheque number already used in another payment. Pick a different cheque.",
+      });
+    }
     console.error("PAYMENT UPDATE ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }

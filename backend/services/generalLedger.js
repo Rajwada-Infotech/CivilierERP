@@ -146,7 +146,8 @@ async function postVoucher(pool, {
  *   Cr PROVISION FOR PENDING GRN A/C . total incl. GST
  */
 async function postGRNApproval(pool, grnId, userEmail) {
-  if (await hasPosting(pool, "GRN", grnId)) return;
+  if (await hasPosting(pool, "GRN", grnId))
+    return { posted: true, reason: "already posted (idempotent)" };
 
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
@@ -157,7 +158,9 @@ async function postGRNApproval(pool, grnId, userEmail) {
     WHERE grn.GRNID = @GRNID
   `);
   const grn = result.recordset[0];
-  if (!grn || !grn.SupplierID) return;
+  if (!grn) return { posted: false, reason: `GRN ${grnId} not found` };
+  if (!grn.SupplierID)
+    return { posted: false, reason: `GRN ${grnId} has no SupplierID` };
 
   let items = [];
   try {
@@ -174,7 +177,8 @@ async function postGRNApproval(pool, grnId, userEmail) {
   const totalInclGst = Number(grn.TotalAmount) || 0;
   const gstAmount = Math.max(0, totalInclGst - baseAmount);
 
-  if (totalInclGst <= 0) return;
+  if (totalInclGst <= 0)
+    return { posted: false, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -213,6 +217,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
       },
     ],
   });
+  return { posted: true };
 }
 
 /**
@@ -241,7 +246,8 @@ async function postGRNApproval(pool, grnId, userEmail) {
  *                                       supplies a stricter FK)
  */
 async function postExpenseBookingApproval(pool, ebId, userEmail) {
-  if (await hasPosting(pool, "ExpenseBooking", ebId)) return;
+  if (await hasPosting(pool, "ExpenseBooking", ebId))
+    return { posted: true, reason: "already posted (idempotent)" };
 
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
@@ -250,10 +256,11 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
     WHERE eb.Eid = @Eid
   `);
   const eb = result.recordset[0];
-  if (!eb) return;
+  if (!eb) return { posted: false, reason: `ExpenseBooking ${ebId} not found` };
 
   const netAmount = Number(eb.ENetAmount ?? eb.EAmount) || 0;
-  if (netAmount <= 0) return;
+  if (netAmount <= 0)
+    return { posted: false, reason: `ExpenseBooking ${ebId} net amount is ${netAmount} (<= 0)` };
 
   const companyId = eb.ECompanyId ?? null;
   const projectId = Number.isFinite(parseInt(eb.EProjectName, 10))
@@ -271,7 +278,11 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
         `SELECT GRNID, TotalAmount, SupplierID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`,
       );
     const grn = grnResult.recordset[0];
-    if (!grn || !grn.SupplierID) return;
+    if (!grn || !grn.SupplierID)
+      return {
+        posted: false,
+        reason: `ExpenseBooking ${ebId}: source GRN ${grnId} missing or has no SupplierID`,
+      };
 
     const grnTotal = Number(grn.TotalAmount) || 0;
     const delta = netAmount - grnTotal; // billing-term adjustment, can be negative
@@ -322,12 +333,17 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       createdBy: userEmail,
       legs,
     });
-    return;
+    return { posted: true };
   }
 
   // Non-GRN sourced (PO / WO_PO / WORK_DONE / standalone)
   const supplierHeadId = await getHeadIdByName(pool, eb.EName);
-  if (!supplierHeadId) return; // can't determine counter-account — skip rather than guess wrong
+  // can't determine counter-account — skip rather than guess wrong
+  if (!supplierHeadId)
+    return {
+      posted: false,
+      reason: `ExpenseBooking ${ebId}: EName "${eb.EName}" did not match any AccountHeadMaster head`,
+    };
 
   const baseAmount = Number(eb.EAmount) || 0;
   const gstAndTerms = Math.max(0, netAmount - baseAmount);
@@ -364,6 +380,7 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       },
     ],
   });
+  return { posted: true };
 }
 
 /**
@@ -377,7 +394,8 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
  * posting is skipped rather than guessing the wrong counter-account.
  */
 async function postPaymentApproval(pool, paymentId, userEmail) {
-  if (await hasPosting(pool, "NewPayment", paymentId)) return;
+  if (await hasPosting(pool, "NewPayment", paymentId))
+    return { posted: true, reason: "already posted (idempotent)" };
 
   const result = await pool
     .request()
@@ -389,10 +407,13 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       WHERE PPaymentID = @PPaymentID
     `);
   const payment = result.recordset[0];
-  if (!payment || !payment.PBankID) return;
+  if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
+  if (!payment.PBankID)
+    return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
 
   const amount = Number(payment.PAmount) || 0;
-  if (amount <= 0) return;
+  if (amount <= 0)
+    return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
   let supplierHeadId = null;
   if (payment.PExpenseRef) {
@@ -421,7 +442,13 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       }
     }
   }
-  if (!supplierHeadId) return;
+  if (!supplierHeadId)
+    return {
+      posted: false,
+      reason: payment.PExpenseRef
+        ? `Payment ${paymentId}: could not resolve supplier from expense ref "${payment.PExpenseRef}"`
+        : `Payment ${paymentId}: no PExpenseRef, cannot resolve counter-account`,
+    };
 
   const companyId = parseInt(payment.PCompany, 10);
   const projectId = parseInt(payment.PProject, 10);
@@ -448,6 +475,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       },
     ],
   });
+  return { posted: true };
 }
 
 /**
@@ -460,7 +488,8 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
  * RPReceivedFrom.
  */
 async function postReceivedPaymentApproval(pool, rpId, userEmail) {
-  if (await hasPosting(pool, "ReceivedPayment", rpId)) return;
+  if (await hasPosting(pool, "ReceivedPayment", rpId))
+    return { posted: true, reason: "already posted (idempotent)" };
 
   const result = await pool
     .request()
@@ -472,10 +501,13 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       WHERE RPPaymentID = @RPPaymentID
     `);
   const rp = result.recordset[0];
-  if (!rp || !rp.RPDepositBankId) return;
+  if (!rp) return { posted: false, reason: `ReceivedPayment ${rpId} not found` };
+  if (!rp.RPDepositBankId)
+    return { posted: false, reason: `ReceivedPayment ${rpId} has no RPDepositBankId` };
 
   const amount = Number(rp.RPAmount) || 0;
-  if (amount <= 0) return;
+  if (amount <= 0)
+    return { posted: false, reason: `ReceivedPayment ${rpId} amount is ${amount} (<= 0)` };
 
   let customerHeadId = null;
   if (rp.SourceSaleInvoiceId) {
@@ -491,7 +523,11 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       rp.RPCustomerName || rp.RPReceivedFrom,
     );
   }
-  if (!customerHeadId) return;
+  if (!customerHeadId)
+    return {
+      posted: false,
+      reason: `ReceivedPayment ${rpId}: could not resolve customer (invoice ${rp.SourceSaleInvoiceId ?? "none"}, name "${rp.RPCustomerName || rp.RPReceivedFrom}")`,
+    };
 
   const docNo = rp.DocNo || `RCV-${rpId}`;
 
@@ -516,6 +552,7 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       },
     ],
   });
+  return { posted: true };
 }
 
 module.exports = {

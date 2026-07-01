@@ -167,16 +167,21 @@ async function getWorkflow(module) {
 /**
  * Fetch the current status of a record.
  */
-async function getRecordStatus(module, id) {
+async function getRecordStatus(module, id, executor = null, { lock = false } = {}) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
 
-  const pool = getPool();
-  const result = await pool
+  const exec = executor || getPool();
+  // UPDLOCK + HOLDLOCK: when called inside the transition() transaction this
+  // takes an update lock on the record row and holds it until commit, so two
+  // concurrent approve/submit calls on the same record serialize instead of
+  // both reading "Pending" and both proceeding (double-approve / double-post).
+  const lockHint = lock ? "WITH (UPDLOCK, HOLDLOCK)" : "";
+  const result = await exec
     .request()
     .input("Id", sql.Int, id)
     .query(
-      `SELECT ${map.status} AS status FROM ${map.table} WHERE ${map.pk} = @Id`,
+      `SELECT ${map.status} AS status FROM ${map.table} ${lockHint} WHERE ${map.pk} = @Id`,
     );
 
   const row = result.recordset[0];
@@ -210,9 +215,10 @@ async function writeAuditLog(
   approverEmail,
   actionStatus,
   note,
+  executor = null,
 ) {
-  const pool = getPool();
-  await pool
+  const exec = executor || getPool();
+  await exec
     .request()
     .input("TableName", sql.NVarChar(100), tableName)
     .input("RecordId", sql.Int, recordId)
@@ -231,9 +237,9 @@ async function writeAuditLog(
 /**
  * Fetch how many levels have been approved so far for a record.
  */
-async function getApprovedLevelCount(tableName, recordId) {
-  const pool = getPool();
-  const result = await pool
+async function getApprovedLevelCount(tableName, recordId, executor = null) {
+  const exec = executor || getPool();
+  const result = await exec
     .request()
     .input("TableName", sql.NVarChar(100), tableName)
     .input("RecordId", sql.Int, recordId).query(`
@@ -272,6 +278,63 @@ async function guardEdit(module, id) {
  * @param {string} userRole
  * @param {string|null} note
  */
+/**
+ * Record the outcome of a GL posting attempt into dbo.GLPostingLog so that
+ * approved-but-unposted documents are findable (see migration 154). Best
+ * effort: never allowed to break the approval flow, but a skip/failure is
+ * always surfaced on the console as well. Degrades gracefully if the log
+ * table doesn't exist yet (older DB / test env).
+ */
+async function recordGLPosting(module, recordId, outcome, approverEmail) {
+  let status;
+  let reason;
+  if (!outcome) {
+    status = "skipped";
+    reason = "poster returned no outcome";
+  } else if (outcome.failed) {
+    status = "failed";
+    reason = outcome.reason;
+  } else if (outcome.none) {
+    status = "none";
+    reason = outcome.reason;
+  } else if (outcome.posted) {
+    status = "posted";
+    reason = outcome.reason || null;
+  } else {
+    status = "skipped";
+    reason = outcome.reason || "unknown";
+  }
+
+  if (status === "skipped" || status === "failed") {
+    console.error(
+      `[generalLedger] ${status} for ${module} #${recordId}: ${reason}`,
+    );
+  }
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("Module", sql.NVarChar(50), module)
+      .input("RecordId", sql.Int, recordId)
+      .input("Outcome", sql.NVarChar(20), status)
+      .input(
+        "Reason",
+        sql.NVarChar(500),
+        reason ? String(reason).slice(0, 500) : null,
+      )
+      .input("ApproverEmail", sql.NVarChar(200), approverEmail || null).query(`
+        INSERT INTO dbo.GLPostingLog (Module, RecordId, Outcome, Reason, ApproverEmail)
+        VALUES (@Module, @RecordId, @Outcome, @Reason, @ApproverEmail)
+      `);
+  } catch (logErr) {
+    console.error(
+      `[generalLedger] could not record posting outcome for ${module} #${recordId}:`,
+      logErr.message,
+    );
+  }
+}
+
 async function transition(
   module,
   id,
@@ -283,93 +346,102 @@ async function transition(
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
 
-  const currentStatus = await getRecordStatus(module, id);
   const tableName = map.table.replace("dbo.", "");
 
-  // ── Submit: Draft/Rejected → Pending ──────────────────────────────────────
-  if (targetStatus === "Pending") {
-    if (!["Draft", "Rejected"].includes(currentStatus)) {
-      throw new Error(`Cannot submit from status "${currentStatus}"`);
-    }
-    await setRecordStatus(module, id, "Pending");
-    await writeAuditLog(tableName, id, 0, userRole, userEmail, "Pending", note);
-    return { newStatus: "Pending" };
-  }
-
-  // ── Approve / Reject — only for authorised roles ──────────────────────────
-  if (!APPROVER_ROLES.includes((userRole || "").toLowerCase())) {
+  // ── Authorisation gate (cheap check before opening a transaction) ─────────
+  const isApproveOrReject =
+    targetStatus === "Approved" || targetStatus === "Rejected";
+  if (
+    isApproveOrReject &&
+    !APPROVER_ROLES.includes((userRole || "").toLowerCase())
+  ) {
     throw new Error("You are not authorized to approve or reject records.");
   }
 
-  if (currentStatus !== "Pending") {
-    throw new Error(
-      `Cannot ${targetStatus.toLowerCase()} from status "${currentStatus}"`,
-    );
-  }
+  // ── Status change + audit write happen atomically under a row lock ────────
+  // Reading status, validating the transition, updating status, and writing
+  // the audit entry must be one unit: otherwise two concurrent approvers both
+  // see "Pending" and both proceed (double-approve, double GL post). The row
+  // lock (UPDLOCK/HOLDLOCK in getRecordStatus) serialises them.
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  let result;
+  let fullyApproved = false;
+  await tx.begin();
+  try {
+    const currentStatus = await getRecordStatus(module, id, tx, { lock: true });
 
-  if (targetStatus === "Rejected") {
-    await setRecordStatus(module, id, "Rejected");
-    await writeAuditLog(
-      tableName,
-      id,
-      0,
-      userRole,
-      userEmail,
-      "Rejected",
-      note,
-    );
-    return { newStatus: "Rejected" };
-  }
-
-  if (targetStatus === "Approved") {
-    const workflow = await getWorkflow(module);
-    const totalLevels = workflow?.Levels ?? 1;
-
-    const approvedSoFar = await getApprovedLevelCount(tableName, id);
-    const nextLevel = approvedSoFar + 1;
-
-    // Write this level's approval
-    await writeAuditLog(
-      tableName,
-      id,
-      nextLevel,
-      userRole,
-      userEmail,
-      "Approved",
-      note,
-    );
-
-    if (nextLevel >= totalLevels) {
-      // All levels done — fully approved
-      await setRecordStatus(module, id, "Approved");
-
-      const poster = GL_POSTERS[module];
-      if (poster) {
-        try {
-          await poster(getPool(), id, userEmail);
-        } catch (glErr) {
-          // Ledger posting must never block the approval itself — log loudly
-          // and let it be reconciled manually. The record is still Approved.
-          console.error(
-            `[generalLedger] posting failed for ${module} #${id}:`,
-            glErr.message,
-          );
-        }
+    if (targetStatus === "Pending") {
+      if (!["Draft", "Rejected"].includes(currentStatus)) {
+        throw new Error(`Cannot submit from status "${currentStatus}"`);
       }
+      await setRecordStatus(module, id, "Pending", tx);
+      await writeAuditLog(tableName, id, 0, userRole, userEmail, "Pending", note, tx);
+      result = { newStatus: "Pending" };
+    } else if (targetStatus === "Rejected") {
+      if (currentStatus !== "Pending") {
+        throw new Error(`Cannot reject from status "${currentStatus}"`);
+      }
+      await setRecordStatus(module, id, "Rejected", tx);
+      await writeAuditLog(tableName, id, 0, userRole, userEmail, "Rejected", note, tx);
+      result = { newStatus: "Rejected" };
+    } else if (targetStatus === "Approved") {
+      if (currentStatus !== "Pending") {
+        throw new Error(`Cannot approve from status "${currentStatus}"`);
+      }
+      const workflow = await getWorkflow(module);
+      const totalLevels = workflow?.Levels ?? 1;
+      const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
+      const nextLevel = approvedSoFar + 1;
 
-      return { newStatus: "Approved", level: nextLevel, totalLevels };
+      await writeAuditLog(tableName, id, nextLevel, userRole, userEmail, "Approved", note, tx);
+
+      if (nextLevel >= totalLevels) {
+        await setRecordStatus(module, id, "Approved", tx);
+        fullyApproved = true;
+        result = { newStatus: "Approved", level: nextLevel, totalLevels };
+      } else {
+        result = {
+          newStatus: "Pending",
+          level: nextLevel,
+          totalLevels,
+          remainingLevels: totalLevels - nextLevel,
+        };
+      }
     } else {
-      // More levels required — stays Pending
-      return {
-        newStatus: "Pending",
-        level: nextLevel,
-        totalLevels,
-        remainingLevels: totalLevels - nextLevel,
-      };
+      throw new Error(`Unknown target status: ${targetStatus}`);
+    }
+
+    await tx.commit();
+  } catch (err) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* rollback best-effort — original error is what propagates */
+    }
+    throw err;
+  }
+
+  // ── Ledger posting — intentionally AFTER the status commit ────────────────
+  // Posting must never block or roll back the approval (postVoucher has its
+  // own transaction). But unlike before, every attempt is now recorded in
+  // dbo.GLPostingLog, so a document that ends up Approved without a matching
+  // ledger entry is discoverable instead of silently lost.
+  if (fullyApproved) {
+    const poster = GL_POSTERS[module];
+    if (!poster) {
+      await recordGLPosting(module, id, { none: true, reason: "no GL poster for module" }, userEmail);
+    } else {
+      try {
+        const outcome = await poster(getPool(), id, userEmail);
+        await recordGLPosting(module, id, outcome, userEmail);
+      } catch (glErr) {
+        await recordGLPosting(module, id, { failed: true, reason: glErr.message }, userEmail);
+      }
     }
   }
 
-  throw new Error(`Unknown target status: ${targetStatus}`);
+  return result;
 }
 
 module.exports = {
@@ -379,4 +451,5 @@ module.exports = {
   getApprovedLevelCount,
   getRecordStatus,
   validateApprovalModuleMap,
+  recordGLPosting,
 };
