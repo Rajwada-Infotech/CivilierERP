@@ -411,6 +411,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "DocNo",
     header: "Doc No",
+    size: 130,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs font-bold">
         {(getValue() as string) || "—"}
@@ -420,6 +421,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "DocDate",
     header: "Doc Date",
+    size: 90,
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
@@ -432,6 +434,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "VehicleNo",
     header: "Vehicle No",
+    size: 110,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs font-semibold text-primary">
         {(getValue() as string) || "—"}
@@ -441,13 +444,15 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "SupplierName",
     header: "Supplier",
+    size: 180,
     cell: ({ getValue }) => (
-      <span className="text-xs">{(getValue() as string) || "—"}</span>
+      <span className="text-xs truncate block max-w-[180px]">{(getValue() as string) || "—"}</span>
     ),
   },
   {
     accessorKey: "PONumber",
     header: "PO No",
+    size: 120,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
     ),
@@ -455,10 +460,11 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "CompanyProject",
     header: "Company / Project",
+    size: 160,
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs">{row.original.CompanyName || "—"}</span>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-xs truncate max-w-[160px] block">{row.original.CompanyName || "—"}</span>
+        <span className="text-[10px] text-muted-foreground truncate max-w-[160px] block">
           {row.original.ProjectName || "—"}
         </span>
       </div>
@@ -467,6 +473,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "EntryTime",
     header: "Entry Time",
+    size: 130,
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
@@ -484,6 +491,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "ChallanNo",
     header: "Challan No",
+    size: 130,
     cell: ({ getValue }) => (
       <span className="text-xs">{(getValue() as string) || "—"}</span>
     ),
@@ -1559,11 +1567,6 @@ export default function VehicleInOut() {
                       value: viewingRec.SupplierName || "—",
                     },
                     {
-                      label: "PO No",
-                      value: viewingRec.PONumber || "—",
-                      mono: true,
-                    },
-                    {
                       label: "Vehicle No",
                       value: viewingRec.VehicleNo || "—",
                       mono: true,
@@ -1584,6 +1587,20 @@ export default function VehicleInOut() {
                       </p>
                     </div>
                   ))}
+
+                  {/* PO Reference — styled like GRN source doc */}
+                  <div className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      PO Reference
+                    </p>
+                    {viewingRec.PONumber ? (
+                      <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400">
+                        {viewingRec.PONumber}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">—</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Times */}
