@@ -87,6 +87,7 @@ import {
   ChevronDown,
   CalendarDays,
   FilePenLine,
+  Package,
   Phone,
   Mail,
   MapPin,
@@ -351,6 +352,7 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewingPO, setViewingPO] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
@@ -1956,7 +1958,14 @@ const PurchaseOrderMaster: React.FC = () => {
                             }
                           />
                           <button
-                            onClick={() => goToView(item)}
+                            onClick={async () => {
+                              try {
+                                const full = await getPurchaseOrderById(item._id);
+                                setViewingPO(full);
+                              } catch {
+                                setViewingPO(item);
+                              }
+                            }}
                             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                             title="View details"
                           >
@@ -2213,6 +2222,135 @@ const PurchaseOrderMaster: React.FC = () => {
           </DialogContent>
         </Dialog>
         </MaterialShell>
+
+        {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
+        {viewingPO && (
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+            <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+
+              {/* Modal header */}
+              <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20">
+                      <ShoppingCart size={13} className="text-emerald-500" />
+                    </div>
+                    <h2 className="font-heading font-bold text-base font-mono">
+                      {viewingPO.PurchaseOrderNo ?? viewingPO.poNumber ?? "—"}
+                    </h2>
+                    {viewingPO.Status && (
+                      <StatusChip status={viewingPO.Status} />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Purchase Order</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {rights.canEdit && (
+                    <button
+                      onClick={() => { setViewingPO(null); goToView({ _id: String(viewingPO.PurchaseOrderID ?? viewingPO._id) } as POListItem); }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors"
+                    >
+                      <FilePenLine size={13} /> Full View
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setViewingPO(null)}
+                    className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-5">
+                {/* Order details grid */}
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <FileText size={10} className="text-emerald-500" /> Order Details
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {[
+                      { label: "PO Number", value: viewingPO.PurchaseOrderNo ?? viewingPO.poNumber, mono: true },
+                      { label: "PO Date", value: viewingPO.PODate ? new Date(viewingPO.PODate).toLocaleDateString("en-IN") : (viewingPO.poDate ?? "—") },
+                      { label: "Expected Delivery", value: viewingPO.ExpectedDeliveryDate ? new Date(viewingPO.ExpectedDeliveryDate).toLocaleDateString("en-IN") : "—" },
+                      { label: "Supplier", value: viewingPO.SupplierName ?? viewingPO.supplierName },
+                      { label: "Company", value: viewingPO.CompanyName ?? viewingPO.companyName },
+                      { label: "Project / Site", value: viewingPO.ProjectName ?? viewingPO.projectName },
+                      { label: "Payment Terms", value: viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "—" },
+                      { label: "Total Amount", value: (viewingPO.TotalAmount ?? viewingPO.totalAmount) != null ? `₹${Number(viewingPO.TotalAmount ?? viewingPO.totalAmount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—" },
+                      { label: "Status", value: viewingPO.Status ?? viewingPO.status ?? "—" },
+                    ].map(({ label, value, mono }: any) => (
+                      <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Line items */}
+                {(() => {
+                  const lineItems: any[] = Array.isArray(viewingPO.LineItems)
+                    ? viewingPO.LineItems
+                    : Array.isArray(viewingPO.POItems)
+                      ? viewingPO.POItems
+                      : [];
+                  if (!lineItems.length) return null;
+                  return (
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Package size={10} className="text-emerald-500" /> Order Items ({lineItems.length})
+                      </p>
+                      <div className="rounded-xl border border-border overflow-hidden">
+                        <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
+                          <thead className="bg-muted/40 border-b border-border">
+                            <tr>
+                              {[["Item / Description", "36%"], ["Qty", "10%"], ["Unit", "9%"], ["Rate", "14%"], ["GST%", "9%"], ["Amount", "14%"], ["Received", "8%"]].map(([h, w]) => (
+                                <th key={h} className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${["Qty","Rate","GST%","Amount","Received"].includes(h) ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {lineItems.map((li: any, i: number) => {
+                              const name = li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—";
+                              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                              const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+                              const rate = Number(li.Rate ?? li.rate ?? 0);
+                              const tax = Number(li.TaxPct ?? li.tax ?? 0);
+                              const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
+                              const received = li.ReceivedQty != null ? Number(li.ReceivedQty) : null;
+                              return (
+                                <tr key={i} className="hover:bg-muted/20 transition-colors">
+                                  <td className="px-3 py-2 truncate font-medium">{name}</td>
+                                  <td className="px-3 py-2 text-right">{qty}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{unit}</td>
+                                  <td className="px-3 py-2 text-right">₹{rate.toLocaleString("en-IN")}</td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground">{tax ? `${tax}%` : "—"}</td>
+                                  <td className="px-3 py-2 text-right font-semibold">₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</td>
+                                  <td className={`px-3 py-2 text-right ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}>
+                                    {received != null ? received : "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Remarks */}
+                {(viewingPO.Remarks ?? viewingPO.remarks) && (
+                  <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                    <p className="text-xs text-foreground">{viewingPO.Remarks ?? viewingPO.remarks}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </>
     );
   }
