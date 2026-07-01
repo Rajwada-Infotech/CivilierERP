@@ -52,7 +52,6 @@ import {
 } from "lucide-react";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
-import { getPurchaseOrderById } from "@/api/purchaseOrdersApi";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Design tokens (match GRN.tsx) ─────────────────────────────────────────────
@@ -647,10 +646,13 @@ export default function VehicleInOut() {
   });
 
   const { data: viewingPODetail, isFetching: loadingPODetail } = useQuery({
-    queryKey: ["purchaseOrder", viewingRec?.POID],
-    queryFn: () => getPurchaseOrderById(viewingRec!.POID),
-    enabled: !!viewingRec?.POID && showPODetails,
+    queryKey: ["veh-po-preview", viewingRec?.VehicleInOutID],
+    queryFn: () =>
+      fetchWithAuth(`/api/vehicle-in-out/${viewingRec!.VehicleInOutID}/po`)
+        .then((r) => { if (!r.ok) throw new Error("No PO"); return r.json(); }),
+    enabled: !!viewingRec?.VehicleInOutID && showPODetails,
     staleTime: 300_000,
+    retry: false,
   });
 
   // POs filtered to the selected supplier
