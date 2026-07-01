@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -894,6 +895,7 @@ export function ConstructionUpdatesPage() {
           { label: "Updates", path: "/followup/construction/updates" },
         ]}
       />
+      <FollowupShell title="Construction Updates">
       <div
         className="cu-page relative space-y-8 mt-6"
         onClick={() => setOpenMenuId(null)}
@@ -1290,6 +1292,7 @@ export function ConstructionUpdatesPage() {
           </div>
         </div>
       </div>
+      </FollowupShell>
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog

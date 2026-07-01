@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -974,15 +975,15 @@ export default function ApplicantDetail() {
   return (
     <>
       <DashboardBackground />
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Applications", path: "/followup/sales/applications" },
+          { label: name },
+        ]}
+      />
+      <FollowupShell title="Applicant Details">
       <div className="relative z-10 max-w-[1400px] mx-auto px-5 py-5 space-y-5">
-        {/* ── Breadcrumb ─────────────────────────────────────────────────── */}
-        <Breadcrumbs
-          items={[
-            { label: "Follow-Up", path: "/followup" },
-            { label: "Applications", path: "/followup/sales/applications" },
-            { label: name },
-          ]}
-        />
 
         {/* ── Hero Header ───────────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -1498,6 +1499,7 @@ export default function ApplicantDetail() {
           </div>
         </div>
       </div>
+      </FollowupShell>
     </>
   );
 }

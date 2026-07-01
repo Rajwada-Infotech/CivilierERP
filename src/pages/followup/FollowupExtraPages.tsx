@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -262,14 +263,9 @@ function ScopedLogPage({
   );
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            {title}
-          </h1>
-          <p className="text-muted-foreground mt-1">{description}</p>
-        </div>
+    <FollowupShell
+      title={title}
+      action={
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -284,7 +280,8 @@ function ScopedLogPage({
             New Entry
           </Button>
         </div>
-      </div>
+      }
+    >
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
@@ -516,7 +513,7 @@ function ScopedLogPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </FollowupShell>
   );
 }
 
@@ -568,14 +565,9 @@ function ReportPage({
   const projectRows = unitRows.slice(0, 8);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            {title}
-          </h1>
-          <p className="text-muted-foreground mt-1">{description}</p>
-        </div>
+    <FollowupShell
+      title={title}
+      action={
         <Button
           variant="outline"
           onClick={() => navigate("/followup")}
@@ -584,7 +576,8 @@ function ReportPage({
           <ArrowLeft className="w-4 h-4" />
           Dashboard
         </Button>
-      </div>
+      }
+    >
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -720,7 +713,7 @@ function ReportPage({
           </CardContent>
         </Card>
       )}
-    </div>
+    </FollowupShell>
   );
 }
 
