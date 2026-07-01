@@ -524,10 +524,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["cost-centers-po"],
     queryFn: () =>
-      fetch("/api/cost-center/options", { credentials: "include" }).then((r) => {
-        if (!r.ok) throw new Error(`cost-center/options ${r.status}`);
-        return r.json();
-      }),
+      fetchWithAuth("/api/cost-center/options").then((r) => r.json()),
   });
 
   // ── Normalise data ────────────────────────────────────────────────────────

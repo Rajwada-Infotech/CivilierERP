@@ -481,7 +481,7 @@ router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", requirePageRight("vehicle-in-out", "approve"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -506,7 +506,7 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "approve"), async 
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", requirePageRight("vehicle-in-out", "approve"), async (req, res) => {
+router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 

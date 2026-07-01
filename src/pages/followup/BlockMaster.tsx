@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -140,11 +141,7 @@ const BlockMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Follow-Up", "Setup", "Block Master"]}
       />
-      <div className="space-y-8 mt-6">
-      <div>
-        <h1 className="text-xl font-heading font-bold text-foreground">Block Master</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Manage project blocks and their configurations</p>
-      </div>
+      <FollowupShell title="Block Master">
       <MasterPage
         title="Block"
         fields={fields}
@@ -180,7 +177,7 @@ const BlockMaster: React.FC = () => {
           win.print();
         }}
       />
-      </div>
+      </FollowupShell>
     </>
   );
 };

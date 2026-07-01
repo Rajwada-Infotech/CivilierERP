@@ -23,6 +23,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -343,17 +344,10 @@ export function LegalMilestonesPage() {
         ]}
       />
 
-      <div className="relative space-y-6 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Legal Milestones
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Track the 8-step sequential legal workflow per booking
-            </p>
-          </div>
+      <FollowupShell
+        title="Legal Milestones"
+        icon={Scale}
+        action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
@@ -371,7 +365,8 @@ export function LegalMilestonesPage() {
               <Plus size={14} /> New Milestone
             </Button>
           </div>
-        </div>
+        }
+      >
 
         {/* Table */}
         <div className="rounded-xl border border-border overflow-hidden bg-card">
@@ -519,7 +514,7 @@ export function LegalMilestonesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </FollowupShell>
 
       {/* ── Create Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

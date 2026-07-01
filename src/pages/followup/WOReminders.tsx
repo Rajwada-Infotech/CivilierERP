@@ -20,6 +20,7 @@ import {
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FollowupShell } from "@/components/followup/FollowupShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface WorkOrder {
@@ -566,24 +567,10 @@ export default function WOReminders() {
           },
         ]}
       />
-      <div className="relative space-y-6 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-orange-500/10 shrink-0">
-              <HardHat size={20} className="text-orange-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                WO Reminders
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Live work order follow-up tracker — same source as the
-                reminder bell
-              </p>
-            </div>
-          </div>
-
+      <FollowupShell
+        title="WO Reminders"
+        icon={HardHat}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
@@ -604,7 +591,8 @@ export default function WOReminders() {
               Open WO Module
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── KPI strip + breakdown ── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
@@ -661,7 +649,7 @@ export default function WOReminders() {
             })}
           </div>
         )}
-      </div>
+      </FollowupShell>
     </>
   );
 }

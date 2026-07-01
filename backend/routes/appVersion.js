@@ -16,6 +16,13 @@ router.get("/", async (req, res) => {
   try {
     const pool = getPool();
 
+    const tableCheck = await pool.request().query(
+      "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.Version')"
+    );
+    if (!tableCheck.recordset[0]) {
+      return res.json({ dbVersion: "—", appVersion: "—", releasedAt: null });
+    }
+
     // Use tenant_id from the JWT payload if available; default to 1
     const tenantId = req.user?.tenantId ?? req.user?.tenant_id ?? 1;
 
@@ -31,7 +38,6 @@ router.get("/", async (req, res) => {
       `);
 
     if (!result.recordset.length) {
-      // No row yet for this tenant — return a safe fallback
       return res.json({ dbVersion: "—", appVersion: "—", releasedAt: null });
     }
 
