@@ -454,10 +454,22 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
     if (PExpenseRef) {
-      const ebCheck = await pool
-        .request()
-        .input("EDocNo", sql.NVarChar(100), PExpenseRef)
-        .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      const isEmiRef = /-EMI-\d+$/.test(PExpenseRef);
+      let ebCheck;
+      if (isEmiRef) {
+        // EMI installment ref — look up parent expense booking via EmiInstallments
+        ebCheck = await pool
+          .request()
+          .input("RefNumber", sql.NVarChar(200), PExpenseRef)
+          .query(`SELECT eb.EStatus FROM dbo.EmiInstallments ei
+                  JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+                  WHERE ei.RefNumber = @RefNumber`);
+      } else {
+        ebCheck = await pool
+          .request()
+          .input("EDocNo", sql.NVarChar(100), PExpenseRef)
+          .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      }
 
       if (!ebCheck.recordset.length) {
         return res
@@ -625,10 +637,21 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
 
     // Enforce: a payment can only be linked to an Approved Expense Booking.
     if (PExpenseRef) {
-      const ebCheck = await pool
-        .request()
-        .input("EDocNo", sql.NVarChar(100), PExpenseRef)
-        .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      const isEmiRef = /-EMI-\d+$/.test(PExpenseRef);
+      let ebCheck;
+      if (isEmiRef) {
+        ebCheck = await pool
+          .request()
+          .input("RefNumber", sql.NVarChar(200), PExpenseRef)
+          .query(`SELECT eb.EStatus FROM dbo.EmiInstallments ei
+                  JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+                  WHERE ei.RefNumber = @RefNumber`);
+      } else {
+        ebCheck = await pool
+          .request()
+          .input("EDocNo", sql.NVarChar(100), PExpenseRef)
+          .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      }
 
       if (!ebCheck.recordset.length) {
         return res
