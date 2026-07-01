@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
+import { getPurchaseOrderById } from "@/api/purchaseOrdersApi";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Design tokens (match GRN.tsx) ─────────────────────────────────────────────
@@ -557,6 +558,7 @@ export default function VehicleInOut() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRec, setViewingRec] = useState<any | null>(null);
+  const [showPODetails, setShowPODetails] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -637,6 +639,13 @@ export default function VehicleInOut() {
         .then((r) => r.json())
         .then((d) => (Array.isArray(d) ? d : (d.data ?? []))),
     staleTime: 120_000,
+  });
+
+  const { data: viewingPODetail, isFetching: loadingPODetail } = useQuery({
+    queryKey: ["purchaseOrder", viewingRec?.POID],
+    queryFn: () => getPurchaseOrderById(viewingRec!.POID),
+    enabled: !!viewingRec?.POID && showPODetails,
+    staleTime: 300_000,
   });
 
   // POs filtered to the selected supplier
@@ -747,6 +756,7 @@ export default function VehicleInOut() {
 
   // ── View / Edit ───────────────────────────────────────────────────────────────
   _onView = async (rec: any) => {
+    setShowPODetails(false);
     try {
       const full = await vehApi.getVehicleInOut(rec.VehicleInOutID);
       setViewingRec(full);
@@ -1535,7 +1545,7 @@ export default function VehicleInOut() {
                   </p>
                 </div>
                 <button
-                  onClick={() => setViewingRec(null)}
+                  onClick={() => { setViewingRec(null); setShowPODetails(false); }}
                   className="p-2 hover:bg-muted rounded-lg transition-colors"
                 >
                   <X size={18} />
@@ -1588,20 +1598,100 @@ export default function VehicleInOut() {
                     </div>
                   ))}
 
-                  {/* PO Reference — styled like GRN source doc */}
-                  <div className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                      PO Reference
-                    </p>
-                    {viewingRec.PONumber ? (
-                      <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400">
-                        {viewingRec.PONumber}
+                  {/* PO Reference */}
+                  {viewingRec.PONumber ? (
+                    <button
+                      onClick={() => setShowPODetails((v) => !v)}
+                      className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-left hover:bg-blue-500/10 transition-colors group"
+                    >
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                        PO Reference
                       </p>
-                    ) : (
+                      <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                        {viewingRec.PONumber}
+                        <ChevronDown
+                          size={11}
+                          className={`transition-transform shrink-0 ${showPODetails ? "rotate-180" : ""}`}
+                        />
+                      </p>
+                    </button>
+                  ) : (
+                    <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
                       <p className="text-xs text-muted-foreground">—</p>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Inline PO Detail Panel */}
+                {showPODetails && viewingRec.PONumber && (
+                  <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden">
+                    <div className="px-4 py-2.5 border-b border-blue-500/15 flex items-center justify-between">
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-blue-600 dark:text-blue-400">
+                        Purchase Order Details
+                      </p>
+                      {loadingPODetail && (
+                        <span className="text-[10px] text-muted-foreground animate-pulse">Loading…</span>
+                      )}
+                    </div>
+                    {viewingPODetail ? (
+                      <div className="p-4 space-y-3">
+                        {/* Order meta */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {[
+                            { label: "PO Number", value: (viewingPODetail as any).PurchaseOrderNo, mono: true },
+                            { label: "PO Date", value: (viewingPODetail as any).PODate ? new Date((viewingPODetail as any).PODate).toLocaleDateString("en-IN") : "—" },
+                            { label: "Expected Delivery", value: (viewingPODetail as any).ExpectedDeliveryDate ? new Date((viewingPODetail as any).ExpectedDeliveryDate).toLocaleDateString("en-IN") : "—" },
+                            { label: "Supplier", value: (viewingPODetail as any).SupplierName },
+                            { label: "Company", value: (viewingPODetail as any).CompanyName },
+                            { label: "Project / Site", value: (viewingPODetail as any).ProjectName },
+                            { label: "Payment Terms", value: (viewingPODetail as any).PaymentTerms || "—" },
+                            { label: "Status", value: (viewingPODetail as any).Status },
+                            { label: "Total Amount", value: (viewingPODetail as any).TotalAmount != null ? `₹${Number((viewingPODetail as any).TotalAmount).toLocaleString("en-IN")}` : "—" },
+                          ].map(({ label, value, mono }: any) => (
+                            <div key={label} className="px-3 py-2 rounded-lg bg-background/60 border border-border/40">
+                              <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                              <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-blue-600 dark:text-blue-400" : "text-foreground"}`}>{value || "—"}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Line items */}
+                        {Array.isArray((viewingPODetail as any).LineItems) && (viewingPODetail as any).LineItems.length > 0 && (
+                          <div>
+                            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1.5">Items</p>
+                            <div className="rounded-lg border border-border/40 overflow-hidden">
+                              <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
+                                <thead className="bg-muted/40">
+                                  <tr>
+                                    <th className="px-3 py-1.5 text-left text-[9px] uppercase tracking-widest text-muted-foreground" style={{ width: "40%" }}>Description</th>
+                                    <th className="px-3 py-1.5 text-right text-[9px] uppercase tracking-widest text-muted-foreground" style={{ width: "15%" }}>Qty</th>
+                                    <th className="px-3 py-1.5 text-left text-[9px] uppercase tracking-widest text-muted-foreground" style={{ width: "10%" }}>Unit</th>
+                                    <th className="px-3 py-1.5 text-right text-[9px] uppercase tracking-widest text-muted-foreground" style={{ width: "15%" }}>Rate</th>
+                                    <th className="px-3 py-1.5 text-right text-[9px] uppercase tracking-widest text-muted-foreground" style={{ width: "20%" }}>Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/30">
+                                  {(viewingPODetail as any).LineItems.map((item: any, i: number) => (
+                                    <tr key={i} className="bg-background/40">
+                                      <td className="px-3 py-1.5 truncate">{item.ItemName || item.Description || "—"}</td>
+                                      <td className="px-3 py-1.5 text-right">{item.Quantity}</td>
+                                      <td className="px-3 py-1.5">{item.UomName || item.Unit || "—"}</td>
+                                      <td className="px-3 py-1.5 text-right">₹{Number(item.Rate || 0).toLocaleString("en-IN")}</td>
+                                      <td className="px-3 py-1.5 text-right font-medium">₹{Number(item.LineAmount || 0).toLocaleString("en-IN")}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : !loadingPODetail ? (
+                      <p className="p-4 text-xs text-muted-foreground">PO details not available.</p>
+                    ) : null}
+                  </div>
+                )}
 
                 {/* Times */}
                 <div className="grid grid-cols-2 gap-3">
