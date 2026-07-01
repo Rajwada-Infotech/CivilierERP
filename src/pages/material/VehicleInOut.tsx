@@ -1430,6 +1430,7 @@ export default function VehicleInOut() {
                     >
                       <option value="">All Years</option>
                       {[...finYears]
+                        .filter((fy) => fy.status === "Active")
                         .sort((a, b) => b.year.localeCompare(a.year))
                         .map((fy) => (
                           <option key={fy.id} value={fy.year}>
