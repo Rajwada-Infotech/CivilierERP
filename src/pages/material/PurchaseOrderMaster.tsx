@@ -1,5 +1,5 @@
 import { generateUUID } from '../../utils/cryptoPolyfill';  
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
@@ -364,6 +364,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
+  const poDocTypeIdRef = useRef<number | null>(null);
   const [poDocNo, setPoDocNo] = useState("");
   const [, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
   const [, setPoFormPatchKey] = useState(0);
@@ -1215,6 +1216,7 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── Doc number helpers ────────────────────────────────────────────────────
   const applyPoDocNumber = (docTypeId: number | null, docNo: string) => {
     setPoDocTypeId(docTypeId);
+    poDocTypeIdRef.current = docTypeId;
     setPoDocNo(docNo);
     setForm((p) => ({ ...p, poNumber: docNo, docNo, docTypeId }));
     setPoFormPatchKey((c) => c + 1);
@@ -1239,7 +1241,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Auto-select WO_PO doc type when form is opened from a Work Order ─────
   useEffect(() => {
-    if (!sourceWO || poDocTypeId) return; // already selected or not a WO-sourced form
+    if (!sourceWO || poDocTypeIdRef.current) return; // already selected or not a WO-sourced form
     fetchDocTypes("WO_PO").then(async (docTypes) => {
       // Lock to the doc type whose Prefix is "WO-PO" (dash, as seeded in TypeOfDoc)
       // Fall back to "WO_PO" (underscore) for legacy installs
@@ -1263,8 +1265,8 @@ const PurchaseOrderMaster: React.FC = () => {
     const targetPrefix = hasMROrSI ? "PO" : "DPO";
     const target = poDocTypes.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix);
     if (!target) return;
-    // Only switch if we're not already on the right type
-    if (poDocTypeId === target.TypeOfDocId) return;
+    // Use ref to avoid stale closure on poDocTypeId
+    if (poDocTypeIdRef.current === target.TypeOfDocId) return;
     fetchNextDocNumber(target.TypeOfDocId, selectedFinYear || undefined).then(
       (docNo) => applyPoDocNumber(target.TypeOfDocId, docNo),
     );
