@@ -6,6 +6,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { promoteLeadToFollowup } = require("../services/saHandoff");
 
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 router.use(authMiddleware);
 
 // GET / — all site visits (row-level scoped via the joined lead)
