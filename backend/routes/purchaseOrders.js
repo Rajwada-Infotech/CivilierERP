@@ -1170,7 +1170,7 @@ router.put("/:id/submit", requirePageRight("purchase-orders", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", requirePageRight("purchase-orders", "approve"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1192,7 +1192,7 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "approve"), async
   }
 });
 
-router.put("/:id/reject", requirePageRight("purchase-orders", "approve"), async (req, res) => {
+router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const { note } = req.body;

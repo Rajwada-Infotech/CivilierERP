@@ -1276,7 +1276,7 @@ router.put("/:id/submit", requirePageRight("grn-master", "edit"), async (req, re
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", requirePageRight("grns", "approve"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("grns", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -1300,7 +1300,7 @@ router.put("/:id/approve", requirePageRight("grns", "approve"), async (req, res)
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", requirePageRight("grns", "approve"), async (req, res) => {
+router.put("/:id/reject", requirePageRight("grns", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
