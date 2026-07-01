@@ -15,6 +15,7 @@ import {
   X, Edit3, Building2, FolderOpen, RotateCcw, ArrowLeft, Package, CheckCircle2,
 } from "lucide-react";
 import { format } from "date-fns";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/material-issue-returns";
 
@@ -75,11 +76,7 @@ const emptyForm = (): FormState => ({
 });
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    ...opts,
-  });
+  const res = await fetchWithAuth(url, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || res.statusText);
@@ -104,12 +101,12 @@ export default function IssueReturn() {
 
   const { data: companies = [] } = useQuery<any[]>({
     queryKey: ["issue-return-companies"],
-    queryFn: () => apiFetch<any[]>("/api/enterprise?type=company"),
+    queryFn: () => apiFetch<any[]>("/api/enterprises/options?business_type=C"),
   });
 
   const { data: projects = [] } = useQuery<any[]>({
     queryKey: ["issue-return-projects"],
-    queryFn: () => apiFetch<any[]>("/api/enterprise?type=project"),
+    queryFn: () => apiFetch<any[]>("/api/enterprises/options?business_type=P"),
   });
 
   const { data: issues = [] } = useQuery<IssueOption[]>({
@@ -332,7 +329,7 @@ export default function IssueReturn() {
                     <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <select className={selectCls + " pl-9"} value={form.CompanyId} onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", IssueId: "", items: [] }))}>
                       <option value="">All Companies</option>
-                      {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {(companies as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.label}</option>)}
                     </select>
                   </div>
                 </div>
@@ -343,7 +340,7 @@ export default function IssueReturn() {
                     <FolderOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <select className={selectCls + " pl-9"} value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, IssueId: "", items: [] }))}>
                       <option value="">All Projects</option>
-                      {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {(filteredProjects as any[]).map((p: any) => <option key={p.id} value={p.id}>{p.label}</option>)}
                     </select>
                   </div>
                 </div>
