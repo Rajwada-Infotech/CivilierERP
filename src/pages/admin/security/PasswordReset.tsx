@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
+import type { UserRole } from "@/contexts/types";
 import { toast } from "sonner";
 import {
   Eye,
@@ -385,7 +386,7 @@ export default function PasswordReset() {
   // Unique roles present in the user list
   const presentRoles = useMemo(() => {
     const roles = new Set(allUsers.map((u) => u.role).filter(Boolean));
-    return ALL_ROLES.filter((r) => r === "All" || roles.has(r));
+    return ALL_ROLES.filter((r) => r === "All" || roles.has(r as UserRole));
   }, [allUsers]);
 
   const activeCount   = allUsers.filter((u) => u.isActive).length;
