@@ -13,9 +13,7 @@ import {
   Calendar,
   FileText,
   Settings,
-  BarChart3,
   LayoutGrid,
-  Puzzle,
   Receipt,
   Truck,
   Users,
@@ -48,6 +46,9 @@ import {
   Profile,
   Logout,
   SidebarLeft,
+  Setting2,
+  Chart,
+  Element4,
 } from "iconsax-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -479,7 +480,7 @@ const SetupDropdown = ({
               : modVars
           }
         >
-          <SlidersHorizontal size={13} />
+          <Setting2 size={13} variant="Outline" color="currentColor" />
           <span>Setup</span>
           <ChevronDown
             size={12}
@@ -1173,7 +1174,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
             >
-              <BarChart3 size={13} />
+              <Chart size={13} variant="Outline" color="currentColor" />
               <span>Reports</span>
             </button>
 
@@ -1184,7 +1185,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
             >
-              <Puzzle size={13} />
+              <Element4 size={13} variant="Outline" color="currentColor" />
               <span>Widgets</span>
             </button>
           </div>
