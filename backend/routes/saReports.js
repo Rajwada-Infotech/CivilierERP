@@ -5,7 +5,10 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, isSaTeamLead, actorId, applyLeadScope } = require("../services/saAccess");
 
+const rateLimit = require("express-rate-limit");
+
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 
 function dateRangeFilter(req, column) {
   // Validate date format before interpolating to prevent SQL injection
