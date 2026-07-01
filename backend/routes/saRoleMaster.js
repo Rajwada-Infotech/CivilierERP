@@ -4,6 +4,9 @@ const { getPool, sql } = require("../db");
 const verifyToken = require("../middleware/auth");
 const { isSaAdmin } = require("../services/saAccess");
 const { userPermissionCache } = require("../middleware/permissions");
+const rateLimit = require("express-rate-limit");
+
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 
 function guard(req, res, next) {
   if (!isSaAdmin(req)) return res.status(403).json({ error: "Access denied" });
