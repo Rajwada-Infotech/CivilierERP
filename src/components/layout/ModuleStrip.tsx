@@ -103,9 +103,9 @@ const MODULES = [
     icon: Archive,
     label: "Records",
     desc: "Every attachment, in one place",
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.22)",
-    ringRgb: "245,158,11",
+    color: "#e11d48",
+    bg: "rgba(225,29,72,0.18)",
+    ringRgb: "225,29,72",
   },
 ];
 

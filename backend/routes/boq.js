@@ -608,6 +608,26 @@ router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
 
 // ── Approval routes ───────────────────────────────────────────────────────────
 
+// Unified transition endpoint used by the BOQ preview panel
+router.post("/:id/transition", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { action } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const targetStatus =
+      action === "submit" ? "Pending" :
+      action === "approve" ? "Approved" :
+      action === "reject" ? "Rejected" : null;
+    if (!targetStatus) return res.status(400).json({ error: `Unknown action: ${action}` });
+    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null);
+    await bumpCacheVersion("boq");
+    res.json({ message: `BOQ ${action}d`, ...result });
+  } catch (err) {
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+  }
+});
+
 router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -143,14 +143,9 @@ const SaSiteVisits: React.FC = () => {
   });
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Site Visits"]} />
-      <div className="space-y-6 mt-6">
+    <SalesAutoShell title="Site Visitation" subtitle="Schedule and track customer site visits for interested leads">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Site Visitation</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Schedule and track customer site visits for interested leads</p>
-          </div>
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
             {([
               { key: "upcoming", icon: CalendarClock, label: "Upcoming" },
@@ -238,7 +233,7 @@ const SaSiteVisits: React.FC = () => {
           }}
         />}
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

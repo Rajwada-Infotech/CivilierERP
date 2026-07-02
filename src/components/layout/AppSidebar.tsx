@@ -101,9 +101,9 @@ const MODULE_HEADER: Record<
   records: {
     label: "Records",
     icon: Archive,
-    color: "#f59e0b",
-    from: "from-amber-500/30",
-    to: "to-amber-500/0",
+    color: "#e11d48",
+    from: "from-rose-600/30",
+    to: "to-rose-600/0",
   },
   civilworkdpr: {
     label: "Civil Work DPR",
