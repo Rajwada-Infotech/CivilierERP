@@ -28,7 +28,8 @@ export type DocModule =
   | "DN" // Debit Note
   | "WD" // Work Done
   | "MR" // Material Request
-  | "ISS"; // Material Issue
+  | "ISS" // Material Issue
+  | "QT"; // Quotation
 
 /**
  * Shape returned by GET /api/document-type.

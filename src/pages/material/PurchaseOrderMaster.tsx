@@ -51,6 +51,7 @@ import {
 } from "@/api/materialRequestApi";
 import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
+import { type QTPOPrefill } from "@/api/quotationApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -374,6 +375,10 @@ const PurchaseOrderMaster: React.FC = () => {
   const woPrefill =
     (location.state as { woPrefill?: WOPOPrefill } | null)?.woPrefill ?? null;
 
+  // ── QT prefill (when navigated from the L1 Price Comparative Chart) ───────
+  const qtPrefill =
+    (location.state as { qtPrefill?: QTPOPrefill } | null)?.qtPrefill ?? null;
+
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -459,6 +464,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
   // Source MR reference — set when form is opened from a Material Request
   const [sourceMR, setSourceMR] = useState<{
+    id: number;
+    docNo: string;
+  } | null>(null);
+
+  // Source Quotation reference — set when form is opened from the L1 Chart
+  const [sourceQT, setSourceQT] = useState<{
     id: number;
     docNo: string;
   } | null>(null);
@@ -962,6 +973,77 @@ const PurchaseOrderMaster: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mrPrefill, companies.length, allProjects.length, uoms.length]);
 
+  // ── Pre-populate form when arriving from the L1 Price Comparative Chart ───
+  // The winning supplier and their quoted rates are already known — unlike
+  // the MR prefill, this pre-fills supplierId and each line's rate too.
+  useEffect(() => {
+    if (
+      !qtPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      uoms.length === 0
+    )
+      return;
+
+    const matchCompany = companies.find(
+      (c) => String(c.id) === String(qtPrefill.CompanyId),
+    );
+    const matchProject = allProjects.find(
+      (p) => String(p.id) === String(qtPrefill.ProjectId),
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId,
+      projectId: matchProject?.id ?? prev.projectId,
+      supplierId: qtPrefill.SupplierId ? String(qtPrefill.SupplierId) : prev.supplierId,
+      remarks: qtPrefill.Remarks ?? prev.remarks,
+    }));
+
+    const prefillLines: POLineItem[] = qtPrefill.items.map((it) => {
+      const cgst = Number(it.M_CGST ?? 0);
+      const sgst = Number(it.M_SGST ?? 0);
+      const igst = Number(it.M_IGST ?? 0);
+      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const qty = Number(it.Quantity ?? 1);
+      const rate = Number(it.Rate ?? 0);
+      const taxAmount = (qty * rate * gstRate) / 100;
+
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch =
+        uoms.find(
+          (u) =>
+            (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) ||
+            (uomNameNorm && u.name.toLowerCase() === uomNameNorm),
+        ) ?? null;
+
+      return {
+        id: uid(),
+        itemId: it.ItemId ?? "",
+        itemName: it.ItemName ?? "",
+        itemDescription: "",
+        quantity: qty,
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
+        rate,
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
+        gstRate,
+        taxAmount,
+        amount: qty * rate + taxAmount,
+      };
+    });
+
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceQT({ id: qtPrefill.QuotationId, docNo: qtPrefill.DocNo });
+
+    setViewMode("create");
+    // Only run once when qtPrefill is present and master data is loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtPrefill, companies.length, allProjects.length, uoms.length]);
+
   // ── Pre-populate form when arriving from Work Done "Create WO_PO" ─────────
   useEffect(() => {
     if (!wdPrefill || companies.length === 0 || allProjects.length === 0)
@@ -1431,6 +1513,8 @@ const PurchaseOrderMaster: React.FC = () => {
       // Source tracking
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
+      SourceQTId: sourceQT?.id ?? null,
+      SourceQTDocNo: sourceQT?.docNo ?? null,
       SourceWDId: sourceWD?.id ?? null,
       SourceWDDocNo: sourceWD?.docNo ?? null,
       SourceWOId: sourceWO?.id ?? null,
@@ -1439,7 +1523,7 @@ const PurchaseOrderMaster: React.FC = () => {
       SourceSaleOrderDocNo: null,
       SourceSaleInvoiceId: sourceSaleInvoice?.id ?? null,
       SourceSaleInvoiceDocNo: sourceSaleInvoice?.docNo ?? null,
-      POType: (sourceMR
+      POType: (sourceMR || sourceQT
         ? "Normal"
         : sourceWD
           ? "WO_PO"
