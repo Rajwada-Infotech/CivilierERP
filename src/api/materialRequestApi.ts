@@ -193,10 +193,12 @@ export interface ApprovedMRSummary {
 export const getApprovedMRList = (params?: {
   companyId?: string;
   projectId?: string;
+  finYearId?: string;
 }) => {
   const qs = new URLSearchParams();
   if (params?.companyId) qs.set("companyId", params.companyId);
   if (params?.projectId) qs.set("projectId", params.projectId);
+  if (params?.finYearId) qs.set("finYearId", params.finYearId);
   const query = qs.toString() ? `?${qs.toString()}` : "";
   return fetchWithAuth(`${BASE}/approved-list${query}`).then((r) =>
     handleResponse<ApprovedMRSummary[]>(r),

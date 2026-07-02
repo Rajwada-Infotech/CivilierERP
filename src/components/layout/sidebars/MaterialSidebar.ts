@@ -1,4 +1,4 @@
-import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, Edit2 } from "iconsax-react";
+import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, Edit2, DocumentText, TrendUp } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
@@ -9,6 +9,7 @@ export const materialNavItems: NavItem[] = [
     children: [
       { label: "Material Request", path: "/material/material-request", pageKey: "material-request" },
       { label: "Purchase Order",   path: "/material/purchase-order",   pageKey: "purchase-orders" },
+      { label: "Quotation",        path: "/material/quotation",        pageKey: "quotation" },
       { label: "Vehicle In/Out",   path: "/material/vehicle-in-out",   pageKey: "vehicle-in-out" },
       { label: "GRN",              path: "/material/grn",              pageKey: "grn-master" },
       { label: "Issues",           path: "/material/issues",           pageKey: "material-issues" },
@@ -16,6 +17,7 @@ export const materialNavItems: NavItem[] = [
       { label: "Invoice",          path: "/material/expense-booking",  pageKey: "expense-booking" },
     ],
   },
+  { label: "L1 Chart",       icon: TrendUp,       path: "/material/l1-chart",       pageKey: "l1-chart" },
   { label: "Stock",          icon: ArrowSwapHorizontal, path: "/material/stock",          pageKey: "stock-ledger" },
   { label: "Transfer",       icon: Repeat,        path: "/material/stock-transfer", pageKey: "stock-transfers" },
   { label: "Debit Note",     icon: ClipboardText,  path: "/material/debit-note",     pageKey: "debit-note" },

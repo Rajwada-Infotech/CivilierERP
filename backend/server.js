@@ -119,6 +119,7 @@ const ALL_ROUTES = [
   { path: "/api/material-issues", file: "./routes/materialIssues" },
   { path: "/api/material-issue-returns", file: "./routes/issueReturn" },
   { path: "/api/material-requests", file: "./routes/materialRequests" },
+  { path: "/api/quotations", file: "./routes/quotations" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
@@ -387,6 +388,20 @@ async function createApp() {
   } catch (err) {
     logger.error(`[ERR] Route failed [dba]: ${err.message}`);
     routeResults.failed.push({ label: "dba", error: err.message });
+  }
+
+  // Supplier Portal route — role-gated to the external "supplier" role only
+  try {
+    app.use(
+      "/api/supplier-portal",
+      authMiddleware,
+      require("./middleware/role")("supplier"),
+      require("./routes/supplierPortal"),
+    );
+    routeResults.loaded.push("supplier-portal");
+  } catch (err) {
+    logger.error(`[ERR] Route failed [supplier-portal]: ${err.message}`);
+    routeResults.failed.push({ label: "supplier-portal", error: err.message });
   }
 
   if (!isTest) {

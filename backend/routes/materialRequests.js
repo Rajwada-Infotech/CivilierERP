@@ -352,6 +352,10 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
       conditions.push("mr.ProjectId = @projectId");
       request.input("projectId", sql.Int, parseInt(req.query.projectId, 10));
     }
+    if (req.query.finYearId) {
+      conditions.push("mr.FinYearId = @finYearId");
+      request.input("finYearId", sql.Int, parseInt(req.query.finYearId, 10));
+    }
 
     const result = await request.query(`
       SELECT

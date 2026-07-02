@@ -235,7 +235,7 @@ function LogoRing({ size }: { size: number }) {
         style={{ border: "1px dotted rgba(167,139,250,0.4)" }}
         animate={{ rotate: -360 }}
         transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
-      <img src="/CivilierERP.png" alt="CivilierERP" className="w-full h-full rounded-full object-contain"
+      <img src="/Civilier.png" alt="CivilierERP" className="w-full h-full rounded-full object-cover"
         style={{ filter: "drop-shadow(0 8px 20px rgba(124,58,237,0.4))" }} />
     </div>
   );
@@ -533,13 +533,9 @@ export default function Login() {
     <div className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{ background: "#0d0a1a" }}>
 
-      {/* Blueprint scene */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute inset-0 flex items-end pb-0" style={{ opacity: 0.7 }}>
-          <CivilScene />
-        </div>
-        <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 70% at 50% 50%, transparent 20%, rgba(13,10,26,0.80) 100%)" }} />
-      </div>
+      {/* Subtle full-page grid — no crane here */}
+      <div className="absolute inset-0 z-0 pointer-events-none"
+        style={{ backgroundImage: "radial-gradient(circle, rgba(167,139,250,0.07) 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <ScanLine />
       </div>
@@ -566,10 +562,21 @@ export default function Login() {
       <div className="relative z-10 w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
         {/* LEFT: Hero copy + floating preview cards */}
-        <motion.div className="hidden lg:flex flex-col gap-6"
+        <motion.div className="hidden lg:flex flex-col gap-6 relative"
           initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
 
+          {/* Crane scene anchored behind the text */}
+          <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+            <div className="absolute bottom-0 left-0 right-0" style={{ height: "110%", opacity: 0.65 }}>
+              <CivilScene />
+            </div>
+            {/* Fade top so crane doesn't compete with headline */}
+            <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(13,10,26,0.72) 0%, rgba(13,10,26,0.18) 40%, rgba(13,10,26,0.10) 70%, rgba(13,10,26,0.55) 100%)" }} />
+          </div>
+
+          {/* All text/cards sit above the crane */}
+          <div className="relative z-10 flex flex-col gap-6">
           <motion.div className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full text-xs font-medium"
             style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
@@ -586,11 +593,11 @@ export default function Login() {
               </span>
               <br />Build Better.
             </motion.h1>
-            <motion.div className="mt-3 flex items-center gap-2 text-sm text-white/50"
+            <motion.div className="mt-3 h-5 flex items-center gap-2 text-sm text-white/50 overflow-hidden"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
-              <span className="w-1 h-1 rounded-full bg-purple-400 inline-block" />
-              <span>{tagline}</span>
-              <motion.span className="inline-block w-0.5 h-3.5 bg-purple-400 ml-0.5"
+              <span className="w-1 h-1 rounded-full bg-purple-400 inline-block shrink-0" />
+              <span className="whitespace-nowrap">{tagline}</span>
+              <motion.span className="inline-block w-0.5 h-3.5 bg-purple-400 ml-0.5 shrink-0"
                 animate={{ opacity: [1, 0] }} transition={{ duration: 0.5, repeat: Infinity }} />
             </motion.div>
           </div>
@@ -613,6 +620,7 @@ export default function Login() {
           <div className="relative h-64 mt-2">
             <HeroCards />
           </div>
+          </div>{/* end z-10 wrapper */}
         </motion.div>
 
         {/* RIGHT: Login card */}

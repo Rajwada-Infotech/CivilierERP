@@ -166,6 +166,8 @@ const PurchaseOrderMaster = lazy(
 const QuotationPage = lazy(() => import("./pages/material/Quotation"));
 const L1ChartPage = lazy(() => import("./pages/material/L1Chart"));
 const SupplierDashboard = lazy(() => import("./pages/supplier/SupplierDashboard"));
+const SupplierLanding = lazy(() => import("./pages/supplier/SupplierLanding"));
+const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
 const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
@@ -1916,6 +1918,24 @@ function AppRoutes() {
               </CustomerLayout>
             </RequireRole>
           </RequireAuth>
+        }
+      />
+
+      {/* SUPPLIER PUBLIC PAGES */}
+      <Route
+        path="/supplier"
+        element={
+          <Suspense fallback={<PageSkeleton />}>
+            <SupplierLanding />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/supplier-login"
+        element={
+          currentUser && currentUser.role === "supplier"
+            ? <Navigate to={`/supplier-portal/${currentUser.id}`} replace />
+            : <Suspense fallback={<PageSkeleton />}><SupplierLogin /></Suspense>
         }
       />
 
