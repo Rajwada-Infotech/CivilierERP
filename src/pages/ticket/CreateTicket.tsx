@@ -403,7 +403,7 @@ const CreateTicket = () => {
       subtitle="Fill in the details below to raise a ticket"
       icon={Send}
     >
-      <div className="max-w-3xl mx-auto space-y-5">
+      <div className="space-y-5">
           {/* ── Section 1: Context ── */}
           <Section icon={Building2} title="Context">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
