@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   CalendarDays,
@@ -310,7 +311,7 @@ export function ExpenseBookingPreviewModal({
     displayNetAmount - (previewRecord.totalPaid ?? 0),
   );
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 expense-preview-modal">
       <style>{`
         @media print {
@@ -1329,6 +1330,7 @@ export function ExpenseBookingPreviewModal({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
