@@ -621,11 +621,14 @@ export default function MaterialRequest() {
       id: "Status",
       accessorKey: "Status",
       header: "Status",
+      size: 180,
       cell: ({ row }) => (
-        <ApprovalStatusChain
-          table="MaterialRequests"
-          recordId={row.original.MRId}
-        />
+        <div className="whitespace-nowrap">
+          <ApprovalStatusChain
+            table="MaterialRequests"
+            recordId={row.original.MRId}
+          />
+        </div>
       ),
     },
     {
