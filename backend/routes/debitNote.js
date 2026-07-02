@@ -92,9 +92,17 @@ router.post("/", requirePageRight("debit-note", "create"), async (req, res) => {
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);
   const supplier_id_val = toInt(supplier_id);
+  const bill_id_val = toInt(bill_id);
 
-  if (!company_id_val || !project_id_val || !supplier_id_val) {
-    return res.status(400).json({ error: "company_id, project_id, supplier_id are required" });
+  // bill_id is a NOT NULL column in dbo.DebitNote with no fallback default
+  // in the insert/update below — toInt() returns null for a missing/invalid
+  // value, which used to reach the database and crash with an unhandled SQL
+  // "Cannot insert the value NULL" 500 instead of this clean validation
+  // error. Same bug class found and fixed across purchaseOrders.js,
+  // expenseBooking.js, workOrder.js, materialIssues.js, and
+  // chequeMasterSchemas.js during a live-DB workflow test.
+  if (!company_id_val || !project_id_val || !supplier_id_val || !bill_id_val) {
+    return res.status(400).json({ error: "company_id, project_id, supplier_id, bill_id are required" });
   }
 
   const validItems = items.filter(i => {
@@ -176,9 +184,17 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);
   const supplier_id_val = toInt(supplier_id);
+  const bill_id_val = toInt(bill_id);
 
-  if (!company_id_val || !project_id_val || !supplier_id_val) {
-    return res.status(400).json({ error: "company_id, project_id, supplier_id are required" });
+  // bill_id is a NOT NULL column in dbo.DebitNote with no fallback default
+  // in the insert/update below — toInt() returns null for a missing/invalid
+  // value, which used to reach the database and crash with an unhandled SQL
+  // "Cannot insert the value NULL" 500 instead of this clean validation
+  // error. Same bug class found and fixed across purchaseOrders.js,
+  // expenseBooking.js, workOrder.js, materialIssues.js, and
+  // chequeMasterSchemas.js during a live-DB workflow test.
+  if (!company_id_val || !project_id_val || !supplier_id_val || !bill_id_val) {
+    return res.status(400).json({ error: "company_id, project_id, supplier_id, bill_id are required" });
   }
 
   const validItems = items.filter(i => {
