@@ -51,6 +51,7 @@ import {
 } from "@/api/materialRequestApi";
 import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
+import { type QTPOPrefill } from "@/api/quotationApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -93,7 +94,28 @@ import {
   Mail,
   MapPin,
   Building2,
+  Download,
+  Upload,
+  Loader2 as Loader2Icon,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const PO_TEMPLATE_COLUMNS = [
+  { header: "Document Type", accessor: "Document Type" },
+  { header: "Supplier", accessor: "Supplier" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "PO Date (YYYY-MM-DD)", accessor: "PO Date (YYYY-MM-DD)" },
+  { header: "Expected Delivery Date (YYYY-MM-DD)", accessor: "Expected Delivery Date (YYYY-MM-DD)" },
+  { header: "Payment Terms", accessor: "Payment Terms" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+  { header: "Rate", accessor: "Rate" },
+  { header: "GST %", accessor: "GST %" },
+];
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
 
@@ -332,6 +354,8 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
 type ViewMode = "list" | "create" | "edit" | "view";
 
 const PurchaseOrderMaster: React.FC = () => {
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const rights = usePageRights("purchase-orders");
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -350,6 +374,10 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── WO prefill (when navigated from Work Order "Create Material PO") ──────
   const woPrefill =
     (location.state as { woPrefill?: WOPOPrefill } | null)?.woPrefill ?? null;
+
+  // ── QT prefill (when navigated from the L1 Price Comparative Chart) ───────
+  const qtPrefill =
+    (location.state as { qtPrefill?: QTPOPrefill } | null)?.qtPrefill ?? null;
 
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -436,6 +464,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
   // Source MR reference — set when form is opened from a Material Request
   const [sourceMR, setSourceMR] = useState<{
+    id: number;
+    docNo: string;
+  } | null>(null);
+
+  // Source Quotation reference — set when form is opened from the L1 Chart
+  const [sourceQT, setSourceQT] = useState<{
     id: number;
     docNo: string;
   } | null>(null);
@@ -939,6 +973,77 @@ const PurchaseOrderMaster: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mrPrefill, companies.length, allProjects.length, uoms.length]);
 
+  // ── Pre-populate form when arriving from the L1 Price Comparative Chart ───
+  // The winning supplier and their quoted rates are already known — unlike
+  // the MR prefill, this pre-fills supplierId and each line's rate too.
+  useEffect(() => {
+    if (
+      !qtPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      uoms.length === 0
+    )
+      return;
+
+    const matchCompany = companies.find(
+      (c) => String(c.id) === String(qtPrefill.CompanyId),
+    );
+    const matchProject = allProjects.find(
+      (p) => String(p.id) === String(qtPrefill.ProjectId),
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId,
+      projectId: matchProject?.id ?? prev.projectId,
+      supplierId: qtPrefill.SupplierId ? String(qtPrefill.SupplierId) : prev.supplierId,
+      remarks: qtPrefill.Remarks ?? prev.remarks,
+    }));
+
+    const prefillLines: POLineItem[] = qtPrefill.items.map((it) => {
+      const cgst = Number(it.M_CGST ?? 0);
+      const sgst = Number(it.M_SGST ?? 0);
+      const igst = Number(it.M_IGST ?? 0);
+      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const qty = Number(it.Quantity ?? 1);
+      const rate = Number(it.Rate ?? 0);
+      const taxAmount = (qty * rate * gstRate) / 100;
+
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch =
+        uoms.find(
+          (u) =>
+            (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) ||
+            (uomNameNorm && u.name.toLowerCase() === uomNameNorm),
+        ) ?? null;
+
+      return {
+        id: uid(),
+        itemId: it.ItemId ?? "",
+        itemName: it.ItemName ?? "",
+        itemDescription: "",
+        quantity: qty,
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
+        rate,
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
+        gstRate,
+        taxAmount,
+        amount: qty * rate + taxAmount,
+      };
+    });
+
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceQT({ id: qtPrefill.QuotationId, docNo: qtPrefill.DocNo });
+
+    setViewMode("create");
+    // Only run once when qtPrefill is present and master data is loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtPrefill, companies.length, allProjects.length, uoms.length]);
+
   // ── Pre-populate form when arriving from Work Done "Create WO_PO" ─────────
   useEffect(() => {
     if (!wdPrefill || companies.length === 0 || allProjects.length === 0)
@@ -1408,6 +1513,8 @@ const PurchaseOrderMaster: React.FC = () => {
       // Source tracking
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
+      SourceQTId: sourceQT?.id ?? null,
+      SourceQTDocNo: sourceQT?.docNo ?? null,
       SourceWDId: sourceWD?.id ?? null,
       SourceWDDocNo: sourceWD?.docNo ?? null,
       SourceWOId: sourceWO?.id ?? null,
@@ -1416,7 +1523,7 @@ const PurchaseOrderMaster: React.FC = () => {
       SourceSaleOrderDocNo: null,
       SourceSaleInvoiceId: sourceSaleInvoice?.id ?? null,
       SourceSaleInvoiceDocNo: sourceSaleInvoice?.docNo ?? null,
-      POType: (sourceMR
+      POType: (sourceMR || sourceQT
         ? "Normal"
         : sourceWD
           ? "WO_PO"
@@ -1957,6 +2064,28 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
     });
   };
 
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], PO_TEMPLATE_COLUMNS, "purchase-order-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER: LIST VIEW
   // ─────────────────────────────────────────────────────────────────────────
@@ -1972,15 +2101,35 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
           subtitle="Create and manage purchase orders"
           icon={ShoppingCart}
           action={
-            rights.canCreate ? (
-            <button
-              onClick={goToCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
-            >
-              <Plus size={13} />
-              New Purchase Order
-            </button>
-            ) : undefined
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2Icon size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <button
+                  onClick={goToCreate}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                >
+                  <Plus size={13} />
+                  New Purchase Order
+                </button>
+              )}
+            </div>
           }
         >
 

@@ -1,8 +1,8 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Megaphone, TrendingUp, IndianRupee, Target, Award } from "lucide-react";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchMarketingDashboard(): Promise<any> {
@@ -31,13 +31,8 @@ const SaMarketingDashboard: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load dashboard.</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Marketing Dashboard"]} />
-      <div className="space-y-6 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Marketing Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Campaign performance, spend, and lead generation overview</p>
-        </div>
+    <SalesAutoShell title="Marketing Dashboard" subtitle="Campaign performance, spend, and lead generation overview" icon={Megaphone}>
+      <div className="space-y-6">
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={Megaphone} label="Total Campaigns" value={data?.totalCampaigns ?? 0} />
@@ -74,7 +69,7 @@ const SaMarketingDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

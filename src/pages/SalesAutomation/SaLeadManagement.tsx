@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -365,15 +365,10 @@ const SaLeadManagement: React.FC = () => {
   const booked = mappedData.filter((l) => l.BookingId);
 
   return (
-    <>
+    <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle">
       <style>{`@media print { nav, header, aside, .print\\:hidden { display: none !important; } }`}</style>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Lead Management"]} />
-      <div className="space-y-6 mt-6">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Lead Management</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">All leads generated from advertisements — track, assign and manage the complete lead lifecycle</p>
-          </div>
           <div className="flex items-center gap-2">
             {/* Transfer Leads — Team Lead only */}
             {isTL && (
@@ -846,7 +841,7 @@ const SaLeadManagement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </SalesAutoShell>
   );
 };
 

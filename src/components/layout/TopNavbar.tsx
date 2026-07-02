@@ -114,7 +114,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
   engineering: "249,115,22",
   ticket: "236,72,153",
   sales: "168,85,247",
-  records: "245,158,11",
+  records: "225,29,72",
   civilworkdpr: "8,145,178",
   admin: "59,130,246",
 };
@@ -123,11 +123,11 @@ const MODULE_GLOW_RGB: Record<string, string> = {
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
   material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
-  followup: { h: 235, s: 90, l: 74 }, // #818cf8 light indigo-violet
+  followup: { h: 174, s: 82, l: 31 }, // #0d9488 teal
   engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
   ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
   sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
-  records: { h: 38, s: 92, l: 50 }, // #f59e0b amber
+  records: { h: 347, s: 77, l: 50 }, // #e11d48 rose
   civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
 };

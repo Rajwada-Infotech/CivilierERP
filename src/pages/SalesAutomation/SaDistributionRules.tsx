@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -217,14 +217,9 @@ const SaDistributionRules: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading distribution rules...</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Setup", "Distribution Rules"]} />
-      <div className="space-y-6 mt-6">
+    <SalesAutoShell title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Distribution Rules</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Configure how leads are automatically assigned to team leads and salespersons</p>
-          </div>
           {canManage && (
             <button
               onClick={() => { setAddOpen(true); setForm({ ...EMPTY_FORM }); setMembers([{ UserId: "", Weight: "1" }]); }}
@@ -331,7 +326,7 @@ const SaDistributionRules: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </SalesAutoShell>
   );
 };
 

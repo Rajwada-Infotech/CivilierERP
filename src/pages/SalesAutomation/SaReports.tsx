@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { exportToXlsx, exportToPdf, type ExportColumn } from "@/lib/export";
 import { Download, FileSpreadsheet } from "lucide-react";
@@ -71,14 +71,9 @@ const SaReports: React.FC = () => {
   };
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Reports"]} />
-      <div className="space-y-6 mt-6">
+    <SalesAutoShell title="Sales Automation Reports" subtitle="Lead source, performance, conversion and ROI reports">
+      <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Sales Automation Reports</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Lead source, performance, conversion and ROI reports</p>
-          </div>
           <div className="flex items-center flex-wrap gap-2">
             {/* Date range filter */}
             <div className="flex items-center gap-1.5">
@@ -145,7 +140,7 @@ const SaReports: React.FC = () => {
           </table>
         </div>
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

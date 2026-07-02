@@ -269,6 +269,8 @@ async function getPOSelect(pool) {
     po.SourceMRDocNo,
     po.SourceWDId,
     po.SourceWDDocNo,
+    po.SourceQTId,
+    po.SourceQTDocNo,
     po.SourceSaleOrderId,
     po.SourceSaleOrderDocNo,
     po.SourceSaleInvoiceId,
@@ -451,6 +453,8 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     SourceMRDocNo,
     SourceWDId,
     SourceWDDocNo,
+    SourceQTId,
+    SourceQTDocNo,
     POType,
     // ── Sale-Order workflow fields (Migration 111) ──
     SourceSaleOrderId,
@@ -620,6 +624,12 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
         SourceWDId ? parseInt(SourceWDId, 10) : null,
       )
       .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
+      .input(
+        "SourceQTId",
+        sql.Int,
+        SourceQTId ? parseInt(SourceQTId, 10) : null,
+      )
+      .input("SourceQTDocNo", sql.NVarChar(100), SourceQTDocNo || null)
       // ── Sale-Order workflow (Migration 111) ──────────────────────────────
       .input(
         "SourceSaleOrderId",
@@ -664,6 +674,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
           SourceWOId, SourceWODocNo,
           SourceMRId, SourceMRDocNo,
           SourceWDId, SourceWDDocNo,
+          SourceQTId, SourceQTDocNo,
           SourceSaleOrderId, SourceSaleOrderDocNo,
           SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
           POType, fy_id
@@ -682,6 +693,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
           @SourceWOId, @SourceWODocNo,
           @SourceMRId, @SourceMRDocNo,
           @SourceWDId, @SourceWDDocNo,
+          @SourceQTId, @SourceQTDocNo,
           @SourceSaleOrderId, @SourceSaleOrderDocNo,
           @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
           @POType, @FyId
@@ -718,6 +730,25 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
             `);
         } catch (e) {
           console.error("MR status update failed:", e.message);
+        }
+      })();
+    }
+
+    // Mark the source Quotation as Closed once a PO is raised against it.
+    if (SourceQTId) {
+      (async () => {
+        try {
+          const qtId = parseInt(SourceQTId, 10);
+          await pool
+            .request()
+            .input("qtId", sql.Int, qtId)
+            .input("user", sql.NVarChar(200), userEmail).query(`
+              UPDATE dbo.Quotations
+              SET Status = 'Closed', UpdatedBy = @user, UpdatedAt = SYSDATETIME()
+              WHERE QuotationId = @qtId
+            `);
+        } catch (e) {
+          console.error("Quotation status update failed:", e.message);
         }
       })();
     }

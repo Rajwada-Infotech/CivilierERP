@@ -91,6 +91,31 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
   },
+  // Quotation domain statuses
+  Sent: {
+    label: "Sent",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  PartiallyQuoted: {
+    label: "Partially Quoted",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  Quoted: {
+    label: "Quoted",
+    icon: PackageCheck,
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
+  },
+  Closed: {
+    label: "Closed",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
 };
 
 // Fallback for unknown statuses

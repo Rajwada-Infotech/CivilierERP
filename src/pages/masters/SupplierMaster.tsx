@@ -112,6 +112,7 @@ interface Supplier {
   LHeadAddress: string | null;
   LBelongsTo: number | null;
   LHeadStatus: boolean;
+  IsTdsApplicable: boolean;
   GroupName: string | null;
 }
 
@@ -151,6 +152,7 @@ interface SupplierForm {
   LHeadAddress: string;
   LHeadStatus: boolean;
   LBelongsTo: string;
+  isTdsApplicable: boolean;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -166,6 +168,7 @@ const EMPTY_FORM: SupplierForm = {
   LHeadAddress: "",
   LBelongsTo: "",
   LHeadStatus: true,
+  isTdsApplicable: false,
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -190,6 +193,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   {
     header: "Status",
     accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
+  },
+  {
+    header: "TDS Applicable",
+    accessor: (r) => (r.IsTdsApplicable ? "Yes" : "No"),
   },
 ];
 
@@ -294,6 +301,20 @@ function buildSupplierColumns(
           >
             {active ? "Active" : "Inactive"}
           </span>
+        );
+      },
+    },
+    {
+      accessorKey: "IsTdsApplicable",
+      header: "TDS",
+      cell: ({ getValue }) => {
+        const tds = getValue() as boolean;
+        return tds ? (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600">
+            TDS
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
         );
       },
     },
@@ -441,6 +462,7 @@ const SupplierMaster: React.FC = () => {
       LHeadAddress: item.LHeadAddress || null,
       LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      IsTdsApplicable: Boolean(item.IsTdsApplicable),
       GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
@@ -461,6 +483,7 @@ const SupplierMaster: React.FC = () => {
     LGSTType: f.LGSTType || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
+    IsTdsApplicable: f.isTdsApplicable,
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
@@ -640,6 +663,7 @@ const SupplierMaster: React.FC = () => {
             LHeadAddress: address,
             LBelongsTo: groupId,
             LHeadStatus: isActive,
+            isTdsApplicable: false,
           };
 
           await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
@@ -716,6 +740,7 @@ const SupplierMaster: React.FC = () => {
       LHeadAddress: s.LHeadAddress ?? "",
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
       LHeadStatus: s.LHeadStatus,
+      isTdsApplicable: Boolean(s.IsTdsApplicable),
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1200,29 +1225,57 @@ const SupplierMaster: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Status toggle ── */}
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))
-                }
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
-              >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`}
-                />
-              </button>
-              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
-                Status —{" "}
-                <span
-                  className={
-                    form.LHeadStatus ? "text-emerald-600" : "text-foreground"
+            {/* ── Toggles ── */}
+            <div className="flex flex-wrap items-center gap-6 pt-1">
+              {/* Status */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))
                   }
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
                 >
-                  {form.LHeadStatus ? "Active" : "Inactive"}
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`}
+                  />
+                </button>
+                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  Status —{" "}
+                  <span
+                    className={
+                      form.LHeadStatus ? "text-emerald-600" : "text-foreground"
+                    }
+                  >
+                    {form.LHeadStatus ? "Active" : "Inactive"}
+                  </span>
                 </span>
-              </span>
+              </div>
+
+              {/* TDS Applicable */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))
+                  }
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                  />
+                </button>
+                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  TDS Applicable —{" "}
+                  <span
+                    className={
+                      form.isTdsApplicable ? "text-amber-600" : "text-foreground"
+                    }
+                  >
+                    {form.isTdsApplicable ? "Yes" : "No"}
+                  </span>
+                </span>
+              </div>
             </div>
           </div>
 

@@ -84,6 +84,8 @@ router.get("/:id", async (req, res, next) => {
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
     if (hasColumn(columnMeta, "LHeadCategory"))
       selectColumns.push("lh.LHeadCategory");
+    if (hasColumn(columnMeta, "IsTdsApplicable"))
+      selectColumns.push("lh.IsTdsApplicable");
 
     const query = `SELECT ${selectColumns.join(", ")}
       FROM dbo.AccountHeadMaster lh
@@ -131,6 +133,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
     if (hasColumn(columnMeta, "LHeadCategory"))
       selectColumns.push("lh.LHeadCategory");
+    if (hasColumn(columnMeta, "IsTdsApplicable"))
+      selectColumns.push("lh.IsTdsApplicable");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -194,6 +198,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     LHeadPan,
     LHeadCategory,
     LHeadType,
+  IsTdsApplicable,
   } = req.body;
 
   try {
@@ -305,6 +310,11 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
       insertColumns.push("LHeadCategory");
       insertValues.push("@LHeadCategory");
+    }
+    if (hasColumn(columnMeta, "IsTdsApplicable")) {
+      request.input("IsTdsApplicable", sql.Bit, IsTdsApplicable ? 1 : 0);
+      insertColumns.push("IsTdsApplicable");
+      insertValues.push("@IsTdsApplicable");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
@@ -514,6 +524,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     LHeadPan,
     LHeadCategory,
     LHeadType,
+    IsTdsApplicable,
   } = req.body;
 
   try {
@@ -620,6 +631,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "LHeadCategory")) {
       request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
       updates.push("LHeadCategory=@LHeadCategory");
+    }
+    if (hasColumn(columnMeta, "IsTdsApplicable")) {
+      request.input("IsTdsApplicable", sql.Bit, IsTdsApplicable ? 1 : 0);
+      updates.push("IsTdsApplicable=@IsTdsApplicable");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);

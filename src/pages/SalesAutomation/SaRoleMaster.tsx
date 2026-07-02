@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Shield, Users, Check, X, Save, RotateCcw, Download, Upload, FileDown,
@@ -596,24 +596,14 @@ const SaRoleMaster: React.FC = () => {
   });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Role Master"]} />
-
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Shield size={20} className="text-primary" />
-            Role Master
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Manage SA module role rights and grant custom page-level permissions per user
-          </p>
-        </div>
+    <SalesAutoShell title="Role Master" subtitle="Manage SA module role rights and grant custom page-level permissions per user"
+      action={
         <span className="text-xs font-semibold px-3 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">
           {users.length} Users
         </span>
-      </div>
+      }
+    >
+      <div className="flex flex-col gap-6">
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-muted/20 border border-border w-fit">
@@ -642,7 +632,8 @@ const SaRoleMaster: React.FC = () => {
           ? <p className="text-sm text-muted-foreground">Loading users…</p>
           : <UserPermissionsTab users={users} />
       )}
-    </div>
+      </div>
+    </SalesAutoShell>
   );
 };
 

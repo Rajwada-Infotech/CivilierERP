@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -150,9 +150,8 @@ const SaInquiryDashboard: React.FC = () => {
   const alreadyScheduled = selectedLead?.Status === "VisitScheduled" || selectedLead?.Status === "Visited";
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Inquiry Dashboard"]} />
-      <div className="mt-6 flex gap-4 h-[calc(100vh-160px)]">
+    <SalesAutoShell title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries">
+      <div className="flex gap-4 h-[calc(100vh-200px)]">
 
         {/* Lead list panel */}
         <div className="w-80 shrink-0 flex flex-col gap-2">
@@ -369,7 +368,7 @@ const SaInquiryDashboard: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </SalesAutoShell>
   );
 };
 

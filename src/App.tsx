@@ -95,6 +95,13 @@ const CustomerLayout = lazy(() =>
   })),
 );
 
+// Supplier Portal
+const SupplierLayout = lazy(() =>
+  import("@/components/layout/SupplierLayout").then((m) => ({
+    default: m.SupplierLayout,
+  })),
+);
+
 // Main Pages
 const FinanceDashboard = lazy(() => import("./pages/finance/FinanceDashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
@@ -156,6 +163,15 @@ const WorkOrderMaster = lazy(
 const PurchaseOrderMaster = lazy(
   () => import("./pages/material/PurchaseOrderMaster"),
 );
+const QuotationPage = lazy(() => import("./pages/material/Quotation"));
+const L1ChartPage = lazy(() => import("./pages/material/L1Chart"));
+const SupplierDashboard = lazy(() => import("./pages/supplier/SupplierDashboard"));
+const SupplierLanding = lazy(() => import("./pages/supplier/SupplierLanding"));
+const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
+const SupplierQuotationDetail = lazy(
+  () => import("./pages/supplier/SupplierQuotationDetail"),
+);
+const SupplierCatalog = lazy(() => import("./pages/supplier/SupplierCatalog"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
 const AccountGroupMaster = lazy(
@@ -570,7 +586,17 @@ function AppRoutes() {
       {/* AUTH */}
       <Route
         path="/login"
-        element={currentUser ? <Navigate to="/" replace /> : <Login />}
+        element={
+          currentUser
+            ? currentUser.role === "supplier"
+              ? <Navigate to={`/supplier-portal/${currentUser.id}`} replace />
+              : currentUser.role === "customer"
+                ? <Navigate to={`/customer-portal/${currentUser.id}`} replace />
+                : currentUser.role === "dba"
+                  ? <Navigate to={`/dba/${currentUser.id}`} replace />
+                  : <Navigate to="/" replace />
+            : <Login />
+        }
       />
 
       {/* MAIN */}
@@ -1263,6 +1289,22 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/quotation"
+        element={
+          <ProtectedRoute pageKey="quotation">
+            <QuotationPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/l1-chart"
+        element={
+          <ProtectedRoute pageKey="l1-chart">
+            <L1ChartPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/material/t-c-master"
         element={
           <ProtectedRoute pageKey="t-c-master">
@@ -1874,6 +1916,74 @@ function AppRoutes() {
                   </Suspense>
                 </RouteErrorBoundary>
               </CustomerLayout>
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+
+      {/* SUPPLIER PUBLIC PAGES */}
+      <Route
+        path="/supplier"
+        element={
+          <Suspense fallback={<PageSkeleton />}>
+            <SupplierLanding />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/supplier-login"
+        element={
+          currentUser && currentUser.role === "supplier"
+            ? <Navigate to={`/supplier-portal/${currentUser.id}`} replace />
+            : <Suspense fallback={<PageSkeleton />}><SupplierLogin /></Suspense>
+        }
+      />
+
+      {/* SUPPLIER PORTAL */}
+      <Route
+        path="/supplier-portal/:userId?"
+        element={
+          <RequireAuth>
+            <RequireRole allowed={["supplier"]}>
+              <SupplierLayout>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<PageSkeleton />}>
+                    <SupplierDashboard />
+                  </Suspense>
+                </RouteErrorBoundary>
+              </SupplierLayout>
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier-portal/:userId/quotation/:qtId"
+        element={
+          <RequireAuth>
+            <RequireRole allowed={["supplier"]}>
+              <SupplierLayout>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<PageSkeleton />}>
+                    <SupplierQuotationDetail />
+                  </Suspense>
+                </RouteErrorBoundary>
+              </SupplierLayout>
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier-portal/:userId/catalog"
+        element={
+          <RequireAuth>
+            <RequireRole allowed={["supplier"]}>
+              <SupplierLayout>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<PageSkeleton />}>
+                    <SupplierCatalog />
+                  </Suspense>
+                </RouteErrorBoundary>
+              </SupplierLayout>
             </RequireRole>
           </RequireAuth>
         }

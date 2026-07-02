@@ -265,7 +265,7 @@ router.get("/preview-next-number", authenticateToken, async (req, res) => {
     const pool = getPool();
     let dtId = null;
     try {
-      dtId = await resolveDocTypeId(pool, sql, "MR");
+      dtId = await resolveDocTypeId(pool, sql, "REQ");
     } catch {
       /* no MR doc type configured */
     }
@@ -351,6 +351,10 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
     if (req.query.projectId) {
       conditions.push("mr.ProjectId = @projectId");
       request.input("projectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+    if (req.query.finYearId) {
+      conditions.push("mr.FinYearId = @finYearId");
+      request.input("finYearId", sql.Int, parseInt(req.query.finYearId, 10));
     }
 
     const result = await request.query(`
@@ -517,7 +521,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
     let dtId = clientDocTypeId ? parseInt(clientDocTypeId, 10) : null;
     if (!dtId) {
       try {
-        dtId = await resolveDocTypeId(pool, sql, "MR");
+        dtId = await resolveDocTypeId(pool, sql, "REQ");
       } catch {
         /* no MR doc type — proceed without numbering */
       }

@@ -49,10 +49,26 @@ import {
   SwitchCamera,
   Image as ImageIcon,
   Edit3,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
 import { usePageRights } from "@/hooks/usePageRights";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const VEH_TEMPLATE_COLUMNS = [
+  { header: "Vehicle Number", accessor: "Vehicle Number" },
+  { header: "Driver Name", accessor: "Driver Name" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "Entry Type (In/Out)", accessor: "Entry Type (In/Out)" },
+  { header: "Purpose", accessor: "Purpose" },
+  { header: "Date (YYYY-MM-DD)", accessor: "Date (YYYY-MM-DD)" },
+  { header: "Remarks", accessor: "Remarks" },
+];
 
 // ── Design tokens (match GRN.tsx) ─────────────────────────────────────────────
 const inp =
@@ -409,27 +425,17 @@ let _canDelete = true;
 // ── List columns ──────────────────────────────────────────────────────────────
 const COLUMNS: ColumnDef<any, unknown>[] = [
   {
-    accessorKey: "DocNo",
+    id: "DocInfo",
     header: "Doc No",
     size: 130,
-    cell: ({ getValue }) => (
-      <span className="font-mono text-xs font-bold">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "DocDate",
-    header: "Doc Date",
-    size: 90,
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+    cell: ({ row }) => (
+      <div className="flex flex-col gap-0.5">
+        <span className="font-mono text-xs font-bold">{row.original.DocNo || "—"}</span>
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+          {row.original.DocDate ? new Date(row.original.DocDate).toLocaleDateString("en-IN") : ""}
         </span>
-      );
-    },
+      </div>
+    ),
   },
   {
     accessorKey: "VehicleNo",
@@ -444,15 +450,15 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "SupplierName",
     header: "Supplier",
-    size: 180,
+    size: 160,
     cell: ({ getValue }) => (
-      <span className="text-xs truncate block max-w-[180px]">{(getValue() as string) || "—"}</span>
+      <span className="text-xs truncate block">{(getValue() as string) || "—"}</span>
     ),
   },
   {
     accessorKey: "PONumber",
     header: "PO No",
-    size: 120,
+    size: 110,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
     ),
@@ -460,11 +466,11 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "CompanyProject",
     header: "Company / Project",
-    size: 160,
+    size: 150,
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs truncate max-w-[160px] block">{row.original.CompanyName || "—"}</span>
-        <span className="text-[10px] text-muted-foreground truncate max-w-[160px] block">
+        <span className="text-xs truncate block">{row.original.CompanyName || "—"}</span>
+        <span className="text-[10px] text-muted-foreground truncate block">
           {row.original.ProjectName || "—"}
         </span>
       </div>
@@ -493,7 +499,21 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     header: "Challan No",
     size: 130,
     cell: ({ getValue }) => (
-      <span className="text-xs">{(getValue() as string) || "—"}</span>
+      <span className="text-xs font-mono">{(getValue() as string) || "—"}</span>
+    ),
+  },
+  {
+    id: "status",
+    header: "Status",
+    size: 170,
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="whitespace-nowrap">
+        <ApprovalStatusChain
+          table="VehicleInOut"
+          recordId={row.original.VehicleInOutID}
+        />
+      </div>
     ),
   },
   {
@@ -504,10 +524,6 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       const rec = row.original;
       return (
         <div className="flex items-center justify-end gap-3">
-          <ApprovalStatusChain
-            table="VehicleInOut"
-            recordId={rec.VehicleInOutID}
-          />
           <div className="flex items-center gap-2">
             <button
               onClick={() => _onView(rec)}
@@ -554,6 +570,8 @@ export default function VehicleInOut() {
     [...finYears].sort((a, b) => b.year.localeCompare(a.year))[0]?.year ||
     "";
 
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRec, setViewingRec] = useState<any | null>(null);
@@ -890,6 +908,28 @@ export default function VehicleInOut() {
     );
   }
 
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], VEH_TEMPLATE_COLUMNS, "vehicle-in-out-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Vehicle In/Out"]} />
@@ -898,18 +938,40 @@ export default function VehicleInOut() {
         subtitle="Track vehicle entry and exit against purchase orders"
         icon={Truck}
         action={
-          !showForm && rights.canCreate ? (
-            <button
-              onClick={() => {
-                setShowForm(true);
-                setEditingId(null);
-                setForm(buildEmpty(activeFinYear));
-                setErrors({});
-              }}
-              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
-            >
-              <Plus size={13} /> New Entry
-            </button>
+          !showForm ? (
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <button
+                  onClick={() => {
+                    setShowForm(true);
+                    setEditingId(null);
+                    setForm(buildEmpty(activeFinYear));
+                    setErrors({});
+                  }}
+                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                >
+                  <Plus size={13} /> New Entry
+                </button>
+              )}
+            </div>
           ) : undefined
         }
       >

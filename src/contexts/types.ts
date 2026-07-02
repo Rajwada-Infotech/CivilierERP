@@ -5,6 +5,7 @@ export type UserRole =
   | "dba"
   | "engineer"
   | "customer"
+  | "supplier"
   | "marketing_head"
   | "sales_team_lead"
   | "sales_person";
