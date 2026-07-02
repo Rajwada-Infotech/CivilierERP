@@ -42,8 +42,12 @@ async function authFetch(url: string, method: string, body?: object) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Request failed");
+  let data: any = {};
+  try { data = await res.json(); } catch { /* non-JSON body (e.g. 429 plain text) */ }
+  if (!res.ok) {
+    if (res.status === 429) throw new Error("Server is busy — please try again in a moment.");
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
   return data;
 }
 
@@ -92,7 +96,22 @@ export function ApprovalActions({
       }
       onSuccess?.(action);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Action failed");
+      const msg = err instanceof Error ? err.message : "Action failed";
+      // If the record was already approved/rejected by another session, treat it
+      // as success so the stale inbox entry is removed and the cache refreshes.
+      const alreadyDone =
+        /Cannot (approve|reject|submit) from status/i.test(msg) ||
+        /already (approved|rejected)/i.test(msg);
+      if (alreadyDone && (action === "approve" || action === "reject")) {
+        toast.info("Already processed — refreshing inbox.");
+        if (action === "reject") {
+          setRejectOpen(false);
+          setRejectNote("");
+        }
+        onSuccess?.(action);
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(null);
     }

@@ -1,8 +1,8 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, GitBranch, Clock } from "lucide-react";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchTeamLeadDashboard(): Promise<any> {
@@ -30,13 +30,8 @@ const SaTeamLeadDashboard: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load dashboard.</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Team Leader Dashboard"]} />
-      <div className="space-y-6 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Team Leader Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Lead distribution and salesperson performance overview</p>
-        </div>
+    <SalesAutoShell title="Team Leader Dashboard" subtitle="Lead distribution and salesperson performance overview" icon={GitBranch}>
+      <div className="space-y-6">
 
         <div className="grid grid-cols-3 gap-4">
           <StatCard icon={Users} label="Leads Received" value={data?.leadsReceived ?? 0} />
@@ -78,7 +73,7 @@ const SaTeamLeadDashboard: React.FC = () => {
           </table>
         </div>
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

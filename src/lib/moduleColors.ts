@@ -9,7 +9,7 @@ export const MODULE_ACCENT: Record<string, string> = {
   engineering: "#f97316",
   ticket: "#ec4899",
   sales: "#a855f7",
-  records: "#f59e0b",
+  records: "#e11d48",
   civilworkdpr: "#0891b2",
   "sales-automation": "#f59e0b",
   admin: "#3b82f6",
