@@ -12,17 +12,17 @@ const API = "/api/sa/teams";
 async function fetchTeams() {
   const r = await fetchWithAuth(API);
   if (!r.ok) throw new Error("Failed to fetch teams");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 async function fetchAllUsers() {
   const r = await fetchWithAuth(`${API}/all-sa-users`);
   if (!r.ok) throw new Error("Failed to fetch users");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 async function fetchUnassigned() {
   const r = await fetchWithAuth(`${API}/unassigned`);
   if (!r.ok) throw new Error("Failed to fetch unassigned users");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 
 const roleBadge = (role: string) => {

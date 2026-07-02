@@ -711,7 +711,7 @@ function DocTable({
     queryKey: ["eng-amend-workdone-list", page, search],
     queryFn: () =>
       fetchWithAuth(`/api/engineering/work-done`).then(async (r) => {
-        const json = await r.json();
+        const json = await r.json().catch(() => ({}));
         const arr = Array.isArray(json)
           ? json
           : Array.isArray(json?.data)
@@ -726,7 +726,7 @@ function DocTable({
     queryKey: ["eng-amend-boq-list", page, search],
     queryFn: () =>
       fetchWithAuth(`/api/boq?page=${page}&limit=${PAGE_SIZE}`).then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     enabled: tab === "BOQ",
   });
@@ -1164,7 +1164,7 @@ export default function EngineeringAmendmentMenu() {
     queryKey: ["eng-amend-workdone-list", 1, ""],
     queryFn: () =>
       fetchWithAuth("/api/engineering/work-done").then(async (r) => {
-        const json = await r.json();
+        const json = await r.json().catch(() => ({}));
         const arr = Array.isArray(json)
           ? json
           : Array.isArray(json?.data)
@@ -1177,7 +1177,7 @@ export default function EngineeringAmendmentMenu() {
   const boqStatsQuery = useQuery({
     queryKey: ["eng-amend-boq-list", 1, ""],
     queryFn: () =>
-      fetchWithAuth("/api/boq?page=1&limit=1").then((r) => r.json()),
+      fetchWithAuth("/api/boq?page=1&limit=1").then((r) => r.json().catch(() => ({}))),
   });
 
   const amendTotalQuery = useQuery({

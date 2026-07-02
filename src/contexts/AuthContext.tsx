@@ -161,7 +161,7 @@ export const AuthProvider = ({
     fetch(`/api/user-profile/${currentUser.id}/profile`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : null))
       .then((data) => {
         if (!data) return;
         const avatarUrl = data.avatar_url ?? null;
@@ -192,7 +192,7 @@ export const AuthProvider = ({
       fetch("/api/user-rights/my", {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => (r.ok ? r.json().catch(() => ({})) : null))
         .then((result) => {
           if (!result?.rightsJson || !Array.isArray(result.rightsJson)) return;
           setCurrentUser((prev) => {

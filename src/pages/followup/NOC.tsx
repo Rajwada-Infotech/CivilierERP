@@ -256,7 +256,7 @@ const STATUS_META: Record<
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth("/api/followup-noc/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchNOCs(params: {
@@ -287,7 +287,7 @@ async function fetchNOCs(params: {
     }),
   });
   if (!res.ok) throw new Error("Failed to load NOCs");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createNOC(payload: Record<string, unknown>) {

@@ -202,7 +202,7 @@ const FinanceDashboard = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/finance-dashboard");
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 60_000,
     refetchInterval: 2 * 60_000,

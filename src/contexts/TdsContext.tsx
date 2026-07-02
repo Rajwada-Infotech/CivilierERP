@@ -33,7 +33,7 @@ export const TdsProvider: React.FC<{ children: React.ReactNode }> = ({
   const { currentUser } = useAuth();
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["tds"],
-    queryFn: () => fetchWithAuth("/api/tds-master").then((r) => r.json()),
+    queryFn: () => fetchWithAuth("/api/tds-master").then((r) => r.json().catch(() => ({}))),
     enabled: !!currentUser && !!localStorage.getItem("token"),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,

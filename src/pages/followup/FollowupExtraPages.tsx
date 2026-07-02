@@ -143,7 +143,7 @@ async function fetchLogs(moduleName: string) {
     `/api/followup-log?module=${encodeURIComponent(moduleName)}`,
   );
   if (!response.ok) throw new Error("Failed to load follow-up records");
-  return response.json() as Promise<LogRecord[]>;
+  return response.json().catch(() => ({})) as Promise<LogRecord[]>;
 }
 
 async function createLog(payload: {
@@ -170,7 +170,7 @@ async function fetchApplicants() {
     "/api/followup-applications?page=1&pageSize=50",
   );
   if (!response.ok) throw new Error("Failed to load applicants");
-  return response.json() as Promise<{
+  return response.json().catch(() => ({})) as Promise<{
     data: ApplicantRecord[];
     pagination: { total: number };
   }>;
@@ -181,7 +181,7 @@ async function fetchAgreements() {
     "/api/followup-agreements?page=1&pageSize=50",
   );
   if (!response.ok) throw new Error("Failed to load agreements");
-  return response.json() as Promise<{
+  return response.json().catch(() => ({})) as Promise<{
     data: AgreementRecord[];
     pagination: { total: number };
   }>;
@@ -192,7 +192,7 @@ async function fetchUnitSelections() {
     "/api/followup-unit-selections?page=1&pageSize=50",
   );
   if (!response.ok) throw new Error("Failed to load unit selections");
-  return response.json() as Promise<{
+  return response.json().catch(() => ({})) as Promise<{
     data: UnitSelectionRecord[];
     pagination: { total: number };
   }>;

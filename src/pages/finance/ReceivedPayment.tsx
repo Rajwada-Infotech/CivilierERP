@@ -392,7 +392,7 @@ export default function ReceivedPaymentPage() {
   useEffect(() => {
     // Companies: enterprise table WHERE business_type = 'C'
     fetchWithAuth("/api/enterprises/options?business_type=C")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((data: any[]) => setCompanies(Array.isArray(data) ? data : []))
       .catch(() => {});
 
@@ -402,7 +402,7 @@ export default function ReceivedPaymentPage() {
 
     // Projects: enterprise table WHERE business_type = 'P', with belongs_to for company filter
     fetchWithAuth("/api/enterprises/options?business_type=P")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((data: any[]) =>
         setProjects(
           (Array.isArray(data) ? data : []).map((p) => ({
@@ -416,7 +416,7 @@ export default function ReceivedPaymentPage() {
 
     // Customers: AccountHeadMaster WHERE LHeadType = 'A'
     fetchWithAuth("/api/account-head/options?type=A")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((data: any[]) =>
         setCustomers(
           (Array.isArray(data) ? data : []).map((x) => ({

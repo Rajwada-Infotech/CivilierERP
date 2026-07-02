@@ -42,7 +42,10 @@ async function authFetch(url: string, method: string, body?: object) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  const data = await res.json();
+  // .catch() guards against a non-JSON body (e.g. a rate-limit 429, a proxy
+  // error page, or a gateway timeout) throwing "Unexpected token ... is not
+  // valid JSON" here instead of surfacing a real error message to the user.
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }

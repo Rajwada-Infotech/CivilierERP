@@ -12,18 +12,18 @@ const API = "/api/sa/distribution-rules";
 async function fetchRules(): Promise<any[]> {
   const r = await fetchWithAuth(API);
   if (!r.ok) throw new Error("Failed to fetch rules");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
   const r = await fetchWithAuth("/api/sa/leads/users");
   if (!r.ok) return [];
-  const data: any[] = await r.json();
+  const data: any[] = await r.json().catch(() => ({}));
   return data.map((u) => ({ value: String(u.Id), label: `${u.Name} (${u.role.replace(/_/g, " ")})` }));
 }
 async function fetchCampaignOptions(): Promise<{ value: string; label: string }[]> {
   const r = await fetchWithAuth("/api/sa/campaigns/dropdown");
   if (!r.ok) return [];
-  const data: any[] = await r.json();
+  const data: any[] = await r.json().catch(() => ({}));
   return data.map((c) => ({ value: String(c.Id), label: `${c.CampaignCode} - ${c.Name}` }));
 }
 

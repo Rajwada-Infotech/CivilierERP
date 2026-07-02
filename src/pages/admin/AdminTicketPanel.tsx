@@ -213,7 +213,7 @@ function TicketDetailDialog({
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/${ticket.id}`);
       if (!res.ok) throw new Error("Failed to load ticket");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 0,
     refetchInterval: () =>
@@ -535,7 +535,7 @@ export default function AdminTicketPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/tickets/stats");
       if (!res.ok) throw new Error("Failed");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     refetchInterval: () =>
       document.visibilityState === "visible" ? 15_000 : false,
@@ -554,7 +554,7 @@ export default function AdminTicketPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/tickets?page=${page}&limit=${limit}`);
       if (!res.ok) throw new Error("Failed");
-      return unwrapTicketList<Ticket>(await res.json());
+      return unwrapTicketList<Ticket>(await res.json().catch(() => ({})));
     },
     staleTime: 0,
     refetchInterval: () =>
@@ -571,7 +571,7 @@ export default function AdminTicketPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/tickets/admin-users");
       if (!res.ok) throw new Error("Failed");
-      const raw = await res.json();
+      const raw = await res.json().catch(() => ({}));
       return Array.isArray(raw)
         ? raw.map((u) => ({
             id: u.id,

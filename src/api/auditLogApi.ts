@@ -83,7 +83,7 @@ export async function fetchAuditLog(
     `/api/followup-audit-log?module=${encodeURIComponent(module)}&recordId=${recordId}`
   );
   if (!res.ok) throw new Error("Failed to fetch audit log");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
 
   // Backend returns { data: RawAuditRow[], pagination: {...} }
   const rows: RawAuditRow[] = Array.isArray(data.data) ? data.data : [];

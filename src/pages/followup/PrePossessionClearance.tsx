@@ -287,7 +287,7 @@ const STATUS_META: Record<
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth("/api/followup-pre-possession/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchPPs(params: {
@@ -304,7 +304,7 @@ async function fetchPPs(params: {
   });
   const res = await fetchWithAuth(`/api/followup-pre-possession?${q}`);
   if (!res.ok) throw new Error("Failed to load Pre-Possession records");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: PrePossession[];
     pagination: {
       page: number;

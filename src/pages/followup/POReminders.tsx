@@ -91,7 +91,7 @@ function fmtCurrency(n: number | undefined | null): string {
 async function fetchPOs(): Promise<POWithUrgency[]> {
   const res = await fetchWithAuth("/api/purchase-orders?page=1&limit=200");
   if (!res.ok) throw new Error("Failed to load purchase orders");
-  const raw = await res.json();
+  const raw = await res.json().catch(() => ({}));
   const list: PurchaseOrder[] = Array.isArray(raw)
     ? raw
     : Array.isArray(raw.data)

@@ -471,7 +471,7 @@ const DebitNoteMaster: React.FC = () => {
     queryKey: ["enterprises-companies"],
     queryFn: () =>
       fetchWithAuth("/api/enterprises/options?business_type=C").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 5 * 60 * 1000,
   });
@@ -480,7 +480,7 @@ const DebitNoteMaster: React.FC = () => {
     queryKey: ["enterprises-projects"],
     queryFn: () =>
       fetchWithAuth("/api/enterprises/options?business_type=P").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 5 * 60 * 1000,
   });
@@ -488,7 +488,7 @@ const DebitNoteMaster: React.FC = () => {
   const { data: accountHeadData } = useQuery({
     queryKey: ["supplier-head-options"],
     queryFn: () =>
-      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json()),
+      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => ({}))),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -509,7 +509,7 @@ const DebitNoteMaster: React.FC = () => {
           body.error || `Failed to load expense options (${r.status})`,
         );
       }
-      return r.json();
+      return r.json().catch(() => ({}));
     },
     enabled: selectedFinYear !== null,
     staleTime: 0,

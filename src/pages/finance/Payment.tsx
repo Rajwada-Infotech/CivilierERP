@@ -320,7 +320,7 @@ const fetchChequeLots = async (
     : `/api/new-payment/cheque-lots`;
   const res = await fetchWithAuth(url);
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Active cards for a bank — used by the Card-mode card selector.
@@ -332,7 +332,7 @@ const fetchCardsByBank = async (
   if (!bankId) return [];
   const res = await fetchWithAuth(`/api/card-master?bankId=${bankId}`);
   if (!res.ok) return [];
-  const rows: any[] = await res.json();
+  const rows: any[] = await res.json().catch(() => ({}));
   return rows.map((r) => ({
     id: r.id,
     bank_id: r.bank_id ?? null,
@@ -347,7 +347,7 @@ const fetchCardsByBank = async (
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   const res = await fetchWithAuth("/api/expense-booking/options");
   if (!res.ok) return [];
-  const raw = await res.json();
+  const raw = await res.json().catch(() => ({}));
   const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
   const mapped = items.map((o: any) => ({
     ...o,
@@ -409,14 +409,14 @@ const fetchExpenseDetail = async (
   if (!id) return null;
   const res = await fetchWithAuth(`/api/expense-booking/${id}`);
   if (!res.ok) return null;
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
   if (!expenseId) return [];
   const res = await fetchWithAuth(`/api/expense-booking/${expenseId}/grns`);
   if (!res.ok) return [];
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : [];
 };
 
@@ -476,7 +476,7 @@ const fetchWorkDoneById = async (
 ): Promise<{ ProjectName: string | null } | null> => {
   const res = await fetchWithAuth(`/api/engineering/work-done/${id}`);
   if (!res.ok) return null;
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchChequeNumbers = async (
@@ -484,7 +484,7 @@ const fetchChequeNumbers = async (
 ): Promise<{ number: string; used: boolean }[]> => {
   const res = await fetchWithAuth(`/api/new-payment/cheque-numbers/${lotId}`);
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const deductChequeFromLot = async (
@@ -500,7 +500,7 @@ const deductChequeFromLot = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to deduct cheque from lot");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchCompanyOptions = async (): Promise<
@@ -508,7 +508,7 @@ const fetchCompanyOptions = async (): Promise<
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchProjectOptions = async (): Promise<
@@ -521,7 +521,7 @@ const fetchProjectOptions = async (): Promise<
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchSupplierOptions = async (): Promise<
@@ -529,7 +529,7 @@ const fetchSupplierOptions = async (): Promise<
 > => {
   const res = await fetchWithAuth("/api/account-head/options?type=S");
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fetchFinYearOptions = async (): Promise<
@@ -537,7 +537,7 @@ const fetchFinYearOptions = async (): Promise<
 > => {
   const res = await fetchWithAuth("/api/fin-year");
   if (!res.ok) return [];
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   const rows: any[] = Array.isArray(data) ? data : (data?.data ?? []);
   return rows
     .filter((r: any) => r.FStatus === 1 || r.FStatus === true)
@@ -1395,7 +1395,7 @@ function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
   React.useEffect(() => {
     if (!expenseId) return;
     fetchWithAuth(`/api/expense-booking/${expenseId}/grns`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) => setGrns(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [expenseId]);

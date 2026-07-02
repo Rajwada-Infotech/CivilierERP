@@ -5,14 +5,14 @@ const BASE = "/api/followup-possession-notice";
 export async function fetchPossessionNoticeOptions() {
   const res = await fetchWithAuth(`${BASE}/meta/options`);
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function fetchPossessionNotices(params?: Record<string, string>) {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
   if (!res.ok) throw new Error("Failed to fetch Possession Notices");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createPossessionNotice(payload: Record<string, unknown>) {
@@ -24,7 +24,7 @@ export async function createPossessionNotice(payload: Record<string, unknown>) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to create");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updatePossessionNotice(
@@ -39,11 +39,11 @@ export async function updatePossessionNotice(
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deletePossessionNotice(id: number) {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete");
-  return res.json();
+  return res.json().catch(() => ({}));
 }

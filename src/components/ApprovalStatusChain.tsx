@@ -109,7 +109,7 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
     fetchWithAuth(
       `/api/approval-workflows/trail?module=${table}&id=${recordId}`,
     )
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((data: TrailData) => {
         if (!cancelled) setTrail(data);
       })

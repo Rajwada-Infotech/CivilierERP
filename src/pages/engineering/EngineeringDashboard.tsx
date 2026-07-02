@@ -254,7 +254,7 @@ export default function EngineeringDashboard() {
         }
         throw new Error(msg);
       }
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 2 * 60 * 1000,
     refetchOnWindowFocus: true,

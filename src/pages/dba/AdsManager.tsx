@@ -124,7 +124,7 @@ export default function AdsManager() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/ads");
       if (!res.ok) throw new Error("Failed to load ads");
-      const rows = await res.json();
+      const rows = await res.json().catch(() => ({}));
       // Normalize DB snake_case to component shape
       return rows.map((r: any) => ({
         id: String(r.Id),

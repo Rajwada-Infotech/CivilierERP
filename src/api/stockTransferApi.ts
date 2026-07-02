@@ -43,7 +43,7 @@ export const getStockTransfers = async (params?: {
   if (params?.limit) qs.set("limit", String(params.limit));
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch transfers: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getStockTransferById = async (
@@ -51,7 +51,7 @@ export const getStockTransferById = async (
 ): Promise<StockTransfer> => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch transfer: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface CreateTransferPayload {
@@ -74,5 +74,5 @@ export const createStockTransfer = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Transfer failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
