@@ -224,25 +224,23 @@ export const ReminderBell = () => {
             </div>
 
             {/* Filter tabs */}
-            <div className="border-b border-[var(--rb-accent-20)] bg-muted/5 px-2 py-2 flex items-center gap-1.5">
-              {/* Left pointer — own circular chip, dims instead of disappearing
-                  so the row never visually shifts as you scroll */}
+            <div className="border-b border-[var(--rb-accent-20)] bg-muted/30 px-3 py-2.5 flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => scrollTabs(-1)}
                 disabled={!canScrollLeft}
-                className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
                   canScrollLeft
-                    ? "bg-card border-[var(--rb-accent-30)] text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
-                    : "bg-transparent border-border/40 text-muted-foreground/30 cursor-default"
+                    ? "text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
+                    : "text-muted-foreground/25 cursor-default"
                 }`}
               >
-                <ChevronLeft size={13} />
+                <ChevronLeft size={12} />
               </button>
 
               <div
                 ref={tabsRef}
-                className="flex-1 flex gap-1.5 overflow-x-auto no-scrollbar"
+                className="flex-1 flex gap-1 overflow-x-auto no-scrollbar"
               >
                 {[
                   "all",
@@ -255,34 +253,36 @@ export const ReminderBell = () => {
                   "material_request",
                 ].map((t) => {
                   const active = filter === t;
+                  const meta = t !== "all" ? TYPE_META[t] : null;
+                  const Icon = meta?.icon;
                   return (
                     <button
                       key={t}
                       onClick={() => setFilter(t)}
-                      className={`shrink-0 px-3 py-1.5 text-[10.5px] font-bold rounded-full border transition-all duration-150 ${
+                      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg transition-all duration-150 ${
                         active
-                          ? "bg-[var(--rb-accent)] text-white border-[var(--rb-accent)] shadow-sm"
-                          : "bg-background text-muted-foreground border-border hover:border-[var(--rb-accent-30)] hover:text-[var(--rb-accent)]"
+                          ? "bg-[var(--rb-accent)] text-white shadow-sm"
+                          : "bg-card/60 text-muted-foreground hover:bg-card hover:text-foreground border border-border/60"
                       }`}
                     >
-                      {t === "all" ? "All" : TYPE_META[t]?.label || t.toUpperCase()}
+                      {Icon && <Icon size={10} className={active ? "text-white/80" : meta?.color} />}
+                      {t === "all" ? "All" : meta?.label || t.toUpperCase()}
                     </button>
                   );
                 })}
               </div>
 
-              {/* Right pointer */}
               <button
                 type="button"
                 onClick={() => scrollTabs(1)}
                 disabled={!canScrollRight}
-                className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
                   canScrollRight
-                    ? "bg-card border-[var(--rb-accent-30)] text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
-                    : "bg-transparent border-border/40 text-muted-foreground/30 cursor-default"
+                    ? "text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
+                    : "text-muted-foreground/25 cursor-default"
                 }`}
               >
-                <ChevronRight size={13} />
+                <ChevronRight size={12} />
               </button>
             </div>
 
