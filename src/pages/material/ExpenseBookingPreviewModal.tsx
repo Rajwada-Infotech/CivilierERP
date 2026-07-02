@@ -316,11 +316,12 @@ export function ExpenseBookingPreviewModal({
       <style>{`
         @media print {
           body > * { display: none !important; }
-          .expense-preview-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; transform: none !important; }
+          .expense-preview-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; transform: none !important; padding: 0 !important; }
+          .expense-preview-inner { max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; box-shadow: none !important; max-width: 100% !important; width: 100% !important; }
           .expense-preview-print-hide { display: none !important; }
         }
       `}</style>
-      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
+      <div className="expense-preview-inner bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
         {/* ── Sticky header ── */}
         <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border expense-preview-print-hide">
