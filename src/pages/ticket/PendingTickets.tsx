@@ -866,7 +866,7 @@ const PendingTickets: React.FC = () => {
       const payload = await res.json();
       return unwrapTicketList<Ticket>(payload).data;
     },
-    staleTime: 0,
+    staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
 

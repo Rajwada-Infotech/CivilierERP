@@ -418,9 +418,9 @@
 [data-module="engineering"]       { --ring: 25 95% 53%; --accent-foreground: 25 95% 35%; }
 .dark [data-module="engineering"] { --ring: 25 95% 53%; --accent-foreground: 25 95% 68%; }
 
-/* Follow-up — indigo-violet */
-[data-module="followup"]       { --ring: 235 90% 74%; --accent-foreground: 235 90% 40%; }
-.dark [data-module="followup"] { --ring: 235 90% 74%; --accent-foreground: 235 90% 82%; }
+/* Follow-up — teal */
+[data-module="followup"]       { --ring: 174 82% 31%; --accent-foreground: 174 82% 22%; }
+.dark [data-module="followup"] { --ring: 174 82% 31%; --accent-foreground: 174 72% 55%; }
 
 /* Ticket — pink */
 [data-module="ticket"]       { --ring: 330 81% 60%; --accent-foreground: 330 81% 38%; }

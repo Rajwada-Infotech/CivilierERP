@@ -263,13 +263,17 @@ export const NavGroup = ({
               <button
                 key={child.path}
                 onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
-                className={`w-full flex justify-between items-center text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
+                className={`w-full flex justify-between items-center gap-2 text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
                   childActive
                     ? ""
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 }`}
               >
-                <NavLabel label={child.label} active={childActive} accentColor={accentColor} />
+                <span
+                  className="shrink-0 w-1 h-1 rounded-full transition-colors"
+                  style={{ background: childActive ? (accentColor || "hsl(var(--primary))") : "currentColor", opacity: childActive ? 1 : 0.4 }}
+                />
+                <NavLabel label={child.label} active={childActive} accentColor={accentColor} className="flex-1 text-left" />
                 {child.badge && (
                   <span className="bg-blue-500 text-white text-[9px] font-bold min-w-[16px] h-[16px] flex items-center justify-center rounded-full">
                     {child.badge}
@@ -307,13 +311,17 @@ export const NavGroup = ({
                       <button
                         key={child.path}
                         onClick={() => navigate(child.path)}
-                        className={`w-full text-left text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
+                        className={`w-full flex items-center gap-2 text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
                           sChildActive
                             ? ""
                             : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
                         }`}
                       >
-                        <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} />
+                        <span
+                          className="shrink-0 w-1 h-1 rounded-full transition-colors"
+                          style={{ background: sChildActive ? (accentColor || "hsl(var(--primary))") : "currentColor", opacity: sChildActive ? 1 : 0.4 }}
+                        />
+                        <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} className="flex-1 text-left" />
                       </button>
                     );
                   })}

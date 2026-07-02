@@ -284,76 +284,82 @@ function ModuleCard({
   return (
     <motion.div
       ref={ref}
-      initial={{ y: 40, opacity: 0 }}
+      initial={{ y: 24, opacity: 0 }}
       animate={inView ? { y: 0, opacity: 1 } : {}}
-      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="group relative rounded-2xl border border-border/60 bg-card/60 backdrop-blur-sm overflow-hidden"
+      transition={{ duration: 0.55, delay, ease: [0.16, 1, 0.3, 1] }}
+      onClick={() => navigate(href)}
+      className="group relative rounded-xl border border-border/50 bg-card/70 backdrop-blur-sm overflow-hidden cursor-pointer select-none"
+      style={{ boxShadow: `0 0 0 0 ${accent}00` }}
+      whileHover={{ y: -2, boxShadow: `0 8px 24px -6px ${accent}22` } as any}
     >
+      {/* Accent left bar */}
       <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse at 50% -20%, ${accent}10 0%, transparent 60%)`,
-        }}
-      />
-      <div
-        className="h-[2px] w-full"
-        style={{
-          background: `linear-gradient(90deg, ${accent}60 0%, ${accent}10 100%)`,
-        }}
+        className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl"
+        style={{ background: `linear-gradient(to bottom, ${accent}, ${accent}40)` }}
       />
 
-      <button
-        onClick={() => navigate(href)}
-        className="w-full flex items-center justify-between px-5 pt-4 pb-3 hover:bg-muted/20 transition-colors group/btn"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl" style={{ background: `${accent}15` }}>
-            <Icon size={15} style={{ color: accent }} />
-          </div>
-          <span className="font-heading font-bold text-sm text-foreground tracking-tight">
-            {title}
-          </span>
-          {badge != null && badge > 0 && (
-            <span
-              className="px-1.5 py-0.5 text-[9px] font-black rounded-full"
-              style={{ background: `${accent}20`, color: accent }}
+      {/* Hover bg wash */}
+      <div
+        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-400 pointer-events-none"
+        style={{ background: `linear-gradient(135deg, ${accent}08 0%, transparent 60%)` }}
+      />
+
+      <div className="pl-4 pr-3 pt-3 pb-3 ml-[3px]">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}
             >
-              {badge} {badgeLabel}
+              <Icon size={13} style={{ color: accent }} />
+            </div>
+            <span className="font-heading font-bold text-[12px] text-foreground tracking-tight leading-tight">
+              {title}
             </span>
-          )}
+            {badge != null && badge > 0 && (
+              <span
+                className="px-1.5 py-px text-[8px] font-black rounded-full leading-none"
+                style={{ background: `${accent}22`, color: accent }}
+              >
+                {badge}
+              </span>
+            )}
+          </div>
+          <ArrowRight
+            size={11}
+            className="text-muted-foreground/20 group-hover:text-muted-foreground/50 group-hover:translate-x-0.5 transition-all shrink-0"
+          />
         </div>
-        <ArrowRight
-          size={13}
-          className="text-muted-foreground/25 group-hover/btn:text-muted-foreground/60 group-hover/btn:translate-x-0.5 transition-all"
-        />
-      </button>
 
-      <div className="px-5 pb-4 grid grid-cols-2 gap-x-4 gap-y-3">
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="animate-pulse space-y-1.5">
-                <div className="h-5 w-12 bg-muted rounded" />
-                <div className="h-2.5 w-16 bg-muted rounded" />
-              </div>
-            ))
-          : stats.map((s, i) => (
-              <div key={i} className="flex flex-col">
-                <span
-                  className="font-heading font-bold text-xl tracking-tighter tabular-nums"
-                  style={{ color: s.accent ?? "hsl(var(--foreground))" }}
-                >
-                  {typeof s.value === "number" ? (
-                    <AnimatedCounter target={s.value} />
-                  ) : (
-                    s.value
-                  )}
-                </span>
-                <span className="text-[10px] font-medium text-muted-foreground/60 leading-tight mt-0.5 flex items-center gap-1">
-                  {s.icon && <s.icon size={9} className="shrink-0" />}
-                  {s.label}
-                </span>
-              </div>
-            ))}
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          {loading
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="animate-pulse space-y-1">
+                  <div className="h-4 w-10 bg-muted rounded" />
+                  <div className="h-2 w-14 bg-muted rounded" />
+                </div>
+              ))
+            : stats.map((s, i) => (
+                <div key={i} className="flex flex-col min-w-0">
+                  <span
+                    className="font-heading font-bold text-base tracking-tight tabular-nums leading-none"
+                    style={{ color: s.accent ?? "hsl(var(--foreground))" }}
+                  >
+                    {typeof s.value === "number" ? (
+                      <AnimatedCounter target={s.value} />
+                    ) : (
+                      s.value
+                    )}
+                  </span>
+                  <span className="text-[9.5px] font-medium text-muted-foreground/55 leading-tight mt-0.5 flex items-center gap-0.5 truncate">
+                    {s.icon && <s.icon size={8} className="shrink-0" />}
+                    {s.label}
+                  </span>
+                </div>
+              ))}
+        </div>
       </div>
     </motion.div>
   );
@@ -1063,410 +1069,135 @@ export default function HomePage() {
             {hasAnyAccess ? "Operations at a glance" : "Your workspace"}
           </SectionLabel>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {/* Finance */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+
+            {/* 1 · Finance */}
             {access.finance && (
-              <ModuleCard
-                title="Finance"
-                href="/finance"
-                icon={BarChart3}
-                accent="#3b82f6"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Finance" href="/finance" icon={BarChart3} accent="#3b82f6" delay={nextDelay()} loading={isLoading}
                 stats={[
-                  {
-                    label: "Total payments",
-                    value: fin?.payments?.totalCount ?? 0,
-                    accent: "#3b82f6",
-                  },
-                  {
-                    label: "Paid this month (₹L)",
-                    value: Math.round(
-                      (fin?.payments?.thisMonthAmount ?? 0) / 100000,
-                    ),
-                    accent: "#10b981",
-                    icon: TrendingUp,
-                  },
-                  {
-                    label: "Open POs",
-                    value: fin?.purchaseOrders?.openCount ?? 0,
-                    accent: "#f59e0b",
-                  },
-                  {
-                    label: "Cheque lots",
-                    value: fin?.cheques?.pendingCount ?? 0,
-                    accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
-                    icon: CreditCard,
-                  },
-                ]}
-              />
+                  { label: "Total payments", value: fin?.payments?.totalCount ?? 0, accent: "#3b82f6" },
+                  { label: "Paid this month (₹L)", value: Math.round((fin?.payments?.thisMonthAmount ?? 0) / 100000), accent: "#10b981", icon: TrendingUp },
+                  { label: "Open POs", value: fin?.purchaseOrders?.openCount ?? 0, accent: "#f59e0b" },
+                  { label: "Cheque lots", value: fin?.cheques?.pendingCount ?? 0, accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined, icon: CreditCard },
+                ]} />
             )}
 
-            {/* Sales */}
-            {access.sales && (
-              <ModuleCard
-                title="Sales"
-                href="/sales/sale-order"
-                icon={ShoppingCart}
-                accent="#7c3aed"
-                delay={nextDelay()}
-                loading={isLoading}
-                stats={[
-                  {
-                    label: "Total orders",
-                    value: sal?.total ?? 0,
-                    accent: "#7c3aed",
-                  },
-                  {
-                    label: "Approved",
-                    value: sal?.approved ?? 0,
-                    accent: "#10b981",
-                    icon: CheckCircle2,
-                  },
-                  {
-                    label: "Pending approval",
-                    value: sal?.pendingApproval ?? 0,
-                    accent: sal?.pendingApproval ? "#f59e0b" : undefined,
-                  },
-                  {
-                    label: "This month",
-                    value: (() => {
-                      const amt = sal?.thisMonthAmount ?? 0;
-                      if (amt === 0) return "₹0";
-                      if (amt < 100000) return `₹${(amt / 1000).toFixed(1)}K`;
-                      return `₹${(amt / 100000).toFixed(2)}L`;
-                    })(),
-                    accent: "#06b6d4",
-                    icon: TrendingUp,
-                  },
-                ]}
-              />
-            )}
-
-            {/* Sales Automation */}
-            {access.salesAutomation && (
-              <ModuleCard
-                title="Sales Automation"
-                href="/sales-automation/leads"
-                icon={Megaphone}
-                accent="#f97316"
-                delay={nextDelay()}
-                loading={isLoading}
-                stats={[]}
-              />
-            )}
-
-            {/* Material */}
+            {/* 2 · Material */}
             {access.material && (
-              <ModuleCard
-                title="Material"
-                href="/material"
-                icon={Package}
-                accent="#8b5cf6"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Material" href="/material" icon={Package} accent="#8b5cf6" delay={nextDelay()} loading={isLoading}
                 stats={[
-                  {
-                    label: "GRNs this month",
-                    value: mat?.grns?.thisMonth ?? 0,
-                    accent: "#8b5cf6",
-                  },
-                  {
-                    label: "Open POs",
-                    value: mat?.purchaseOrders?.open ?? 0,
-                    accent: "#f59e0b",
-                  },
-                  {
-                    label: "Total items",
-                    value: mat?.items?.count ?? 0,
-                    accent: "#06b6d4",
-                    icon: Warehouse,
-                  },
-                  {
-                    label: "Today's GRNs",
-                    value: mat?.grns?.today ?? 0,
-                    accent: mat?.grns?.today ? "#10b981" : undefined,
-                  },
-                ]}
-              />
+                  { label: "GRNs this month", value: mat?.grns?.thisMonth ?? 0, accent: "#8b5cf6" },
+                  { label: "Open POs", value: mat?.purchaseOrders?.open ?? 0, accent: "#f59e0b" },
+                  { label: "Total items", value: mat?.items?.count ?? 0, accent: "#06b6d4", icon: Warehouse },
+                  { label: "Today's GRNs", value: mat?.grns?.today ?? 0, accent: mat?.grns?.today ? "#10b981" : undefined },
+                ]} />
             )}
 
-            {/* Engineering */}
+            {/* 3 · Engineering */}
             {access.engineering && (
-              <ModuleCard
-                title="Engineering"
-                href="/engineering"
-                icon={Wrench}
-                accent="#ec4899"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Engineering" href="/engineering" icon={Wrench} accent="#ec4899" delay={nextDelay()} loading={isLoading}
                 stats={[
-                  {
-                    label: "Open work orders",
-                    value: eng?.workOrders?.open ?? 0,
-                    accent: "#ec4899",
-                  },
-                  {
-                    label: "Active projects",
-                    value: eng?.projects?.active ?? 0,
-                    accent: "#10b981",
-                    icon: Building2,
-                  },
-                  {
-                    label: "Work done pending",
-                    value: eng?.workDone?.pending ?? 0,
-                    accent: eng?.workDone?.pending ? "#f59e0b" : undefined,
-                  },
-                  {
-                    label: "BOQ approved",
-                    value: eng?.boq?.approved ?? 0,
-                    accent: "#06b6d4",
-                    icon: FileText,
-                  },
-                ]}
-              />
+                  { label: "Open work orders", value: eng?.workOrders?.open ?? 0, accent: "#ec4899" },
+                  { label: "Active projects", value: eng?.projects?.active ?? 0, accent: "#10b981", icon: Building2 },
+                  { label: "Work done pending", value: eng?.workDone?.pending ?? 0, accent: eng?.workDone?.pending ? "#f59e0b" : undefined },
+                  { label: "BOQ approved", value: eng?.boq?.approved ?? 0, accent: "#06b6d4", icon: FileText },
+                ]} />
             )}
 
-            {/* Followup */}
-            {access.followup && (
-              <ModuleCard
-                title="Followup"
-                href="/followup"
-                icon={Users}
-                accent="#6366f1"
-                delay={nextDelay()}
-                loading={isLoading}
-                badge={fol?.pendingNOCs}
-                badgeLabel="NOCs"
-                stats={[
-                  {
-                    label: "Applications",
-                    value: fol?.applications ?? 0,
-                    accent: "#6366f1",
-                  },
-                  {
-                    label: "Confirmed bookings",
-                    value: fol?.confirmedBookings ?? 0,
-                    accent: "#10b981",
-                    icon: CheckCircle2,
-                  },
-                  {
-                    label: "Active agreements",
-                    value: fol?.activeAgreements ?? 0,
-                    accent: "#f59e0b",
-                  },
-                  {
-                    label: "Handovers due",
-                    value: fol?.scheduledHandovers ?? 0,
-                    accent: fol?.scheduledHandovers ? "#ef4444" : undefined,
-                  },
-                ]}
-              />
-            )}
-
-            {/* Civil Work DPR */}
+            {/* 4 · Civil Work DPR */}
             {access.civilworkdpr && (
-              <ModuleCard
-                title="Civil Work DPR"
-                href="/civilworkdpr"
-                icon={Pickaxe}
-                accent="#0891b2"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Civil DPR" href="/civilworkdpr" icon={Pickaxe} accent="#0891b2" delay={nextDelay()} loading={isLoading}
                 badge={civilDpr?.progress?.pendingReviewCount}
-                badgeLabel="pending review"
                 stats={[
-                  {
-                    label: "Active activities",
-                    value: civilDpr?.activities?.activeCount ?? 0,
-                    accent: "#0891b2",
-                  },
-                  {
-                    label: "Workers assigned",
-                    value: civilDpr?.allocations?.workerCount ?? 0,
-                    accent: "#3b82f6",
-                    icon: HardHat,
-                  },
-                  {
-                    label: "Pending review",
-                    value: civilDpr?.progress?.pendingReviewCount ?? 0,
-                    accent: civilDpr?.progress?.pendingReviewCount ? "#f59e0b" : undefined,
-                  },
-                  {
-                    label: "Labour on site today",
-                    value: civilDpr?.labour?.totalToday ?? 0,
-                    accent: "#10b981",
-                    icon: Users,
-                  },
-                ]}
-              />
+                  { label: "Active activities", value: civilDpr?.activities?.activeCount ?? 0, accent: "#0891b2" },
+                  { label: "Workers assigned", value: civilDpr?.allocations?.workerCount ?? 0, accent: "#3b82f6", icon: HardHat },
+                  { label: "Pending review", value: civilDpr?.progress?.pendingReviewCount ?? 0, accent: civilDpr?.progress?.pendingReviewCount ? "#f59e0b" : undefined },
+                  { label: "Labour on site today", value: civilDpr?.labour?.totalToday ?? 0, accent: "#10b981", icon: Users },
+                ]} />
             )}
 
-            {/* Approvals — only privileged */}
+            {/* 5 · Follow-Up */}
+            {access.followup && (
+              <ModuleCard title="Follow-Up" href="/followup" icon={Users} accent="#0d9488" delay={nextDelay()} loading={isLoading}
+                badge={fol?.pendingNOCs}
+                stats={[
+                  { label: "Applications", value: fol?.applications ?? 0, accent: "#0d9488" },
+                  { label: "Confirmed bookings", value: fol?.confirmedBookings ?? 0, accent: "#10b981", icon: CheckCircle2 },
+                  { label: "Active agreements", value: fol?.activeAgreements ?? 0, accent: "#f59e0b" },
+                  { label: "Handovers due", value: fol?.scheduledHandovers ?? 0, accent: fol?.scheduledHandovers ? "#ef4444" : undefined },
+                ]} />
+            )}
+
+            {/* 6 · Approval Inbox */}
             {access.approvals && (
-              <ModuleCard
-                title="Approval Inbox"
-                href="/admin/approval/inbox"
-                icon={FileCheck}
-                accent="#f59e0b"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Approvals" href="/admin/approval/inbox" icon={FileCheck} accent="#f59e0b" delay={nextDelay()} loading={isLoading}
                 badge={pendingApprovals.length}
-                badgeLabel="pending"
                 stats={[
-                  {
-                    label: "Awaiting action",
-                    value: pendingApprovals.length,
-                    accent: pendingApprovals.length ? "#f59e0b" : undefined,
-                  },
-                  {
-                    label: "Modules affected",
-                    value: new Set(
-                      pendingApprovals.map((a: ApprovalInboxItem) => a.Module),
-                    ).size,
-                    accent: "#8b5cf6",
-                  },
-                  {
-                    label: "PO approvals",
-                    value: pendingApprovals.filter(
-                      (a: ApprovalInboxItem) => a.Module === "PurchaseOrders",
-                    ).length,
-                  },
-                  {
-                    label: "GRN approvals",
-                    value: pendingApprovals.filter(
-                      (a: ApprovalInboxItem) =>
-                        a.Module === "GoodsReceiptNotes",
-                    ).length,
-                  },
-                ]}
-              />
+                  { label: "Awaiting action", value: pendingApprovals.length, accent: pendingApprovals.length ? "#f59e0b" : undefined },
+                  { label: "Modules affected", value: new Set(pendingApprovals.map((a: ApprovalInboxItem) => a.Module)).size, accent: "#8b5cf6" },
+                  { label: "PO approvals", value: pendingApprovals.filter((a: ApprovalInboxItem) => a.Module === "PurchaseOrders").length },
+                  { label: "GRN approvals", value: pendingApprovals.filter((a: ApprovalInboxItem) => a.Module === "GoodsReceiptNotes").length },
+                ]} />
             )}
 
-            {/* Tickets */}
+            {/* 7 · Sales */}
+            {access.sales && (
+              <ModuleCard title="Sales" href="/sales/sale-order" icon={ShoppingCart} accent="#7c3aed" delay={nextDelay()} loading={isLoading}
+                stats={[
+                  { label: "Total orders", value: sal?.total ?? 0, accent: "#7c3aed" },
+                  { label: "Approved", value: sal?.approved ?? 0, accent: "#10b981", icon: CheckCircle2 },
+                  { label: "Pending approval", value: sal?.pendingApproval ?? 0, accent: sal?.pendingApproval ? "#f59e0b" : undefined },
+                  { label: "This month", value: (() => { const a = sal?.thisMonthAmount ?? 0; return a === 0 ? "₹0" : a < 100000 ? `₹${(a/1000).toFixed(1)}K` : `₹${(a/100000).toFixed(1)}L`; })(), accent: "#06b6d4", icon: TrendingUp },
+                ]} />
+            )}
+
+            {/* 8 · Sales Automation */}
+            {access.salesAutomation && (
+              <ModuleCard title="Sales Auto" href="/sales-automation/leads" icon={Megaphone} accent="#f97316" delay={nextDelay()} loading={isLoading} stats={[]} />
+            )}
+
+            {/* 9 · Tickets */}
             {access.ticket && (
-              <ModuleCard
-                title="Tickets"
-                href="/ticket"
-                icon={Ticket}
-                accent="#f97316"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Tickets" href="/ticket" icon={Ticket} accent="#ef4444" delay={nextDelay()} loading={isLoading}
                 badge={tick?.urgent}
-                badgeLabel="urgent"
                 stats={[
-                  {
-                    label: "Open",
-                    value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
-                    accent: "#f97316",
-                  },
-                  {
-                    label: "Urgent",
-                    value: tick?.urgent ?? 0,
-                    accent: tick?.urgent ? "#ef4444" : undefined,
-                    icon: TriangleAlert,
-                  },
-                  {
-                    label: "Resolved",
-                    value: tick?.resolved ?? 0,
-                    accent: "#10b981",
-                    icon: CheckCircle2,
-                  },
-                  {
-                    label: "Resolution %",
-                    value: `${tick?.resolvedPct ?? 0}%`,
-                    accent: "#06b6d4",
-                  },
-                ]}
-              />
+                  { label: "Open", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: "#ef4444" },
+                  { label: "Urgent", value: tick?.urgent ?? 0, accent: tick?.urgent ? "#f97316" : undefined, icon: TriangleAlert },
+                  { label: "Resolved", value: tick?.resolved ?? 0, accent: "#10b981", icon: CheckCircle2 },
+                  { label: "Resolution %", value: `${tick?.resolvedPct ?? 0}%`, accent: "#06b6d4" },
+                ]} />
             )}
 
-            {/* Admin — privileged only */}
+            {/* 10 · Admin */}
             {access.admin && !isDba && (
-              <ModuleCard
-                title="Admin"
-                href="/admin"
-                icon={ShieldCheck}
-                accent="#a855f7"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="Admin" href="/admin" icon={ShieldCheck} accent="#a855f7" delay={nextDelay()} loading={isLoading}
                 stats={[
-                  {
-                    label: "Total users",
-                    value: adm?.stats?.totalUsers ?? 0,
-                    accent: "#a855f7",
-                  },
-                  {
-                    label: "Active users",
-                    value: adm?.stats?.activeUsers ?? 0,
-                    accent: "#10b981",
-                    icon: Users,
-                  },
-                  {
-                    label: "Roles",
-                    value: adm?.stats?.totalRoles ?? 0,
-                    accent: "#06b6d4",
-                  },
-                  {
-                    label: "Work orders open",
-                    value: eng?.workOrders?.open ?? 0,
-                    accent: "#f59e0b",
-                    icon: Hammer,
-                  },
-                ]}
-              />
+                  { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: "#a855f7" },
+                  { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#10b981", icon: Users },
+                  { label: "Roles", value: adm?.stats?.totalRoles ?? 0, accent: "#06b6d4" },
+                  { label: "Work orders open", value: eng?.workOrders?.open ?? 0, accent: "#f59e0b", icon: Hammer },
+                ]} />
             )}
 
-            {/* DBA console */}
+            {/* 11 · DBA Console */}
             {access.dba && (
-              <ModuleCard
-                title="DBA Console"
-                href="/dba"
-                icon={Database}
-                accent="#10b981"
-                delay={nextDelay()}
-                loading={isLoading}
+              <ModuleCard title="DBA Console" href="/dba" icon={Database} accent="#10b981" delay={nextDelay()} loading={isLoading}
                 stats={[
-                  {
-                    label: "Total users",
-                    value: adm?.stats?.totalUsers ?? 0,
-                    accent: "#10b981",
-                  },
-                  {
-                    label: "Active users",
-                    value: adm?.stats?.activeUsers ?? 0,
-                    accent: "#3b82f6",
-                  },
+                  { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: "#10b981" },
+                  { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#3b82f6" },
                   { label: "Roles", value: adm?.stats?.totalRoles ?? 0 },
-                  {
-                    label: "Open tickets",
-                    value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
-                    accent: "#f97316",
-                    icon: Ticket,
-                  },
-                ]}
-              />
+                  { label: "Open tickets", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: "#f97316", icon: Ticket },
+                ]} />
             )}
 
-            {/* No-access fallback for "user" role with extremely minimal permissions */}
             {!hasAnyAccess && (
-              <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
-                <motion.div
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6 }}
-                  className="rounded-2xl border border-border/40 bg-card/40 p-8 text-center"
+              <div className="col-span-2 sm:col-span-3 lg:col-span-4 xl:col-span-5">
+                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
+                  className="rounded-xl border border-border/40 bg-card/40 p-8 text-center"
                 >
-                  <ShieldCheck
-                    size={28}
-                    className="text-muted-foreground/30 mx-auto mb-3"
-                  />
-                  <p className="text-sm font-medium text-muted-foreground/60">
-                    No module access assigned.
-                  </p>
-                  <p className="text-xs text-muted-foreground/40 mt-1">
-                    Contact your administrator to get module permissions.
-                  </p>
+                  <ShieldCheck size={28} className="text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-muted-foreground/60">No module access assigned.</p>
+                  <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
                 </motion.div>
               </div>
             )}

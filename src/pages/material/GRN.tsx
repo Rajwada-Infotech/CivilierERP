@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -40,7 +40,28 @@ import {
   RotateCcw,
   BookOpen,
   Landmark,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const GRN_TEMPLATE_COLUMNS = [
+  { header: "Purchase Order No", accessor: "Purchase Order No" },
+  { header: "Supplier", accessor: "Supplier" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "GRN Date (YYYY-MM-DD)", accessor: "GRN Date (YYYY-MM-DD)" },
+  { header: "Challan No", accessor: "Challan No" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "Ordered Qty", accessor: "Ordered Qty" },
+  { header: "Received Qty", accessor: "Received Qty" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Rate", accessor: "Rate" },
+];
+
 import {
   Dialog,
   DialogContent,
@@ -757,6 +778,8 @@ export default function GRN() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
@@ -1416,6 +1439,28 @@ export default function GRN() {
     );
   }
 
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], GRN_TEMPLATE_COLUMNS, "grn-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ─── JSX ─────────────────────────────────────────────────────────────────────
   return (
     <>
@@ -1425,18 +1470,40 @@ export default function GRN() {
         subtitle="Record goods received against purchase orders"
         icon={Truck}
         action={
-          !showForm && rights.canCreate ? (
-            <button
-              onClick={() => {
-                setShowForm(true);
-                setEditingId(null);
-                setFormData(buildEmptyForm());
-                setErrors({});
-              }}
-              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
-            >
-              <Plus size={13} /> New GRN
-            </button>
+          !showForm ? (
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <button
+                  onClick={() => {
+                    setShowForm(true);
+                    setEditingId(null);
+                    setFormData(buildEmptyForm());
+                    setErrors({});
+                  }}
+                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                >
+                  <Plus size={13} /> New GRN
+                </button>
+              )}
+            </div>
           ) : undefined
         }
       >
