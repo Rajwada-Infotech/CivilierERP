@@ -1,8 +1,8 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, PhoneCall, Flame, MapPin, Award, Percent } from "lucide-react";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchSalesDashboard(): Promise<any> {
@@ -30,13 +30,8 @@ const SaSalesDashboard: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load dashboard.</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Sales Dashboard"]} />
-      <div className="space-y-6 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Sales Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Lead pipeline, classification, and conversion overview</p>
-        </div>
+    <SalesAutoShell title="Sales Dashboard" subtitle="Lead pipeline, classification, and conversion overview" icon={Users}>
+      <div className="space-y-6">
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={Users} label="Total Leads" value={data?.totalLeads ?? 0} />
@@ -71,7 +66,7 @@ const SaSalesDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

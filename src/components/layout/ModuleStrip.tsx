@@ -48,9 +48,9 @@ const MODULES = [
     icon: Category2,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
-    color: "#818cf8",
-    bg: "rgba(129,140,248,0.22)",
-    ringRgb: "129,140,248",
+    color: "#0d9488",
+    bg: "rgba(13,148,136,0.18)",
+    ringRgb: "13,148,136",
   },
   {
     id: "engineering" as Module,
@@ -103,9 +103,9 @@ const MODULES = [
     icon: Archive,
     label: "Records",
     desc: "Every attachment, in one place",
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.22)",
-    ringRgb: "245,158,11",
+    color: "#e11d48",
+    bg: "rgba(225,29,72,0.18)",
+    ringRgb: "225,29,72",
   },
 ];
 

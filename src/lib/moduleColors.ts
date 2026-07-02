@@ -5,11 +5,11 @@
 export const MODULE_ACCENT: Record<string, string> = {
   finance: "#6366f1",
   material: "#10b981",
-  followup: "#818cf8",
+  followup: "#0d9488",
   engineering: "#f97316",
   ticket: "#ec4899",
   sales: "#a855f7",
-  records: "#f59e0b",
+  records: "#e11d48",
   civilworkdpr: "#0891b2",
   "sales-automation": "#f59e0b",
   admin: "#3b82f6",

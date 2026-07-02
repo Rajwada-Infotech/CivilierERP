@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,8 +13,9 @@ import {
   CalendarDays, FileText, Save, Search, Trash2, Plus, RefreshCw,
   X, Edit3, Building2, FolderOpen, RotateCcw, ArrowLeft, Package,
   CheckCircle2, Eye, ChevronDown, ClipboardList, RotateCw,
-  AlertCircle, Hash, TrendingDown,
+  AlertCircle, Hash, TrendingDown, Download, Upload, Loader2,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
 import { format } from "date-fns";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -41,8 +42,21 @@ interface IssueItem { ItemId: number; M_Id: string; ItemName: string; Quantity: 
 interface ReturnItem { origIssueItemId: number | null; M_Id: string; ItemName: string; Quantity: number; UOMSymbol: string; maxQty?: number; }
 interface FormState { ReturnDate: string; IssueId: string; CompanyId: string; ProjectId: string; Reason: string; Remarks: string; items: ReturnItem[]; }
 
+// ─── Template columns ─────────────────────────────────────────────────────────
+const ISSUE_RETURN_TEMPLATE_COLUMNS = [
+  { header: "Return Date (YYYY-MM-DD)", accessor: "Return Date (YYYY-MM-DD)" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "Issue Reference", accessor: "Issue Reference" },
+  { header: "Reason", accessor: "Reason" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+];
+
 const today = new Date().toISOString().split("T")[0];
-const emptyForm = (): FormState => ({ ReturnDate: today, IssueId: "", CompanyId: "", ProjectId: "", Reason: "", Remarks: "", items: [] });
+const emptyForm = (): FormState =>({ ReturnDate: today, IssueId: "", CompanyId: "", ProjectId: "", Reason: "", Remarks: "", items: [] });
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetchWithAuth(url, opts);
@@ -64,6 +78,8 @@ export default function IssueReturn() {
   const { theme } = useTheme();
   const isDark = theme !== "light";
 
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [view, setView] = useState<"list" | "form" | "detail">("list");
   const [editId, setEditId] = useState<number | null>(null);
   const [detailRecord, setDetailRecord] = useState<any | null>(null);
@@ -290,6 +306,39 @@ export default function IssueReturn() {
                     title="Refresh"
                   >
                     <RefreshCw size={14} />
+                  </button>
+                  <input ref={importFileInputRef} type="file" accept=".csv" onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    e.target.value = "";
+                    setImporting(true);
+                    try {
+                      const text = await file.text();
+                      const rows = parseCsv(text);
+                      if (!rows.length) { toast.error("CSV is empty"); return; }
+                      toast.success(`${rows.length} rows read — full import coming soon`);
+                    } catch (err: any) {
+                      toast.error(err?.message || "Failed to parse CSV");
+                    } finally {
+                      setImporting(false);
+                    }
+                  }} className="hidden" />
+                  <button
+                    onClick={() => exportToCsv([], ISSUE_RETURN_TEMPLATE_COLUMNS, "issue-return-template")}
+                    title="Download a blank CSV template"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                  >
+                    <Download size={13} />
+                    <span className="hidden sm:inline">Download Template</span>
+                  </button>
+                  <button
+                    onClick={() => importFileInputRef.current?.click()}
+                    disabled={importing}
+                    title="Import from CSV"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
                   </button>
                   {rights.canCreate && (
                     <button

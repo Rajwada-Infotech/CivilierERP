@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -196,14 +196,9 @@ const SaAdMaster: React.FC = () => {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Ad Master"]} />
-      <div className="space-y-6 mt-6">
+    <SalesAutoShell title="Ad Master" subtitle="Manage advertisements running under each campaign">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Ad Master</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Manage advertisements running under each campaign</p>
-          </div>
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
             {([
               { key: "list", icon: LayoutList, label: "List" },
@@ -320,7 +315,7 @@ const SaAdMaster: React.FC = () => {
           }}
         />}
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

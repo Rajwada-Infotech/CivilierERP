@@ -467,7 +467,12 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
-          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          -- Use live GRN total when available so the amount in the picker is accurate
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+            THEN grn.TotalAmount
+            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+          END AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -477,7 +482,13 @@ router.get("/options", async (req, res) => {
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
-            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS BIGINT) AS NVARCHAR(20)),
+            CAST(CAST(
+              CASE
+                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+                THEN grn.TotalAmount
+                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+              END
+            AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
@@ -495,6 +506,7 @@ router.get("/options", async (req, res) => {
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
+          AND ISNULL(eb.EBillStatus, '') <> 'Paid'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
@@ -915,6 +927,38 @@ router.get("/:id/can-delete", async (req, res) => {
   } catch (err) {
     console.error("Can-delete check error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /emi-reminders — all pending EMI installments (for reminder bell) ────
+router.get("/emi-reminders", async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        ei.Id              AS id,
+        ei.ExpenseBookingId AS expenseBookingId,
+        ei.InstallmentNo   AS installmentNo,
+        ei.RefNumber       AS refNumber,
+        ei.DueDate         AS dueDate,
+        ei.Amount          AS amount,
+        ei.Status          AS status,
+        eb.EDocNo          AS parentDocNo,
+        COALESCE(proj.name, eb.EProjectName, '') AS projectName,
+        ISNULL(eb.EName, '') AS partyName,
+        eb.EInstallmentCount AS totalInstallments
+      FROM dbo.EmiInstallments ei
+      INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+      LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
+      WHERE ei.Status = 'Pending'
+        AND eb.EStatus = 'Approved'
+        AND eb.EEmiPayment = 1
+      ORDER BY ei.DueDate ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("EMI reminders error:", err);
+    res.status(500).json({ error: "Failed to fetch EMI reminders" });
   }
 });
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/sa/lead-distribution";
@@ -139,13 +139,8 @@ const SaLeadDistribution: React.FC = () => {
   };
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Lead Distribution"]} />
-      <div className="space-y-6 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Lead Distribution</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Allocate leads to team leaders (L1) and sales persons (L2)</p>
-        </div>
+    <SalesAutoShell title="Lead Distribution" subtitle="Allocate leads to team leaders (L1) and sales persons (L2)">
+      <div className="space-y-6">
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-border">
@@ -402,7 +397,7 @@ const SaLeadDistribution: React.FC = () => {
           </div>
         )}
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

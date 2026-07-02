@@ -53,7 +53,7 @@ const MODULE_COLORS: Record<string, string> = {
   Finance: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   Material: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   Engineering: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  "Follow-Up": "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  "Follow-Up": "bg-teal-500/10 text-teal-600 border-teal-500/20",
   Ticket: "bg-red-500/10 text-red-400 border-red-500/20",
   Sales: "bg-pink-500/10 text-pink-400 border-pink-500/20",
   "Civil Work DPR": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",

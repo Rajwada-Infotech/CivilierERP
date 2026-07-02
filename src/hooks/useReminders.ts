@@ -3,7 +3,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 
 export type ReminderType =
-  | "cheque"
   | "purchase_order"
   | "work_order"
   | "tds"
@@ -54,41 +53,19 @@ export function formatDate(dateStr: string): string {
 
 async function fetchEmiReminders(): Promise<ReminderItem[]> {
   try {
-    // Fetch all expense bookings and look for pending EMI installments due soon
-    const res = await fetchWithAuth("/api/expense-booking?limit=200");
+    const res = await fetchWithAuth("/api/expense-booking/emi-reminders");
     if (!res.ok) return [];
-    const data = await res.json();
-    const rows: any[] = Array.isArray(data) ? data : (data.data ?? []);
-
-    const items: ReminderItem[] = [];
-
-    for (const row of rows) {
-      if (!row.EEmiPayment) continue;
-      let emiData: any = null;
-      try {
-        emiData = JSON.parse(row.EEmiData || "{}");
-      } catch (_e) {
-        // ignore malformed EMI JSON — treat as empty schedule
-      }
-      const schedule: any[] = emiData?.schedule ?? [];
-
-      for (const inst of schedule) {
-        if (inst.status === "Paid") continue;
-        const urgency = classifyUrgency(inst.dueDate);
-
-        items.push({
-          id: `emi-${row.Eid}-${inst.installmentNo}`,
-          type: "emi_installment",
-          title: `EMI #${inst.installmentNo} — ${inst.refNumber || row.EDocNo || "—"}`,
-          subtitle: `${row.EProjectName || "Expense Booking"} · Installment ${inst.installmentNo}/${emiData?.installmentCount ?? "?"}`,
-          dueDate: inst.dueDate,
-          urgency,
-          amount: inst.amount,
-          path: `/material/expense-booking?view=${row.Eid}`,
-        });
-      }
-    }
-    return items;
+    const rows: any[] = await res.json();
+    return rows.map((inst) => ({
+      id: `emi-${inst.expenseBookingId}-${inst.installmentNo}`,
+      type: "emi_installment" as ReminderType,
+      title: `${inst.refNumber || `${inst.parentDocNo}-EMI-${String(inst.installmentNo).padStart(2, "0")}`}`,
+      subtitle: `${inst.projectName || inst.partyName || "Expense Booking"} · Installment ${inst.installmentNo}/${inst.totalInstallments ?? "?"}`,
+      dueDate: String(inst.dueDate).slice(0, 10),
+      urgency: classifyUrgency(String(inst.dueDate).slice(0, 10)),
+      amount: inst.amount,
+      path: `/material/expense-booking?view=${inst.expenseBookingId}`,
+    }));
   } catch {
     return [];
   }
@@ -101,29 +78,22 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
     const raw = await res.json();
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
-    // Statuses that need action / attention
-    const ACTIONABLE = new Set(["Pending", "Approved", "Partially Ordered"]);
+    const ACTIONABLE = new Set(["pending", "approved"]);
 
     return list
-      .filter((r) => ACTIONABLE.has(r.Status))
+      .filter((r) => {
+        const status = (r.Status || "").toLowerCase();
+        return ACTIONABLE.has(status) && r.RequiredByDate;
+      })
       .map((r) => {
-        // Use RequiredByDate for urgency if set; otherwise treat as "upcoming"
-        // so MRs without a deadline don't incorrectly show as overdue.
-        const dueDate: string = r.RequiredByDate
-          ? String(r.RequiredByDate).slice(0, 10)
-          : String(r.RequestDate ?? new Date().toISOString()).slice(0, 10);
-
-        const urgency: ReminderItem["urgency"] = r.RequiredByDate
-          ? classifyUrgency(String(r.RequiredByDate).slice(0, 10))
-          : "upcoming";
-
+        const dueDate = String(r.RequiredByDate).slice(0, 10);
         return {
           id: `mr-${r.MRId}`,
           type: "material_request" as ReminderType,
           title: `MR ${r.DocNo || `#${r.MRId}`}`,
           subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
           dueDate,
-          urgency,
+          urgency: classifyUrgency(dueDate),
           path: `/material/material-request?view=${r.MRId}`,
         };
       });
@@ -148,7 +118,6 @@ const PRIVILEGED_REMINDER_ROLES = new Set(["super_admin", "admin", "dba"]);
 const REMINDER_PAGE_KEYS: Record<string, string[]> = {
   purchase_order: ["purchase-orders"],
   grn: ["grn-master", "grns"],
-  cheque: ["cheque-master"],
   tds: ["tds-master"],
   work_order: ["work-order", "engineering-work-order"],
 };
@@ -185,10 +154,9 @@ export async function fetchAllReminders(
       ? fetchWithAuth(url)
       : Promise.resolve(null);
 
-  const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
+  const [poRes, grnRes, tdsRes, woRes] = await Promise.allSettled([
     maybeFetch("/api/purchase-orders", "purchase_order"),
     maybeFetch("/api/grns", "grn"),
-    maybeFetch("/api/cheque-master", "cheque"),
     maybeFetch("/api/tds-master", "tds"),
     maybeFetch("/api/work-orders", "work_order"),
   ]);
@@ -281,17 +249,8 @@ export async function fetchAllReminders(
     });
   };
 
-  const FINANCE_ROLES = [
-    "admin",
-    "super_admin",
-    "dba",
-    "finance_manager",
-    "branch_manager",
-  ];
-  const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
-  const [poList, chequeList, tdsList, woList] = await Promise.all([
+  const [poList, tdsList, woList] = await Promise.all([
     toList(poRes),
-    toList(chequeRes),
     toList(tdsRes),
     toList(woRes),
   ]);
@@ -299,14 +258,10 @@ export async function fetchAllReminders(
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
-      process(chequeList, "cheque", "CId", "CHQ", "/masters/cheque");
       process(tdsList, "tds", "Id", "TDS", "/masters/tds");
       process(woList, "work_order", "Id", "WO", "/material/work-order");
     }),
-    (hasFinanceAccess
-      ? fetchEmiReminders()
-      : Promise.resolve([] as ReminderItem[])
-    ).catch(() => [] as ReminderItem[]),
+    fetchEmiReminders().catch(() => [] as ReminderItem[]),
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
   ]);
 

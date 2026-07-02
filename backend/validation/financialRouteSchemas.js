@@ -106,6 +106,8 @@ const purchaseOrderBaseSchema = z
     SourceMRDocNo: optStr(100),
     SourceWDId: optInt,
     SourceWDDocNo: optStr(100),
+    SourceQTId: optInt,
+    SourceQTDocNo: optStr(100),
     POType: optStr(20),
   })
   .passthrough();

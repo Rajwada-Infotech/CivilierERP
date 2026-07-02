@@ -1,5 +1,5 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -33,7 +33,11 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -49,6 +53,19 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { usePageRights } from "@/hooks/usePageRights";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const ISSUES_TEMPLATE_COLUMNS = [
+  { header: "Issue Date (YYYY-MM-DD)", accessor: "Issue Date (YYYY-MM-DD)" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "Godown", accessor: "Godown" },
+  { header: "Issued To", accessor: "Issued To" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+];
 
 // ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
 
@@ -83,7 +100,6 @@ interface IssueHeader {
   docNoPreview: string;
   issuedTo: string;
   costCenter: string;
-  purpose: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -98,7 +114,6 @@ const defaultHeader: IssueHeader = {
   docNoPreview: "",
   issuedTo: "",
   costCenter: "",
-  purpose: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -180,6 +195,8 @@ function GodownBadge({
 export default function Issues() {
   const rights = usePageRights("material-issues");
   const queryClient = useQueryClient();
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRecord, setViewingRecord] = useState<any>(null);
@@ -217,6 +234,17 @@ export default function Issues() {
   const { data: godowns = [], isLoading: loadingGodowns } = useQuery({
     queryKey: ["issues-godowns"],
     queryFn: issuesApi.getGodowns,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: contractors = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["issues-contractors"],
+    queryFn: async () => {
+      const { fetchWithAuth } = await import("@/lib/fetchWithAuth");
+      const res = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!res.ok) return [];
+      return res.json();
+    },
     staleTime: 5 * 60_000,
   });
 
@@ -556,7 +584,6 @@ export default function Issues() {
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
-      purpose: record.Purpose ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: generateUUID(),
@@ -603,7 +630,6 @@ export default function Issues() {
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
-      Purpose: header.purpose || null,
       items: cart
         .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
         .map((ci) => ({
@@ -1144,18 +1170,22 @@ export default function Issues() {
 
             {/* Row 2: Issued To | Cost Center */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Issued To (Dept / Employee)">
+              <Field label="Issued To (Contractor)">
                 <div className="relative">
                   <User
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <Input
+                  <select
                     value={header.issuedTo}
                     onChange={(e) => setH("issuedTo", e.target.value)}
-                    className="pl-9 h-9 text-sm"
-                    placeholder="Dept, employee, or project name…"
-                  />
+                    className={`${selectCls} pl-9`}
+                  >
+                    <option value="">— Select contractor —</option>
+                    {contractors.map((c) => (
+                      <option key={c.id} value={c.label}>{c.label}</option>
+                    ))}
+                  </select>
                 </div>
               </Field>
 
@@ -1165,15 +1195,6 @@ export default function Issues() {
                   onChange={(e) => setH("costCenter", e.target.value)}
                   className="h-9 text-sm"
                   placeholder="Cost centre or GL code…"
-                />
-              </Field>
-
-              <Field label="Purpose">
-                <Input
-                  value={header.purpose}
-                  onChange={(e) => setH("purpose", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Purpose of this material issue…"
                 />
               </Field>
             </div>
@@ -1710,6 +1731,28 @@ export default function Issues() {
     );
   };
 
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], ISSUES_TEMPLATE_COLUMNS, "material-issues-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ── Page render ───────────────────────────────────────────────────────────
 
   return (
@@ -1720,18 +1763,40 @@ export default function Issues() {
         subtitle="Issue materials from godown to projects"
         icon={ArrowDownToLine}
         action={
-          viewMode === "list" && rights.canCreate ? (
-            <Button
-              onClick={() => {
-                setHeader(defaultHeader);
-                setCart([blankCartItem()]);
-                setEditingId(null);
-                setViewMode("form");
-              }}
-              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
-            >
-              <Plus size={15} /> New Issue
-            </Button>
+          viewMode === "list" ? (
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <Button
+                  onClick={() => {
+                    setHeader(defaultHeader);
+                    setCart([blankCartItem()]);
+                    setEditingId(null);
+                    setViewMode("form");
+                  }}
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                >
+                  <Plus size={15} /> New Issue
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       >

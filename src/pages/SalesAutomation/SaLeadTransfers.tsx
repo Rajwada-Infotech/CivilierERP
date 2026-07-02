@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, ArrowRightLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -94,13 +94,11 @@ const SaLeadTransfers: React.FC = () => {
   const pendingCount = (requests as any[]).filter((r: any) => r.Status === "Pending").length;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Lead Transfers"]} />
-      <div className="space-y-6 mt-6">
+    <SalesAutoShell title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-heading font-bold text-foreground">Lead Transfer Requests</h1>
               {pendingCount > 0 && (
                 <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600">{pendingCount} pending</span>
               )}
@@ -268,7 +266,7 @@ const SaLeadTransfers: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </>
+    </SalesAutoShell>
   );
 };
 
