@@ -190,21 +190,24 @@ export default function SupplierDashboard() {
           <div className="space-y-4">
 
             {/* Company card */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="h-14 relative"
+            <div className="rounded-xl border border-border bg-card overflow-hidden relative">
+              {/* Banner */}
+              <div className="h-20"
                 style={isDark
                   ? { background: "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)" }
                   : { background: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)", borderBottom: "1px solid #a7f3d0" }}>
-                <div className="absolute inset-0" style={{
+                <div className="absolute inset-x-0 top-0 h-20" style={{
                   backgroundImage: `radial-gradient(circle, ${isDark ? "rgba(255,255,255,0.10)" : "rgba(5,150,105,0.10)"} 1px, transparent 1px)`,
                   backgroundSize: "14px 14px",
                 }} />
               </div>
-              <div className="px-4 pb-4 -mt-7">
-                <div className="w-14 h-14 rounded-xl border-2 border-card bg-emerald-500/10 flex items-center justify-center mb-3"
-                  style={{ boxShadow: "0 2px 12px rgba(16,185,129,0.18)" }}>
-                  <Building2 size={22} className="text-emerald-600 dark:text-emerald-400" />
-                </div>
+              {/* Avatar — absolute, half-in banner half-below */}
+              <div className="absolute left-4 top-10 w-14 h-14 rounded-xl border-2 border-card bg-emerald-500/10 flex items-center justify-center"
+                style={{ boxShadow: "0 2px 12px rgba(16,185,129,0.18)" }}>
+                <Building2 size={22} className="text-emerald-600 dark:text-emerald-400" />
+              </div>
+              {/* Content — padding-top accounts for avatar overflow (half avatar = 28px) */}
+              <div className="px-4 pb-4 pt-10">
                 <p className="font-bold text-sm text-foreground leading-snug">
                   {profile?.Name ?? currentUser?.name ?? "—"}
                 </p>
