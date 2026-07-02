@@ -34,10 +34,10 @@ function CivilScene() {
     <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" className="w-full h-full" style={{ overflow: "visible" }}>
       <defs>
         <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(124,58,237,0.12)" strokeWidth="0.8" />
+          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(167,139,250,0.18)" strokeWidth="0.8" />
         </pattern>
         <pattern id="gridBig" width="90" height="90" patternUnits="userSpaceOnUse">
-          <path d="M 90 0 L 0 0 0 90" fill="none" stroke="rgba(124,58,237,0.18)" strokeWidth="1.2" />
+          <path d="M 90 0 L 0 0 0 90" fill="none" stroke="rgba(167,139,250,0.28)" strokeWidth="1.2" />
         </pattern>
         <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="3" result="blur" />
@@ -49,105 +49,105 @@ function CivilScene() {
       </defs>
       <rect width="800" height="420" fill="url(#grid)" opacity="0.6" />
       <rect width="800" height="420" fill="url(#gridBig)" opacity="0.8" />
-      <line x1="0" y1="370" x2="800" y2="370" stroke="rgba(124,58,237,0.3)" strokeWidth="1.5" strokeDasharray="8 4" />
+      <line x1="0" y1="370" x2="800" y2="370" stroke="rgba(167,139,250,0.3)" strokeWidth="1.5" strokeDasharray="8 4" />
       {/* Small building left */}
       <g opacity="0.55">
-        <rect x="20" y="290" width="60" height="80" fill="none" stroke="rgba(124,58,237,0.5)" strokeWidth="1.2" />
+        <rect x="20" y="290" width="60" height="80" fill="none" stroke="rgba(167,139,250,0.5)" strokeWidth="1.2" />
         {[300, 320, 340, 360].map((y) => (
           <g key={y}>
-            <rect x="28" y={y} width="10" height="12" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
-            <rect x="44" y={y} width="10" height="12" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
-            <rect x="60" y={y} width="10" height="12" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+            <rect x="28" y={y} width="10" height="12" fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
+            <rect x="44" y={y} width="10" height="12" fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
+            <rect x="60" y={y} width="10" height="12" fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
           </g>
         ))}
       </g>
       {/* Medium building */}
       <g opacity="0.6">
-        <rect x="100" y="210" width="80" height="160" fill="none" stroke="rgba(124,58,237,0.55)" strokeWidth="1.4" />
+        <rect x="100" y="210" width="80" height="160" fill="none" stroke="rgba(167,139,250,0.55)" strokeWidth="1.4" />
         {[220, 240, 260, 280, 300, 320, 340, 360].map((y) => (
           <g key={y}>
-            <rect x="108" y={y} width="12" height="14" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="126" y={y} width="12" height="14" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="144" y={y} width="12" height="14" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="162" y={y} width="12" height="14" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
+            <rect x="108" y={y} width="12" height="14" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="126" y={y} width="12" height="14" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="144" y={y} width="12" height="14" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="162" y={y} width="12" height="14" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
           </g>
         ))}
-        <line x1="100" y1="210" x2="180" y2="210" stroke="rgba(124,58,237,0.5)" strokeWidth="2" />
-        <rect x="120" y="198" width="40" height="12" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="1" />
+        <line x1="100" y1="210" x2="180" y2="210" stroke="rgba(167,139,250,0.5)" strokeWidth="2" />
+        <rect x="120" y="198" width="40" height="12" fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="1" />
       </g>
       {/* Right building */}
       <g opacity="0.5">
-        <rect x="610" y="250" width="70" height="120" fill="none" stroke="rgba(124,58,237,0.5)" strokeWidth="1.2" />
+        <rect x="610" y="250" width="70" height="120" fill="none" stroke="rgba(167,139,250,0.5)" strokeWidth="1.2" />
         {[260, 278, 296, 314, 332, 350].map((y) => (
           <g key={y}>
-            <rect x="618" y={y} width="10" height="13" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="634" y={y} width="10" height="13" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="650" y={y} width="10" height="13" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
-            <rect x="666" y={y} width="10" height="13" fill="none" stroke="rgba(124,58,237,0.35)" strokeWidth="0.8" />
+            <rect x="618" y={y} width="10" height="13" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="634" y={y} width="10" height="13" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="650" y={y} width="10" height="13" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            <rect x="666" y={y} width="10" height="13" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
           </g>
         ))}
       </g>
       {/* Far right tall building */}
       <g opacity="0.55">
-        <rect x="700" y="200" width="85" height="170" fill="none" stroke="rgba(124,58,237,0.55)" strokeWidth="1.4" />
+        <rect x="700" y="200" width="85" height="170" fill="none" stroke="rgba(167,139,250,0.55)" strokeWidth="1.4" />
         {[210, 228, 246, 264, 282, 300, 318, 336, 354].map((y) => (
           <g key={y}>
-            <rect x="708" y={y} width="11" height="13" fill="none" stroke="rgba(124,58,237,0.3)" strokeWidth="0.8" />
-            <rect x="725" y={y} width="11" height="13" fill="none" stroke="rgba(124,58,237,0.3)" strokeWidth="0.8" />
-            <rect x="742" y={y} width="11" height="13" fill="none" stroke="rgba(124,58,237,0.3)" strokeWidth="0.8" />
-            <rect x="759" y={y} width="11" height="13" fill="none" stroke="rgba(124,58,237,0.3)" strokeWidth="0.8" />
-            <rect x="776" y={y} width="11" height="13" fill="none" stroke="rgba(124,58,237,0.3)" strokeWidth="0.8" />
+            <rect x="708" y={y} width="11" height="13" fill="none" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+            <rect x="725" y={y} width="11" height="13" fill="none" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+            <rect x="742" y={y} width="11" height="13" fill="none" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+            <rect x="759" y={y} width="11" height="13" fill="none" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+            <rect x="776" y={y} width="11" height="13" fill="none" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
           </g>
         ))}
-        <rect x="720" y="186" width="45" height="14" fill="none" stroke="rgba(124,58,237,0.45)" strokeWidth="1" />
+        <rect x="720" y="186" width="45" height="14" fill="none" stroke="rgba(167,139,250,0.45)" strokeWidth="1" />
       </g>
       {/* Crane */}
       <g filter="url(#softShadow)">
-        <rect x="378" y="80" width="10" height="290" fill="none" stroke="rgba(124,58,237,0.8)" strokeWidth="2" />
+        <rect x="378" y="80" width="10" height="290" fill="none" stroke="rgba(167,139,250,0.8)" strokeWidth="2" />
         {[80, 120, 160, 200, 240, 280, 320].map((y, i) => (
-          <line key={y} x1={i % 2 === 0 ? 378 : 388} y1={y} x2={i % 2 === 0 ? 388 : 378} y2={y + 40} stroke="rgba(124,58,237,0.5)" strokeWidth="1" />
+          <line key={y} x1={i % 2 === 0 ? 378 : 388} y1={y} x2={i % 2 === 0 ? 388 : 378} y2={y + 40} stroke="rgba(167,139,250,0.5)" strokeWidth="1" />
         ))}
-        <rect x="388" y="82" width="200" height="8" fill="none" stroke="rgba(124,58,237,0.8)" strokeWidth="1.8" />
+        <rect x="388" y="82" width="200" height="8" fill="none" stroke="rgba(167,139,250,0.8)" strokeWidth="1.8" />
         {[0, 40, 80, 120, 160].map((x) => (
-          <line key={x} x1={388 + x} y1="82" x2={388 + x + 40} y2="90" stroke="rgba(124,58,237,0.45)" strokeWidth="1" />
+          <line key={x} x1={388 + x} y1="82" x2={388 + x + 40} y2="90" stroke="rgba(167,139,250,0.45)" strokeWidth="1" />
         ))}
-        <rect x="298" y="82" width="80" height="8" fill="none" stroke="rgba(124,58,237,0.7)" strokeWidth="1.8" />
-        <rect x="288" y="78" width="20" height="20" fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth="1.5" />
-        <rect x="372" y="68" width="22" height="18" fill="none" stroke="rgba(124,58,237,0.9)" strokeWidth="1.8" />
-        <rect x="376" y="72" width="6" height="8" fill="rgba(124,58,237,0.15)" stroke="rgba(124,58,237,0.5)" strokeWidth="0.8" />
-        <rect x="384" y="72" width="6" height="8" fill="rgba(124,58,237,0.15)" stroke="rgba(124,58,237,0.5)" strokeWidth="0.8" />
+        <rect x="298" y="82" width="80" height="8" fill="none" stroke="rgba(167,139,250,0.7)" strokeWidth="1.8" />
+        <rect x="288" y="78" width="20" height="20" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="1.5" />
+        <rect x="372" y="68" width="22" height="18" fill="none" stroke="rgba(167,139,250,0.9)" strokeWidth="1.8" />
+        <rect x="376" y="72" width="6" height="8" fill="rgba(167,139,250,0.15)" stroke="rgba(167,139,250,0.5)" strokeWidth="0.8" />
+        <rect x="384" y="72" width="6" height="8" fill="rgba(167,139,250,0.15)" stroke="rgba(167,139,250,0.5)" strokeWidth="0.8" />
         {/* Dangling wire + load */}
-        <line x1="560" y1="90" x2="560" y2="200" stroke="rgba(124,58,237,0.7)" strokeWidth="1.5" strokeDasharray="4 3">
+        <line x1="560" y1="90" x2="560" y2="200" stroke="rgba(167,139,250,0.7)" strokeWidth="1.5" strokeDasharray="4 3">
           <animate attributeName="y2" values="200;240;200" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1" />
         </line>
         <g>
           <animateTransform attributeName="transform" type="translate" values="0,0;0,40;0,0" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1" additive="sum" />
-          <rect x="554" y="200" width="12" height="10" fill="none" stroke="rgba(124,58,237,0.8)" strokeWidth="1.5" />
-          <path d="M 558 210 Q 560 218 562 210" fill="none" stroke="rgba(124,58,237,0.8)" strokeWidth="1.5" />
+          <rect x="554" y="200" width="12" height="10" fill="none" stroke="rgba(167,139,250,0.8)" strokeWidth="1.5" />
+          <path d="M 558 210 Q 560 218 562 210" fill="none" stroke="rgba(167,139,250,0.8)" strokeWidth="1.5" />
         </g>
         {/* Moving trolley */}
-        <rect x="549" y="88" width="18" height="10" fill="rgba(124,58,237,0.1)" stroke="rgba(124,58,237,0.7)" strokeWidth="1.2">
+        <rect x="549" y="88" width="18" height="10" fill="rgba(167,139,250,0.1)" stroke="rgba(167,139,250,0.7)" strokeWidth="1.2">
           <animate attributeName="x" values="549;440;549" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1" />
         </rect>
         {/* Support cables */}
-        <line x1="383" y1="82" x2="440" y2="140" stroke="rgba(124,58,237,0.35)" strokeWidth="1" />
-        <line x1="383" y1="82" x2="500" y2="140" stroke="rgba(124,58,237,0.3)" strokeWidth="1" />
-        <line x1="383" y1="82" x2="340" y2="140" stroke="rgba(124,58,237,0.3)" strokeWidth="1" />
+        <line x1="383" y1="82" x2="440" y2="140" stroke="rgba(167,139,250,0.35)" strokeWidth="1" />
+        <line x1="383" y1="82" x2="500" y2="140" stroke="rgba(167,139,250,0.3)" strokeWidth="1" />
+        <line x1="383" y1="82" x2="340" y2="140" stroke="rgba(167,139,250,0.3)" strokeWidth="1" />
         {/* Base */}
-        <rect x="358" y="368" width="50" height="8" fill="none" stroke="rgba(124,58,237,0.7)" strokeWidth="2" />
-        <rect x="350" y="374" width="66" height="6" fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth="1.5" />
+        <rect x="358" y="368" width="50" height="8" fill="none" stroke="rgba(167,139,250,0.7)" strokeWidth="2" />
+        <rect x="350" y="374" width="66" height="6" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="1.5" />
       </g>
       {/* Scaffold */}
       <g opacity="0.4">
-        <line x1="695" y1="200" x2="695" y2="370" stroke="rgba(124,58,237,0.6)" strokeWidth="1.5" />
-        <line x1="707" y1="200" x2="707" y2="370" stroke="rgba(124,58,237,0.6)" strokeWidth="1.5" />
+        <line x1="695" y1="200" x2="695" y2="370" stroke="rgba(167,139,250,0.6)" strokeWidth="1.5" />
+        <line x1="707" y1="200" x2="707" y2="370" stroke="rgba(167,139,250,0.6)" strokeWidth="1.5" />
         {[200, 230, 260, 290, 320, 350].map((y) => (
-          <line key={y} x1="695" y1={y} x2="707" y2={y} stroke="rgba(124,58,237,0.5)" strokeWidth="1.2" />
+          <line key={y} x1="695" y1={y} x2="707" y2={y} stroke="rgba(167,139,250,0.5)" strokeWidth="1.2" />
         ))}
       </g>
       {/* Pulsing markers */}
       {[[220, 185], [560, 60], [650, 230], [80, 260]].map(([cx, cy], i) => (
-        <circle key={i} cx={cx} cy={cy} r="3" fill="none" stroke="rgba(124,58,237,0.5)" strokeWidth="1">
+        <circle key={i} cx={cx} cy={cy} r="3" fill="none" stroke="rgba(167,139,250,0.5)" strokeWidth="1">
           <animate attributeName="opacity" values="0.3;0.9;0.3" dur={`${2.5 + i * 0.7}s`} repeatCount="indefinite" />
         </circle>
       ))}
@@ -185,21 +185,21 @@ function FloatingParticles() {
   const renderIcon = (type: string) => {
     if (type === "bolt") return (
       <svg width="12" height="12" viewBox="0 0 12 12">
-        <polygon points="6,1 10.2,3.5 10.2,8.5 6,11 1.8,8.5 1.8,3.5" fill="none" stroke="rgba(124,58,237,0.55)" strokeWidth="1" />
-        <circle cx="6" cy="6" r="2" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+        <polygon points="6,1 10.2,3.5 10.2,8.5 6,11 1.8,8.5 1.8,3.5" fill="none" stroke="rgba(167,139,250,0.55)" strokeWidth="1" />
+        <circle cx="6" cy="6" r="2" fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
       </svg>
     );
     if (type === "triangle") return (
       <svg width="13" height="12" viewBox="0 0 13 12">
-        <polygon points="6.5,1 12,11 1,11" fill="none" stroke="rgba(124,58,237,0.5)" strokeWidth="1" />
-        <line x1="6.5" y1="6" x2="6.5" y2="11" stroke="rgba(124,58,237,0.35)" strokeWidth="0.7" />
+        <polygon points="6.5,1 12,11 1,11" fill="none" stroke="rgba(167,139,250,0.5)" strokeWidth="1" />
+        <line x1="6.5" y1="6" x2="6.5" y2="11" stroke="rgba(167,139,250,0.35)" strokeWidth="0.7" />
       </svg>
     );
     return (
       <svg width="14" height="10" viewBox="0 0 14 10">
-        <rect width="14" height="10" rx="1" fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth="1.2" />
-        <line x1="7" y1="0" x2="7" y2="10" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
-        <line x1="0" y1="5" x2="14" y2="5" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+        <rect width="14" height="10" rx="1" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="1.2" />
+        <line x1="7" y1="0" x2="7" y2="10" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
+        <line x1="0" y1="5" x2="14" y2="5" stroke="rgba(167,139,250,0.4)" strokeWidth="0.8" />
       </svg>
     );
   };
@@ -246,9 +246,9 @@ function FloatingCard({ children, className, delay = 0, style }: { children: Rea
   return (
     <motion.div className={`absolute rounded-2xl backdrop-blur-md ${className}`}
       style={{
-        background: "rgba(255,255,255,0.75)",
-        border: "1px solid rgba(196,181,253,0.35)",
-        boxShadow: "0 8px 32px rgba(124,58,237,0.12), inset 0 1px 0 rgba(255,255,255,0.9)",
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(167,139,250,0.20)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)",
         ...style,
       }}
       initial={{ opacity: 0, y: 20 }}
@@ -267,19 +267,19 @@ function HeroCards() {
           <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(124,58,237,0.12)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
           </div>
-          <span className="text-xs font-semibold text-slate-700">Project Overview</span>
+          <span className="text-xs font-semibold text-white/80">Project Overview</span>
         </div>
         {[{ label: "Site A", pct: 78, col: "#7c3aed" }, { label: "Site B", pct: 45, col: "#a78bfa" }, { label: "Site C", pct: 91, col: "#c4b5fd" }].map((p) => (
           <div key={p.label} className="mb-2 last:mb-0">
-            <div className="flex justify-between text-[10px] text-slate-500 mb-1"><span>{p.label}</span><span style={{ color: p.col }}>{p.pct}%</span></div>
-            <div className="h-1 rounded-full bg-purple-100"><div className="h-full rounded-full" style={{ width: `${p.pct}%`, background: p.col }} /></div>
+            <div className="flex justify-between text-[10px] text-white/45 mb-1"><span>{p.label}</span><span style={{ color: p.col }}>{p.pct}%</span></div>
+            <div className="h-1 rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${p.pct}%`, background: p.col }} /></div>
           </div>
         ))}
       </FloatingCard>
 
       <FloatingCard delay={0.6} className="top-[32%] right-[2%] w-44 p-4" style={{ zIndex: 2 }}>
-        <p className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Monthly Revenue</p>
-        <p className="text-xl font-bold text-slate-800">₹12.4L</p>
+        <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Monthly Revenue</p>
+        <p className="text-xl font-bold text-white">₹12.4L</p>
         <p className="text-[10px] mt-1 flex items-center gap-1" style={{ color: "#7c3aed" }}>
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="18 15 12 9 6 15"/></svg>
           +18.2% vs last month
@@ -297,8 +297,8 @@ function HeroCards() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           </div>
           <div>
-            <p className="text-xs font-semibold text-slate-700">MR Approved</p>
-            <p className="text-[10px] text-slate-400">Steel – 2.5 MT · Site A</p>
+            <p className="text-xs font-semibold text-white/80">MR Approved</p>
+            <p className="text-[10px] text-white/35">Steel – 2.5 MT · Site A</p>
           </div>
         </div>
       </FloatingCard>
@@ -308,8 +308,8 @@ function HeroCards() {
           <div className="w-2 h-2 rounded-full animate-pulse bg-purple-500" />
           <span className="text-[10px] font-semibold uppercase tracking-widest text-purple-600">Live GRN</span>
         </div>
-        <p className="text-xs text-slate-600">Cement · 150 bags received</p>
-        <p className="text-[10px] text-slate-400 mt-1">Royal Garden · Just now</p>
+        <p className="text-xs text-white/60">Cement · 150 bags received</p>
+        <p className="text-[10px] text-white/35 mt-1">Royal Garden · Just now</p>
       </FloatingCard>
     </div>
   );
@@ -362,7 +362,7 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
   return (
     <div className="relative group">
       <motion.label className="absolute left-4 pointer-events-none font-medium z-10 origin-left"
-        style={{ color: focused ? "rgba(124,58,237,0.9)" : "rgba(100,116,139,0.8)" }}
+        style={{ color: focused ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}
         animate={{
           top: focused || has ? "6px" : "50%",
           y: focused || has ? "0%" : "-50%",
@@ -374,7 +374,7 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
         {label}
       </motion.label>
       <motion.div className="absolute inset-0 rounded-xl pointer-events-none"
-        animate={{ boxShadow: focused ? "0 0 0 2px rgba(124,58,237,0.35), 0 0 20px rgba(124,58,237,0.12)" : "0 0 0 1.5px rgba(196,181,253,0.5)" }}
+        animate={{ boxShadow: focused ? "0 0 0 1.5px rgba(167,139,250,0.6), 0 0 20px rgba(124,58,237,0.15)" : "0 0 0 1px rgba(255,255,255,0.10)" }}
         transition={{ duration: 0.2 }} />
       <AnimatePresence>
         {focused && (
@@ -387,8 +387,8 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
       <input type={type} value={value} onChange={onChange}
         placeholder={focused ? placeholder : ""}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm text-slate-800 outline-none transition-colors"
-        style={{ background: focused ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)", border: "none" }} />
+        className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm text-white/90 outline-none transition-colors"
+        style={{ background: focused ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)", border: "none" }} />
       {children}
     </div>
   );
@@ -405,7 +405,7 @@ function PasswordStrength({ password }: { password: string }) {
       <div className="flex gap-1 mb-1">
         {[1, 2, 3, 4].map((i) => (
           <motion.div key={i} className="h-1 flex-1 rounded-full"
-            animate={{ backgroundColor: i <= strength ? colors[strength] : "rgba(203,213,225,0.5)" }}
+            animate={{ backgroundColor: i <= strength ? colors[strength] : "rgba(255,255,255,0.12)" }}
             transition={{ duration: 0.3, delay: i * 0.05 }} />
         ))}
       </div>
@@ -455,9 +455,10 @@ function WelcomeBackCard({ name }: { name?: string }) {
   const firstName = name?.trim().split(/\s+/)[0] || "";
   return (
     <motion.div className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none px-4"
+      style={{ background: "rgba(13,10,26,0.70)", backdropFilter: "blur(8px)" }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.18 } }}>
       <motion.div className="relative flex flex-col items-center gap-3 px-8 py-7 rounded-3xl text-center"
-        style={{ background: "rgba(255,255,255,0.92)", border: "1px solid rgba(196,181,253,0.6)", boxShadow: "0 20px 60px -10px rgba(124,58,237,0.35), 0 0 0 1px rgba(255,255,255,0.4) inset" }}
+        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 20px 60px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06) inset", backdropFilter: "blur(24px)" }}
         initial={{ y: 48, opacity: 0, scale: 0.94 }} animate={{ y: 0, opacity: 1, scale: 1 }}
         exit={{ y: -16, opacity: 0, scale: 0.97, transition: { duration: 0.18 } }}
         transition={{ type: "spring", stiffness: 340, damping: 26 }}>
@@ -475,7 +476,7 @@ function WelcomeBackCard({ name }: { name?: string }) {
             initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16, duration: 0.3 }}>
             Welcome back{firstName ? `, ${firstName}` : ""}!
           </motion.p>
-          <motion.p className="text-xs text-slate-500 mt-0.5"
+          <motion.p className="text-xs text-white/40 mt-0.5"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.24, duration: 0.3 }}>
             Taking you to your dashboard…
           </motion.p>
@@ -530,14 +531,14 @@ export default function Login() {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
-      style={{ background: "linear-gradient(160deg, #f3e8ff 0%, #ede9fe 30%, #ffffff 65%, #f8f4ff 100%)" }}>
+      style={{ background: "#0d0a1a" }}>
 
       {/* Blueprint scene */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute inset-0 flex items-end pb-0">
+        <div className="absolute inset-0 flex items-end pb-0" style={{ opacity: 0.7 }}>
           <CivilScene />
         </div>
-        <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 70% at 50% 50%, transparent 20%, rgba(243,232,255,0.75) 100%)" }} />
+        <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 70% at 50% 50%, transparent 20%, rgba(13,10,26,0.80) 100%)" }} />
       </div>
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <ScanLine />
@@ -547,12 +548,12 @@ export default function Login() {
       {/* Animated blobs */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <motion.div className="absolute top-[-12%] left-[-8%] w-[45%] h-[45%] rounded-full blur-[100px]"
-          style={{ background: "rgba(168,85,247,0.18)" }}
-          animate={{ scale: [1, 1.12, 1], opacity: [0.18, 0.28, 0.18] }}
+          style={{ background: "rgba(124,58,237,0.28)" }}
+          animate={{ scale: [1, 1.12, 1], opacity: [0.28, 0.42, 0.28] }}
           transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }} />
         <motion.div className="absolute bottom-[-12%] right-[-8%] w-[45%] h-[45%] rounded-full blur-[100px]"
-          style={{ background: "rgba(139,92,246,0.14)" }}
-          animate={{ scale: [1, 1.15, 1], opacity: [0.14, 0.24, 0.14] }}
+          style={{ background: "rgba(79,70,229,0.22)" }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.22, 0.34, 0.22] }}
           transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 2 }} />
       </div>
 
@@ -570,14 +571,14 @@ export default function Login() {
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
 
           <motion.div className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full text-xs font-medium"
-            style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.20)", color: "#7c3aed" }}
+            style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
             <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-purple-500" />
             New: L1 Chart &amp; Supplier Portal just launched
           </motion.div>
 
           <div>
-            <motion.h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] font-bold leading-[1.12] tracking-tight text-slate-800"
+            <motion.h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] font-bold leading-[1.12] tracking-tight text-white"
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.7 }}>
               CivilierERP —{" "}
               <span style={{ background: "linear-gradient(135deg, #7c3aed, #a78bfa, #c4b5fd)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
@@ -585,7 +586,7 @@ export default function Login() {
               </span>
               <br />Build Better.
             </motion.h1>
-            <motion.div className="mt-3 flex items-center gap-2 text-sm text-slate-500"
+            <motion.div className="mt-3 flex items-center gap-2 text-sm text-white/50"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
               <span className="w-1 h-1 rounded-full bg-purple-400 inline-block" />
               <span>{tagline}</span>
@@ -594,7 +595,7 @@ export default function Login() {
             </motion.div>
           </div>
 
-          <motion.p className="text-sm text-slate-500 max-w-md leading-relaxed"
+          <motion.p className="text-sm text-white/40 max-w-md leading-relaxed"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
             From procurement and material tracking to contractor management and live project dashboards — CivilierERP gives your team total visibility and control.
           </motion.p>
@@ -603,8 +604,8 @@ export default function Login() {
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
             {[["12+", "Modules"], ["99.9%", "Uptime"], ["500+", "Projects"]].map(([val, label]) => (
               <div key={label} className="flex flex-col">
-                <span className="text-2xl font-bold text-slate-800">{val}</span>
-                <span className="text-[11px] text-slate-400">{label}</span>
+                <span className="text-2xl font-bold text-white">{val}</span>
+                <span className="text-[11px] text-white/35">{label}</span>
               </div>
             ))}
           </motion.div>
@@ -622,17 +623,17 @@ export default function Login() {
             <TiltCard>
               {/* Blueprint corner accents */}
               {["top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl", "top-0 right-0 border-t-2 border-r-2 rounded-tr-2xl", "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-2xl", "bottom-0 right-0 border-b-2 border-r-2 rounded-br-2xl"].map((cls, i) => (
-                <motion.div key={i} className={`absolute w-5 h-5 border-purple-400/40 z-20 ${cls}`}
+                <motion.div key={i} className={`absolute w-5 h-5 border-violet-400/60 z-20 ${cls}`}
                   initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.4 + i * 0.08, duration: 0.4, ease: "backOut" }} />
               ))}
 
               <div className="p-6 sm:p-8 rounded-2xl"
                 style={{
-                  background: "linear-gradient(145deg, rgba(255,255,255,0.93) 0%, rgba(248,244,255,0.96) 100%)",
-                  border: "1px solid rgba(196,181,253,0.4)",
-                  boxShadow: "0 20px 60px rgba(124,58,237,0.1), 0 4px 20px rgba(124,58,237,0.08), inset 0 1px 0 rgba(255,255,255,0.8)",
-                  backdropFilter: "blur(24px)",
+                  background: "linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(124,58,237,0.04) 100%)",
+                  border: "1px solid rgba(167,139,250,0.18)",
+                  boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,58,237,0.08) inset, inset 0 1px 0 rgba(255,255,255,0.07)",
+                  backdropFilter: "blur(28px) saturate(150%)",
                 }}>
 
                 {/* Header */}
@@ -649,7 +650,7 @@ export default function Login() {
                     </motion.h1>
                   </motion.div>
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-                    className="mt-2 text-xs sm:text-sm text-slate-500 h-5 flex items-center justify-center gap-1.5">
+                    className="mt-2 text-xs sm:text-sm text-white/40 h-5 flex items-center justify-center gap-1.5">
                     <motion.span className="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block"
                       animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.2, repeat: Infinity }} />
                     <span>{tagline}</span>
@@ -671,7 +672,7 @@ export default function Login() {
                       onChange={(e) => { setPassword(e.target.value); setError(""); }}
                       placeholder="••••••••">
                       <motion.button type="button" onClick={() => setShowPass(!showPass)}
-                        className="absolute right-3 bottom-2.5 text-slate-400 hover:text-purple-700 transition-colors p-1"
+                        className="absolute right-3 bottom-2.5 text-white/30 hover:text-violet-300 transition-colors p-1"
                         whileTap={{ scale: 0.85, rotate: 15 }}>
                         <AnimatePresence mode="wait">
                           <motion.span key={showPass ? "off" : "on"}
@@ -693,7 +694,7 @@ export default function Login() {
                         exit={{ opacity: 0, y: -6, scale: 0.97 }}
                         transition={{ type: "spring", stiffness: 400, damping: 25 }}
                         className="px-4 py-2.5 rounded-xl text-sm text-red-600 flex items-center gap-2"
-                        style={{ background: "rgba(254,226,226,0.7)", border: "1px solid rgba(252,165,165,0.5)" }}>
+                        style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", color: "#fca5a5" }}>
                         <motion.div animate={{ rotate: [0, -8, 8, -4, 4, 0] }} transition={{ duration: 0.4 }} className="shrink-0">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -719,7 +720,7 @@ export default function Login() {
                   </ShimmerButton>
                 </motion.form>
 
-                <p className="text-center text-[10px] text-slate-400 mt-5">
+                <p className="text-center text-[10px] text-white/20 mt-5">
                   Secure access · Role-based permissions · v1.0.0
                 </p>
               </div>
