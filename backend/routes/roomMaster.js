@@ -95,6 +95,26 @@ router.get("/units", async (req, res) => {
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { ProjectId, UnitId, RoomName, Floor, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
+
+  // ProjectId, UnitId and RoomName are NOT NULL columns with no fallback
+  // default in the insert below. UnitId happens to be indirectly guarded by
+  // the unit lookup just below (a missing/invalid id won't match any row),
+  // but ProjectId and RoomName have no such protection and would otherwise
+  // reach the INSERT and crash with an unhandled SQL "Cannot insert the
+  // value NULL" 500. Same bug class found and fixed across
+  // purchaseOrders.js, expenseBooking.js, workOrder.js, materialIssues.js,
+  // chequeMasterSchemas.js, debitNote.js, and cardMasterSchemas.js during a
+  // live-DB workflow test.
+  if (!ProjectId) {
+    return res.status(400).json({ error: "ProjectId is required." });
+  }
+  if (!UnitId) {
+    return res.status(400).json({ error: "UnitId is required." });
+  }
+  if (!RoomName || !String(RoomName).trim()) {
+    return res.status(400).json({ error: "RoomName is required." });
+  }
+
   try {
     const pool = getPool();
 
@@ -133,6 +153,21 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   const { id } = req.params;
   const { ProjectId, UnitId, RoomName, Floor, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
+
+  // Same NOT NULL columns as POST / — this UPDATE overwrites them
+  // unconditionally, so omitting any of them here would null out the
+  // existing value and crash the same way the create path did before the
+  // fix above.
+  if (!ProjectId) {
+    return res.status(400).json({ error: "ProjectId is required." });
+  }
+  if (!UnitId) {
+    return res.status(400).json({ error: "UnitId is required." });
+  }
+  if (!RoomName || !String(RoomName).trim()) {
+    return res.status(400).json({ error: "RoomName is required." });
+  }
+
   try {
     const pool = getPool();
 

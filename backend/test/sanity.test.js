@@ -197,7 +197,46 @@ describe("backend sanity: DB retry wrapper", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  test.todo("queryWithRetry should retry ETIMEDOUT and ESOCKET transient SQL errors");
+  test("queryWithRetry retries ETIMEDOUT and returns the successful result", async () => {
+    const { queryWithRetry } = require("../db");
+    const fakePool = { request: jest.fn(() => ({ requestId: "req" })) };
+    const fn = jest
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }))
+      .mockResolvedValueOnce({ recordset: [{ ok: 1 }] });
+
+    await expect(queryWithRetry(fakePool, fn, 2)).resolves.toEqual({
+      recordset: [{ ok: 1 }],
+    });
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fakePool.request).toHaveBeenCalledTimes(2);
+  });
+
+  test("queryWithRetry retries ESOCKET and returns the successful result", async () => {
+    const { queryWithRetry } = require("../db");
+    const fakePool = { request: jest.fn(() => ({ requestId: "req" })) };
+    const fn = jest
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("socket error"), { code: "ESOCKET" }))
+      .mockResolvedValueOnce({ recordset: [{ ok: 1 }] });
+
+    await expect(queryWithRetry(fakePool, fn, 2)).resolves.toEqual({
+      recordset: [{ ok: 1 }],
+    });
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fakePool.request).toHaveBeenCalledTimes(2);
+  });
+
+  test("queryWithRetry gives up and throws once retries are exhausted", async () => {
+    const { queryWithRetry } = require("../db");
+    const fakePool = { request: jest.fn(() => ({})) };
+    const err = Object.assign(new Error("still timing out"), { code: "ETIMEDOUT" });
+    const fn = jest.fn().mockRejectedValue(err);
+
+    await expect(queryWithRetry(fakePool, fn, 2)).rejects.toBe(err);
+    // Initial attempt + 2 retries = 3 total calls
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("backend sanity: route and migration inventory", () => {
@@ -260,5 +299,10 @@ describe("backend sanity: package test contract", () => {
     expect(pkg.jest.testMatch).toContain("**/test/**/*.test.js");
   });
 
-  test.todo("remove --passWithNoTests from npm test so CI cannot pass with zero tests");
+  test("npm test does not pass silently when zero tests are discovered", () => {
+    const pkg = require("../package.json");
+
+    expect(pkg.scripts.test).not.toMatch(/--passWithNoTests/);
+    expect(pkg.jest.passWithNoTests).not.toBe(true);
+  });
 });

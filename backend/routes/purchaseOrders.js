@@ -482,6 +482,18 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
+    // PODate and SupplierID are NOT NULL columns with no fallback default
+    // below — omitting either used to reach the INSERT and crash with a raw,
+    // unhandled SQL "Cannot insert the value NULL" 500 (leaking internal
+    // table/column names to the client) instead of a clean validation error.
+    // Caught live: creating a PO without PODate 500'd instead of 400'ing.
+    if (!PODate) {
+      return res.status(400).json({ error: "PODate is required." });
+    }
+    if (!SupplierID) {
+      return res.status(400).json({ error: "SupplierID is required." });
+    }
+
     const pool = getPool();
 
     // Enforce: a PO can only be raised against a paid Sale Invoice
@@ -821,6 +833,17 @@ router.put(
     try {
       const userEmail = requireUserName(req, res);
       if (!userEmail) return;
+
+      // Same NOT NULL columns as POST / — this UPDATE overwrites them
+      // unconditionally (not a COALESCE-style partial update), so omitting
+      // either here would null out the existing value and crash the same
+      // way the create path did before the fix above.
+      if (!PODate) {
+        return res.status(400).json({ error: "PODate is required." });
+      }
+      if (!SupplierID) {
+        return res.status(400).json({ error: "SupplierID is required." });
+      }
 
       await guardEdit("purchase-orders", id);
 
