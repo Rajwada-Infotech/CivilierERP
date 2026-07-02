@@ -567,10 +567,7 @@ export default function MaterialRequest() {
       header: "Company",
       size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm whitespace-nowrap">
-          <Building2 size={12} className="text-muted-foreground shrink-0" />
-          {String(getValue() || "—")}
-        </div>
+        <span className="text-sm truncate">{String(getValue() || "—")}</span>
       ),
     },
     {
@@ -579,10 +576,7 @@ export default function MaterialRequest() {
       header: "Project",
       size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap">
-          <FolderOpen size={12} className="shrink-0" />
-          {String(getValue() || "—")}
-        </div>
+        <span className="text-sm text-muted-foreground truncate">{String(getValue() || "—")}</span>
       ),
     },
     {
@@ -591,15 +585,10 @@ export default function MaterialRequest() {
       header: "Items",
       size: 140,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1.5 whitespace-nowrap">
-          <ShoppingCart size={12} className="text-muted-foreground" />
-          <span className="font-semibold text-sm">
-            {row.original.ItemCount || 0}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            ({(row.original.TotalQty || 0).toFixed(2)} units)
-          </span>
-        </div>
+        <span className="text-sm whitespace-nowrap">
+          <span className="font-semibold">{row.original.ItemCount || 0}</span>
+          <span className="text-muted-foreground ml-1">({(row.original.TotalQty || 0).toFixed(2)} units)</span>
+        </span>
       ),
     },
     {
@@ -632,13 +621,11 @@ export default function MaterialRequest() {
       id: "Status",
       accessorKey: "Status",
       header: "Status",
-      cell: ({ getValue, row }) => (
-        <div>
-          <ApprovalStatusChain
-            table="MaterialRequests"
-            recordId={row.original.MRId}
-          />
-        </div>
+      cell: ({ row }) => (
+        <ApprovalStatusChain
+          table="MaterialRequests"
+          recordId={row.original.MRId}
+        />
       ),
     },
     {
