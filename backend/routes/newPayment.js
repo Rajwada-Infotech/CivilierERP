@@ -92,15 +92,17 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
-    const search = req.query.supplier ? req.query.supplier.trim() : "";
-    const companyId = req.query.company ? req.query.company.trim() : "";
-    const project = req.query.project ? req.query.project.trim() : "";
-    const finYear = req.query.finYear ? req.query.finYear.trim() : "";
-    const docNumber = req.query.docNumber ? req.query.docNumber.trim() : "";
-    const docDate = req.query.docDate ? req.query.docDate.trim() : "";
-    const dateParam = req.query.date ? req.query.date.trim() : "";
-    const dueDate = req.query.dueDate ? req.query.dueDate.trim() : "";
-    const remarks = req.query.remarks ? req.query.remarks.trim() : "";
+    // String() coercion guards against Express parsing duplicate params as an
+    // array (e.g. ?supplier[]=a&supplier[]=b), which would make .trim() throw.
+    const search = req.query.supplier ? String(req.query.supplier).trim() : "";
+    const companyId = req.query.company ? String(req.query.company).trim() : "";
+    const project = req.query.project ? String(req.query.project).trim() : "";
+    const finYear = req.query.finYear ? String(req.query.finYear).trim() : "";
+    const docNumber = req.query.docNumber ? String(req.query.docNumber).trim() : "";
+    const docDate = req.query.docDate ? String(req.query.docDate).trim() : "";
+    const dateParam = req.query.date ? String(req.query.date).trim() : "";
+    const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
+    const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
 
     const conditions = [];
