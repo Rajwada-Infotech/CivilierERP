@@ -94,7 +94,7 @@ function initSocket(httpServer) {
 
   // ── Connection lifecycle ─────────────────────────────────────────────────
   io.on("connection", (socket) => {
-    const { userId, role } = socket.data.user || {};
+    const { userId, role, roleId } = socket.data.user || {};
     logger.info(
       { event: "SOCKET_CONNECT", socketId: socket.id, userId, role },
       "Socket connected"
@@ -102,6 +102,11 @@ function initSocket(httpServer) {
 
     // Each user automatically joins their personal room for targeted emits.
     if (userId) socket.join(`user:${userId}`);
+
+    // Every user also joins a room scoped to their RoleId, so a change to
+    // role-level rights (RoleRights) can be pushed to everyone holding that
+    // role in one emit, without needing to look up each user's socket.
+    if (roleId) socket.join(`role:${roleId}`);
 
     // Ticket admins watch ticket/activity broadcasts.
     if (isTicketAdmin(role)) {

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -931,35 +931,39 @@ router.get("/:id/can-delete", async (req, res) => {
 
       // For each GRN, check if it has an expense booking
       const grnIds = grns.map((g) => g.grnId);
-      const idList = grnIds.join(",");
-
-      const expCheck = await pool.request().query(`
+      const expReq = pool.request();
+      const expPlaceholders = grnIds.map((id, i) => {
+        expReq.input(`gid${i}`, sql.Int, id);
+        return `@gid${i}`;
+      });
+      const expCheck = await expReq.query(`
         SELECT eb.Eid, eb.EDocNo, eb.EStatus, eb.ESourceId
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = 'GRN'
-          AND eb.ESourceId IN (${idList})
+          AND eb.ESourceId IN (${expPlaceholders.join(",")})
           AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
       `);
 
       if (expCheck.recordset.length > 0) {
         // Check if any of those expense bookings have cleared BRS payments
-        const expDocNos = expCheck.recordset
-          .map((e) => e.EDocNo)
-          .filter(Boolean)
-          .map((d) => `'${d.replace(/'/g, "''")}'`)
-          .join(",");
+        const docNoList = expCheck.recordset.map((e) => e.EDocNo).filter(Boolean);
 
         let brsCleared = [];
-        if (expDocNos.length > 0) {
-          const brsCheck = await pool.request().query(`
+        if (docNoList.length > 0) {
+          // Parameterise every doc-number — never interpolate DB-sourced strings into SQL.
+          const brsReq = pool.request();
+          const brsPlaceholders = docNoList.map((d, i) => {
+            brsReq.input(`dn${i}`, sql.NVarChar(100), d);
+            return `@dn${i}`;
+          });
+          brsCleared = (await brsReq.query(`
             SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
             FROM dbo.NewPayment np
             JOIN dbo.BankReconciliation brc
               ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
             JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            WHERE np.PExpenseRef IN (${expDocNos})
-          `);
-          brsCleared = brsCheck.recordset;
+            WHERE np.PExpenseRef IN (${brsPlaceholders.join(",")})
+          `)).recordset;
         }
 
         if (brsCleared.length > 0) {
@@ -984,14 +988,18 @@ router.get("/:id/can-delete", async (req, res) => {
 
         // Check for uncleared payments
         let linkedPayments = [];
-        if (expDocNos.length > 0) {
-          const payCheck = await pool.request().query(`
+        if (docNoList.length > 0) {
+          const payReq = pool.request();
+          const payPlaceholders = docNoList.map((d, i) => {
+            payReq.input(`pd${i}`, sql.NVarChar(100), d);
+            return `@pd${i}`;
+          });
+          linkedPayments = (await payReq.query(`
             SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
             FROM dbo.NewPayment np
             JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            WHERE np.PExpenseRef IN (${expDocNos})
-          `);
-          linkedPayments = payCheck.recordset;
+            WHERE np.PExpenseRef IN (${payPlaceholders.join(",")})
+          `)).recordset;
         }
 
         if (linkedPayments.length > 0) {

@@ -61,7 +61,7 @@ const emptyForm = (): FormState =>({ ReturnDate: today, IssueId: "", CompanyId: 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetchWithAuth(url, opts);
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as any).error || res.statusText); }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {

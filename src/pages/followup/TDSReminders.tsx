@@ -72,7 +72,7 @@ function fmtPct(p: number | null | undefined): string {
 
 async function fetchTdsRates(): Promise<TdsWithUrgency[]> {
   const res = await fetchWithAuth("/api/tds-master");
-  const list: DbTds[] = await res.json();
+  const list: DbTds[] = await res.json().catch(() => ({}));
 
   return list
     .map((tds) => ({

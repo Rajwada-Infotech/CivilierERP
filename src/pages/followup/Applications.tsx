@@ -921,7 +921,7 @@ export default function ApplicationsPage() {
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/options`);
       if (!r.ok) throw new Error("Failed");
-      return r.json();
+      return r.json().catch(() => ({}));
     },
   });
   const { data: customers = [] } = useQuery<Customer[]>({
@@ -929,7 +929,7 @@ export default function ApplicationsPage() {
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/customers`);
       if (!r.ok) throw new Error("Failed");
-      return r.json();
+      return r.json().catch(() => ({}));
     },
   });
   const { data: units = [] } = useQuery<UnitOption[]>({
@@ -938,7 +938,7 @@ export default function ApplicationsPage() {
       const p = form.ProjectId ? `?projectId=${form.ProjectId}` : "";
       const r = await fetchWithAuth(`${API}/units${p}`);
       if (!r.ok) throw new Error("Failed");
-      return r.json();
+      return r.json().catch(() => ({}));
     },
     enabled: drawerOpen,
   });
@@ -958,7 +958,7 @@ export default function ApplicationsPage() {
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}?${queryParams}`);
       if (!r.ok) throw new Error("Failed");
-      return r.json();
+      return r.json().catch(() => ({}));
     },
   });
 

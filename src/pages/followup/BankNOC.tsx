@@ -252,7 +252,7 @@ async function fetchBankNOCs(params: {
     }),
   });
   if (!res.ok) throw new Error("Failed to load Bank NOC records");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function updateBankNOC(id: number, payload: Record<string, unknown>) {

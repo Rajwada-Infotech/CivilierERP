@@ -25,7 +25,7 @@ export const GLAccountMultiSelect: React.FC<{
 
   useEffect(() => {
     fetchWithAuth("/api/general-ledger/options")
-      .then((res) => res.json())
+      .then((res) => res.json().catch(() => ({})))
       .then((data: GLOption[]) => setOptions(Array.isArray(data) ? data : []))
       .catch(() => setOptions([]))
       .finally(() => setLoading(false));

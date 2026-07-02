@@ -243,7 +243,7 @@ async function fetchMeta(): Promise<MetaOptions> {
     "/api/followup-possession-notice/meta/options",
   );
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchPNs(params: {
@@ -262,7 +262,7 @@ async function fetchPNs(params: {
   });
   const res = await fetchWithAuth(`/api/followup-possession-notice?${q}`);
   if (!res.ok) throw new Error("Failed to load Possession Notices");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: PossessionNotice[];
     pagination: {
       page: number;

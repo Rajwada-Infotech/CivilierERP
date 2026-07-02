@@ -186,7 +186,7 @@ async function fetchPayments(p: {
   });
   const res = await fetchWithAuth(`/api/followup-payments?${q}`);
   if (!res.ok) throw new Error("Failed to load payments");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: PaymentRow[];
     pagination: { page: number; pageSize: number; total: number };
     summary: PaymentSummary;
@@ -196,13 +196,13 @@ async function fetchPayments(p: {
 async function fetchProjects() {
   const res = await fetchWithAuth("/api/followup-payments/projects");
   if (!res.ok) throw new Error("Failed to load projects");
-  return res.json() as Promise<ProjectOption[]>;
+  return res.json().catch(() => ({})) as Promise<ProjectOption[]>;
 }
 
 async function fetchReceipts(termId: number) {
   const res = await fetchWithAuth(`/api/followup-payments/receipts/${termId}`);
   if (!res.ok) throw new Error("Failed to load receipts");
-  return res.json() as Promise<Receipt[]>;
+  return res.json().catch(() => ({})) as Promise<Receipt[]>;
 }
 
 async function recordPayment(termId: number, body: RecordForm) {
@@ -223,7 +223,7 @@ async function recordPayment(termId: number, body: RecordForm) {
       (err as { error?: string }).error || "Failed to record payment",
     );
   }
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     success: boolean;
     receiptNo: string;
     markedPaid: boolean;
@@ -244,7 +244,7 @@ async function deleteReceipt(receiptId: number) {
       (err as { error?: string }).error || "Failed to delete receipt",
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 // ─── Status pill ──────────────────────────────────────────────────────────────
@@ -406,7 +406,7 @@ export function FinancePaymentsPage() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/followup-payments/companies");
       if (!res.ok) throw new Error("Failed to load companies");
-      return res.json() as Promise<{ id: number; label: string }[]>;
+      return res.json().catch(() => ({})) as Promise<{ id: number; label: string }[]>;
     },
     staleTime: 5 * 60 * 1000,
   });

@@ -376,7 +376,7 @@ const ItemMaster: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/account-head/options?type=S");
       if (!res.ok) return [];
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return Array.isArray(data)
         ? data
         : Array.isArray(data?.data)

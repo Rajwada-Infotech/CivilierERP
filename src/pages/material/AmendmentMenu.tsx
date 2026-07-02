@@ -1157,7 +1157,7 @@ function DocTable({
     queryFn: () =>
       fetchWithAuth(
         `/api/expense-booking?page=${page}&limit=${PAGE_SIZE}`,
-      ).then((r) => r.json()),
+      ).then((r) => r.json().catch(() => ({}))),
     enabled: tab === "EB",
   });
 
@@ -1453,7 +1453,7 @@ export default function AmendmentMenu() {
     queryKey: ["amend-eb-list", 1],
     queryFn: () =>
       fetchWithAuth("/api/expense-booking?page=1&limit=1").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
   });
   const amendTotalQuery = useQuery({

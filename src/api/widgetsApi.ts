@@ -186,7 +186,7 @@ export async function getWidgetsDashboard(): Promise<WidgetsDashboardData> {
     throw new Error("Failed to load widgets dashboard");
   }
 
-  return response.json();
+  return response.json().catch(() => ({}));
 }
 
 export async function getWidgetCatalog(): Promise<WidgetCatalogItem[]> {
@@ -196,5 +196,5 @@ export async function getWidgetCatalog(): Promise<WidgetCatalogItem[]> {
     throw new Error("Failed to load widget catalog");
   }
 
-  return response.json();
+  return response.json().catch(() => ({}));
 }

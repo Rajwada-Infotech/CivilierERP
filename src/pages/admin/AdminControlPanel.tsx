@@ -72,7 +72,7 @@ export default function AdminControlPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/system/metrics");
       if (!res.ok) throw new Error("Failed to load system metrics");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: activeTab === "database",
     staleTime: 30_000,
@@ -83,7 +83,7 @@ export default function AdminControlPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/user-activity?page=${activityPage}&limit=20`);
       if (!res.ok) throw new Error("Failed to load activity");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: activeTab === "activity",
     staleTime: 30_000,

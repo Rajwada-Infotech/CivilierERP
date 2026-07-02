@@ -18,13 +18,13 @@ function safeArray<T>(raw: unknown): T[] {
 export const getWorkOrders = async () => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getWorkOrder = async (id: number) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const createWorkOrder = async (data: Record<string, unknown>) => {
@@ -42,7 +42,7 @@ export const createWorkOrder = async (data: Record<string, unknown>) => {
     }
     throw new Error(err.error || `POST failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateWorkOrder = async (
@@ -63,7 +63,7 @@ export const updateWorkOrder = async (
     }
     throw new Error(err.error || `PUT failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteWorkOrder = async (id: number) => {
@@ -77,7 +77,7 @@ export const deleteWorkOrder = async (id: number) => {
     }
     throw new Error(err.error || `DELETE failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // ── Dropdown data fetchers ────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ const _fetchAllActivities = async () => {
     group_id: number | null;
     is_active: boolean | null;
     hsn_code: string | null;
-  }>(await res.json());
+  }>(await res.json().catch(() => ({})));
 };
 
 export const fetchActivityGroups = async (): Promise<
@@ -358,7 +358,7 @@ export const saveFullWorkOrder = async (
     }
     throw new Error(err.error || `Save failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // ── Confirm WO → auto-create WO-POs ──────────────────────────────────────────
@@ -410,7 +410,7 @@ export const getWOPOPrefill = async (id: number): Promise<WOPOPrefill> => {
     }
     throw new Error(err.error || `Failed to load WO prefill: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const confirmWorkOrder = async (
@@ -431,5 +431,5 @@ export const confirmWorkOrder = async (
     }
     throw new Error(err.error || `Confirm failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

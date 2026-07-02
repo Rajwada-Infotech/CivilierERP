@@ -74,7 +74,7 @@ const EMPTY_FORM: ReminderFormState = {
 async function fetchReminders(): Promise<ReminderRecord[]> {
   const response = await fetchWithAuth("/api/tenant-reminders");
   if (!response.ok) throw new Error("Failed to load reminders");
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   return Array.isArray(data) ? data : data.data || [];
 }
 

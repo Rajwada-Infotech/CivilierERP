@@ -5,14 +5,14 @@ const BASE = "/api/followup-pre-possession";
 export async function fetchPrePossessionOptions() {
   const res = await fetchWithAuth(`${BASE}/meta/options`);
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function fetchPrePossessions(params?: Record<string, string>) {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
   if (!res.ok) throw new Error("Failed to fetch Pre-Possession records");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createPrePossession(payload: Record<string, unknown>) {
@@ -24,7 +24,7 @@ export async function createPrePossession(payload: Record<string, unknown>) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to create");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updatePrePossession(
@@ -39,11 +39,11 @@ export async function updatePrePossession(
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deletePrePossession(id: number) {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete");
-  return res.json();
+  return res.json().catch(() => ({}));
 }

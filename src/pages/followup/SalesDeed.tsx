@@ -255,7 +255,7 @@ const STATUS_META: Record<
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth("/api/followup-sales-deed/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchDeeds(params: {
@@ -280,7 +280,7 @@ async function fetchDeeds(params: {
   });
   const res = await fetchWithAuth(`/api/followup-sales-deed?${q}`);
   if (!res.ok) throw new Error("Failed to load Sales Deeds");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createDeed(payload: Record<string, unknown>) {

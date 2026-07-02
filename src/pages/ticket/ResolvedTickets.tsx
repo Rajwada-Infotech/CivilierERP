@@ -339,7 +339,7 @@ function TicketDetailView({
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/${ticketId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -368,7 +368,7 @@ function TicketDetailView({
         body: formData,
       });
       if (!res.ok) throw new Error(`Failed to upload ${file.name}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const firstId = data.attachments?.[0]?.id;
       if (firstId) allIds.push(firstId);
     }
@@ -827,7 +827,7 @@ const ResolvedTickets: React.FC = () => {
         const endpoint = canSeeAllTickets ? "/api/tickets?limit=100&status=Resolved,Closed" : "/api/tickets/my";
         const res = await fetchWithAuth(endpoint);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const payload = await res.json();
+        const payload = await res.json().catch(() => ({}));
         const raw: Ticket[] = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
         return raw.filter((t) => t.status === "Resolved" || t.status === "Closed");
       },

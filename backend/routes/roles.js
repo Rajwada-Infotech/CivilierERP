@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
@@ -386,6 +386,18 @@ router.post(
       permissionCache.invalidateRole(roleId);
     } catch {
       /* permissions module not loaded yet — no-op */
+    }
+
+    // Push to every currently-connected user holding this role so their
+    // session refreshes pagePermissions immediately instead of waiting on
+    // the client's periodic poll (or requiring a re-login) to pick up the
+    // change. Server-side enforcement (checkPermission) is already instant
+    // via the cache invalidation above — this closes the same gap on the
+    // client-rendered sidebar/menu.
+    try {
+      require("../socket").getIo().to(`role:${roleId}`).emit("permissions:updated");
+    } catch {
+      /* socket.io not initialized (e.g. tests) — no-op */
     }
 
     return res.json({ success: true });

@@ -140,7 +140,7 @@ export default function PaymentLogs() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/payment-logs");
       if (!res.ok) throw new Error("Failed to load payment logs");
-      const rows = await res.json();
+      const rows = await res.json().catch(() => ({}));
       // Normalize DB snake_case → component shape
       return rows.map((r: any) => ({
         id: String(r.Id),
@@ -185,7 +185,7 @@ export default function PaymentLogs() {
         body: JSON.stringify({ ...addForm, amount: parseFloat(addForm.amount) || 0 }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed"); }
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dba-payment-logs"] });

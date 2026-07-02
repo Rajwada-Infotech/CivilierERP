@@ -71,7 +71,7 @@ export const getPayments = async (
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
     throw new Error(await parseError(res, `GET failed: ${res.status}`));
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Fetch a single payment by PPaymentID — used by the Trial Balance drill-down
@@ -80,7 +80,7 @@ export const getPaymentById = async (id: number) => {
   const res = await fetchWithAuth(`${BASE_URL}?id=${id}&limit=1`);
   if (!res.ok)
     throw new Error(await parseError(res, `GET failed: ${res.status}`));
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   const rows = Array.isArray(data) ? data : data?.data ?? data?.rows ?? [];
   return rows[0] ?? null;
 };
@@ -92,7 +92,7 @@ export const addPayment = async (data: PaymentPayload) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(await parseError(res, "POST failed"));
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updatePayment = async (
@@ -105,11 +105,11 @@ export const updatePayment = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(await parseError(res, "PUT failed"));
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deletePayment = async (id: string | number) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await parseError(res, "DELETE failed"));
-  return res.json();
+  return res.json().catch(() => ({}));
 };

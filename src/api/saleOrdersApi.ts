@@ -60,13 +60,13 @@ export const getSaleOrders = async (params?: {
   if (params?.limit) qs.set("limit", String(params.limit));
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch sale orders: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getSaleOrderById = async (id: number): Promise<SaleOrder> => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch sale order: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteSaleOrder = async (
@@ -77,7 +77,7 @@ export const deleteSaleOrder = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Failed to delete sale order: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface CreateSaleOrderPayload {
@@ -109,5 +109,5 @@ export const createSaleOrder = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Sale order failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

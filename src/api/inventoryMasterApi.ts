@@ -36,5 +36,5 @@ export const getInventoryMaster = async (
   if (dateTo) qs.set("dateTo", dateTo);
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch inventory: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };

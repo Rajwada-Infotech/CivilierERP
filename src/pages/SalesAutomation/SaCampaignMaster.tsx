@@ -17,7 +17,7 @@ const API = "/api/sa/campaigns";
 async function fetchCampaigns(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch campaigns");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchPlatformOptions(): Promise<{ value: string; label: string }[]> {

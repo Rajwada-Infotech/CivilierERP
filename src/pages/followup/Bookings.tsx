@@ -718,7 +718,7 @@ function BookingForm({
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/${editBookingId}/payment-terms`);
       if (!res.ok) return [];
-      return res.json() as Promise<{ TermID: number }[]>;
+      return res.json().catch(() => ({})) as Promise<{ TermID: number }[]>;
     },
     enabled: !!editBookingId,
     staleTime: 0,
@@ -747,7 +747,7 @@ function BookingForm({
     queryFn: async () => {
       const res = await fetchWithAuth(TERMS_API);
       if (!res.ok) throw new Error("Failed to load payment terms");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 300_000,
   });
@@ -1202,7 +1202,7 @@ function BookingDrawer({
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/${booking.Id}/payment-terms`);
       if (!res.ok) return [];
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 60_000,
   });
@@ -1723,7 +1723,7 @@ export default function BookingsPage() {
       p.set("pageSize", String(PAGE_SIZE));
       const res = await fetchWithAuth(`${API}?${p}`);
       if (!res.ok) throw new Error("Failed to load");
-      return res.json() as Promise<{
+      return res.json().catch(() => ({})) as Promise<{
         data: Booking[];
         pagination: { total: number; totalPages: number };
       }>;
@@ -1736,7 +1736,7 @@ export default function BookingsPage() {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/applicants`);
       if (!res.ok) throw new Error("Failed");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 300_000,
   });
@@ -1746,7 +1746,7 @@ export default function BookingsPage() {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/projects`);
       if (!res.ok) throw new Error("Failed");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 600_000,
   });
@@ -1793,12 +1793,12 @@ export default function BookingsPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const j = await res.json();
+        const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Update failed");
       }
       toast.success("Booking updated");
       const updated = await fetchWithAuth(`${API}/${editBooking.Id}`)
-        .then((r) => r.json())
+        .then((r) => r.json().catch(() => ({})))
         .catch(() => null);
       if (updated) setSelectedBooking(updated);
     } else {
@@ -1808,15 +1808,15 @@ export default function BookingsPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const j = await res.json();
+        const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Create failed");
       }
-      const created = await res.json();
+      const created = await res.json().catch(() => ({}));
       toast.success("Booking created");
 
       // Fetch full booking record so communicator has correct name/email/phone
       const fullCreated = await fetchWithAuth(`${API}/${created.Id ?? created.id}`)
-        .then((r) => r.ok ? r.json() : created)
+        .then((r) => r.ok ? r.json().catch(() => ({})) : created)
         .catch(() => created);
 
       // Auto-create a Welcome Call record linked to this booking

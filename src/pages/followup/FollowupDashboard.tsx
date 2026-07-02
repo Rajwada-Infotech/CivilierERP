@@ -433,7 +433,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-applications"],
     queryFn: () =>
       fetchWithAuth("/api/followup-applications?pageSize=500").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -442,7 +442,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-bookings"],
     queryFn: () =>
       fetchWithAuth("/api/followup-bookings?pageSize=500").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -452,7 +452,7 @@ export default function FollowupDashboard() {
       queryKey: ["dashboard-unit-selections"],
       queryFn: () =>
         fetchWithAuth("/api/followup-unit-selections?pageSize=500").then((r) =>
-          r.json(),
+          r.json().catch(() => ({})),
         ),
       staleTime: 2 * 60 * 1000,
     });
@@ -461,7 +461,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-agreements"],
     queryFn: () =>
       fetchWithAuth("/api/followup-agreements?pageSize=500").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -469,7 +469,7 @@ export default function FollowupDashboard() {
   const { data: nocRes, isLoading: nocLoading } = useQuery({
     queryKey: ["dashboard-noc"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-noc?pageSize=500").then((r) => r.json()),
+      fetchWithAuth("/api/followup-noc?pageSize=500").then((r) => r.json().catch(() => ({}))),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -477,7 +477,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-sales-deed"],
     queryFn: () =>
       fetchWithAuth("/api/followup-sales-deed?pageSize=500").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -486,7 +486,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-handover"],
     queryFn: () =>
       fetchWithAuth("/api/followup-handover?pageSize=500").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -495,7 +495,7 @@ export default function FollowupDashboard() {
     queryKey: ["dashboard-construction"],
     queryFn: () =>
       fetchWithAuth("/api/followup-construction-updates?pageSize=500").then(
-        (r) => r.json(),
+        (r) => r.json().catch(() => ({})),
       ),
     staleTime: 2 * 60 * 1000,
   });
@@ -507,14 +507,14 @@ export default function FollowupDashboard() {
     isFetching,
   } = useQuery({
     queryKey: ["followup-dashboard-log"],
-    queryFn: () => fetchWithAuth("/api/followup-log").then((r) => r.json()),
+    queryFn: () => fetchWithAuth("/api/followup-log").then((r) => r.json().catch(() => ({}))),
     staleTime: 2 * 60 * 1000,
   });
 
   const { data: dashboardSummary } = useQuery({
     queryKey: ["followup-dashboard-summary"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-dashboard/summary").then((r) => r.json()),
+      fetchWithAuth("/api/followup-dashboard/summary").then((r) => r.json().catch(() => ({}))),
     staleTime: 2 * 60 * 1000,
   });
 

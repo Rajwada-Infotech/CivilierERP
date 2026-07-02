@@ -797,7 +797,7 @@ export default function ApplicantDetail() {
         const e = (await r.json().catch(() => ({}))) as ApiErrorPayload;
         throw new Error(e.error || "Failed");
       }
-      return r.json();
+      return r.json().catch(() => ({}));
     },
     enabled: Boolean(id),
     retry: false,
@@ -810,7 +810,7 @@ export default function ApplicantDetail() {
         `/api/followup-applications?search=${encodeURIComponent(stateName)}&pageSize=5`,
       );
       if (!r.ok) return null;
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       const list: FollowupApplicant[] = d.data ?? [];
       return list.find((a) => a.ApplicantName === stateName) ?? null;
     },
@@ -833,7 +833,7 @@ export default function ApplicantDetail() {
         `/api/followup-unit-selections?applicantId=${followupId}`,
       );
       if (!r.ok) return [];
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       return Array.isArray(d?.data) ? d.data : d;
     },
     enabled: Boolean(followupId),
@@ -846,7 +846,7 @@ export default function ApplicantDetail() {
         `/api/followup-agreements?applicantId=${followupId}`,
       );
       if (!r.ok) return [];
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       return Array.isArray(d?.data) ? d.data : d;
     },
     enabled: Boolean(followupId),
@@ -857,7 +857,7 @@ export default function ApplicantDetail() {
     queryFn: async () => {
       const r = await fetchWithAuth(`/api/followup-log?refId=${refId}`);
       if (!r.ok) return [];
-      return r.json();
+      return r.json().catch(() => ({}));
     },
     enabled: Boolean(refId),
   });
@@ -869,7 +869,7 @@ export default function ApplicantDetail() {
         `/api/tenant-reminders?module=applicant&refId=${refId}`,
       );
       if (!r.ok) return [];
-      return r.json();
+      return r.json().catch(() => ({}));
     },
     enabled: Boolean(refId),
     retry: false,

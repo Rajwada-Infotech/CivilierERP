@@ -21,7 +21,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const rateLimit = require("express-rate-limit");
-const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, message: { error: "Too many requests, please try again later." } });
 router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -1024,7 +1024,11 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
     await bumpCacheVersion("material-issues");
     res.json({ message: "Material Issue approved", ...result });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    // Matches the newPayment.js/receivedPayment.js convention: an
+    // authorization failure from transition()'s role gate is a 403, not a
+    // generic 400 validation error.
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -1044,7 +1048,8 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     await bumpCacheVersion("material-issues");
     res.json({ message: "Material Issue rejected", ...result });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 module.exports = router;

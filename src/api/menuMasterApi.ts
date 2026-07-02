@@ -15,7 +15,7 @@ export interface MenuMaster {
 export const getMenuMasters = async (): Promise<MenuMaster[]> => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addMenuMaster = async (data: {
@@ -27,10 +27,10 @@ export const addMenuMaster = async (data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateMenuMaster = async (
@@ -42,10 +42,10 @@ export const updateMenuMaster = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteMenuMaster = async (id: number) => {
@@ -53,8 +53,8 @@ export const deleteMenuMaster = async (id: number) => {
     method: "DELETE",
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

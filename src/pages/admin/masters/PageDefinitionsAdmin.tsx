@@ -101,7 +101,7 @@ const emptyForm: FormState = {
 async function fetchAll(): Promise<PageDef[]> {
   const res = await fetchWithAuth("/api/page-definitions/all");
   if (!res.ok) throw new Error("Failed to fetch page definitions");
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   return json.data ?? [];
 }
 
@@ -121,7 +121,7 @@ async function createDef(
     }),
   });
   if (!res.ok) {
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     throw new Error(j.error || "Create failed");
   }
 }
@@ -144,7 +144,7 @@ async function updateDef(
     }),
   });
   if (!res.ok) {
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     throw new Error(j.error || "Update failed");
   }
 }
@@ -154,7 +154,7 @@ async function deleteDef(id: number) {
     method: "DELETE",
   });
   if (!res.ok) {
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     throw new Error(j.error || "Delete failed");
   }
 }

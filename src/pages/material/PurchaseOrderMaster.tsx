@@ -141,7 +141,7 @@ function usePOChainStatus(poId: string | null) {
     fetchWithAuth(
       `/api/expense-booking/chain-status?sourceType=PO&sourceId=${poId}`,
     )
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then(setStatus)
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -555,7 +555,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["cost-centers-po"],
     queryFn: () =>
-      fetchWithAuth("/api/cost-center/options").then((r) => r.json()),
+      fetchWithAuth("/api/cost-center/options").then((r) => r.json().catch(() => ({}))),
   });
 
   // ── Normalise data ────────────────────────────────────────────────────────

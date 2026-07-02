@@ -30,13 +30,13 @@ export interface GodownsResponse {
 export const getGodowns = async (): Promise<GodownsResponse> => {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error(`Failed to fetch godowns: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getGodown = async (id: number): Promise<Godown> => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch godown: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface CreateGodownPayload {
@@ -63,7 +63,7 @@ export const createGodown = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Create failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateGodown = async (
@@ -79,7 +79,7 @@ export const updateGodown = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Update failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteGodown = async (
@@ -90,5 +90,5 @@ export const deleteGodown = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Delete failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
