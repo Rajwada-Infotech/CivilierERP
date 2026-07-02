@@ -123,7 +123,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
   material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
-  followup: { h: 235, s: 90, l: 74 }, // #818cf8 light indigo-violet
+  followup: { h: 174, s: 82, l: 31 }, // #0d9488 teal
   engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
   ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
   sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple

@@ -48,9 +48,9 @@ const MODULES = [
     icon: Category2,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
-    color: "#818cf8",
-    bg: "rgba(129,140,248,0.22)",
-    ringRgb: "129,140,248",
+    color: "#0d9488",
+    bg: "rgba(13,148,136,0.18)",
+    ringRgb: "13,148,136",
   },
   {
     id: "engineering" as Module,

@@ -131,9 +131,9 @@ const MODULE_META: Record<
     route: MODULE_DASHBOARD_ROUTES.material,
   },
   followup: {
-    h: 263,
-    s: 70,
-    l: 58,
+    h: 174,
+    s: 72,
+    l: 40,
     icon: Category2,
     label: "Follow Up",
     route: MODULE_DASHBOARD_ROUTES.followup,

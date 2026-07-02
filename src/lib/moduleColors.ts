@@ -5,7 +5,7 @@
 export const MODULE_ACCENT: Record<string, string> = {
   finance: "#6366f1",
   material: "#10b981",
-  followup: "#818cf8",
+  followup: "#0d9488",
   engineering: "#f97316",
   ticket: "#ec4899",
   sales: "#a855f7",
