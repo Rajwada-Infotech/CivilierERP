@@ -963,7 +963,7 @@ const ReportTable: React.FC<{
   useEffect(() => {
     if (!isStockSummary) return;
     fetchWithAuth("/api/godowns")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((j) => {
         const list = Array.isArray(j) ? j : (j.data ?? []);
         setGodowns(list);
@@ -1300,11 +1300,11 @@ const Reports: React.FC = () => {
 
   useEffect(() => {
     fetchWithAuth("/api/reports/companies")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((l: CompanyOption[]) => setCompanies(Array.isArray(l) ? l : []))
       .catch(() => {});
     fetchWithAuth("/api/fin-year")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((l: FinYearOption[]) => setFinYears(Array.isArray(l) ? l : []))
       .catch(() => {});
   }, []);

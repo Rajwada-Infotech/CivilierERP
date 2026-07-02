@@ -138,7 +138,7 @@ function PriorityBadge({ priority }: { priority: string | null }) {
 async function fetchFollowupTasks(): Promise<FollowupTask[]> {
   const res = await fetchWithAuth("/api/tasks?module=followup");
   if (!res.ok) throw new Error("Failed to load follow-up tasks");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createFollowupTask(payload: {

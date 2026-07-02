@@ -12,12 +12,12 @@ const API = "/api/sa/lead-transfers";
 async function fetchRequests(): Promise<any[]> {
   const r = await fetchWithAuth(API);
   if (!r.ok) throw new Error("Failed to fetch transfer requests");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 async function fetchItems(requestId: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${requestId}/items`);
   if (!r.ok) throw new Error("Failed to fetch leads");
-  return r.json();
+  return r.json().catch(() => ({}));
 }
 
 const statusBadge = (status: string) => {

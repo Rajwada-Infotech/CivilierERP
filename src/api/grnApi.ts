@@ -185,7 +185,7 @@ export const getGRNs = async (
 ): Promise<PaginatedResponse<any>> => {
   const res = await fetch(buildUrl(BASE, query), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch GRNs");
-  return normalizePaginated(await res.json());
+  return normalizePaginated(await res.json().catch(() => ({})));
 };
 
 export const addGRN = async (data: GRNFormDataPayload) => {
@@ -198,7 +198,7 @@ export const addGRN = async (data: GRNFormDataPayload) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to create GRN");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
@@ -211,7 +211,7 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to update GRN");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteGRN = async (id: string) => {
@@ -223,7 +223,7 @@ export const deleteGRN = async (id: string) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to delete GRN");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // ── Attachments ────────────────────────────────────────────────────────────
@@ -259,7 +259,7 @@ export const uploadGRNAttachments = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to upload attachment(s)");
   }
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return data.attachments as GRNAttachment[];
 };
 
@@ -272,7 +272,7 @@ export const deleteGRNAttachment = async (attachmentId: number) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to delete attachment");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getGRNAttachments = async (
@@ -285,7 +285,7 @@ export const getGRNAttachments = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to fetch attachments");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const previewNextGRNNumber = async (
@@ -298,7 +298,7 @@ export const previewNextGRNNumber = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to preview GRN number");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // â”€â”€ Dropdown fetches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -308,7 +308,7 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch suppliers");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : [];
 };
 
@@ -321,7 +321,7 @@ export const getPurchaseOrders = async (
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
-  return normalizeArray<PurchaseOrder>(await res.json());
+  return normalizeArray<PurchaseOrder>(await res.json().catch(() => ({})));
 };
 
 export const getPurchaseOrderById = async (
@@ -331,7 +331,7 @@ export const getPurchaseOrderById = async (
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch PO details");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getItems = async (): Promise<Item[]> => {
@@ -339,14 +339,14 @@ export const getItems = async (): Promise<Item[]> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Items");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : [];
 };
 
 export const getUoms = async (): Promise<UOM[]> => {
   const res = await fetch("/api/uom-master", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch UOMs");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data)
     ? data.filter((u: UOM) => u.IsActive !== false)
     : [];
@@ -357,7 +357,7 @@ export const getProjects = async (): Promise<
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) throw new Error("Failed to fetch projects");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   // /enterprises/options returns { id, label, belongs_to } â€” normalise to { id, name }
   return Array.isArray(data)
     ? (data as { id: number; label: string; short_name?: string | null }[]).map(
@@ -401,7 +401,7 @@ export const createGRNFromTransfer = async (
       err.error || `Failed to create GRN from transfer: ${res.status}`,
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface TransferGRNSummary {
@@ -421,5 +421,5 @@ export const getGRNsByTransfer = async (
   const res = await fetchWithAuth(`/api/grns/by-transfer/${transferId}`);
   if (!res.ok)
     throw new Error(`Failed to fetch GRNs for transfer: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };

@@ -129,7 +129,7 @@ function RemainingItemsPanel({
   useEffect(() => {
     setLoading(true);
     fetchWithAuth(`/api/grns/${grnId}/pending-items`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : null))
       .then((d) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -329,7 +329,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
     fetchWithAuth(
       `/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
     )
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then(setChain)
       .catch(() => {});
   }, [grnId]);
@@ -369,7 +369,7 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
     fetchWithAuth(
       `/api/expense-booking/by-source?sourceType=GRN&sourceId=${grnId}`,
     )
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) =>
         setBookings(
           Array.isArray(data)

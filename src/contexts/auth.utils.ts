@@ -97,6 +97,12 @@ export const CUSTOMER_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
 ];
 
+// Supplier portal: can only submit quotation prices and manage their rate catalog
+export const SUPPLIER_ACCESS: PagePermission[] = [
+  { page: "supplier-quotations", actions: ["view", "create", "edit"] },
+  { page: "supplier-catalog", actions: ["view", "create", "edit"] },
+];
+
 // Sales Team Lead: view+edit leads/visits/inquiry, view-only marketing, view+create distribution/transfers
 export const SALES_TEAM_LEAD_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
@@ -135,6 +141,7 @@ export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
   if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
   if (role === "engineer") return ENGINEER_ACCESS;
   if (role === "customer") return CUSTOMER_ACCESS;
+  if (role === "supplier") return SUPPLIER_ACCESS;
   if (role === "marketing_head") return MARKETING_HEAD_ACCESS;
   if (role === "sales_team_lead") return SALES_TEAM_LEAD_ACCESS;
   if (role === "sales_person") return SALES_PERSON_ACCESS;

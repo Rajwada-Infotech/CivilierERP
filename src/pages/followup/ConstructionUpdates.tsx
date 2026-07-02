@@ -351,7 +351,7 @@ async function fetchMeta(): Promise<MetaOptions> {
     "/api/followup-construction-updates/meta/options",
   );
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchUpdates(params: {
@@ -368,7 +368,7 @@ async function fetchUpdates(params: {
   });
   const res = await fetchWithAuth(`/api/followup-construction-updates?${q}`);
   if (!res.ok) throw new Error("Failed to load updates");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: ConstructionUpdate[];
     pagination: {
       page: number;

@@ -8,7 +8,7 @@ const getAuthHeaders = () => ({
 export const getTCRecords = async () => {
   const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addTCRecord = async (data: Record<string, unknown>) => {
@@ -22,7 +22,7 @@ export const addTCRecord = async (data: Record<string, unknown>) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Updated to accept string | number (more flexible)
@@ -40,7 +40,7 @@ export const updateTCRecord = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Updated to accept string | number
@@ -53,5 +53,5 @@ export const deleteTCRecord = async (id: string | number) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

@@ -637,7 +637,7 @@ export default function MaterialDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/item-master");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "items",
@@ -649,7 +649,7 @@ export default function MaterialDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/grns?page=1&limit=200");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "grns",
@@ -663,7 +663,7 @@ export default function MaterialDashboard() {
         "/api/purchase-orders?page=1&limit=200&status=Open",
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "pos",
@@ -675,7 +675,7 @@ export default function MaterialDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/expense-booking?status=Pending");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "expenses",
@@ -687,7 +687,7 @@ export default function MaterialDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/stock-ledger?page=1&limit=200");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "stock",
@@ -701,7 +701,7 @@ export default function MaterialDashboard() {
         "/api/material-issues?page=1&limit=200&search=",
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "issues",
@@ -715,7 +715,7 @@ export default function MaterialDashboard() {
         "/api/material-requests?page=1&limit=200",
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
     },
     enabled: openModal === "requests",
@@ -731,7 +731,7 @@ export default function MaterialDashboard() {
           const errBody = await res.json().catch(() => ({}));
           throw new Error(errBody?.error || `HTTP ${res.status}`);
         }
-        const raw = await res.json();
+        const raw = await res.json().catch(() => ({}));
 
         return {
           items: raw.items ?? { count: 0, groupCount: 0 },

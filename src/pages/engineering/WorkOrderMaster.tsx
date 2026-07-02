@@ -109,9 +109,9 @@ function useWOChainStatus(woId: number | null) {
     Promise.all([
       fetchWithAuth(
         `/api/expense-booking/chain-status?sourceType=WO&sourceId=${woId}`,
-      ).then((r) => r.json()),
+      ).then((r) => r.json().catch(() => ({}))),
       fetchWithAuth(`/api/engineering/work-order-summary/${woId}`).then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     ])
       .then(([chain, summary]) => {

@@ -6,7 +6,7 @@ const { checkPermission } = require("../middleware/permissions");
 const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
 
 const PERMISSION_MODULE = "Followup";

@@ -8,7 +8,7 @@ import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 async function fetchSalesDashboard(): Promise<any> {
   const res = await fetchWithAuth("/api/sa/dashboard/sales");
   if (!res.ok) throw new Error("Failed to fetch sales dashboard");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string | number; tone?: string }> = ({ icon: Icon, label, value, tone }) => (

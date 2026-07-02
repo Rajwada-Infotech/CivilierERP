@@ -223,7 +223,7 @@ function initials(name: string): string {
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth("/api/followup-agreements/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchAgreements(params: {
@@ -248,7 +248,7 @@ async function fetchAgreements(params: {
   });
   const res = await fetchWithAuth(`/api/followup-agreements?${q}`);
   if (!res.ok) throw new Error("Failed to load agreements");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createAgreement(payload: Record<string, unknown>) {

@@ -28,7 +28,8 @@ export type DocModule =
   | "DN" // Debit Note
   | "WD" // Work Done
   | "MR" // Material Request
-  | "ISS"; // Material Issue
+  | "ISS" // Material Issue
+  | "QT"; // Quotation
 
 /**
  * Shape returned by GET /api/document-type.
@@ -96,7 +97,7 @@ export async function fetchNextDocNumber(
     `/api/document-type/${docTypeId}/next-number${qs}`,
   );
   if (!res.ok) return "";
-  const data: NextNumberResult = await res.json();
+  const data: NextNumberResult = await res.json().catch(() => ({}));
   return data.nextDocNo ?? "";
 }
 
@@ -110,7 +111,7 @@ export async function fetchDocTypes(
   const qs = module ? `?module=${encodeURIComponent(module)}` : "";
   const res = await fetchWithAuth(`/api/document-type${qs}`);
   if (!res.ok) return [];
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 // ── Label builder ─────────────────────────────────────────────────────────────

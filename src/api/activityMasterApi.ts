@@ -65,7 +65,7 @@ export const toPayload = (
 export const getActivities = async (): Promise<DbActivity[]> => {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error(`Failed to fetch activities: ${res.statusText}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addActivity = async (
@@ -77,7 +77,7 @@ export const addActivity = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(`Failed to add activity: ${res.statusText}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateActivity = async (
@@ -90,7 +90,7 @@ export const updateActivity = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(`Failed to update activity: ${res.statusText}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteActivity = async (
@@ -98,5 +98,5 @@ export const deleteActivity = async (
 ): Promise<ApiResponse> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to delete activity: ${res.statusText}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };

@@ -225,7 +225,7 @@ const API = "/api/followup-welcome-calls";
 async function fetchCalls(): Promise<WelcomeCall[]> {
   const res = await fetchWithAuth(`${API}?pageSize=200`);
   if (!res.ok) throw new Error("Failed to load welcome calls");
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   return json.data ?? json;
 }
 
@@ -241,7 +241,7 @@ async function createCall(payload: Record<string, unknown>) {
       (err as { error?: string }).error || "Failed to create entry",
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function deleteCall(id: number) {
@@ -265,7 +265,7 @@ interface MetaOptions {
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth(`${API}/meta/options`);
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 // ─── Call Card ────────────────────────────────────────────────────────────────
@@ -921,7 +921,7 @@ export function WelcomeCallsPage() {
                               set("BookingId", String(b.Id));
                               // We need ApplicantId — stored on booking; fetch it
                               fetchWithAuth(`/api/followup-bookings/${b.Id}`)
-                                .then((r) => r.json())
+                                .then((r) => r.json().catch(() => ({})))
                                 .then((data) => {
                                   if (data?.ApplicantId) {
                                     setForm((f) => ({

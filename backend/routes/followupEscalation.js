@@ -16,7 +16,7 @@ const { runEscalation } = require("../escalationEngine");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 20, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "Escalation"));
 

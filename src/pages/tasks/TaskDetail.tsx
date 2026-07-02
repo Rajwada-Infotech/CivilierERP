@@ -105,7 +105,7 @@ export default function TaskDetail() {
     fetchWithAuth(`/api/tasks/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error("Task not found");
-        return r.json();
+        return r.json().catch(() => ({}));
       })
       .then((t: Task) => setResolvedTask(t))
       .catch((e) => setFetchError(e.message))

@@ -12,7 +12,7 @@ export interface AgreementWorkflowStep {
 export async function fetchAgreementWorkflowOptions() {
   const res = await fetchWithAuth(`${BASE}/meta/options`);
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function fetchAgreementWorkflows(
@@ -21,7 +21,7 @@ export async function fetchAgreementWorkflows(
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
   if (!res.ok) throw new Error("Failed to fetch Agreement Workflows");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createAgreementWorkflow(
@@ -35,7 +35,7 @@ export async function createAgreementWorkflow(
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to create");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updateAgreementWorkflow(
@@ -50,7 +50,7 @@ export async function updateAgreementWorkflow(
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updateWorkflowStep(
@@ -65,11 +65,11 @@ export async function updateWorkflowStep(
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update step");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deleteAgreementWorkflow(id: number) {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete");
-  return res.json();
+  return res.json().catch(() => ({}));
 }

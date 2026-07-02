@@ -101,7 +101,7 @@ function useAllowedWidgets() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/user-widget-rights/my");
       if (!res.ok) throw new Error("Failed to load widget rights");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 5 * 60 * 1000, // re-fetch every 5 min
     retry: false, // don't retry on 404 — graceful fallback

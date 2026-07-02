@@ -14,7 +14,7 @@ interface AppVersionData {
 async function fetchAppVersion(): Promise<AppVersionData> {
   const res = await fetchWithAuth("/api/app-version");
   if (!res.ok) throw new Error("Failed to fetch app version");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export function useAppVersion() {

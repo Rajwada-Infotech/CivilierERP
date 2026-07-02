@@ -138,7 +138,7 @@ const SalesDashboard = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/sales-dashboard");
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 2 * 60_000,
     refetchInterval: 5 * 60_000,

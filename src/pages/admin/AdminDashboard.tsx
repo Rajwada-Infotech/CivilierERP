@@ -179,7 +179,7 @@ export default function AdminDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/admin-dashboard");
       if (!res.ok) throw new Error("Failed to fetch dashboard");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 60_000,
     refetchInterval: 2 * 60_000,
@@ -192,7 +192,7 @@ export default function AdminDashboard() {
       queryFn: async () => {
         const res = await fetchWithAuth("/api/user-activity?limit=6&page=1");
         if (!res.ok) throw new Error("Failed to fetch activity log");
-        return res.json();
+        return res.json().catch(() => ({}));
       },
       staleTime: 60_000,
       refetchInterval: 90_000,
