@@ -2,7 +2,7 @@ import React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -116,13 +116,8 @@ const SaSocialMediaMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load platforms.</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Social Media Master"]} />
-      <div className="space-y-8 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Social Media Master</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Manage social media platforms and their campaign connections</p>
-        </div>
+    <SalesAutoShell title="Social Media Master" subtitle="Manage social media platforms and their campaign connections">
+      <div className="space-y-8">
         <MasterPage
           title="Social Media Platform"
           fields={fields}
@@ -151,7 +146,7 @@ const SaSocialMediaMaster: React.FC = () => {
           }}
         />
       </div>
-    </>
+    </SalesAutoShell>
   );
 };
 

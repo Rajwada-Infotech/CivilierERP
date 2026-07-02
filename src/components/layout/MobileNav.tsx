@@ -155,9 +155,9 @@ const MODULE_META: Record<
     route: MODULE_DASHBOARD_ROUTES.ticket,
   },
   records: {
-    h: 45,
-    s: 93,
-    l: 47,
+    h: 347,
+    s: 77,
+    l: 50,
     icon: Archive,
     label: "Records",
     route: MODULE_DASHBOARD_ROUTES.records,
