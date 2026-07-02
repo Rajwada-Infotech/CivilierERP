@@ -55,13 +55,13 @@ function getAuthHeaders(): Record<string, string> {
 async function fetchUsers(): Promise<UserEntry[]> {
   const res = await fetch("/api/user-widget-rights/users", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchUserWidgets(userId: number): Promise<string[]> {
   const res = await fetch(`/api/user-widget-rights/${userId}`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch widget rights");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return data.allowedWidgets ?? [];
 }
 

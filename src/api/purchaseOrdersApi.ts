@@ -66,6 +66,8 @@ export interface PurchaseOrder {
   SourceWODocNo?: string | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
+  SourceQTId?: number | null;
+  SourceQTDocNo?: string | null;
   SourceWDId?: number | null;
   SourceWDDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO";
@@ -118,6 +120,8 @@ export interface CreatePOPayload {
   SourceWODocNo?: string | null;
   SourceMRId?: number | string | null;
   SourceMRDocNo?: string | null;
+  SourceQTId?: number | string | null;
+  SourceQTDocNo?: string | null;
   SourceWDId?: number | string | null;
   SourceWDDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO";
@@ -176,7 +180,7 @@ async function handleResponse<T = any>(res: Response): Promise<T> {
     }
     throw new Error(message);
   }
-  return res.json() as Promise<T>;
+  return res.json().catch(() => ({})) as Promise<T>;
 }
 
 // ── API Functions ─────────────────────────────────────────────────────────────

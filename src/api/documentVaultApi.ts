@@ -5,14 +5,14 @@ const BASE = "/api/followup-document-vault";
 export async function fetchDocumentVaultOptions() {
   const res = await fetchWithAuth(`${BASE}/meta/options`);
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function fetchDocuments(params?: Record<string, string>) {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
   if (!res.ok) throw new Error("Failed to fetch documents");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function uploadDocument(formData: FormData) {
@@ -25,7 +25,7 @@ export async function uploadDocument(formData: FormData) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as { error?: string }).error || "Upload failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updateDocument(id: number, payload: Record<string, unknown>) {
@@ -37,13 +37,13 @@ export async function updateDocument(id: number, payload: Record<string, unknown
     const err = await res.json().catch(() => ({}));
     throw new Error((err as { error?: string }).error || "Failed to update");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deleteDocument(id: number) {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete document");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 /** Returns the URL to stream/download a file inline */

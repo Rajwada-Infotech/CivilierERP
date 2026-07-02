@@ -14,7 +14,7 @@ const API = "/api/sa/marketing-invoices";
 async function fetchInvoices(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch invoices");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchCampaignOptions(): Promise<{ value: string; label: string }[]> {
   try {

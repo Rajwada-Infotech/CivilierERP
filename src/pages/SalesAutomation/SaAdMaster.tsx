@@ -18,7 +18,7 @@ const API = "/api/sa/ads";
 async function fetchAds(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch ads");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchCampaignOptions(): Promise<{ value: string; label: string }[]> {

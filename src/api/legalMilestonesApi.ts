@@ -38,14 +38,14 @@ async function parseError(res: Response): Promise<string> {
 export async function fetchLegalMilestonesOptions() {
   const res = await fetchWithAuth(`${BASE}/meta/options`);
   if (!res.ok) throw new Error(`Failed to load options: ${await parseError(res)}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function fetchLegalMilestones(params?: Record<string, string>) {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch Legal Milestones: ${await parseError(res)}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createLegalMilestone(payload: Record<string, unknown>) {
@@ -54,7 +54,7 @@ export async function createLegalMilestone(payload: Record<string, unknown>) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 /**
@@ -71,7 +71,7 @@ export async function updateLegalMilestone(
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 /**
@@ -102,11 +102,11 @@ export async function updateMilestoneStep(
     body: JSON.stringify(step),
   });
   if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deleteLegalMilestone(id: number) {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to delete: ${await parseError(res)}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 }

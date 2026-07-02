@@ -5,7 +5,7 @@ const BASE_URL = "/api/hsn";
 export const getHsn = async () => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addHsn = async (data: Record<string, unknown>) => {
@@ -14,10 +14,10 @@ export const addHsn = async (data: Record<string, unknown>) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateHsn = async (
@@ -29,10 +29,10 @@ export const updateHsn = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteHsn = async (code: string) => {
@@ -40,8 +40,8 @@ export const deleteHsn = async (code: string) => {
     method: "DELETE",
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

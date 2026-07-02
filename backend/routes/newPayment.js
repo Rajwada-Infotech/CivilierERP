@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -92,37 +92,45 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
-    const search = req.query.supplier ? req.query.supplier.trim() : "";
-    const companyId = req.query.company ? req.query.company.trim() : "";
-    const project = req.query.project ? req.query.project.trim() : "";
-    const finYear = req.query.finYear ? req.query.finYear.trim() : "";
-    const docNumber = req.query.docNumber ? req.query.docNumber.trim() : "";
-    const docDate = req.query.docDate ? req.query.docDate.trim() : "";
-    const dateParam = req.query.date ? req.query.date.trim() : "";
-    const dueDate = req.query.dueDate ? req.query.dueDate.trim() : "";
-    const remarks = req.query.remarks ? req.query.remarks.trim() : "";
+    // String() coercion guards against Express parsing duplicate params as an
+    // array (e.g. ?supplier[]=a&supplier[]=b), which would make .trim() throw.
+    const search = req.query.supplier ? String(req.query.supplier).trim() : "";
+    const companyId = req.query.company ? String(req.query.company).trim() : "";
+    const project = req.query.project ? String(req.query.project).trim() : "";
+    const finYear = req.query.finYear ? String(req.query.finYear).trim() : "";
+    const docNumber = req.query.docNumber ? String(req.query.docNumber).trim() : "";
+    const docDate = req.query.docDate ? String(req.query.docDate).trim() : "";
+    const dateParam = req.query.date ? String(req.query.date).trim() : "";
+    const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
+    const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
 
+    // Every column here is qualified with np. — the data query joins
+    // dbo.GoodsReceiptNotes and dbo.PurchaseOrders, both of which also have a
+    // DocNo column, so an unqualified `DocNo LIKE @search`/`DocNo LIKE
+    // @docNumber` throws "Ambiguous column name 'DocNo'" the moment the
+    // search or docNumber filter is used. The count query below is aliased
+    // to match.
     const conditions = [];
-    if (idFilter) conditions.push(`PPaymentID = @idFilter`);
+    if (idFilter) conditions.push(`np.PPaymentID = @idFilter`);
     if (search) {
-      conditions.push(`(PPaymentName LIKE @search
-          OR DocNo LIKE @search
-          OR PExpenseRef LIKE @search
-          OR PProject LIKE @search
-          OR PCompany LIKE @search
-          OR PBankName LIKE @search)`);
+      conditions.push(`(np.PPaymentName LIKE @search
+          OR np.DocNo LIKE @search
+          OR np.PExpenseRef LIKE @search
+          OR np.PProject LIKE @search
+          OR np.PCompany LIKE @search
+          OR np.PBankName LIKE @search)`);
     }
-    if (companyId) conditions.push(`PCompany = @companyId`);
-    if (project) conditions.push(`PProject LIKE @project`);
-    if (finYear) conditions.push(`DocYear  = @finYear`);
-    if (docNumber) conditions.push(`DocNo LIKE @docNumber`);
-    if (docDate) conditions.push(`CAST(PCreatedAt AS DATE) = @docDate`);
-    if (dateParam) conditions.push(`PDate = @dateParam`);
-    if (dueDate) conditions.push(`PChequeDate = @dueDate`);
+    if (companyId) conditions.push(`np.PCompany = @companyId`);
+    if (project) conditions.push(`np.PProject LIKE @project`);
+    if (finYear) conditions.push(`np.DocYear  = @finYear`);
+    if (docNumber) conditions.push(`np.DocNo LIKE @docNumber`);
+    if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
+    if (dateParam) conditions.push(`np.PDate = @dateParam`);
+    if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
     if (remarks)
       conditions.push(
-        `(PPaymentName LIKE @remarks OR PExpenseRef LIKE @remarks)`,
+        `(np.PPaymentName LIKE @remarks OR np.PExpenseRef LIKE @remarks)`,
       );
 
     const whereClause = conditions.length
@@ -143,7 +151,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
-      `SELECT COUNT(*) AS total FROM dbo.NewPayment ${whereClause}`,
+      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${whereClause}`,
     );
     const total = parseInt(countResult.recordset[0].total);
 
@@ -575,7 +583,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (PExpenseRef) await syncBillStatus(pool, PExpenseRef);
 
     await bumpCacheVersion("new-payment");
-    res.json({
+    res.status(201).json({
       message: "Payment added successfully",
       PPaymentID: newId,
       docNo: finalDocNo,

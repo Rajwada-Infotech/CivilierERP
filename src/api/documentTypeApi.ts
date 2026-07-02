@@ -73,28 +73,28 @@ export interface DocTypePayload {
 export const getDocumentTypes = async (): Promise<DocTypeRecord[]> => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error("Failed to fetch document types");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 /** Entry_Type master — provides EntryType label + Eprefix */
 export const getEntryTypes = async (): Promise<EntryTypeOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/entrytypes`);
   if (!res.ok) throw new Error("Failed to fetch entry types");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 /** Companies dropdown (enterprise where business_type = 'C') */
 export const getCompanies = async (): Promise<CompanyOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/companies`);
   if (!res.ok) throw new Error("Failed to fetch companies");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 /** Projects dropdown (enterprise where business_type = 'P') */
 export const getProjects = async (): Promise<ProjectOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export const createDocumentType = async (
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to create document type");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateDocumentType = async (
@@ -125,7 +125,7 @@ export const updateDocumentType = async (
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update document type");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteDocumentType = async (
@@ -133,5 +133,5 @@ export const deleteDocumentType = async (
 ): Promise<{ message: string }> => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to deactivate document type");
-  return res.json();
+  return res.json().catch(() => ({}));
 };

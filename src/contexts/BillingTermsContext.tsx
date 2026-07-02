@@ -87,7 +87,7 @@ export const BillingTermsProvider: React.FC<{ children: React.ReactNode }> = ({
     let cancelled = false;
 
     fetchWithAuth("/api/billing-terms")
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data: any[]) => {
         if (cancelled) return;
         if (Array.isArray(data)) {

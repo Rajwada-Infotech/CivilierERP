@@ -29,7 +29,7 @@ export function useUserMap(): (email: string | null | undefined) => string {
     fetchWithAuth("/api/users")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch users");
-        return res.json();
+        return res.json().catch(() => ({}));
       })
       .then((users: UserRecord[]) => {
         if (cancelled) return;

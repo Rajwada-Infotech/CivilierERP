@@ -144,7 +144,7 @@ export default function ControlPanel() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/control-panel");
       if (!res.ok) throw new Error("Failed to load tenants");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
   });
 
@@ -162,7 +162,7 @@ export default function ControlPanel() {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Update failed");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["dba-control-panel"] }),

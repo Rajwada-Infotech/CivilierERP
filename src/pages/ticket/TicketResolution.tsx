@@ -425,7 +425,7 @@ export default function TicketResolution() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/tickets?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const all = unwrapTicketList<Ticket>(await res.json()).data;
+      const all = unwrapTicketList<Ticket>(await res.json().catch(() => ({}))).data;
       // Only unresolved: Pending or InProgress
       return all.filter(
         (t) => t.status === "Pending" || t.status === "InProgress",

@@ -69,7 +69,7 @@ export const followupCommunicatorApi = {
       const err = await res.json().catch(() => ({}));
       throw new Error((err as { error?: string }).error || "Send failed");
     }
-    return res.json();
+    return res.json().catch(() => ({}));
   },
 
   /** System trigger — sends welcome messages across all configured channels */
@@ -84,7 +84,7 @@ export const followupCommunicatorApi = {
       const err = await res.json().catch(() => ({}));
       throw new Error((err as { error?: string }).error || "Trigger failed");
     }
-    return res.json();
+    return res.json().catch(() => ({}));
   },
 
   /** Fetch sent log */
@@ -103,13 +103,13 @@ export const followupCommunicatorApi = {
     ).toString();
     const res = await fetchWithAuth(`${BASE}/logs${qs ? "?" + qs : ""}`);
     if (!res.ok) throw new Error("Failed to fetch communicator logs");
-    return res.json();
+    return res.json().catch(() => ({}));
   },
 
   /** Single log entry */
   getLog: async (id: number): Promise<CommunicatorLog> => {
     const res = await fetchWithAuth(`${BASE}/logs/${id}`);
     if (!res.ok) throw new Error("Failed to fetch log entry");
-    return res.json();
+    return res.json().catch(() => ({}));
   },
 };

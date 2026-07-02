@@ -740,7 +740,7 @@ export default function HomePage() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/civilworkdpr-dashboard");
       if (!res.ok) throw new Error("Failed to fetch Civil Work DPR stats");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: access.civilworkdpr,
     staleTime: 2 * 60 * 1000,

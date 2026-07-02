@@ -191,7 +191,7 @@ function computedValue(form: FormState) {
 async function fetchOptions(): Promise<Options> {
   const res = await fetchWithAuth("/api/followup-unit-selections/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchSelections(search: string, status: string, page: number) {
@@ -200,7 +200,7 @@ async function fetchSelections(search: string, status: string, page: number) {
   if (status !== "all") params.set("status", status);
   const res = await fetchWithAuth(`/api/followup-unit-selections?${params}`);
   if (!res.ok) throw new Error("Failed to load unit selections");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: UnitSelection[];
     pagination: Pagination;
   }>;

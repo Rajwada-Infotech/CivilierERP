@@ -129,7 +129,7 @@ async function fetchFollowupLog(
     `/api/followup-log${params.toString() ? `?${params.toString()}` : ""}`,
   );
   if (!res.ok) throw new Error("Failed to load follow-up log");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createFollowupLog(payload: {

@@ -14,7 +14,7 @@ export interface ProjectMasterPayload {
 export const getProjects = async () => {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error("Failed to load projects");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const createProject = async (data: Partial<ProjectMasterPayload>) => {
@@ -27,7 +27,7 @@ export const createProject = async (data: Partial<ProjectMasterPayload>) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to create project");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateProject = async (
@@ -43,7 +43,7 @@ export const updateProject = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to update project");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteProject = async (id: number) => {
@@ -52,5 +52,5 @@ export const deleteProject = async (id: number) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.reason || err.error || "Failed to delete project");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

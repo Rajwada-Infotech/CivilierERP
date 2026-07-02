@@ -46,7 +46,7 @@ const {
 const router = express.Router();
 
 // ── Rate-limit ────────────────────────────────────────────────────────────────
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // ── Permission guard ─────────────────────────────────────────────────────────
 router.use(checkPermissionForMethod("Material", "VehicleInOut"));

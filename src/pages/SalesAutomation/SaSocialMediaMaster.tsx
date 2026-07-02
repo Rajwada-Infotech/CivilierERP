@@ -17,7 +17,7 @@ const API = "/api/sa/social-media";
 async function fetchPlatforms(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch social media platforms");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const fields: FieldDef[] = [

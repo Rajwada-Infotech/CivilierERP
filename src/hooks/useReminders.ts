@@ -163,7 +163,7 @@ export async function fetchAllReminders(
 
   const toList = async (res: PromiseSettledResult<Response | null>) => {
     if (res.status !== "fulfilled" || !res.value || !res.value.ok) return [];
-    const raw = await res.value.json();
+    const raw = await res.value.json().catch(() => ({}));
     return Array.isArray(raw) ? raw : (raw.data ?? []);
   };
   const grnList: any[] = await toList(grnRes);

@@ -27,7 +27,7 @@ export const getDocumentChain = async (
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Each doc type's list page and the query param it watches for deep-linking.

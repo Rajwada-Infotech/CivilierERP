@@ -158,7 +158,7 @@ export default function DBADashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/health");
       if (!res.ok) throw new Error("Failed to fetch DB health");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: activeTab === "overview",
     staleTime: 30_000,
@@ -174,7 +174,7 @@ export default function DBADashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/tables");
       if (!res.ok) throw new Error("Failed to fetch tables");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: activeTab === "tables",
     staleTime: 60_000,
@@ -190,7 +190,7 @@ export default function DBADashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/query-history");
       if (!res.ok) throw new Error("Failed to fetch history");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: activeTab === "history",
     staleTime: 30_000,
@@ -204,7 +204,7 @@ export default function DBADashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/databases");
       if (!res.ok) throw new Error("Failed to fetch databases");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 60_000,
   });
@@ -217,7 +217,7 @@ export default function DBADashboard() {
         method: "POST",
         body: JSON.stringify({ query: effectiveQuery }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Query failed");
       return data as QueryResult;
     },

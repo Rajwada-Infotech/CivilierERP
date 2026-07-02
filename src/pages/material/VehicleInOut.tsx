@@ -625,7 +625,7 @@ export default function VehicleInOut() {
     queryKey: ["enterprise-companies"],
     queryFn: () =>
       fetchWithAuth("/api/enterprises/options?business_type=C").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 300_000,
   });
@@ -635,7 +635,7 @@ export default function VehicleInOut() {
     queryKey: ["enterprise-projects"],
     queryFn: () =>
       fetchWithAuth("/api/enterprises/options?business_type=P").then((r) =>
-        r.json(),
+        r.json().catch(() => ({})),
       ),
     staleTime: 300_000,
   });
@@ -644,7 +644,7 @@ export default function VehicleInOut() {
   const { data: suppliers = [] } = useQuery({
     queryKey: ["account-head-suppliers-v2"],
     queryFn: () =>
-      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json()),
+      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => ({}))),
     staleTime: 300_000,
   });
 
@@ -653,7 +653,7 @@ export default function VehicleInOut() {
     queryKey: ["purchaseOrders"],
     queryFn: () =>
       fetchWithAuth("/api/purchase-orders?limit=500")
-        .then((r) => r.json())
+        .then((r) => r.json().catch(() => ({})))
         .then((d) => (Array.isArray(d) ? d : (d.data ?? []))),
     staleTime: 120_000,
   });
@@ -662,7 +662,7 @@ export default function VehicleInOut() {
     queryKey: ["veh-po-preview", viewingRec?.VehicleInOutID],
     queryFn: () =>
       fetchWithAuth(`/api/vehicle-in-out/${viewingRec!.VehicleInOutID}/po`)
-        .then((r) => { if (!r.ok) throw new Error("No PO"); return r.json(); }),
+        .then((r) => { if (!r.ok) throw new Error("No PO"); return r.json().catch(() => ({})); }),
     enabled: !!viewingRec?.VehicleInOutID && showPODetails,
     staleTime: 300_000,
     retry: false,

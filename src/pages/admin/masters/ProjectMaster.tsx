@@ -591,7 +591,7 @@ export default function ProjectMaster() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/enterprises");
       if (!res.ok) throw new Error("Failed to load enterprises");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return Array.isArray(data) ? data.filter((e: any) => !e.discontinue) : [];
     },
     staleTime: 5 * 60 * 1000,
@@ -602,7 +602,7 @@ export default function ProjectMaster() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/company-master");
       if (!res.ok) throw new Error("Failed to load companies");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return Array.isArray(data)
         ? data.filter((c: any) => c.IsActive !== 0)
         : [];

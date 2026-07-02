@@ -14,7 +14,7 @@ async function handleResponse<T = any>(res: Response): Promise<T> {
     }
     throw new Error(message);
   }
-  return res.json() as Promise<T>;
+  return res.json().catch(() => ({})) as Promise<T>;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────

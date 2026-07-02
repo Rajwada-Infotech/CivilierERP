@@ -50,7 +50,7 @@ export default function Signature() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/signatures");
       if (!res.ok) throw new Error("Failed to load");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
   });
 

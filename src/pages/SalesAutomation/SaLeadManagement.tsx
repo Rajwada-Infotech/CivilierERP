@@ -14,7 +14,7 @@ const API = "/api/sa/leads";
 async function fetchLeads(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch leads");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchTeamLeadOptions(): Promise<{ value: string; label: string }[]> {
   try {
@@ -135,7 +135,7 @@ const SaLeadManagement: React.FC = () => {
     queryFn: async () => {
       const r = await fetchWithAuth("/api/sa/leads/users");
       if (!r.ok) return [];
-      const data: any[] = await r.json();
+      const data: any[] = await r.json().catch(() => ({}));
       return data.filter((u) => u.role === "sales_team_lead" && u.id !== currentUser?.id);
     },
     staleTime: 5 * 60_000,

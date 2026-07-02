@@ -573,7 +573,7 @@ export default function CompanyMaster() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/company-master");
       if (!res.ok) throw new Error("Failed to load");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -584,7 +584,7 @@ export default function CompanyMaster() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/enterprises");
       if (!res.ok) throw new Error("Failed to load enterprises");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return Array.isArray(data) ? data.filter((e: any) => !e.discontinue) : [];
     },
     staleTime: 5 * 60 * 1000,

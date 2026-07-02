@@ -25,7 +25,7 @@ export const getRolesList = async (): Promise<
   if (!res.ok) {
     throw new Error("Failed to fetch roles list");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Full role records — requires admin (Rights > Menu > CanView). Use in Role Master only.
@@ -34,7 +34,7 @@ export const getRoles = async (): Promise<RoleRecord[]> => {
   if (!res.ok) {
     throw new Error("Failed to fetch roles");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addRole = async (data: {
@@ -47,10 +47,10 @@ export const addRole = async (data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to create role");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateRole = async (
@@ -63,10 +63,10 @@ export const updateRole = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to update role");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteRole = async (id: number): Promise<{ success: boolean }> => {
@@ -74,5 +74,5 @@ export const deleteRole = async (id: number): Promise<{ success: boolean }> => {
   if (!res.ok) {
     throw new Error("Failed to delete role");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

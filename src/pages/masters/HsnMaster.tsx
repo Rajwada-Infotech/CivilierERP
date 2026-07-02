@@ -22,21 +22,21 @@ import {
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/hsn";
 
-const getHsn = () => fetchWithAuth(BASE).then((r) => r.json());
+const getHsn = () => fetchWithAuth(BASE).then((r) => r.json().catch(() => ({})));
 const addHsn = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json());
+  }).then((r) => r.json().catch(() => ({})));
 const updateHsn = (code: string, data: object) =>
   fetchWithAuth(`${BASE}/${code}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json());
+  }).then((r) => r.json().catch(() => ({})));
 const deleteHsn = (code: string) =>
-  fetchWithAuth(`${BASE}/${code}`, { method: "DELETE" }).then((r) => r.json());
+  fetchWithAuth(`${BASE}/${code}`, { method: "DELETE" }).then((r) => r.json().catch(() => ({})));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbHsn {

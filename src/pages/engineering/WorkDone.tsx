@@ -283,7 +283,7 @@ function WorkDoneForm({
     const woId = form.workOrderId;
     if (!woId) return;
     fetchWithAuth(`/api/work-orders/${woId}/activities?_t=${Date.now()}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((res) => (res.ok ? res.json().catch(() => ({})) : Promise.reject()))
       .then((acts) => setWoActivities(Array.isArray(acts) ? acts : []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -341,7 +341,7 @@ function WorkDoneForm({
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Save failed");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["engineering-work-done"] });
@@ -1048,7 +1048,7 @@ export default function WorkDone() {
     queryFn: () =>
       fetchWithAuth("/api/engineering/work-orders-with-activities").then(
         async (r) => {
-          const json = await r.json();
+          const json = await r.json().catch(() => ({}));
           const rows = Array.isArray(json) ? json : [];
           return rows.map((w: any) => ({
             id: w.Id,
@@ -1075,7 +1075,7 @@ export default function WorkDone() {
     queryKey: ["engineering-work-done"],
     queryFn: () =>
       fetchWithAuth("/api/engineering/work-done").then(async (r) => {
-        const json = await r.json();
+        const json = await r.json().catch(() => ({}));
         return Array.isArray(json) ? json : (json.data ?? []);
       }),
     staleTime: 60 * 1000,

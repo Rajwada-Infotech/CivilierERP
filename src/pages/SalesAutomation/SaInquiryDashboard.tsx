@@ -13,12 +13,12 @@ const VISITS_API = "/api/sa/site-visits";
 async function fetchLeads(): Promise<any[]> {
   const res = await fetchWithAuth(LEADS_API);
   if (!res.ok) throw new Error("Failed to fetch leads");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchLeadDetail(leadId: number): Promise<any> {
   const res = await fetchWithAuth(`${API}/lead/${leadId}`);
   if (!res.ok) throw new Error("Failed to fetch lead detail");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
   try {
