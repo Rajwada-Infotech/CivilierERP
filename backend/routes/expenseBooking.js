@@ -1666,6 +1666,38 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   }
 });
 
+// ─── GET /emi-reminders — all pending EMI installments (for reminder bell) ────
+router.get("/emi-reminders", async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        ei.Id              AS id,
+        ei.ExpenseBookingId AS expenseBookingId,
+        ei.InstallmentNo   AS installmentNo,
+        ei.RefNumber       AS refNumber,
+        ei.DueDate         AS dueDate,
+        ei.Amount          AS amount,
+        ei.Status          AS status,
+        eb.EDocNo          AS parentDocNo,
+        COALESCE(proj.name, eb.EProjectName, '') AS projectName,
+        ISNULL(eb.EName, '') AS partyName,
+        eb.EInstallmentCount AS totalInstallments
+      FROM dbo.EmiInstallments ei
+      INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+      LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
+      WHERE ei.Status = 'Pending'
+        AND eb.EStatus = 'Approved'
+        AND eb.EEmiPayment = 1
+      ORDER BY ei.DueDate ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("EMI reminders error:", err);
+    res.status(500).json({ error: "Failed to fetch EMI reminders" });
+  }
+});
+
 // ─── GET /:id/emi-schedule ────────────────────────────────────────────────────
 router.get("/:id/emi-schedule", async (req, res) => {
   const id = parseInt(req.params.id, 10);

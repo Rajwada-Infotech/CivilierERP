@@ -831,8 +831,7 @@ const ResolvedTickets: React.FC = () => {
         const raw: Ticket[] = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
         return raw.filter((t) => t.status === "Resolved" || t.status === "Closed");
       },
-      staleTime: 0,
-      gcTime: 0,
+      staleTime: 30_000,
       refetchOnWindowFocus: true,
     });
 

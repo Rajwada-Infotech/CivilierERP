@@ -73,9 +73,9 @@ const MODULE_HEADER: Record<
   followup: {
     label: "Follow-Up",
     icon: Calendar,
-    color: "#818cf8",
-    from: "from-indigo-400/30",
-    to: "to-indigo-400/0",
+    color: "#0d9488",
+    from: "from-teal-600/30",
+    to: "to-teal-600/0",
   },
   engineering: {
     label: "Engineering",

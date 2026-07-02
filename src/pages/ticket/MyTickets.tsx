@@ -1588,10 +1588,9 @@ const MyTickets: React.FC = () => {
       const payload = await res.json();
       return unwrapTicketList<Ticket>(payload).data;
     },
-    staleTime: 0,
+    staleTime: 30_000,
     refetchOnWindowFocus: true,
-    refetchOnMount: "always",
-    refetchInterval: 20_000,
+    refetchInterval: 30_000,
   });
 
   useTicketSync(refetch);
