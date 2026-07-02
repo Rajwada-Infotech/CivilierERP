@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import {
   CalendarDays,
   Truck,
   User,
@@ -27,6 +19,7 @@ import {
   FileText,
   Wallet,
   Printer,
+  X,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
@@ -318,22 +311,51 @@ export function ExpenseBookingPreviewModal({
   );
 
   return (
-    <Dialog open={!!previewRecord} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-w-5xl max-h-[96vh] overflow-y-auto expense-preview-modal">
-        <style>{`
-          @media print {
-            body > * { display: none !important; }
-            [data-radix-dialog-overlay] { display: none !important; }
-            .expense-preview-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; transform: none !important; }
-            .expense-preview-print-hide { display: none !important; }
-          }
-        `}</style>
-        <DialogHeader>
-          <DialogTitle>Invoice Preview</DialogTitle>
-          <DialogDescription>
-            Details for invoice {previewRecord?.bookingReference}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 expense-preview-modal">
+      <style>{`
+        @media print {
+          body > * { display: none !important; }
+          .expense-preview-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; transform: none !important; }
+          .expense-preview-print-hide { display: none !important; }
+        }
+      `}</style>
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
+
+        {/* ── Sticky header ── */}
+        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border expense-preview-print-hide">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                <Receipt size={13} className="text-emerald-500" />
+              </div>
+              <h2 className="font-heading font-bold text-base font-mono">
+                {previewRecord.bookingReference ?? "—"}
+              </h2>
+              <StatusBadge status={previewRecord.status} />
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Invoice</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+            >
+              <Printer size={13} /> Print
+            </button>
+            <button
+              onClick={() => { onClose(); onEdit(previewRecord); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+            >
+              <Edit size={13} /> Edit
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
 
         {/* ── Tab bar ── */}
         <div className="flex items-center gap-1 px-4 sm:px-6 pt-1 border-b border-border bg-card expense-preview-print-hide">
@@ -473,77 +495,30 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 1: Booking Info ── */}
           <div>
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CalendarDays
-                size={10}
-                className="text-emerald-600 dark:text-emerald-400"
-              />{" "}
+              <CalendarDays size={10} className="text-emerald-600 dark:text-emerald-400" />
               Booking Information
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Booking Date
-                </p>
-                <p className="text-sm font-medium">
-                  {previewRecord.bookingDate || "—"}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Due Date
-                </p>
-                <p className="text-sm font-medium">
-                  {previewRecord.dueDate || "—"}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Document Type
-                </p>
-                <p className="text-sm font-medium truncate">
-                  {previewRecord.docTypeName ||
-                    previewRecord.materialCategory ||
-                    "—"}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Source Document
-                </p>
-                <p className="text-sm font-mono font-semibold text-foreground">
-                  {previewRecord.sourceDocNo
-                    ? previewRecord.sourceDocNo
-                    : previewRecord.eSourceType && previewRecord.eSourceId
-                      ? `${previewRecord.eSourceType}-${previewRecord.eSourceId}`
-                      : previewRecord.purchaseOrderId
-                        ? `PO-${previewRecord.purchaseOrderId}`
-                        : previewRecord.workOrderId
-                          ? `WO-${previewRecord.workOrderId}`
-                          : "—"}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Company
-                </p>
-                <p className="text-sm font-medium truncate">
-                  {previewRecord.companyName ||
-                    (previewRecord.companyId
-                      ? `Company #${previewRecord.companyId}`
-                      : "—")}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                  Project
-                </p>
-                <p className="text-sm font-medium truncate">
-                  {previewRecord.projectName ||
-                    (previewRecord.projectId
-                      ? `Project #${previewRecord.projectId}`
-                      : "—")}
-                </p>
-              </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {([
+                { label: "Booking Date", value: previewRecord.bookingDate },
+                { label: "Due Date", value: previewRecord.dueDate },
+                { label: "Document Type", value: previewRecord.docTypeName || previewRecord.materialCategory },
+                {
+                  label: "Source Document",
+                  value: previewRecord.sourceDocNo
+                    || (previewRecord.eSourceType && previewRecord.eSourceId ? `${previewRecord.eSourceType}-${previewRecord.eSourceId}` : null)
+                    || (previewRecord.purchaseOrderId ? `PO-${previewRecord.purchaseOrderId}` : null)
+                    || (previewRecord.workOrderId ? `WO-${previewRecord.workOrderId}` : null),
+                  mono: true,
+                },
+                { label: "Company", value: previewRecord.companyName || (previewRecord.companyId ? `Company #${previewRecord.companyId}` : null) },
+                { label: "Project / Site", value: previewRecord.projectName || (previewRecord.projectId ? `Project #${previewRecord.projectId}` : null) },
+              ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
+                <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                  <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -1105,57 +1080,21 @@ export function ExpenseBookingPreviewModal({
                 />{" "}
                 Invoice &amp; Allocation
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
-                {previewRecord.vendorInvoiceNo && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      Vendor Invoice No
-                    </p>
-                    <p className="text-sm font-mono font-semibold">
-                      {previewRecord.vendorInvoiceNo}
-                    </p>
-                  </div>
-                )}
-                {previewRecord.vendorInvoiceDate && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      Vendor Invoice Date
-                    </p>
-                    <p className="text-sm font-medium">
-                      {previewRecord.vendorInvoiceDate}
-                    </p>
-                  </div>
-                )}
-                {previewRecord.costCenter && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      Cost Centre
-                    </p>
-                    <p className="text-sm font-medium">
-                      {previewRecord.costCenter}
-                    </p>
-                  </div>
-                )}
-                {previewRecord.glAccount && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      GL Account
-                    </p>
-                    <p className="text-sm font-medium">
-                      {previewRecord.glAccount}
-                    </p>
-                  </div>
-                )}
-                {previewRecord.workDoneRef && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      Work Done Ref
-                    </p>
-                    <p className="text-sm font-mono font-semibold text-violet-600 dark:text-violet-400">
-                      {previewRecord.workDoneRef}
-                    </p>
-                  </div>
-                )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {([
+                  { label: "Vendor Invoice No", value: previewRecord.vendorInvoiceNo, mono: true },
+                  { label: "Vendor Invoice Date", value: previewRecord.vendorInvoiceDate },
+                  { label: "Cost Centre", value: previewRecord.costCenter },
+                  { label: "GL Account", value: previewRecord.glAccount },
+                  { label: "Work Done Ref", value: previewRecord.workDoneRef, mono: true, accent: "text-violet-600 dark:text-violet-400" },
+                ] as { label: string; value: any; mono?: boolean; accent?: string }[])
+                  .filter((f) => !!f.value)
+                  .map(({ label, value, mono, accent }) => (
+                    <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className={`text-xs font-semibold truncate ${mono ? `font-mono ${accent ?? "text-emerald-600 dark:text-emerald-400"}` : "text-foreground"}`}>{value}</p>
+                    </div>
+                  ))}
               </div>
               {previewRecord.additionalCharges &&
                 previewRecord.additionalCharges.length > 0 && (
@@ -1383,38 +1322,13 @@ export function ExpenseBookingPreviewModal({
         </div>
         )}
 
-        <div className="border-t border-border px-4 sm:px-6 py-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2 bg-muted/10">
-          <p className="text-[10px] text-muted-foreground expense-preview-print-hide">
+        <div className="border-t border-border px-5 sm:px-6 py-3 bg-muted/10 expense-preview-print-hide">
+          <p className="text-[10px] text-muted-foreground">
             ID: <span className="font-mono">{previewRecord.id || "—"}</span>
           </p>
-          <div className="flex gap-2 w-full sm:w-auto">
-            <Button
-              variant="outline"
-              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
-              onClick={() => {
-                onClose();
-                onEdit(previewRecord);
-              }}
-            >
-              <Edit size={11} className="mr-1.5" /> Edit
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
-              onClick={() => window.print()}
-            >
-              <Printer size={11} className="mr-1.5" /> Print
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
-              onClick={onClose}
-            >
-              Close
-            </Button>
-          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+
+      </div>
+    </div>
   );
 }
