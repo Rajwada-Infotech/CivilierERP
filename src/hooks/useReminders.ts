@@ -54,41 +54,19 @@ export function formatDate(dateStr: string): string {
 
 async function fetchEmiReminders(): Promise<ReminderItem[]> {
   try {
-    // Fetch all expense bookings and look for pending EMI installments due soon
-    const res = await fetchWithAuth("/api/expense-booking?limit=200");
+    const res = await fetchWithAuth("/api/expense-booking/emi-reminders");
     if (!res.ok) return [];
-    const data = await res.json();
-    const rows: any[] = Array.isArray(data) ? data : (data.data ?? []);
-
-    const items: ReminderItem[] = [];
-
-    for (const row of rows) {
-      if (!row.EEmiPayment) continue;
-      let emiData: any = null;
-      try {
-        emiData = JSON.parse(row.EEmiData || "{}");
-      } catch (_e) {
-        // ignore malformed EMI JSON — treat as empty schedule
-      }
-      const schedule: any[] = emiData?.schedule ?? [];
-
-      for (const inst of schedule) {
-        if (inst.status === "Paid") continue;
-        const urgency = classifyUrgency(inst.dueDate);
-
-        items.push({
-          id: `emi-${row.Eid}-${inst.installmentNo}`,
-          type: "emi_installment",
-          title: `EMI #${inst.installmentNo} — ${inst.refNumber || row.EDocNo || "—"}`,
-          subtitle: `${row.EProjectName || "Expense Booking"} · Installment ${inst.installmentNo}/${emiData?.installmentCount ?? "?"}`,
-          dueDate: inst.dueDate,
-          urgency,
-          amount: inst.amount,
-          path: `/material/expense-booking?view=${row.Eid}`,
-        });
-      }
-    }
-    return items;
+    const rows: any[] = await res.json();
+    return rows.map((inst) => ({
+      id: `emi-${inst.expenseBookingId}-${inst.installmentNo}`,
+      type: "emi_installment" as ReminderType,
+      title: `${inst.refNumber || `${inst.parentDocNo}-EMI-${String(inst.installmentNo).padStart(2, "0")}`}`,
+      subtitle: `${inst.projectName || inst.partyName || "Expense Booking"} · Installment ${inst.installmentNo}/${inst.totalInstallments ?? "?"}`,
+      dueDate: String(inst.dueDate).slice(0, 10),
+      urgency: classifyUrgency(String(inst.dueDate).slice(0, 10)),
+      amount: inst.amount,
+      path: `/material/expense-booking?view=${inst.expenseBookingId}`,
+    }));
   } catch {
     return [];
   }
@@ -281,14 +259,6 @@ export async function fetchAllReminders(
     });
   };
 
-  const FINANCE_ROLES = [
-    "admin",
-    "super_admin",
-    "dba",
-    "finance_manager",
-    "branch_manager",
-  ];
-  const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
   const [poList, chequeList, tdsList, woList] = await Promise.all([
     toList(poRes),
     toList(chequeRes),
@@ -303,10 +273,7 @@ export async function fetchAllReminders(
       process(tdsList, "tds", "Id", "TDS", "/masters/tds");
       process(woList, "work_order", "Id", "WO", "/material/work-order");
     }),
-    (hasFinanceAccess
-      ? fetchEmiReminders()
-      : Promise.resolve([] as ReminderItem[])
-    ).catch(() => [] as ReminderItem[]),
+    fetchEmiReminders().catch(() => [] as ReminderItem[]),
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
   ]);
 
