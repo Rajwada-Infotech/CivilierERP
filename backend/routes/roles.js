@@ -388,6 +388,18 @@ router.post(
       /* permissions module not loaded yet — no-op */
     }
 
+    // Push to every currently-connected user holding this role so their
+    // session refreshes pagePermissions immediately instead of waiting on
+    // the client's periodic poll (or requiring a re-login) to pick up the
+    // change. Server-side enforcement (checkPermission) is already instant
+    // via the cache invalidation above — this closes the same gap on the
+    // client-rendered sidebar/menu.
+    try {
+      require("../socket").getIo().to(`role:${roleId}`).emit("permissions:updated");
+    } catch {
+      /* socket.io not initialized (e.g. tests) — no-op */
+    }
+
     return res.json({ success: true });
   } catch (err) {
     console.error("SAVE RIGHTS ERROR:", err);

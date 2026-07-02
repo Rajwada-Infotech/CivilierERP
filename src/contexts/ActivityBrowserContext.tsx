@@ -346,6 +346,27 @@ export const ActivityBrowserProvider: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── PERIODIC FALLBACK REFRESH ──────────────────────────────────────────────
+  // The socket push above is the primary real-time path, but if the socket
+  // connection is ever down/reconnecting for any reason (proxy hiccup,
+  // network blip), the Activity Browser would otherwise show stale data
+  // indefinitely with no self-healing. This background re-fetch guarantees
+  // the data is never more than this interval stale even then. Cheap: the
+  // endpoint is version-cached server-side (60s TTL), so most ticks hit the
+  // cache rather than the DB, and fetchActivityCore already no-ops instantly
+  // for non-privileged users.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (fetchingRef.current) return; // avoid piling up overlapping requests
+      void fetchActivityCore(
+        currentPageRef.current,
+        currentFiltersRef.current,
+        dateFiltersRef.current,
+      );
+    }, 20_000);
+    return () => window.clearInterval(intervalId);
+  }, [fetchActivityCore]);
+
   // ── RECORDING ──────────────────────────────────────────────────────────────
 
   const recordLogin = useCallback(

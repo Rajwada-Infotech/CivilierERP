@@ -124,4 +124,43 @@ describe("useIdleLogout", () => {
 
     expect(onTimeout).not.toHaveBeenCalled();
   });
+
+  it("does not throw and still tracks idle time when localStorage access throws", () => {
+    // Simulates locked-down iframes / strict browser privacy policies where
+    // localStorage.getItem/setItem throw a SecurityError. The interval tick
+    // must not propagate an uncaught exception, and idle detection should
+    // keep working via the in-memory fallback.
+    const originalGetItem = Storage.prototype.getItem;
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.getItem = () => {
+      throw new Error("SecurityError: storage disabled");
+    };
+    Storage.prototype.setItem = () => {
+      throw new Error("SecurityError: storage disabled");
+    };
+
+    try {
+      const onTimeout = vi.fn();
+      const { result } = renderHook(() => useIdleLogout(true, onTimeout));
+
+      expect(() => {
+        act(() => {
+          vi.advanceTimersByTime(WARNING_AFTER_MS + 1000);
+        });
+      }).not.toThrow();
+
+      expect(result.current.secondsLeft).not.toBeNull();
+
+      expect(() => {
+        act(() => {
+          vi.advanceTimersByTime(COUNTDOWN_MS);
+        });
+      }).not.toThrow();
+
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+    } finally {
+      Storage.prototype.getItem = originalGetItem;
+      Storage.prototype.setItem = originalSetItem;
+    }
+  });
 });

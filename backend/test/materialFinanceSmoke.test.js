@@ -564,3 +564,56 @@ describe("received payment: approval/rejection requires admin role", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ── Material issue: approval role gate (HTTP) ─────────────────────────────────
+
+describe("material issue: approval/rejection requires admin role", () => {
+  // Unlike received-payment.js, materialIssues.js's approve/reject routes have
+  // no requirePageRight/checkPermissionForMethod gate — a "user" role token
+  // reaches transition() directly, which throws "not authorized". The route's
+  // catch block used to map every error to 400 regardless of cause; fixed to
+  // match the newPayment.js/receivedPayment.js convention of mapping
+  // "not authorized" errors to 403 specifically.
+
+  test("PUT /api/material-issues/:id/approve with user role → 403", async () => {
+    mockFakePool = makeFakePool();
+    const { createApp } = require("../server");
+    const app = await createApp();
+
+    const res = await request(app)
+      .put("/api/material-issues/1/approve")
+      .set("Authorization", `Bearer ${userToken()}`)
+      .send({ note: "approve attempt" });
+
+    expect(res.status).toBe(403);
+  });
+
+  test("PUT /api/material-issues/:id/reject with user role → 403", async () => {
+    mockFakePool = makeFakePool();
+    const { createApp } = require("../server");
+    const app = await createApp();
+
+    const res = await request(app)
+      .put("/api/material-issues/1/reject")
+      .set("Authorization", `Bearer ${userToken()}`)
+      .send({ note: "reject attempt" });
+
+    expect(res.status).toBe(403);
+  });
+
+  test("PUT /api/material-issues/:id/approve for a non-existent record → 400 (not 403)", async () => {
+    // Record-not-found is a genuine 400, distinct from an authorization
+    // failure — confirms the mapping only special-cases the "not authorized"
+    // message, not every error from transition().
+    mockFakePool = makeFakePool(); // empty recordset -> "not found in material-issues"
+    const { createApp } = require("../server");
+    const app = await createApp();
+
+    const res = await request(app)
+      .put("/api/material-issues/99999/approve")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+});

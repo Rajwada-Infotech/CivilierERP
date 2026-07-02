@@ -49,7 +49,17 @@ export function IdleLogoutWatcher() {
   return (
     <>
       {overlay}
-      <AlertDialog open={showWarning}>
+      <AlertDialog
+        open={showWarning}
+        onOpenChange={(open) => {
+          // Radix may attempt to close the dialog through paths other than
+          // our own button (e.g. focus/interaction edge cases inside the
+          // primitive) — route any such attempt through the same resetTimer
+          // used by the explicit "Stay signed in" click, so the underlying
+          // idle clock and the visible dialog state can never disagree.
+          if (!open) resetTimer();
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <div className="flex items-center gap-2">
