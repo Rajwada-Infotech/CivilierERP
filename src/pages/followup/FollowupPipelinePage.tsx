@@ -148,7 +148,7 @@ async function fetchList(
 
   const response = await fetchWithAuth(`${apiPath}?${params.toString()}`);
   if (!response.ok) throw new Error("Failed to load records");
-  return response.json() as Promise<{
+  return response.json().catch(() => ({})) as Promise<{
     data: RecordRow[];
     pagination: {
       page: number;
@@ -162,7 +162,7 @@ async function fetchList(
 async function fetchOptions(apiPath: string) {
   const response = await fetchWithAuth(`${apiPath}/meta/options`);
   if (!response.ok) throw new Error("Failed to load form options");
-  return response.json() as Promise<OptionsBag>;
+  return response.json().catch(() => ({})) as Promise<OptionsBag>;
 }
 
 async function saveRecord(

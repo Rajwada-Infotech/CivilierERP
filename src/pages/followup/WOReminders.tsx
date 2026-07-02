@@ -99,7 +99,7 @@ function fmtCurrency(n: number | undefined | null): string {
 async function fetchWOs(): Promise<WOWithUrgency[]> {
   const res = await fetchWithAuth("/api/work-orders");
   if (!res.ok) throw new Error("Failed to load work orders");
-  const raw = await res.json();
+  const raw = await res.json().catch(() => ({}));
   const list: WorkOrder[] = Array.isArray(raw)
     ? raw
     : Array.isArray(raw.data)

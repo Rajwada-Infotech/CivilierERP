@@ -11,22 +11,22 @@ const RULES_API = "/api/sa/distribution-rules";
 async function fetchPending(level: number): Promise<any[]> {
   const res = await fetchWithAuth(`${API}/pending?level=${level}`);
   if (!res.ok) throw new Error("Failed to fetch pending leads");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchUsers(): Promise<any[]> {
   const res = await fetchWithAuth("/api/sa/leads/users");
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchHistory(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch distribution history");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchRules(): Promise<any[]> {
   const res = await fetchWithAuth(RULES_API);
   if (!res.ok) throw new Error("Failed to fetch distribution rules");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const SaLeadDistribution: React.FC = () => {

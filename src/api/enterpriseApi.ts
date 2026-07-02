@@ -48,7 +48,7 @@ async function handle<T>(res: Response): Promise<T> {
     const err = await res.json().catch(() => ({ error: "Request failed" }));
     throw new Error(err.error || "Request failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export const getEnterprises = async (): Promise<Enterprise[]> => {

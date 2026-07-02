@@ -186,7 +186,7 @@ export default function CivilWorkDprDashboard() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/civilworkdpr-dashboard");
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     // "Realtime": poll every 10s so review queue / progress counts stay
     // fresh without the user manually refreshing.

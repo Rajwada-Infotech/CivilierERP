@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql, queryWithRetry } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -502,6 +502,16 @@ router.patch(
         const { userPermissionCache } = require("../middleware/permissions");
         userPermissionCache.invalidateUser(id);
       } catch {}
+
+      // Push to this user's active session(s) so their sidebar/menu
+      // refreshes immediately — mirrors the same push in
+      // routes/userRights.js's PUT /:userId (SAVE permissions) handler,
+      // which this route duplicates for the AuthContext caller.
+      try {
+        require("../socket").getIo().to(`user:${id}`).emit("permissions:updated");
+      } catch {
+        /* socket.io not initialized (e.g. tests) — no-op */
+      }
 
       res.json({ message: "Permissions updated" });
     } catch (err) {

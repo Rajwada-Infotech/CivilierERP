@@ -98,7 +98,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
             body.error || `Failed to load records (${res.status})`,
           );
         }
-        return res.json();
+        return res.json().catch(() => ({}));
       })
       .then((json) => {
         const rows: RawRecord[] = Array.isArray(json)

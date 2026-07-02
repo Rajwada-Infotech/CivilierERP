@@ -30,6 +30,6 @@ export function formatCompanyLocation(
 export const getCompanyLocations = async (): Promise<CompanyLocation[]> => {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error(`Failed to fetch companies: ${res.status}`);
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : [];
 };

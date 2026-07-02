@@ -41,7 +41,7 @@ export const HsnProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     fetchWithAuth("/api/hsn")
-      .then((r) => r.json())
+      .then((r) => r.json().catch(() => ({})))
       .then((data: any[]) => {
         if (!Array.isArray(data)) return;
         setHsnRecordsState(

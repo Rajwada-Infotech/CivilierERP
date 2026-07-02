@@ -55,7 +55,7 @@ const EMPTY_DRAFT: DraftRow = {
 async function fetchTerms(): Promise<PaymentTerm[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch payment terms");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const TYPE_META: Record<

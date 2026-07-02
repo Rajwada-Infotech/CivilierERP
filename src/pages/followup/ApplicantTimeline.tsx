@@ -203,7 +203,7 @@ async function fetchApplicant(id: string) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "Failed to load applicant");
   }
-  return response.json() as Promise<ApplicantRecord>;
+  return response.json().catch(() => ({})) as Promise<ApplicantRecord>;
 }
 
 async function fetchUnitSelections(applicantId: string) {
@@ -213,7 +213,7 @@ async function fetchUnitSelections(applicantId: string) {
   if (!response.ok) {
     throw new Error("Failed to load unit selections");
   }
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   return (
     Array.isArray(data?.data) ? data.data : data
   ) as UnitSelectionRecord[];
@@ -226,7 +226,7 @@ async function fetchAgreements(applicantId: string) {
   if (!response.ok) {
     throw new Error("Failed to load agreements");
   }
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   return (Array.isArray(data?.data) ? data.data : data) as AgreementRecord[];
 }
 
@@ -237,7 +237,7 @@ async function fetchLogs(applicantId: string) {
   if (!response.ok) {
     throw new Error("Failed to load log entries");
   }
-  return response.json() as Promise<LogRecord[]>;
+  return response.json().catch(() => ({})) as Promise<LogRecord[]>;
 }
 
 async function fetchReminders(applicantId: string) {
@@ -247,7 +247,7 @@ async function fetchReminders(applicantId: string) {
   if (!response.ok) {
     throw new Error("Failed to load reminders");
   }
-  return response.json() as Promise<ReminderRecord[]>;
+  return response.json().catch(() => ({})) as Promise<ReminderRecord[]>;
 }
 
 async function fetchTasks() {
@@ -255,7 +255,7 @@ async function fetchTasks() {
   if (!response.ok) {
     throw new Error("Failed to load tasks");
   }
-  return response.json() as Promise<TaskRecord[]>;
+  return response.json().catch(() => ({})) as Promise<TaskRecord[]>;
 }
 
 async function createLog(payload: {

@@ -158,7 +158,7 @@ export default function CustomerPortal() {
       queryFn: async () => {
         const res = await fetchWithAuth("/api/tickets/my");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        return res.json().catch(() => ({}));
       },
       staleTime: 60_000,
       refetchInterval: 2 * 60_000,
@@ -170,7 +170,7 @@ export default function CustomerPortal() {
       queryFn: async () => {
         const res = await fetchWithAuth("/api/followup-construction-updates?pageSize=50");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        return res.json().catch(() => ({}));
       },
       staleTime: 5 * 60_000,
       enabled: tab === "progress",

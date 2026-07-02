@@ -5,7 +5,7 @@ const BASE = "/api/user-profile";
 export const getUserProfile = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}/profile`);
   if (!res.ok) throw new Error("Failed to fetch profile");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateUserProfile = async (id: number, data: { name: string }) => {
@@ -14,7 +14,7 @@ export const updateUserProfile = async (id: number, data: { name: string }) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update profile");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const changePassword = async (
@@ -28,22 +28,22 @@ export const changePassword = async (
     body: JSON.stringify({ current_password, new_password }),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error ?? "Password change failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getUserPermissions = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}/permissions`);
   if (!res.ok) throw new Error("Failed to fetch permissions");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getUserActivity = async (id: number, limit = 50) => {
   const res = await fetchWithAuth(`${BASE}/${id}/activity?limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch activity");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const uploadAvatar = async (id: number, dataUri: string) => {
@@ -56,11 +56,11 @@ export const uploadAvatar = async (id: number, dataUri: string) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error ?? "Failed to upload avatar");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const removeAvatar = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}/avatar`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to remove avatar");
-  return res.json();
+  return res.json().catch(() => ({}));
 };

@@ -26,7 +26,7 @@ async function fetchReport(key: string, from?: string, to?: string): Promise<any
   const qs = params.toString();
   const res = await fetchWithAuth(`/api/sa/reports/${key}${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch report");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 function deriveColumns(rows: any[]): string[] {

@@ -58,7 +58,7 @@ export const getSaleInvoices = async (params?: {
   if (params?.limit) qs.set("limit", String(params.limit));
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(`Failed to fetch sale invoices: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getSaleInvoiceById = async (
@@ -66,7 +66,7 @@ export const getSaleInvoiceById = async (
 ): Promise<SaleInvoiceDetail> => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch sale invoice: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Fully-paid invoices with no Purchase Order created against them yet —
@@ -75,7 +75,7 @@ export const getPaidSaleInvoicesForPO = async (): Promise<SaleInvoice[]> => {
   const res = await fetchWithAuth(`${BASE}/paid-for-po`);
   if (!res.ok)
     throw new Error(`Failed to fetch payable sale invoices: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface CreateSaleInvoicePayload {
@@ -99,5 +99,5 @@ export const createSaleInvoice = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Sale invoice failed: ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

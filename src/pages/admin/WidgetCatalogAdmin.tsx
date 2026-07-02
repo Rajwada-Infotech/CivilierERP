@@ -72,7 +72,7 @@ const BLANK: Omit<CatalogWidget, "isActive" | "createdAt" | "updatedAt"> = {
 async function fetchCatalog(): Promise<CatalogWidget[]> {
   const res = await fetchWithAuth("/api/widget-catalog");
   if (!res.ok) throw new Error("Failed to load widget catalog");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createWidget(body: typeof BLANK): Promise<void> {
@@ -108,7 +108,7 @@ async function toggleWidget(key: string): Promise<{ isActive: boolean }> {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to toggle widget");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function deleteWidget(key: string): Promise<void> {

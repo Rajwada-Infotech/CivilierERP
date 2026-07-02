@@ -216,7 +216,7 @@ export default function TicketDashboard() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
-      const payload = await res.json();
+      const payload = await res.json().catch(() => ({}));
       return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,

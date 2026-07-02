@@ -43,7 +43,7 @@ const authHeaders = () => ({
 const getUsers = async (): Promise<User[]> => {
   const res = await fetch(BASE_URL, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const addUserApi = async (user: {
@@ -68,7 +68,7 @@ const addUserApi = async (user: {
     }
     throw new Error(data?.error || "Failed to add user");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const updateUserApi = async (id: number, data: Partial<User>) => {
@@ -87,7 +87,7 @@ const updateUserApi = async (id: number, data: Partial<User>) => {
     }
     throw new Error(body?.error || "Failed to update user");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const updateTicketAcceptanceApi = async (id: number, canAccept: boolean) => {
@@ -100,7 +100,7 @@ const updateTicketAcceptanceApi = async (id: number, canAccept: boolean) => {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error || "Failed to update ticket acceptance");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const deleteUserApi = async (id: number) => {
@@ -112,7 +112,7 @@ const deleteUserApi = async (id: number) => {
     const data = await res.json().catch(() => ({}));
     throw new Error(data?.error || "Failed to delete user");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // ─── Avatar helper ────────────────────────────────────────────────────────────

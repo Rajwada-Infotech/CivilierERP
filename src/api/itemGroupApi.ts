@@ -11,7 +11,7 @@ const getAuthHeaders = () => ({
 export const getItemGroups = async () => {
   const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addItemGroup = async (data: Record<string, unknown>) => {
@@ -22,10 +22,10 @@ export const addItemGroup = async (data: Record<string, unknown>) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateItemGroup = async (
@@ -39,10 +39,10 @@ export const updateItemGroup = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteItemGroup = async (id: string) => {
@@ -51,8 +51,8 @@ export const deleteItemGroup = async (id: string) => {
     headers: getAuthHeaders(), // was missing — caused 401
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };

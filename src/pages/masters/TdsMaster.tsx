@@ -23,21 +23,21 @@ import {
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/tds-master";
 
-const getTds = () => fetchWithAuth(BASE).then((r) => r.json());
+const getTds = () => fetchWithAuth(BASE).then((r) => r.json().catch(() => ({})));
 const addTds = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json());
+  }).then((r) => r.json().catch(() => ({})));
 const updateTds = (id: string, data: object) =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json());
+  }).then((r) => r.json().catch(() => ({})));
 const deleteTds = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json().catch(() => ({})));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbTds {

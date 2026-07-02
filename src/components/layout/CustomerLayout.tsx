@@ -5,6 +5,7 @@ import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { useNavigate } from "react-router-dom";
 import { LogOut, User } from "lucide-react";
+import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 
 export function CustomerLayout({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
@@ -37,6 +38,7 @@ export function CustomerLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
       {overlay}
+      <IdleLogoutWatcher />
     </div>
   );
 }

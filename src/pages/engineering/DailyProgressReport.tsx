@@ -1290,7 +1290,7 @@ export default function DailyProgressReport() {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error ?? `HTTP ${res.status}`);
         }
-        return res.json();
+        return res.json().catch(() => ({}));
       },
       staleTime: 2 * 60 * 1000,
     });

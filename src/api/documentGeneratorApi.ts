@@ -25,5 +25,5 @@ export const generateDocumentNumber = async (
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to generate document number");
-  return res.json();
+  return res.json().catch(() => ({}));
 };

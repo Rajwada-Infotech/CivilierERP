@@ -6,7 +6,7 @@ export const getList = async (type?: string) => {
   const url = type ? `${BASE_URL}?type=${encodeURIComponent(type)}` : BASE_URL;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addRecord = async (
@@ -19,10 +19,10 @@ export const addRecord = async (
     body: JSON.stringify({ ...data, LHeadType: type }),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateRecord = async (
@@ -36,10 +36,10 @@ export const updateRecord = async (
     body: JSON.stringify({ ...data, LHeadType: type }),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteRecord = async (id: number) => {
@@ -47,10 +47,10 @@ export const deleteRecord = async (id: number) => {
     method: "DELETE",
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getOptions = async (type?: string) => {
@@ -59,7 +59,7 @@ export const getOptions = async (type?: string) => {
     : `${BASE_URL}/options`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error(`Options GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export interface AccountGroup {
@@ -71,5 +71,5 @@ export interface AccountGroup {
 export const getAccountGroups = async (): Promise<AccountGroup[]> => {
   const res = await fetchWithAuth("/api/account-group");
   if (!res.ok) throw new Error(`Account Groups GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };

@@ -8,6 +8,7 @@ import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
+import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
 );
@@ -222,6 +223,10 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             <React.Suspense fallback={null}>
               <SlowConnectionBanner />
             </React.Suspense>
+
+            {/* Auto-logout on inactivity — mounted once for every
+                authenticated page rendered through AppLayout. */}
+            <IdleLogoutWatcher />
 
             {/* Universal assistant — fixed-position, mounted once for every
                 page rendered through AppLayout. Suggested queries adapt to

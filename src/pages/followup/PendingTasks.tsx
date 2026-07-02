@@ -84,7 +84,7 @@ const EMPTY_FORM: TaskFormState = {
 async function fetchPendingTasks(): Promise<PendingTask[]> {
   const res = await fetchWithAuth("/api/tasks?module=followup");
   if (!res.ok) throw new Error("Failed to load tasks");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : (data.data ?? []);
 }
 

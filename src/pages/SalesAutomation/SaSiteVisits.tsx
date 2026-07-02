@@ -13,7 +13,7 @@ const API = "/api/sa/site-visits";
 async function fetchVisits(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch site visits");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 async function fetchLeadOptions(): Promise<{ value: string; label: string }[]> {
   try {
