@@ -3,7 +3,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 
 export type ReminderType =
-  | "cheque"
   | "purchase_order"
   | "work_order"
   | "tds"
@@ -79,29 +78,22 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
     const raw = await res.json();
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
-    // Statuses that need action / attention
-    const ACTIONABLE = new Set(["Pending", "Approved", "Partially Ordered"]);
+    const ACTIONABLE = new Set(["pending", "approved"]);
 
     return list
-      .filter((r) => ACTIONABLE.has(r.Status))
+      .filter((r) => {
+        const status = (r.Status || "").toLowerCase();
+        return ACTIONABLE.has(status) && r.RequiredByDate;
+      })
       .map((r) => {
-        // Use RequiredByDate for urgency if set; otherwise treat as "upcoming"
-        // so MRs without a deadline don't incorrectly show as overdue.
-        const dueDate: string = r.RequiredByDate
-          ? String(r.RequiredByDate).slice(0, 10)
-          : String(r.RequestDate ?? new Date().toISOString()).slice(0, 10);
-
-        const urgency: ReminderItem["urgency"] = r.RequiredByDate
-          ? classifyUrgency(String(r.RequiredByDate).slice(0, 10))
-          : "upcoming";
-
+        const dueDate = String(r.RequiredByDate).slice(0, 10);
         return {
           id: `mr-${r.MRId}`,
           type: "material_request" as ReminderType,
           title: `MR ${r.DocNo || `#${r.MRId}`}`,
           subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
           dueDate,
-          urgency,
+          urgency: classifyUrgency(dueDate),
           path: `/material/material-request?view=${r.MRId}`,
         };
       });
@@ -126,7 +118,6 @@ const PRIVILEGED_REMINDER_ROLES = new Set(["super_admin", "admin", "dba"]);
 const REMINDER_PAGE_KEYS: Record<string, string[]> = {
   purchase_order: ["purchase-orders"],
   grn: ["grn-master", "grns"],
-  cheque: ["cheque-master"],
   tds: ["tds-master"],
   work_order: ["work-order", "engineering-work-order"],
 };
@@ -163,10 +154,9 @@ export async function fetchAllReminders(
       ? fetchWithAuth(url)
       : Promise.resolve(null);
 
-  const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
+  const [poRes, grnRes, tdsRes, woRes] = await Promise.allSettled([
     maybeFetch("/api/purchase-orders", "purchase_order"),
     maybeFetch("/api/grns", "grn"),
-    maybeFetch("/api/cheque-master", "cheque"),
     maybeFetch("/api/tds-master", "tds"),
     maybeFetch("/api/work-orders", "work_order"),
   ]);
@@ -259,9 +249,8 @@ export async function fetchAllReminders(
     });
   };
 
-  const [poList, chequeList, tdsList, woList] = await Promise.all([
+  const [poList, tdsList, woList] = await Promise.all([
     toList(poRes),
-    toList(chequeRes),
     toList(tdsRes),
     toList(woRes),
   ]);
@@ -269,7 +258,6 @@ export async function fetchAllReminders(
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
-      process(chequeList, "cheque", "CId", "CHQ", "/masters/cheque");
       process(tdsList, "tds", "Id", "TDS", "/masters/tds");
       process(woList, "work_order", "Id", "WO", "/material/work-order");
     }),

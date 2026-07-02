@@ -376,31 +376,7 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
       null,
   }));
 
-  // For booking-type options, fetch the authoritative amount from /:id
-  // (the /options endpoint stores ENetAmount which may be stale for GRN bookings)
-  const enriched = await Promise.all(
-    mapped.map(async (o) => {
-      if (o.type !== "booking") return o;
-      try {
-        const det = await fetchWithAuth(`/api/expense-booking/${o.id}`, {
-          cache: "no-store",
-        });
-        if (!det.ok) return o;
-        const d = await det.json();
-        const correctAmount = d.ENetAmount ?? d.EAmount ?? o.amount;
-        if (correctAmount == null) return o;
-        const amountInt = Math.round(Number(correctAmount));
-        return {
-          ...o,
-          amount: Number(correctAmount),
-          label: `${o.docNo} — ${o.projectName ?? ""} (₹${amountInt.toLocaleString("en-IN")})`,
-        };
-      } catch {
-        return o;
-      }
-    }),
-  );
-  return enriched;
+  return mapped;
 };
 
 const fetchExpenseDetail = async (
@@ -2432,7 +2408,6 @@ const Payment: React.FC = () => {
     queryKey: ["expense-options-payment"],
     queryFn: fetchExpenseOptions,
     staleTime: 0,
-    refetchOnMount: "always",
   });
 
   // ── Stats ──────────────────────────────────────────────────────────────────

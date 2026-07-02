@@ -61,7 +61,6 @@ const ISSUES_TEMPLATE_COLUMNS = [
   { header: "Project/Site", accessor: "Project/Site" },
   { header: "Godown", accessor: "Godown" },
   { header: "Issued To", accessor: "Issued To" },
-  { header: "Purpose", accessor: "Purpose" },
   { header: "Remarks", accessor: "Remarks" },
   { header: "Item Name", accessor: "Item Name" },
   { header: "UOM", accessor: "UOM" },
@@ -101,7 +100,6 @@ interface IssueHeader {
   docNoPreview: string;
   issuedTo: string;
   costCenter: string;
-  purpose: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -116,7 +114,6 @@ const defaultHeader: IssueHeader = {
   docNoPreview: "",
   issuedTo: "",
   costCenter: "",
-  purpose: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -237,6 +234,17 @@ export default function Issues() {
   const { data: godowns = [], isLoading: loadingGodowns } = useQuery({
     queryKey: ["issues-godowns"],
     queryFn: issuesApi.getGodowns,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: contractors = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["issues-contractors"],
+    queryFn: async () => {
+      const { fetchWithAuth } = await import("@/lib/fetchWithAuth");
+      const res = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!res.ok) return [];
+      return res.json();
+    },
     staleTime: 5 * 60_000,
   });
 
@@ -576,7 +584,6 @@ export default function Issues() {
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
-      purpose: record.Purpose ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: generateUUID(),
@@ -623,7 +630,6 @@ export default function Issues() {
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
-      Purpose: header.purpose || null,
       items: cart
         .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
         .map((ci) => ({
@@ -1164,18 +1170,22 @@ export default function Issues() {
 
             {/* Row 2: Issued To | Cost Center */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Issued To (Dept / Employee)">
+              <Field label="Issued To (Contractor)">
                 <div className="relative">
                   <User
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <Input
+                  <select
                     value={header.issuedTo}
                     onChange={(e) => setH("issuedTo", e.target.value)}
-                    className="pl-9 h-9 text-sm"
-                    placeholder="Dept, employee, or project name…"
-                  />
+                    className={`${selectCls} pl-9`}
+                  >
+                    <option value="">— Select contractor —</option>
+                    {contractors.map((c) => (
+                      <option key={c.id} value={c.label}>{c.label}</option>
+                    ))}
+                  </select>
                 </div>
               </Field>
 
@@ -1185,15 +1195,6 @@ export default function Issues() {
                   onChange={(e) => setH("costCenter", e.target.value)}
                   className="h-9 text-sm"
                   placeholder="Cost centre or GL code…"
-                />
-              </Field>
-
-              <Field label="Purpose">
-                <Input
-                  value={header.purpose}
-                  onChange={(e) => setH("purpose", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Purpose of this material issue…"
                 />
               </Field>
             </div>

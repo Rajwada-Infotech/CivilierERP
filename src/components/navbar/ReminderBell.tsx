@@ -6,7 +6,6 @@ import {
   RefreshCw,
   ShoppingCart,
   HardHat,
-  BookOpen,
   FileWarning,
   Package,
   Lock,
@@ -27,15 +26,10 @@ type ReminderMeta = {
 const TYPE_META: Record<string, ReminderMeta> = {
   purchase_order: { icon: ShoppingCart, label: "PO", color: "text-violet-500" },
   work_order: { icon: HardHat, label: "WO", color: "text-orange-500" },
-  cheque: { icon: BookOpen, label: "CHQ", color: "text-cyan-500" },
   tds: { icon: FileWarning, label: "TDS", color: "text-rose-500" },
   grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
   emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
-  material_request: {
-    icon: ClipboardList,
-    label: "MR",
-    color: "text-blue-500",
-  },
+  material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
 };
 
 export const ReminderBell = () => {
@@ -247,7 +241,6 @@ export const ReminderBell = () => {
                   "purchase_order",
                   "work_order",
                   "grn",
-                  "cheque",
                   "tds",
                   "emi_installment",
                   "material_request",

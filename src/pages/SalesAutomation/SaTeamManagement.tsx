@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -137,15 +137,8 @@ const SaTeamManagement: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading teams...</div>;
 
   return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Sales Automation", "Team Management"]} />
-      <div className="space-y-6 mt-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Sales Team Management</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage team leads and their salespersons — add, remove, transfer, promote or demote
-          </p>
-        </div>
+    <SalesAutoShell title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote">
+      <div className="space-y-6">
 
         {/* Teams */}
         <div className="space-y-3">
@@ -349,7 +342,7 @@ const SaTeamManagement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </SalesAutoShell>
   );
 };
 
