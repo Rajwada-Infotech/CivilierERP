@@ -1148,6 +1148,25 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     PaymentTermId,
   } = req.body;
 
+  // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
+  // with no fallback default in the INSERT below — omitting any of them used
+  // to reach the database and crash with a raw, unhandled SQL "Cannot insert
+  // the value NULL" 500 (leaking internal table/column names) instead of a
+  // clean validation error. Caught live: creating a booking without
+  // EProjectName 500'd instead of 400'ing.
+  if (!EProjectName) {
+    return res.status(400).json({ error: "EProjectName is required." });
+  }
+  if (!EDocumentType) {
+    return res.status(400).json({ error: "EDocumentType is required." });
+  }
+  if (!EDocDate) {
+    return res.status(400).json({ error: "EDocDate is required." });
+  }
+  if (!ECompanyId) {
+    return res.status(400).json({ error: "ECompanyId is required." });
+  }
+
   const pool = getPool();
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const transaction = pool.transaction();
@@ -2068,6 +2087,23 @@ router.put(
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
     } = req.body;
+
+    // Same NOT NULL columns as POST / — this UPDATE overwrites them
+    // unconditionally (not a COALESCE-style partial update), so omitting any
+    // of them here would null out the existing value and crash the same way
+    // the create path did before the fix above.
+    if (!EProjectName) {
+      return res.status(400).json({ error: "EProjectName is required." });
+    }
+    if (!EDocumentType) {
+      return res.status(400).json({ error: "EDocumentType is required." });
+    }
+    if (!EDocDate) {
+      return res.status(400).json({ error: "EDocDate is required." });
+    }
+    if (!ECompanyId) {
+      return res.status(400).json({ error: "ECompanyId is required." });
+    }
 
     try {
       const pool = getPool();

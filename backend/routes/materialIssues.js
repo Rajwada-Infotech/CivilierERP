@@ -391,6 +391,25 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       DocTypeId: clientDocTypeId = null,
     } = req.body;
 
+    // CompanyId, ProjectId, Date and Reason are NOT NULL columns with no
+    // fallback default below — omitting any of them used to reach the
+    // INSERT and crash with an unhandled SQL error (caught by the generic
+    // catch block as an opaque 500 "Failed to create material issue")
+    // instead of a clean, specific validation message. Same bug class found
+    // and fixed in purchaseOrders.js, expenseBooking.js, and workOrder.js.
+    if (!CompanyId) {
+      return res.status(400).json({ error: "CompanyId is required." });
+    }
+    if (!ProjectId) {
+      return res.status(400).json({ error: "ProjectId is required." });
+    }
+    if (!IssueDate) {
+      return res.status(400).json({ error: "Date is required." });
+    }
+    if (!Reason) {
+      return res.status(400).json({ error: "Reason is required." });
+    }
+
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: "At least one item is required" });
 
@@ -605,6 +624,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       CostCenter = null,
       Purpose = null,
     } = req.body;
+
+    // Same NOT NULL columns as POST / — this UPDATE overwrites them
+    // unconditionally (not a COALESCE-style partial update), so omitting
+    // any of them here would null out the existing value and crash the
+    // same way the create path did before the fix above.
+    if (!CompanyId) {
+      return res.status(400).json({ error: "CompanyId is required." });
+    }
+    if (!ProjectId) {
+      return res.status(400).json({ error: "ProjectId is required." });
+    }
+    if (!IssueDate) {
+      return res.status(400).json({ error: "Date is required." });
+    }
+    if (!Reason) {
+      return res.status(400).json({ error: "Reason is required." });
+    }
 
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: "At least one item is required" });

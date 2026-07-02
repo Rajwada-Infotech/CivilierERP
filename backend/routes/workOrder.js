@@ -387,6 +387,26 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
     GST,
     BoqID,
   } = req.body;
+
+  // CompanyId, ProjectId, DocumentDate and ContractorId are NOT NULL columns
+  // with no fallback default in the INSERT below — omitting any of them used
+  // to reach the database and crash with a raw, unhandled SQL "Cannot insert
+  // the value NULL" 500 (leaking internal table/column names) instead of a
+  // clean validation error. Same bug class found and fixed in
+  // purchaseOrders.js and expenseBooking.js during a live-DB workflow test.
+  if (!CompanyId) {
+    return res.status(400).json({ error: "CompanyId is required." });
+  }
+  if (!ProjectId) {
+    return res.status(400).json({ error: "ProjectId is required." });
+  }
+  if (!DocumentDate) {
+    return res.status(400).json({ error: "DocumentDate is required." });
+  }
+  if (!ContractorId) {
+    return res.status(400).json({ error: "ContractorId is required." });
+  }
+
   const gstJson = GST
     ? typeof GST === "string"
       ? GST
@@ -426,6 +446,16 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
         tableName: "WorkOrderHeader",
         docNoColumn: "DocumentNumber",
         issuedBy: req.user?.email || req.user?.name || null,
+      });
+    }
+
+    // DocumentNumber is NOT NULL — same class of gap as CompanyId/ProjectId/
+    // DocumentDate/ContractorId above, but this one can only be resolved
+    // after lockNextDocNumber runs, so it's checked here instead.
+    if (!finalDocNo) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "DocumentNumber is required. Select a document type or enter a document number manually.",
       });
     }
 
@@ -508,6 +538,29 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
     GST,
     BoqID,
   } = req.body;
+
+  // Same NOT NULL columns as POST / — this UPDATE overwrites them
+  // unconditionally (not a COALESCE-style partial update), so omitting any
+  // of them here would null out the existing value and crash the same way
+  // the create path did before the fix above.
+  if (!CompanyId) {
+    return res.status(400).json({ error: "CompanyId is required." });
+  }
+  if (!ProjectId) {
+    return res.status(400).json({ error: "ProjectId is required." });
+  }
+  if (!DocumentNumber) {
+    // Unlike POST /, this UPDATE binds DocumentNumber straight from the
+    // request body with no DocNo fallback — so DocNo alone does not save it.
+    return res.status(400).json({ error: "DocumentNumber is required." });
+  }
+  if (!DocumentDate) {
+    return res.status(400).json({ error: "DocumentDate is required." });
+  }
+  if (!ContractorId) {
+    return res.status(400).json({ error: "ContractorId is required." });
+  }
+
   const gstJson = GST
     ? typeof GST === "string"
       ? GST
