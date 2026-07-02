@@ -29,18 +29,31 @@ const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
 // every event without this.
 const WRITE_THROTTLE_MS = 5000;
 
+// Fallback for environments where localStorage access throws (locked-down
+// iframes, some enterprise browser policies). Without this, a read failure
+// inside the setInterval tick would go uncaught and silently disable the
+// whole feature (idleMs would never advance, or worse, the tick itself would
+// throw). With it, idle detection still works correctly within this single
+// tab — it just loses the cross-tab synchronization localStorage provides.
+let memoryFallback = Date.now();
+
 function readLastActivity(): number {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  const parsed = raw ? Number(raw) : NaN;
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : memoryFallback;
+  } catch {
+    return memoryFallback;
+  }
 }
 
 function writeLastActivity(ts: number) {
+  memoryFallback = ts;
   try {
     localStorage.setItem(STORAGE_KEY, String(ts));
   } catch {
     // localStorage unavailable (private mode / quota) — idle detection still
-    // works within this tab via the in-memory ref, just not cross-tab.
+    // works within this tab via memoryFallback, just not cross-tab.
   }
 }
 

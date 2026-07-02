@@ -130,6 +130,19 @@ router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
 
     userPermissionCache.invalidateUser(req.params.userId);
 
+    // Push to this specific user's active session(s) so their sidebar/menu
+    // refreshes immediately rather than waiting on the periodic client poll
+    // (or a re-login) to notice the change. Mirrors the role-level push in
+    // routes/roles.js's SET ROLE RIGHTS handler.
+    try {
+      require("../socket")
+        .getIo()
+        .to(`user:${req.params.userId}`)
+        .emit("permissions:updated");
+    } catch {
+      /* socket.io not initialized (e.g. tests) — no-op */
+    }
+
     res.json({ success: true, message: "Permissions saved successfully" });
   } catch (err) {
     console.error(err);

@@ -19,7 +19,7 @@ import type {
 } from "./types";
 
 import * as AuthUtils from "./auth.utils";
-import { connectSocket, disconnectSocket } from "@/lib/socket";
+import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 
 // Re-exports
 export { PAGE_DEFINITIONS } from "@/contexts/auth.utils";
@@ -177,11 +177,18 @@ export const AuthProvider = ({
       });
   }, [currentUser?.id]);
 
-  // ── POLL RIGHTS EVERY 5 MIN ───────────────────────────────────────────────
-  // When an admin changes a user's rights via MenuRights, the backend cache is
-  // busted immediately but the user's active browser session still holds the
-  // old pagePermissions in state and localStorage. This poll detects changes
-  // and refreshes without forcing a re-login.
+  // ── KEEP RIGHTS IN SYNC (instant push + periodic fallback) ────────────────
+  // When an admin changes a user's rights via MenuRights (or a role's rights
+  // via Role Master), the backend permission cache is busted immediately, but
+  // the user's active browser session still holds the old pagePermissions in
+  // state/localStorage until this refetches them. The backend emits a
+  // "permissions:updated" socket event to the affected user's room (and to
+  // every user sharing an edited role's room) the instant a save happens —
+  // see routes/roles.js, routes/userRights.js, routes/users.js — so this
+  // normally fires within a second of the admin clicking Save. The 5-minute
+  // poll is kept as a fallback for the rare case the socket connection is
+  // down, so rights sync eventually even then, without ever requiring a
+  // forced re-login.
   useEffect(() => {
     const PRIVILEGED = ["super_admin", "admin", "dba"];
     if (!currentUser?.id || PRIVILEGED.includes(currentUser.role)) return;
@@ -205,8 +212,14 @@ export const AuthProvider = ({
         .catch(() => {});
     };
 
+    const socket = connectSocket() ?? getSocket();
+    socket?.on("permissions:updated", fetchRights);
+
     const interval = setInterval(fetchRights, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      socket?.off("permissions:updated", fetchRights);
+    };
   }, [currentUser?.id, currentUser?.role]);
 
   const login = useCallback(async (email: string, password: string) => {

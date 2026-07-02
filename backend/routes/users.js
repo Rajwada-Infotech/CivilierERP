@@ -503,6 +503,16 @@ router.patch(
         userPermissionCache.invalidateUser(id);
       } catch {}
 
+      // Push to this user's active session(s) so their sidebar/menu
+      // refreshes immediately — mirrors the same push in
+      // routes/userRights.js's PUT /:userId (SAVE permissions) handler,
+      // which this route duplicates for the AuthContext caller.
+      try {
+        require("../socket").getIo().to(`user:${id}`).emit("permissions:updated");
+      } catch {
+        /* socket.io not initialized (e.g. tests) — no-op */
+      }
+
       res.json({ message: "Permissions updated" });
     } catch (err) {
       console.error("PATCH /users/:id/permissions error:", err);
