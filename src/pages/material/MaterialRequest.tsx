@@ -1,5 +1,6 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -30,6 +31,10 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  Download,
+  Upload,
+  Loader2,
+  Printer,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,6 +53,24 @@ import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { exportToCsv, parseCsv } from "@/lib/export";
+import { printMasterPreview } from "@/utils/masterPreviewPrint";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const MR_TEMPLATE_COLUMNS = [
+  { header: "Document Type", accessor: "Document Type" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "Financial Year", accessor: "Financial Year" },
+  { header: "Priority (Normal/High/Critical/Low)", accessor: "Priority (Normal/High/Critical/Low)" },
+  { header: "Required By Date (YYYY-MM-DD)", accessor: "Required By Date (YYYY-MM-DD)" },
+  { header: "Reason", accessor: "Reason" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+  { header: "Item Remarks", accessor: "Item Remarks" },
+];
 
 // ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
 
@@ -166,6 +189,8 @@ export default function MaterialRequest() {
   const rights = usePageRights("material-request");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRecord, setViewingRecord] = useState<any>(null);
@@ -488,7 +513,6 @@ export default function MaterialRequest() {
     } catch {
       setViewingRecord(record);
     }
-    setViewMode("view");
   };
 
   // Deep-link support — Linked Documents panels elsewhere navigate here as
@@ -1321,15 +1345,20 @@ export default function MaterialRequest() {
     </div>
   );
 
-  // ── View mode ─────────────────────────────────────────────────────────────────
+  // ── View mode — portal overlay ────────────────────────────────────────────────
 
-  const ViewMode = () => {
+  const ViewModal = () => {
     if (!viewingRecord) return null;
     const items: any[] = viewingRecord.items || [];
     const priority = viewingRecord.Priority || "Normal";
+    const closeOverlay = () => setViewingRecord(null);
 
-    return (
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full overflow-hidden">
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
+      >
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
         {/* ── Sticky header ── */}
         <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border">
@@ -1349,9 +1378,47 @@ export default function MaterialRequest() {
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Request</p>
           </div>
           <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const rec = viewingRecord;
+                  const itms: any[] = rec.items || [];
+                  printMasterPreview({
+                    title: rec.DocNo || `MR-${rec.MRId}`,
+                    subtitle: "Material Request",
+                    code: rec.DocNo,
+                    status: rec.Status,
+                    sections: [
+                      {
+                        title: "Request Details",
+                        fields: [
+                          { label: "Doc No", value: rec.DocNo },
+                          { label: "Financial Year", value: rec.FinYearName },
+                          { label: "Request Date", value: fmtDate(rec.RequestDate) },
+                          { label: "Required By", value: fmtDate(rec.RequiredByDate) },
+                          { label: "Company", value: rec.CompanyName },
+                          { label: "Project / Site", value: rec.ProjectName },
+                          { label: "Priority", value: rec.Priority || "Normal" },
+                          { label: "Reason", value: rec.Reason },
+                          { label: "Remarks", value: rec.Remarks },
+                        ],
+                      },
+                      {
+                        title: `Requested Items (${itms.length})`,
+                        fields: itms.map((it, i) => ({
+                          label: `${i + 1}. ${it.ItemName || it.ItemId}`,
+                          value: `${Number(it.Quantity).toFixed(2)} ${it.UOMName || it.UOMCode || ""}${it.Remarks ? ` — ${it.Remarks}` : ""}`,
+                        })),
+                      },
+                    ],
+                  });
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
+              >
+                <Printer size={13} /> Print
+              </button>
             {rights.canEdit && viewingRecord.Status === "Draft" && (
               <button
-                onClick={() => handleEdit(viewingRecord)}
+                onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
               >
                 <Edit3 size={13} /> Edit
@@ -1363,7 +1430,7 @@ export default function MaterialRequest() {
                 onClick={() => {
                   if (confirm("Delete this material request?")) {
                     deleteMutation.mutate(viewingRecord.MRId);
-                    goToList();
+                    closeOverlay();
                   }
                 }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 text-xs font-semibold text-destructive hover:bg-destructive/10 transition disabled:opacity-50"
@@ -1372,7 +1439,7 @@ export default function MaterialRequest() {
               </button>
             )}
             <button
-              onClick={goToList}
+              onClick={closeOverlay}
               className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
             >
               <X size={16} />
@@ -1467,7 +1534,31 @@ export default function MaterialRequest() {
 
         </div>
       </div>
+      </div>,
+      document.body,
     );
+  };
+
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], MR_TEMPLATE_COLUMNS, "material-request-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
   };
 
   // ── Page render ───────────────────────────────────────────────────────────────
@@ -1480,19 +1571,41 @@ export default function MaterialRequest() {
         subtitle="Request materials for projects"
         icon={Send}
         action={
-          viewMode === "list" && rights.canCreate ? (
-            <Button
-              onClick={() => setViewMode("form")}
-              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
-            >
-              <Plus size={13} /> New Request
-            </Button>
+          viewMode === "list" ? (
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <Button
+                  onClick={() => setViewMode("form")}
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                >
+                  <Plus size={13} /> New Request
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       >
         {viewMode === "list" && ListView()}
         {viewMode === "form" && FormView()}
-        {viewMode === "view" && ViewMode()}
+        {ViewModal()}
       </MaterialShell>
     </>
   );

@@ -93,7 +93,28 @@ import {
   Mail,
   MapPin,
   Building2,
+  Download,
+  Upload,
+  Loader2 as Loader2Icon,
 } from "lucide-react";
+import { exportToCsv, parseCsv } from "@/lib/export";
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+const PO_TEMPLATE_COLUMNS = [
+  { header: "Document Type", accessor: "Document Type" },
+  { header: "Supplier", accessor: "Supplier" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "PO Date (YYYY-MM-DD)", accessor: "PO Date (YYYY-MM-DD)" },
+  { header: "Expected Delivery Date (YYYY-MM-DD)", accessor: "Expected Delivery Date (YYYY-MM-DD)" },
+  { header: "Payment Terms", accessor: "Payment Terms" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+  { header: "Rate", accessor: "Rate" },
+  { header: "GST %", accessor: "GST %" },
+];
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
 
@@ -332,6 +353,8 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
 type ViewMode = "list" | "create" | "edit" | "view";
 
 const PurchaseOrderMaster: React.FC = () => {
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const rights = usePageRights("purchase-orders");
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -1957,6 +1980,28 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
     });
   };
 
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], PO_TEMPLATE_COLUMNS, "purchase-order-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.success(`${rows.length} rows read — full import coming soon`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER: LIST VIEW
   // ─────────────────────────────────────────────────────────────────────────
@@ -1972,15 +2017,35 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
           subtitle="Create and manage purchase orders"
           icon={ShoppingCart}
           action={
-            rights.canCreate ? (
-            <button
-              onClick={goToCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
-            >
-              <Plus size={13} />
-              New Purchase Order
-            </button>
-            ) : undefined
+            <div className="flex items-center gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2Icon size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <button
+                  onClick={goToCreate}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                >
+                  <Plus size={13} />
+                  New Purchase Order
+                </button>
+              )}
+            </div>
           }
         >
 
