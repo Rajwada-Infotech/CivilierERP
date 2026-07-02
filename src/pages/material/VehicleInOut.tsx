@@ -425,32 +425,22 @@ let _canDelete = true;
 // ── List columns ──────────────────────────────────────────────────────────────
 const COLUMNS: ColumnDef<any, unknown>[] = [
   {
-    accessorKey: "DocNo",
+    id: "DocInfo",
     header: "Doc No",
-    size: 140,
-    cell: ({ getValue }) => (
-      <span className="font-mono text-xs font-bold">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "DocDate",
-    header: "Doc Date",
-    size: 100,
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+    size: 130,
+    cell: ({ row }) => (
+      <div className="flex flex-col gap-0.5">
+        <span className="font-mono text-xs font-bold">{row.original.DocNo || "—"}</span>
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+          {row.original.DocDate ? new Date(row.original.DocDate).toLocaleDateString("en-IN") : ""}
         </span>
-      );
-    },
+      </div>
+    ),
   },
   {
     accessorKey: "VehicleNo",
     header: "Vehicle No",
-    size: 120,
+    size: 110,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs font-semibold text-primary">
         {(getValue() as string) || "—"}
@@ -460,15 +450,15 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "SupplierName",
     header: "Supplier",
-    size: 180,
+    size: 160,
     cell: ({ getValue }) => (
-      <span className="text-xs truncate block max-w-[180px]">{(getValue() as string) || "—"}</span>
+      <span className="text-xs truncate block">{(getValue() as string) || "—"}</span>
     ),
   },
   {
     accessorKey: "PONumber",
     header: "PO No",
-    size: 120,
+    size: 110,
     cell: ({ getValue }) => (
       <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
     ),
@@ -476,11 +466,11 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "CompanyProject",
     header: "Company / Project",
-    size: 160,
+    size: 150,
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs truncate max-w-[160px] block">{row.original.CompanyName || "—"}</span>
-        <span className="text-[10px] text-muted-foreground truncate max-w-[160px] block">
+        <span className="text-xs truncate block">{row.original.CompanyName || "—"}</span>
+        <span className="text-[10px] text-muted-foreground truncate block">
           {row.original.ProjectName || "—"}
         </span>
       </div>
@@ -489,7 +479,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "EntryTime",
     header: "Entry Time",
-    size: 140,
+    size: 130,
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
@@ -507,7 +497,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "ChallanNo",
     header: "Challan No",
-    size: 140,
+    size: 130,
     cell: ({ getValue }) => (
       <span className="text-xs font-mono">{(getValue() as string) || "—"}</span>
     ),
@@ -515,7 +505,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "status",
     header: "Status",
-    size: 180,
+    size: 170,
     enableSorting: false,
     cell: ({ row }) => (
       <div className="whitespace-nowrap">

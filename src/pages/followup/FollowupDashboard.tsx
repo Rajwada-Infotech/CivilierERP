@@ -34,7 +34,7 @@ import {
   Scale,
 } from "lucide-react";
 
-const ACCENT = "#6366f1"; // indigo — matches Follow-Up's ModuleStrip color
+const ACCENT = "#0d9488"; // teal — matches Follow-Up's ModuleStrip color
 const SECONDARY = "#8b5cf6"; // violet bloom
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
