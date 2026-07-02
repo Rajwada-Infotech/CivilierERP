@@ -72,16 +72,28 @@ router.post("/query", async (req, res) => {
     return res.status(400).json({ error: "Valid query is required" });
   }
 
-  // Allowlist approach: strip SQL comments then require the statement to start
-  // with SELECT. A blocklist of dangerous keywords is trivially bypassable
-  // (comment injection, hex encoding, sp_executesql, etc.) — a positive check
-  // on the first keyword is not. Also disallow semicolons to prevent
-  // multi-statement batches (SELECT ... ; DROP ...).
+  // Strip SQL comments first, then apply BOTH an allowlist (must start with
+  // SELECT, no semicolons) AND a blocklist scan over the same stripped text.
+  // The allowlist alone is not sufficient: SQL Server executes multiple
+  // statements in one batch WITHOUT semicolons between them, so
+  // "SELECT 1 --\nDROP TABLE dbo.Users" starts with SELECT, has no semicolon,
+  // yet still sends a second, unchecked DROP statement to the server in the
+  // same batch (confirmed live — see live workflow test D3, 2026-07-02: this
+  // exact payload reached SQL Server as a real DROP TABLE dbo.Users and was
+  // only stopped by an unrelated FK-constraint error, not by this endpoint).
+  // The blocklist re-scan runs on the comment-stripped text, so a keyword
+  // hidden after a `--` comment or on a separate line is still caught.
   const stripped = query
     .replace(/--[^\n]*/g, " ")         // strip single-line comments
     .replace(/\/\*[\s\S]*?\*\//g, " ") // strip block comments
     .trim();
-  if (!/^SELECT\b/i.test(stripped) || /;/.test(stripped)) {
+  const dangerousKeywords =
+    /\b(DROP|TRUNCATE|ALTER|CREATE|EXEC|EXECUTE|INSERT|UPDATE|DELETE|GRANT|REVOKE|DENY|MERGE|BACKUP|RESTORE|SHUTDOWN|WAITFOR)\b/i;
+  if (
+    !/^SELECT\b/i.test(stripped) ||
+    /;/.test(stripped) ||
+    dangerousKeywords.test(stripped)
+  ) {
     return res.status(403).json({
       error: "Only single SELECT statements are allowed through this endpoint.",
     });
@@ -146,10 +158,19 @@ router.post("/query/write", async (req, res) => {
     });
   }
 
-  // Extra safety: still block dangerous commands even with confirmation
+  // Extra safety: still block dangerous commands even with confirmation.
+  // Strip comments first and use \s+ (not a literal space) between ALTER and
+  // TABLE — "ALTER TABLE" with a literal single space is bypassable with
+  // "ALTER  TABLE" (extra space), "ALTER\nTABLE", or a comment in between,
+  // none of which the old regex matched. Also block GRANT/REVOKE/DENY
+  // (privilege escalation) and BACKUP/RESTORE (exfiltration/corruption),
+  // matching the read-only /query endpoint's blocklist.
+  const stripped = query
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ");
   const dangerousKeywords =
-    /\b(DROP|TRUNCATE|ALTER TABLE|CREATE|EXEC|SHUTDOWN)\b/i;
-  if (dangerousKeywords.test(query)) {
+    /\b(DROP|TRUNCATE|ALTER\s+TABLE|CREATE|EXEC|EXECUTE|SHUTDOWN|GRANT|REVOKE|DENY|BACKUP|RESTORE)\b/i;
+  if (dangerousKeywords.test(stripped)) {
     return res.status(403).json({
       error:
         "This type of operation is not allowed via the API for safety reasons.",
