@@ -205,6 +205,18 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     const userName = requireUserName(req, res);
     if (!userName) return;
 
+    // LHeadName is a NOT NULL column with no fallback default in the insert
+    // below (unlike LHeadAddress/LHeadContactPerson/LHeadType, which all
+    // fall back to a placeholder) — omitting it used to reach the database
+    // and crash with an unhandled SQL "Cannot insert the value NULL" 500
+    // instead of a clean validation error. Same bug class found and fixed
+    // across purchaseOrders.js, expenseBooking.js, workOrder.js,
+    // materialIssues.js, chequeMasterSchemas.js, debitNote.js,
+    // cardMasterSchemas.js, and roomMaster.js during a live-DB workflow test.
+    if (!LHeadName || !LHeadName.trim()) {
+      return res.status(400).json({ error: "LHeadName is required." });
+    }
+
     // ── Account Group is mandatory (not required for suppliers/customers/contractors) ──
     if (
       !LBelongsTo &&
@@ -518,6 +530,14 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
+
+    // Same NOT NULL column as POST / — this UPDATE overwrites it
+    // unconditionally (LHeadName=@LHeadName, not a COALESCE-style partial
+    // update), so omitting it here would null out the existing value and
+    // crash the same way the create path did before the fix above.
+    if (!LHeadName || !LHeadName.trim()) {
+      return res.status(400).json({ error: "LHeadName is required." });
+    }
 
     const pool = getPool();
 
