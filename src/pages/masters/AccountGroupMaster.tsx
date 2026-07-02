@@ -320,7 +320,7 @@ const AccountGroupMaster: React.FC = () => {
         `/api/account-head?type=GL&groupId=${selectedGroupId}`,
       );
       if (!res.ok) throw new Error("Failed to load GL accounts");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     enabled: !!selectedGroupId,
     staleTime: 60_000,

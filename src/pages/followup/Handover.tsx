@@ -257,7 +257,7 @@ const STATUS_META: Record<
 async function fetchMeta(): Promise<MetaOptions> {
   const res = await fetchWithAuth("/api/followup-handover/meta/options");
   if (!res.ok) throw new Error("Failed to load options");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchHandovers(params: {
@@ -282,7 +282,7 @@ async function fetchHandovers(params: {
   });
   const res = await fetchWithAuth(`/api/followup-handover?${q}`);
   if (!res.ok) throw new Error("Failed to load Handovers");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function createHandover(payload: Record<string, unknown>) {

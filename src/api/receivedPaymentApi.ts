@@ -73,7 +73,7 @@ export async function getReceivedPayments(
 ): Promise<PaginatedReceivedPayments> {
   const res = await fetchWithAuth(`${BASE}?page=${page}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch received payments");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createReceivedPayment(
@@ -85,7 +85,7 @@ export async function createReceivedPayment(
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to create received payment");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updateReceivedPayment(
@@ -98,7 +98,7 @@ export async function updateReceivedPayment(
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to update received payment");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function deleteReceivedPayment(id: number): Promise<void> {

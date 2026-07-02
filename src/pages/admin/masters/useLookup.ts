@@ -35,7 +35,7 @@ export type LookupType =
 async function fetchLookup(type: string): Promise<string[]> {
   const res = await fetchWithAuth(`/api/lookups?type=${encodeURIComponent(type)}`);
   if (!res.ok) throw new Error(`Failed to fetch lookup: ${type}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 /**

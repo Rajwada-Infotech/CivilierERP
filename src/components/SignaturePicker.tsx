@@ -34,7 +34,7 @@ interface Props {
 async function fetchSignatures(): Promise<SignatureRecord[]> {
   const res = await fetchWithAuth("/api/signatures");
   if (!res.ok) throw new Error("Failed to load signatures");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   // API may return { data: [...] } or [...] directly
   return Array.isArray(data) ? data : (data.data ?? []);
 }

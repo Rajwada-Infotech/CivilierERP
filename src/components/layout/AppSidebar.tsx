@@ -174,7 +174,7 @@ function useApprovalCount() {
       .fetch("/api/approval-inbox/count", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
       .then((d) => {
         if (!mountedRef.current) return;
         failRef.current = 0;

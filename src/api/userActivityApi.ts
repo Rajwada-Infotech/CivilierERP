@@ -95,7 +95,7 @@ export const getUserActivityLogs = async (
   const response = await fetchWithAuth(url);
   if (!response.ok) throw new Error("Failed to fetch activity logs");
 
-  return response.json();
+  return response.json().catch(() => ({}));
 };
 
 // ==================== LEGACY ====================
@@ -109,7 +109,7 @@ export const getUserActivityLogsLegacy = async (
   const response = await fetchWithAuth(url, { skipActivityLog: true });
   if (!response.ok) throw new Error("Failed to fetch activity logs");
 
-  return response.json();
+  return response.json().catch(() => ({}));
 };
 
 // ==================== SESSION ====================
@@ -123,7 +123,7 @@ export const getSessionActivity = async (
   );
 
   if (!response.ok) throw new Error("Failed to fetch session activity");
-  return response.json();
+  return response.json().catch(() => ({}));
 };
 
 // ==================== LOGGING ====================
@@ -146,7 +146,7 @@ export const logUserActivity = async (
     throw new Error(errorText);
   }
 
-  return response.json();
+  return response.json().catch(() => ({}));
 };
 
 // ==================== DELETE / CLEAR ====================
@@ -163,7 +163,7 @@ export const deleteActivityHistory = async (): Promise<{ message: string }> => {
     throw new Error(errorText);
   }
 
-  return response.json();
+  return response.json().catch(() => ({}));
 };
 
 // ==================== SOCKET.IO REAL-TIME =====================

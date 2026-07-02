@@ -529,7 +529,7 @@ export default function TrialBalance() {
   useEffect(() => {
     setFinYearsLoading(true);
     fetchWithAuth("/api/fin-year")
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data: FinYearRow[]) => {
         // Only unlocked + active fin years are selectable for Trial Balance reporting
         const unlocked = data.filter(

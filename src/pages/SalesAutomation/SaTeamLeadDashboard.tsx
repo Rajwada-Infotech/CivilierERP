@@ -8,7 +8,7 @@ import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 async function fetchTeamLeadDashboard(): Promise<any> {
   const res = await fetchWithAuth("/api/sa/dashboard/team-lead");
   if (!res.ok) throw new Error("Failed to fetch team lead dashboard");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string | number }> = ({ icon: Icon, label, value }) => (

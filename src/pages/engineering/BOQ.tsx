@@ -155,7 +155,7 @@ const apiFetch = async (path: string, opts?: RequestInit) => {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fmt = (n: number) =>

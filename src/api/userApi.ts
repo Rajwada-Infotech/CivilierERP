@@ -33,7 +33,7 @@ export const getUsers = async (): Promise<User[]> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addUser = async (user: {
@@ -48,7 +48,7 @@ export const addUser = async (user: {
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to add user");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateUser = async (id: number, user: Partial<User>) => {
@@ -58,7 +58,7 @@ export const updateUser = async (id: number, user: Partial<User>) => {
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to update user");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteUser = async (id: number) => {
@@ -67,7 +67,7 @@ export const deleteUser = async (id: number) => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete user");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getUsersForRights = async (): Promise<
@@ -77,7 +77,7 @@ export const getUsersForRights = async (): Promise<
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch users for rights");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getUserPermissions = async (
@@ -87,7 +87,7 @@ export const getUserPermissions = async (
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch user permissions");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return data.rightsJson || [];
 };
 
@@ -106,7 +106,7 @@ export const saveUserPermissions = async (
     throw new Error(errorData.error || "Failed to save permissions");
   }
 
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const resetUserPassword = async (
@@ -122,7 +122,7 @@ export const resetUserPassword = async (
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || "Failed to reset password");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export default {

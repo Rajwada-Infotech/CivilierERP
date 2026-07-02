@@ -6,7 +6,7 @@ const { isSaAdmin } = require("../services/saAccess");
 const { userPermissionCache } = require("../middleware/permissions");
 const rateLimit = require("express-rate-limit");
 
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 function guard(req, res, next) {
   if (!isSaAdmin(req)) return res.status(403).json({ error: "Access denied" });

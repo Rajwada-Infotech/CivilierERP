@@ -203,7 +203,7 @@ async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
         (details ? ` → ${details}` : ""),
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 const _mastersCache: {
@@ -1441,7 +1441,7 @@ function GRNChainBadge({
   useEffect(() => {
     if (!bookingId) return;
     fetchWithAuth(`/api/expense-booking/${bookingId}/grns`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) => setGrns(Array.isArray(data) ? data : []))
       .catch((err) => {
         toast.error(

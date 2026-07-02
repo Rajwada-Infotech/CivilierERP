@@ -360,7 +360,7 @@ function TicketDetailView({
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/${ticketId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -389,7 +389,7 @@ function TicketDetailView({
         body: formData,
       });
       if (!res.ok) throw new Error(`Failed to upload ${file.name}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const firstId = data.attachments?.[0]?.id;
       if (firstId) allIds.push(firstId);
     }
@@ -863,7 +863,7 @@ const PendingTickets: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/tickets?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = await res.json();
+      const payload = await res.json().catch(() => ({}));
       return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,

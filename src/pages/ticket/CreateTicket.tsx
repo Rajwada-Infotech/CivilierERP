@@ -270,7 +270,7 @@ const CreateTicket = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/business/dropdown");
       if (!res.ok) throw new Error("Failed to load dropdowns");
-      return res.json() as Promise<{
+      return res.json().catch(() => ({})) as Promise<{
         companies: DropdownOption[];
         projects: DropdownOption[];
       }>;
@@ -283,7 +283,7 @@ const CreateTicket = () => {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/account-head?type=A");
       if (!res.ok) throw new Error("Failed to load customers");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return (Array.isArray(data) ? data : []) as CustomerOption[];
     },
     staleTime: 5 * 60_000,

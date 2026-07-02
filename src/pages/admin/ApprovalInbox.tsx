@@ -168,7 +168,7 @@ const fetchInbox = async (): Promise<InboxItem[]> => {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? "Failed to fetch approval inbox");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 const fmtDate = (d: string | null) => {

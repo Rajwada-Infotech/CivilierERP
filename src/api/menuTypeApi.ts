@@ -23,7 +23,7 @@ export interface MenuType {
 export const getMenuTypes = async (): Promise<MenuType[]> => {
   const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const addMenuType = async (data: Record<string, unknown>) => {
@@ -33,10 +33,10 @@ export const addMenuType = async (data: Record<string, unknown>) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateMenuType = async (
@@ -49,10 +49,10 @@ export const updateMenuType = async (
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteMenuType = async (id: number) => {
@@ -61,10 +61,10 @@ export const deleteMenuType = async (id: number) => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 /**

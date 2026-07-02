@@ -22,7 +22,7 @@ export const getSystemMetrics = async (): Promise<SystemMetrics> => {
     const error = await res.json().catch(() => ({}));
     throw new Error(error.error || "Failed to fetch system metrics");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 export const fetchMetrics = async (
   baseURL: string,

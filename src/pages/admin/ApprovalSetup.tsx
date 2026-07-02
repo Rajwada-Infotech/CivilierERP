@@ -171,7 +171,7 @@ const APPROVAL_API = "/api/approval-workflows";
 async function fetchWorkflows(): Promise<ApprovalWorkflow[]> {
   const res = await fetchWithAuth(APPROVAL_API);
   if (!res.ok) throw new Error("Failed to fetch workflows");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function apiSave(
@@ -181,8 +181,8 @@ async function apiSave(
   const method = id ? "PUT" : "POST";
   const url = id ? `${APPROVAL_API}/${id}` : APPROVAL_API;
   const res = await fetchWithAuth(url, { method, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error((await res.json()).error || "Save failed");
-  return res.json();
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Save failed");
+  return res.json().catch(() => ({}));
 }
 
 async function apiToggle(id: number) {

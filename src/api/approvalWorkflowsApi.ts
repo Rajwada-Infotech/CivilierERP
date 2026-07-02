@@ -11,7 +11,7 @@ export type { ApprovalWorkflow, ApprovalLevel };
 export async function getApprovalWorkflows(): Promise<ApprovalWorkflow[]> {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error("Failed to fetch approval workflows");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function getApprovalWorkflowsByModule(
@@ -21,7 +21,7 @@ export async function getApprovalWorkflowsByModule(
     `${BASE}?module=${encodeURIComponent(module)}`,
   );
   if (!res.ok) throw new Error("Failed to fetch workflows for module");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createApprovalWorkflow(
@@ -31,8 +31,8 @@ export async function createApprovalWorkflow(
     method: "POST",
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error((await res.json()).error || "Create failed");
-  return res.json();
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Create failed");
+  return res.json().catch(() => ({}));
 }
 
 export async function updateApprovalWorkflow(
@@ -43,8 +43,8 @@ export async function updateApprovalWorkflow(
     method: "PUT",
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error((await res.json()).error || "Update failed");
-  return res.json();
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Update failed");
+  return res.json().catch(() => ({}));
 }
 
 export async function toggleApprovalWorkflow(id: number): Promise<void> {

@@ -91,19 +91,19 @@ export async function getVehicleInOuts(params: {
 
   const res = await fetchWithAuth(`${BASE}?${qs}`);
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function getVehicleInOut(id: number): Promise<VehicleInOutRecord> {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function previewNextVEHNumber(): Promise<{ nextDocNo: string }> {
   const res = await fetchWithAuth(`${BASE}/next-number`);
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function createVehicleInOut(
@@ -118,7 +118,7 @@ export async function createVehicleInOut(
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || "Failed to create Vehicle In/Out");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 export async function updateVehicleInOut(
@@ -173,7 +173,7 @@ export async function uploadVehicleAttachments(
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || "Upload failed");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 /** Remove a single attachment — e.g. user un-attaches a photo before saving. */

@@ -5,25 +5,25 @@ const BASE = "/api/material-issues";
 export const getCompanies = async () => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) throw new Error("Failed to fetch companies");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getProjects = async () => {
   const res = await fetchWithAuth(`${BASE}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getFinYears = async () => {
   const res = await fetchWithAuth(`${BASE}/fin-years`);
   if (!res.ok) throw new Error("Failed to fetch financial years");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getGodowns = async () => {
   const res = await fetchWithAuth(`${BASE}/godowns`);
   if (!res.ok) throw new Error("Failed to fetch godowns");
-  return res.json() as Promise<
+  return res.json().catch(() => ({})) as Promise<
     {
       id: number;
       name: string;
@@ -40,13 +40,13 @@ export const getItemOptions = async (godownId?: number | null) => {
   const q = godownId ? `?godownId=${godownId}` : "";
   const res = await fetchWithAuth(`${BASE}/item-options${q}`);
   if (!res.ok) throw new Error("Failed to fetch items");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getUomOptions = async () => {
   const res = await fetchWithAuth("/api/uom-master");
   if (!res.ok) throw new Error("Failed to fetch UOMs");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return Array.isArray(data) ? data : [];
 };
 
@@ -55,7 +55,7 @@ export const getStockBalance = async (itemId: string) => {
     `${BASE}/stock/${encodeURIComponent(itemId)}`,
   );
   if (!res.ok) throw new Error("Failed to fetch stock");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     stockIn: number;
     stockOut: number;
     balance: number;
@@ -76,20 +76,20 @@ export const getIssues = async (params: {
   if (params.status) q.set("status", params.status);
   const res = await fetchWithAuth(`${BASE}?${q}`);
   if (!res.ok) throw new Error("Failed to fetch issues");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const getIssue = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error("Failed to fetch issue");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const previewNextIssueNumber = async (exb = false) => {
   const suffix = exb ? "?exb=true" : "";
   const res = await fetchWithAuth(`${BASE}/next-number${suffix}`);
   if (!res.ok) throw new Error("Failed to preview issue number");
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const createIssue = async (payload: any) => {
@@ -102,7 +102,7 @@ export const createIssue = async (payload: any) => {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to create issue");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const updateIssue = async (id: number, payload: any) => {
@@ -115,7 +115,7 @@ export const updateIssue = async (id: number, payload: any) => {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to update issue");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 export const deleteIssue = async (id: number) => {
@@ -124,7 +124,7 @@ export const deleteIssue = async (id: number) => {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to delete issue");
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 };
 
 // Legacy compatibility

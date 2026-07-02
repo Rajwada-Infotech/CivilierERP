@@ -169,7 +169,7 @@ export function ExpenseBookingPreviewModal({
       // stores rates/GST at booking time, but the GRN holds the actual
       // received quantities and item-level HSN rates used for payment.
       fetchWithAuth(`/api/grns/by-po/${eSourceId}`)
-        .then((r) => (r.ok ? r.json() : []))
+        .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
         .then((grns: { GRNID: number }[]) => {
           if (Array.isArray(grns) && grns.length > 0) {
             // grns is ordered newest-first (ORDER BY GRNID DESC)
@@ -185,7 +185,7 @@ export function ExpenseBookingPreviewModal({
 
     // Fetch billing terms master to hydrate terms when EBillingTermsData is missing
     fetchWithAuth("/api/billing-terms")
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) => setMasterBillingTerms(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [previewRecord?.id]);

@@ -19,7 +19,7 @@ const API = "/api/unit-master";
 async function fetchUnits(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch units");
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function fetchProjectOptions(): Promise<
@@ -27,7 +27,7 @@ async function fetchProjectOptions(): Promise<
 > {
   const res = await fetchWithAuth(`${API}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
-  const data: { Id: number; Name: string }[] = await res.json();
+  const data: { Id: number; Name: string }[] = await res.json().catch(() => ({}));
   return data.map((p) => ({ value: String(p.Id), label: p.Name }));
 }
 
@@ -107,7 +107,7 @@ const UnitMaster: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/blocks`);
       if (!res.ok) throw new Error("Failed to fetch blocks");
-      return res.json();
+      return res.json().catch(() => ({}));
     },
     staleTime: 5 * 60 * 1000,
   });

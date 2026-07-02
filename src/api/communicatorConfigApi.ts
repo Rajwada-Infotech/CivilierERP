@@ -9,7 +9,7 @@ export const getCommunicatorConfig = async <TConfig = Record<string, unknown>>(
     throw new Error(error.error || "Failed to load communicator config");
   }
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return (data?.config ?? {}) as TConfig;
 };
 
@@ -27,5 +27,5 @@ export const saveCommunicatorConfig = async (
     throw new Error(error.error || "Failed to save communicator config");
   }
 
-  return res.json();
+  return res.json().catch(() => ({}));
 };

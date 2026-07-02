@@ -140,7 +140,7 @@ async function fetchDemands(params: {
   });
   const res = await fetchWithAuth(`/api/followup-demands?${q}`);
   if (!res.ok) throw new Error("Failed to load demands");
-  return res.json() as Promise<{
+  return res.json().catch(() => ({})) as Promise<{
     data: DemandRow[];
     pagination: { page: number; pageSize: number; total: number };
     summary: DemandSummary;
@@ -150,7 +150,7 @@ async function fetchDemands(params: {
 async function fetchProjects() {
   const res = await fetchWithAuth("/api/followup-demands/projects");
   if (!res.ok) throw new Error("Failed to load projects");
-  return res.json() as Promise<ProjectOption[]>;
+  return res.json().catch(() => ({})) as Promise<ProjectOption[]>;
 }
 
 async function raiseDemand(
@@ -167,7 +167,7 @@ async function raiseDemand(
       (err as { error?: string }).error || "Failed to raise demand",
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 async function undoRaise(id: number) {
@@ -181,7 +181,7 @@ async function undoRaise(id: number) {
       (err as { error?: string }).error || "Failed to undo demand",
     );
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }
 
 // ─── Status pill ──────────────────────────────────────────────────────────────

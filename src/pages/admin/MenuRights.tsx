@@ -158,7 +158,7 @@ export default function MenuRights() {
     fetchWithAuth("/api/page-definitions")
       .then((res) => {
         if (!res.ok) throw new Error("fetch failed");
-        return res.json();
+        return res.json().catch(() => ({}));
       })
       .then((json) => setPageDefs(json.data ?? []))
       .catch(() => toast.error("Failed to load page definitions"))
