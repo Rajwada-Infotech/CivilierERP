@@ -72,12 +72,18 @@ router.post("/query", async (req, res) => {
     return res.status(400).json({ error: "Valid query is required" });
   }
 
-  // Block dangerous keywords
-  const blockedKeywords =
-    /\b(DROP|TRUNCATE|ALTER|CREATE|EXEC|EXECUTE|INSERT|UPDATE|DELETE|GRANT|REVOKE|SHUTDOWN)\b/i;
-  if (blockedKeywords.test(query)) {
+  // Allowlist approach: strip SQL comments then require the statement to start
+  // with SELECT. A blocklist of dangerous keywords is trivially bypassable
+  // (comment injection, hex encoding, sp_executesql, etc.) — a positive check
+  // on the first keyword is not. Also disallow semicolons to prevent
+  // multi-statement batches (SELECT ... ; DROP ...).
+  const stripped = query
+    .replace(/--[^\n]*/g, " ")         // strip single-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, " ") // strip block comments
+    .trim();
+  if (!/^SELECT\b/i.test(stripped) || /;/.test(stripped)) {
     return res.status(403).json({
-      error: "Only SELECT queries are allowed through this endpoint.",
+      error: "Only single SELECT statements are allowed through this endpoint.",
     });
   }
 

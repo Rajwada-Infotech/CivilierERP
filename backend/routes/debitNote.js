@@ -155,7 +155,7 @@ router.post("/", requirePageRight("debit-note", "create"), async (req, res) => {
 
       await tx.commit();
       await bumpCacheVersion("debit-note");
-      res.json({ message: "Debit note created", id: newId });
+      res.status(201).json({ message: "Debit note created", id: newId });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[debitNote] POST /:", err.message);
