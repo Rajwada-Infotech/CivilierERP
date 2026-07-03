@@ -28,6 +28,7 @@ import {
   getStockTransfers,
   type StockTransfer,
 } from "@/api/stockTransferApi";
+import { createInterCompanyTransfer } from "@/api/interCompanyTransferApi";
 import {
   createGRNFromTransfer,
   getGRNsByTransfer,
@@ -931,6 +932,30 @@ export default function StockTransfer() {
     onError: (e: Error) => setErrorMsg(e.message),
   });
 
+  // "Inter-Company" + "Route via Dummy Bank" together mean this transfer
+  // crosses a real legal/GST boundary — instead of a plain StockLedger
+  // move, generate the full commercial paper trail (Sale Order -> Sale
+  // Invoice -> Received Payment on the sending side, Purchase Order -> GRN
+  // -> Expense Booking -> Payment on the receiving side), priced at the
+  // sender's own last purchase rate. See backend/routes/interCompanyTransfer.js.
+  const interTransferMut = useMutation({
+    mutationFn: createInterCompanyTransfer,
+    onSuccess: (res) => {
+      setSuccessMsg(
+        `Inter-company transfer ${res.DocNo} completed — Sale Invoice #${res.links.SaleInvoiceID}, GRN #${res.links.GRNID}, Payment #${res.links.NewPaymentID}.`,
+      );
+      setErrorMsg("");
+      setFromGodownId(null);
+      setToGodownId(null);
+      setItems([emptyItem()]);
+      setRemarks("");
+      qc.invalidateQueries({ queryKey: ["inventory-master"] });
+      qc.invalidateQueries({ queryKey: ["stock-transfers"] });
+      setTimeout(() => setSuccessMsg(""), 6000);
+    },
+    onError: (e: Error) => setErrorMsg(e.message),
+  });
+
   const updateItem = (idx: number, patch: Partial<TItem>) =>
     setItems((prev) =>
       prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
@@ -950,7 +975,8 @@ export default function StockTransfer() {
     (transferMode === "inter" || fromGodownId !== toGodownId) &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
     !hasOverLimit &&
-    !transferMut.isPending;
+    !transferMut.isPending &&
+    !interTransferMut.isPending;
 
   const handleTransfer = () => {
     setErrorMsg("");
@@ -963,6 +989,30 @@ export default function StockTransfer() {
         uom: it.uom,
         remarks: it.remarks,
       }));
+
+    if (transferMode === "inter" && viaBank) {
+      const senderProjectId = fromGodown?.ProjectID;
+      const receiverProjectId = toGodown?.ProjectID;
+      if (!senderProjectId || !receiverProjectId) {
+        setErrorMsg(
+          "Both the source and destination godowns must be linked to a Project to route this transfer via the Dummy Bank.",
+        );
+        return;
+      }
+      interTransferMut.mutate({
+        SenderProjectId: senderProjectId,
+        ReceiverProjectId: receiverProjectId,
+        Remarks: remarks || undefined,
+        Items: validItems.map((it) => ({
+          itemId: it.itemId,
+          itemName: it.itemName,
+          uom: it.uom,
+          qty: it.qty,
+        })),
+      });
+      return;
+    }
+
     transferMut.mutate({
       FromGodownID: fromGodownId!,
       ToGodownID: toGodownId!,
@@ -1382,7 +1432,7 @@ export default function StockTransfer() {
                         disabled={!canTransfer}
                         className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                       >
-                        {transferMut.isPending ? (
+                        {transferMut.isPending || interTransferMut.isPending ? (
                           <>
                             <RefreshCw size={14} className="animate-spin" />{" "}
                             Processing…

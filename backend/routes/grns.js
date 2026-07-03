@@ -966,38 +966,58 @@ router.post(
       await bumpCacheVersion("stock-ledger");
       await bumpCacheVersion("grns");
 
-      // Auto-submit: transition Draft → Pending immediately after creation.
-      try {
-        await transition(
-          "goods-receipt",
-          grnId,
-          "Pending",
-          req.user?.email,
-          req.user?.role,
-        );
-      } catch (submitErr) {
-        console.warn("GRN auto-submit failed (non-fatal):", submitErr.message);
-      }
+    // PascalCase matching the actual column name, consistent with every
+    // other internal creation function this session (PurchaseOrderID,
+    // SaleOrderID, SaleInvoiceID, etc.) — callers besides this route's own
+    // POST / handler (e.g. the Inter-Company Stock Transfer orchestrator)
+    // rely on this exact shape.
+    return { GRNID: grnId, DocNo: finalDocNo };
+  } catch (err) {
+    await transaction.rollback().catch(() => {});
+    throw err;
+  }
+}
 
-      res.status(201).json({
-        message: "GRN created successfully",
+router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodySchema), async (req, res) => {
+  try {
+    const userEmail = req.user?.email || req.user?.name || null;
+    const pool = getPool();
+    const { GRNID: grnId, DocNo: docNo } = await createGRNInternal(pool, req.body, userEmail);
+    const grnNo = docNo;
+
+    await bumpCacheVersion("stock-ledger");
+    await bumpCacheVersion("grns");
+
+    // Auto-submit: transition Draft → Pending immediately after creation.
+    try {
+      await transition(
+        "goods-receipt",
         grnId,
-        grnNo: finalDocNo,
-        docNo: finalDocNo,
-        status: "Pending",
-      });
-    } catch (err) {
-      await transaction.rollback().catch(() => {});
-      console.error("CREATE GRN FULL ERROR:", err);
-      if (res.headersSent) return; // timeout middleware already sent 503
-      res.status(500).json({
-        error: "Failed to create GRN",
-        message: err.message,
-        detail: err.originalError?.info || null,
-      });
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn("GRN auto-submit failed (non-fatal):", submitErr.message);
     }
-  },
-);
+
+    res.status(201).json({
+      message: "GRN created successfully",
+      grnId,
+      grnNo,
+      docNo,
+      status: "Pending",
+    });
+  } catch (err) {
+    console.error("CREATE GRN FULL ERROR:", err);
+    if (res.headersSent) return;
+    res.status(500).json({
+      error: "Failed to create GRN",
+      message: err.message,
+      detail: err.originalError?.info || null,
+    });
+  }
+});
 
 // PUT - Update GRN
 router.put(
