@@ -353,16 +353,26 @@ export const getUoms = async (): Promise<UOM[]> => {
 };
 
 export const getProjects = async (): Promise<
-  { id: number; name: string; short_name: string | null }[]
+  { id: number; name: string; short_name: string | null; enterprise_id: number | null }[]
 > => {
-  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
-  if (!res.ok) throw new Error("Failed to fetch projects");
+  const res = await fetchWithAuth(“/api/enterprises/options?business_type=P”);
+  if (!res.ok) throw new Error(“Failed to fetch projects”);
   const data = await res.json().catch(() => ({}));
-  // /enterprises/options returns { id, label, belongs_to } â€” normalise to { id, name }
   return Array.isArray(data)
-    ? (data as { id: number; label: string; short_name?: string | null }[]).map(
-        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null }),
+    ? (data as { id: number; label: string; short_name?: string | null; enterprise_id?: number | null }[]).map(
+        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null, enterprise_id: p.enterprise_id ?? null }),
       )
+    : [];
+};
+
+export const getCompanies = async (): Promise<
+  { id: number; name: string }[]
+> => {
+  const res = await fetchWithAuth(“/api/enterprises/options?business_type=C”);
+  if (!res.ok) throw new Error(“Failed to fetch companies”);
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray(data)
+    ? (data as { id: number; label: string }[]).map((c) => ({ id: c.id, name: c.label }))
     : [];
 };
 
