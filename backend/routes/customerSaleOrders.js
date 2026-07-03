@@ -132,6 +132,155 @@ const syncLineItems = async (transaction, sqlRef, saleOrderID, soItems, uomMap) 
   }
 };
 
+// ─── Internal creation function ──────────────────────────────────────────────
+// Extracted from POST / so other server-side callers (the Inter-Company
+// Stock Transfer orchestrator) can create a real, fully-validated Sale
+// Order in-process without duplicating this validation/numbering/insert
+// logic or making an HTTP self-call. Mechanical extraction — the POST route
+// below now just calls this and maps thrown errors to a response; behavior
+// is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
+const createSaleOrderInternal = async (pool, payload, userEmail) => {
+  const {
+    SaleOrderNo: soNoFromClient,
+    SODate,
+    CustomerID,
+    CompanyId,
+    ProjectId,
+    ItemDescription,
+    Quantity,
+    Unit,
+    Rate,
+    TotalAmount,
+    ReceivingGodownId,
+    ReferenceNumber,
+    PaymentTerms,
+    Status,
+    Remarks,
+    DocTypeId,
+    finYear,
+    SOItems,
+  } = payload;
+
+  const soItemsArray = Array.isArray(SOItems)
+    ? SOItems
+    : (safeJson(parseJson(SOItems)) ?? []);
+  const soItemsJson = JSON.stringify(soItemsArray);
+  const total =
+    computeTotal(soItemsArray) ??
+    (parseFloat(TotalAmount) ||
+      parseFloat(Quantity) * parseFloat(Rate) ||
+      0);
+
+  // Customer must actually be a Customer-type ledger head, not a supplier
+  // or any other account — this is the one thing PurchaseOrders doesn't
+  // need to check (suppliers aren't filtered by type at this layer either,
+  // but getting the party type wrong here is the more common mistake
+  // since Sale Order is new and customers/suppliers share one master).
+  const custCheck = await pool
+    .request()
+    .input("CustomerID", sql.Int, parseInt(CustomerID, 10))
+    .query(
+      "SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @CustomerID",
+    );
+  if (!custCheck.recordset.length) {
+    const err = new Error("Customer not found.");
+    err.status = 404;
+    throw err;
+  }
+  if (custCheck.recordset[0].LHeadType !== "C") {
+    const err = new Error("Selected account is not a Customer.");
+    err.status = 400;
+    throw err;
+  }
+
+  const uomMap = await buildUomMap(pool);
+  const fyId = await resolveFyId(pool, finYear);
+
+  const transaction = pool.transaction();
+  await transaction.begin();
+
+  try {
+    let finalDocNo = null;
+    if (DocTypeId) {
+      finalDocNo = await lockNextDocNumber(pool, sql, {
+        docTypeId: parseInt(DocTypeId, 10),
+        finYear,
+        tableName: "CustomerSaleOrders",
+        docNoColumn: "SaleOrderNo",
+        issuedBy: userEmail,
+      });
+    } else {
+      finalDocNo = soNoFromClient || null;
+    }
+
+    if (!finalDocNo) {
+      const err = new Error(
+        "SaleOrderNo is required. Select a document type or enter a sale order number manually.",
+      );
+      err.status = 400;
+      throw err;
+    }
+
+    const result = await transaction
+      .request()
+      .input("SaleOrderNo", sql.NVarChar(100), finalDocNo)
+      .input("SODate", sql.Date, SODate || new Date())
+      .input("CustomerID", sql.Int, parseInt(CustomerID, 10))
+      .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
+      .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
+      .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
+      .input("Quantity", sql.Decimal(18, 4), parseFloat(Quantity) || 0)
+      .input("Unit", sql.NVarChar(50), Unit || "NOS")
+      .input("Rate", sql.Decimal(18, 4), parseFloat(Rate) || 0)
+      .input("TotalAmount", sql.Decimal(18, 2), total)
+      .input(
+        "ReceivingGodownId",
+        sql.Int,
+        ReceivingGodownId ? parseInt(ReceivingGodownId, 10) : null,
+      )
+      .input("ReferenceNumber", sql.NVarChar(100), ReferenceNumber || null)
+      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
+      .input("Status", sql.NVarChar(50), Status || "Open")
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("CreatedBy", sql.NVarChar(100), userEmail)
+      .input("CreatedAt", sql.DateTime2, new Date())
+      .input("SOItems", sql.NVarChar(sql.MAX), soItemsJson)
+      .input("FyId", sql.Int, fyId).query(`
+        INSERT INTO dbo.CustomerSaleOrders (
+          SaleOrderNo, SODate, CustomerID, CompanyId, ProjectId,
+          ItemDescription, Quantity, Unit, Rate, TotalAmount,
+          ReceivingGodownId, ReferenceNumber, PaymentTerms, Status, Remarks,
+          DocTypeId, CreatedBy, CreatedAt, SOItems, fy_id
+        )
+        OUTPUT INSERTED.SaleOrderID
+        VALUES (
+          @SaleOrderNo, @SODate, @CustomerID, @CompanyId, @ProjectId,
+          @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
+          @ReceivingGodownId, @ReferenceNumber, @PaymentTerms, @Status, @Remarks,
+          @DocTypeId, @CreatedBy, @CreatedAt, @SOItems, @FyId
+        )
+      `);
+
+    const newId = result.recordset[0].SaleOrderID;
+
+    await syncLineItems(transaction, sql, newId, soItemsArray, uomMap);
+
+    await transaction.commit();
+
+    await backPatchRecordId(pool, sql, finalDocNo, "CustomerSaleOrders", newId);
+
+    return { SaleOrderID: newId, SaleOrderNo: finalDocNo };
+  } catch (err) {
+    try {
+      await transaction.rollback();
+    } catch {
+      // already rolled back
+    }
+    throw err;
+  }
+};
+
 // ─── SELECT columns shared by GET / and GET /:id ─────────────────────────────
 
 const SO_SELECT = `
@@ -269,152 +418,18 @@ router.get("/:id", async (req, res) => {
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
 router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(customerSaleOrderBodySchema), async (req, res) => {
-  const {
-    SaleOrderNo: soNoFromClient,
-    SODate,
-    CustomerID,
-    CompanyId,
-    ProjectId,
-    ItemDescription,
-    Quantity,
-    Unit,
-    Rate,
-    TotalAmount,
-    ReceivingGodownId,
-    ReferenceNumber,
-    PaymentTerms,
-    Status,
-    Remarks,
-    DocTypeId,
-    finYear,
-    SOItems,
-  } = req.body;
-
-  const soItemsArray = Array.isArray(SOItems)
-    ? SOItems
-    : (safeJson(parseJson(SOItems)) ?? []);
-  const soItemsJson = JSON.stringify(soItemsArray);
-  const total =
-    computeTotal(soItemsArray) ??
-    (parseFloat(TotalAmount) ||
-      parseFloat(Quantity) * parseFloat(Rate) ||
-      0);
-
-  let transaction;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const pool = getPool();
-
-    // Customer must actually be a Customer-type ledger head, not a supplier
-    // or any other account — this is the one thing PurchaseOrders doesn't
-    // need to check (suppliers aren't filtered by type at this layer either,
-    // but getting the party type wrong here is the more common mistake
-    // since Sale Order is new and customers/suppliers share one master).
-    const custCheck = await pool
-      .request()
-      .input("CustomerID", sql.Int, parseInt(CustomerID, 10))
-      .query(
-        "SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @CustomerID",
-      );
-    if (!custCheck.recordset.length) {
-      return res.status(404).json({ error: "Customer not found." });
-    }
-    if (custCheck.recordset[0].LHeadType !== "C") {
-      return res.status(400).json({
-        error: "Selected account is not a Customer.",
-      });
-    }
-
-    const uomMap = await buildUomMap(pool);
-    const fyId = await resolveFyId(pool, finYear);
-
-    transaction = pool.transaction();
-    await transaction.begin();
-
-    let finalDocNo = null;
-    if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: parseInt(DocTypeId, 10),
-        finYear,
-        tableName: "CustomerSaleOrders",
-        docNoColumn: "SaleOrderNo",
-        issuedBy: req.user?.email,
-      });
-    } else {
-      finalDocNo = soNoFromClient || null;
-    }
-
-    if (!finalDocNo) {
-      await transaction.rollback();
-      return res.status(400).json({
-        error:
-          "SaleOrderNo is required. Select a document type or enter a sale order number manually.",
-      });
-    }
-
-    const result = await transaction
-      .request()
-      .input("SaleOrderNo", sql.NVarChar(100), finalDocNo)
-      .input("SODate", sql.Date, SODate || new Date())
-      .input("CustomerID", sql.Int, parseInt(CustomerID, 10))
-      .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
-      .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
-      .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
-      .input("Quantity", sql.Decimal(18, 4), parseFloat(Quantity) || 0)
-      .input("Unit", sql.NVarChar(50), Unit || "NOS")
-      .input("Rate", sql.Decimal(18, 4), parseFloat(Rate) || 0)
-      .input("TotalAmount", sql.Decimal(18, 2), total)
-      .input(
-        "ReceivingGodownId",
-        sql.Int,
-        ReceivingGodownId ? parseInt(ReceivingGodownId, 10) : null,
-      )
-      .input("ReferenceNumber", sql.NVarChar(100), ReferenceNumber || null)
-      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
-      .input("Status", sql.NVarChar(50), Status || "Open")
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("CreatedBy", sql.NVarChar(100), userEmail)
-      .input("CreatedAt", sql.DateTime2, new Date())
-      .input("SOItems", sql.NVarChar(sql.MAX), soItemsJson)
-      .input("FyId", sql.Int, fyId).query(`
-        INSERT INTO dbo.CustomerSaleOrders (
-          SaleOrderNo, SODate, CustomerID, CompanyId, ProjectId,
-          ItemDescription, Quantity, Unit, Rate, TotalAmount,
-          ReceivingGodownId, ReferenceNumber, PaymentTerms, Status, Remarks,
-          DocTypeId, CreatedBy, CreatedAt, SOItems, fy_id
-        )
-        OUTPUT INSERTED.SaleOrderID
-        VALUES (
-          @SaleOrderNo, @SODate, @CustomerID, @CompanyId, @ProjectId,
-          @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
-          @ReceivingGodownId, @ReferenceNumber, @PaymentTerms, @Status, @Remarks,
-          @DocTypeId, @CreatedBy, @CreatedAt, @SOItems, @FyId
-        )
-      `);
-
-    const newId = result.recordset[0].SaleOrderID;
-
-    await syncLineItems(transaction, sql, newId, soItemsArray, uomMap);
-
-    await transaction.commit();
-
-    await backPatchRecordId(pool, sql, finalDocNo, "CustomerSaleOrders", newId);
+    const { SaleOrderID, SaleOrderNo } = await createSaleOrderInternal(pool, req.body, userEmail);
     await bumpCacheVersion("customer-sale-orders");
 
-    res.status(201).json({ SaleOrderID: newId, SaleOrderNo: finalDocNo });
+    res.status(201).json({ SaleOrderID, SaleOrderNo });
   } catch (err) {
-    if (transaction) {
-      try {
-        await transaction.rollback();
-      } catch {
-        // already rolled back
-      }
-    }
     console.error("POST CustomerSaleOrder error:", err);
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 
@@ -537,3 +552,4 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(custo
 });
 
 module.exports = router;
+module.exports.createSaleOrderInternal = createSaleOrderInternal;
