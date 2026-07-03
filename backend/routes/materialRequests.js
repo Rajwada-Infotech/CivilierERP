@@ -541,30 +541,67 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       }
     }
 
-    const insertHdr = await pool
-      .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("FinYearId", sql.Int, FinYearId || null)
-      .input("RequestDate", sql.Date, RequestDate || new Date())
-      .input("RequiredByDate", sql.Date, RequiredByDate || null)
-      .input("Priority", sql.NVarChar(20), Priority)
-      .input("Reason", sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
-      .input("CreatedBy", sql.NVarChar(200), user).query(`
-        INSERT INTO dbo.MaterialRequests
-          (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-           Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
-        OUTPUT INSERTED.MRId
-        VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
-      `);
+    // Header + items must be one atomic unit — previously each ran on the
+    // plain pool (auto-committing individually), so a failure partway
+    // through the item loop (bad ItemId, transient connection blip, etc.)
+    // left a MaterialRequests header permanently committed with only some
+    // of its intended items, and no rollback to clean it up. Found during
+    // a systematic pass over multi-step write routes.
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+      const insertHdr = await tx
+        .request()
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("RequestDate", sql.Date, RequestDate || new Date())
+        .input("RequiredByDate", sql.Date, RequiredByDate || null)
+        .input("Priority", sql.NVarChar(20), Priority)
+        .input("Reason", sql.NVarChar(sql.MAX), Reason)
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("DocTypeId", sql.Int, dtId || null)
+        .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
+        .input("CreatedBy", sql.NVarChar(200), user).query(`
+          INSERT INTO dbo.MaterialRequests
+            (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
+             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
+          OUTPUT INSERTED.MRId
+          VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
+                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
+        `);
 
-    const newId = insertHdr.recordset[0].MRId;
+      newId = insertHdr.recordset[0].MRId;
 
-    // Record the RecordId back in DocNumberSequence for lineage tracing
+      for (const item of items) {
+        await tx
+          .request()
+          .input("MRId", sql.Int, newId)
+          .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+          .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+          .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
+
+    // Record the RecordId back in DocNumberSequence for lineage tracing —
+    // best-effort, after commit, matching the pattern used elsewhere
+    // (grns.js, materialIssues.js): a failure here shouldn't roll back an
+    // already-successful, fully-committed material request.
     if (lockedDocNo) {
       await backPatchRecordId(
         pool,
@@ -573,20 +610,6 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         "MaterialRequests",
         newId,
       );
-    }
-
-    for (const item of items) {
-      await pool
-        .request()
-        .input("MRId", sql.Int, newId)
-        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
-        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
-        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-          INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-          VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
-        `);
     }
 
     await bumpCacheVersion("material-requests");
@@ -658,53 +681,75 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         error: `Cannot edit a Material Request with status "${statusCheck.recordset[0].Status}". Only Draft requests can be edited.`,
       });
 
-    const updateResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("FinYearId", sql.Int, FinYearId || null)
-      .input("RequestDate", sql.Date, RequestDate || new Date())
-      .input("RequiredByDate", sql.Date, RequiredByDate || null)
-      .input("Priority", sql.NVarChar(20), Priority)
-      .input("Reason", sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("Status", sql.NVarChar(20), Status || "Draft")
-      .input("UpdatedBy", sql.NVarChar(200), user).query(`
-        UPDATE dbo.MaterialRequests
-        SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
-            RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
-            Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
-            Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-        WHERE MRId=@id AND Status='Draft'
-      `);
-
-    // Race-condition guard: if another request approved/submitted this MR
-    // between our status check and the UPDATE, rowsAffected will be 0.
-    if (updateResult.rowsAffected[0] === 0)
-      return res.status(409).json({
-        error:
-          "Update failed: the request status changed before the update could be applied.",
-      });
-
-    // Replace items
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("DELETE FROM dbo.MaterialRequestItems WHERE MRId=@id");
-
-    for (const item of items) {
-      await pool
+    // Header update + item replacement must be one atomic unit — previously
+    // each ran on the plain pool (auto-committing individually). The item
+    // replacement in particular DELETEs all existing items before
+    // re-inserting the new set, so a failure partway through the insert
+    // loop used to leave the request with neither its old nor its complete
+    // new items — active data loss, not just a missing-items gap. Found
+    // during a systematic pass over multi-step write routes.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const updateResult = await tx
         .request()
-        .input("MRId", sql.Int, id)
-        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
-        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
-        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-          INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-          VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+        .input("id", sql.Int, id)
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("RequestDate", sql.Date, RequestDate || new Date())
+        .input("RequiredByDate", sql.Date, RequiredByDate || null)
+        .input("Priority", sql.NVarChar(20), Priority)
+        .input("Reason", sql.NVarChar(sql.MAX), Reason)
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("Status", sql.NVarChar(20), Status || "Draft")
+        .input("UpdatedBy", sql.NVarChar(200), user).query(`
+          UPDATE dbo.MaterialRequests
+          SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
+              RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
+              Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
+              Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
+          WHERE MRId=@id AND Status='Draft'
         `);
+
+      // Race-condition guard: if another request approved/submitted this MR
+      // between our status check and the UPDATE, rowsAffected will be 0.
+      if (updateResult.rowsAffected[0] === 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error:
+            "Update failed: the request status changed before the update could be applied.",
+        });
+      }
+
+      // Replace items
+      await tx
+        .request()
+        .input("id", sql.Int, id)
+        .query("DELETE FROM dbo.MaterialRequestItems WHERE MRId=@id");
+
+      for (const item of items) {
+        await tx
+          .request()
+          .input("MRId", sql.Int, id)
+          .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+          .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+          .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
     }
 
     await bumpCacheVersion("material-requests");

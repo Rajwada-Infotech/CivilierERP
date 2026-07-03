@@ -54,6 +54,8 @@ export interface SupplierQuotationDetail {
   DocDate: string;
   DueDate?: string;
   Remarks?: string;
+  CompanyName?: string;
+  ProjectName?: string;
   MySubmissionStatus: "Pending" | "Submitted";
   items: SupplierQuotationItem[];
 }
