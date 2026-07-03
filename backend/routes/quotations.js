@@ -183,57 +183,79 @@ router.post("/", authenticateToken, requirePageRight("quotation", "create"), asy
       }
     }
 
-    const insertHdr = await pool
-      .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("FinYearId", sql.Int, FinYearId || null)
-      .input("SourceMRId", sql.Int, SourceMRId || null)
-      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
-      .input("DocDate", sql.Date, DocDate || new Date())
-      .input("DueDate", sql.Date, DueDate || null)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("TermsConditionIds", sql.NVarChar(sql.MAX), TermsConditionIds ? JSON.stringify(TermsConditionIds) : null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("DocNo", sql.NVarChar(100), lockedDocNo || null)
-      .input("CreatedBy", sql.NVarChar(200), user).query(`
-        INSERT INTO dbo.Quotations
-          (CompanyId, ProjectId, FinYearId, SourceMRId, SourceMRDocNo,
-           DocDate, DueDate, Remarks, TermsConditionIds, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
-        OUTPUT INSERTED.QuotationId
-        VALUES (@CompanyId, @ProjectId, @FinYearId, @SourceMRId, @SourceMRDocNo,
-                @DocDate, @DueDate, @Remarks, @TermsConditionIds, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
-      `);
+    // Header + items + tagged suppliers must be one atomic unit — previously
+    // each ran on the plain pool (auto-committing individually), so a
+    // failure partway through either loop left a Quotations header
+    // permanently committed with only some of its intended items/suppliers,
+    // and no rollback to clean it up. Same bug class found and fixed in
+    // materialRequests.js.
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+      const insertHdr = await tx
+        .request()
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("SourceMRId", sql.Int, SourceMRId || null)
+        .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+        .input("DocDate", sql.Date, DocDate || new Date())
+        .input("DueDate", sql.Date, DueDate || null)
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("TermsConditionIds", sql.NVarChar(sql.MAX), TermsConditionIds ? JSON.stringify(TermsConditionIds) : null)
+        .input("DocTypeId", sql.Int, dtId || null)
+        .input("DocNo", sql.NVarChar(100), lockedDocNo || null)
+        .input("CreatedBy", sql.NVarChar(200), user).query(`
+          INSERT INTO dbo.Quotations
+            (CompanyId, ProjectId, FinYearId, SourceMRId, SourceMRDocNo,
+             DocDate, DueDate, Remarks, TermsConditionIds, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
+          OUTPUT INSERTED.QuotationId
+          VALUES (@CompanyId, @ProjectId, @FinYearId, @SourceMRId, @SourceMRDocNo,
+                  @DocDate, @DueDate, @Remarks, @TermsConditionIds, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
+        `);
 
-    const newId = insertHdr.recordset[0].QuotationId;
+      newId = insertHdr.recordset[0].QuotationId;
 
+      for (const item of items) {
+        await tx
+          .request()
+          .input("QuotationId", sql.Int, newId)
+          .input("MRItemId", sql.Int, item.MRItemId || null)
+          .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+          .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+          .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
+            INSERT INTO dbo.QuotationItems (QuotationId, MRItemId, ItemId, ItemName, UOMCode, Quantity, Remarks)
+            VALUES (@QuotationId, @MRItemId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          `);
+      }
+
+      for (const lheadId of supplierLHeadIds) {
+        await tx
+          .request()
+          .input("QuotationId", sql.Int, newId)
+          .input("SupplierLHeadId", sql.Int, parseInt(lheadId, 10)).query(`
+            INSERT INTO dbo.QuotationSuppliers (QuotationId, SupplierLHeadId)
+            VALUES (@QuotationId, @SupplierLHeadId)
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
+
+    // Best-effort, after commit — matching materialRequests.js's convention:
+    // a failure here shouldn't roll back an already-successful quotation.
     if (lockedDocNo) {
       await backPatchRecordId(pool, sql, lockedDocNo, "Quotations", newId);
-    }
-
-    for (const item of items) {
-      await pool
-        .request()
-        .input("QuotationId", sql.Int, newId)
-        .input("MRItemId", sql.Int, item.MRItemId || null)
-        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
-        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
-        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-          INSERT INTO dbo.QuotationItems (QuotationId, MRItemId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-          VALUES (@QuotationId, @MRItemId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
-        `);
-    }
-
-    for (const lheadId of supplierLHeadIds) {
-      await pool
-        .request()
-        .input("QuotationId", sql.Int, newId)
-        .input("SupplierLHeadId", sql.Int, parseInt(lheadId, 10)).query(`
-          INSERT INTO dbo.QuotationSuppliers (QuotationId, SupplierLHeadId)
-          VALUES (@QuotationId, @SupplierLHeadId)
-        `);
     }
 
     const created = await pool
@@ -284,50 +306,73 @@ router.put("/:id", authenticateToken, requirePageRight("quotation", "edit"), asy
       items = [],
     } = req.body;
 
-    const updateResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("FinYearId", sql.Int, FinYearId || null)
-      .input("SourceMRId", sql.Int, SourceMRId || null)
-      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
-      .input("DocDate", sql.Date, DocDate || new Date())
-      .input("DueDate", sql.Date, DueDate || null)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("TermsConditionIds", sql.NVarChar(sql.MAX), TermsConditionIds ? JSON.stringify(TermsConditionIds) : null)
-      .input("UpdatedBy", sql.NVarChar(200), user).query(`
-        UPDATE dbo.Quotations
-        SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
-            SourceMRId=@SourceMRId, SourceMRDocNo=@SourceMRDocNo,
-            DocDate=@DocDate, DueDate=@DueDate, Remarks=@Remarks,
-            TermsConditionIds=@TermsConditionIds,
-            UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
-        WHERE QuotationId=@id AND Status='Draft'
-      `);
-
-    if (updateResult.rowsAffected[0] === 0)
-      return res.status(409).json({
-        error: "Update failed: the quotation status changed before the update could be applied.",
-      });
-
-    await pool.request().input("id", sql.Int, id).query(
-      "DELETE FROM dbo.QuotationItems WHERE QuotationId=@id",
-    );
-
-    for (const item of items) {
-      await pool
+    // Header update + item replacement must be one atomic unit — the item
+    // replacement DELETEs all existing items before re-inserting the new
+    // set, so a failure partway through the insert loop used to leave the
+    // quotation with neither its old nor its complete new items. Same bug
+    // class found and fixed in materialRequests.js.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const updateResult = await tx
         .request()
-        .input("QuotationId", sql.Int, id)
-        .input("MRItemId", sql.Int, item.MRItemId || null)
-        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
-        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
-        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-          INSERT INTO dbo.QuotationItems (QuotationId, MRItemId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-          VALUES (@QuotationId, @MRItemId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+        .input("id", sql.Int, id)
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("SourceMRId", sql.Int, SourceMRId || null)
+        .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+        .input("DocDate", sql.Date, DocDate || new Date())
+        .input("DueDate", sql.Date, DueDate || null)
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("TermsConditionIds", sql.NVarChar(sql.MAX), TermsConditionIds ? JSON.stringify(TermsConditionIds) : null)
+        .input("UpdatedBy", sql.NVarChar(200), user).query(`
+          UPDATE dbo.Quotations
+          SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
+              SourceMRId=@SourceMRId, SourceMRDocNo=@SourceMRDocNo,
+              DocDate=@DocDate, DueDate=@DueDate, Remarks=@Remarks,
+              TermsConditionIds=@TermsConditionIds,
+              UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
+          WHERE QuotationId=@id AND Status='Draft'
         `);
+
+      // Race-condition guard: if another request approved/sent this
+      // quotation between our status check and the UPDATE, rowsAffected
+      // will be 0.
+      if (updateResult.rowsAffected[0] === 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: "Update failed: the quotation status changed before the update could be applied.",
+        });
+      }
+
+      await tx.request().input("id", sql.Int, id).query(
+        "DELETE FROM dbo.QuotationItems WHERE QuotationId=@id",
+      );
+
+      for (const item of items) {
+        await tx
+          .request()
+          .input("QuotationId", sql.Int, id)
+          .input("MRItemId", sql.Int, item.MRItemId || null)
+          .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+          .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+          .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
+            INSERT INTO dbo.QuotationItems (QuotationId, MRItemId, ItemId, ItemName, UOMCode, Quantity, Remarks)
+            VALUES (@QuotationId, @MRItemId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
     }
 
     res.json({ message: "Quotation updated" });
