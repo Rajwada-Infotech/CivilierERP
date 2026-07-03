@@ -1668,6 +1668,34 @@ router.get("/:id/pending-items", async (req, res) => {
         ? Math.max(0, poTotal - poTotalReceived)
         : pendingItems.reduce((s, i) => s + i.pendingAmount, 0);
 
+    // Other GRNs for the same PO (partial receipts — excludes this GRN and rejected ones)
+    let partialGRNs = [];
+    if (row.POID) {
+      const otherGRNsResult = await pool.request()
+        .input("POID", sql.Int, row.POID)
+        .input("GRNID", sql.Int, grnId)
+        .query(`
+          SELECT grn.GRNID, grn.GRNNo, grn.DocNo, grn.GRNDate, grn.Status,
+                 grn.TotalAmount, grn.GRNItems
+          FROM dbo.GoodsReceiptNotes grn
+          WHERE grn.POID = @POID
+            AND grn.GRNID != @GRNID
+            AND grn.Status != 'Rejected'
+          ORDER BY grn.GRNDate DESC
+        `);
+      partialGRNs = otherGRNsResult.recordset.map((g) => {
+        const items = parseGRNItems(g.GRNItems);
+        return {
+          grnId: g.GRNID,
+          grnNo: g.GRNNo || g.DocNo,
+          grnDate: g.GRNDate,
+          status: g.Status,
+          totalAmount: Number(g.TotalAmount || 0),
+          itemCount: items.length,
+        };
+      });
+    }
+
     res.json({
       grnId: row.GRNID,
       grnNo: row.GRNNo || row.DocNo,
@@ -1677,6 +1705,7 @@ router.get("/:id/pending-items", async (req, res) => {
       pendingItems,
       totalPendingAmount: Math.round(totalPendingAmount * 100) / 100,
       hasPending: pendingItems.length > 0,
+      partialGRNs,
     });
   } catch (err) {
     console.error("GET pending-items error:", err.message);
