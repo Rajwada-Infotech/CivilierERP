@@ -449,17 +449,17 @@ function GroupTreePicker({
         <ChevronsUpDown size={13} className="text-muted-foreground/40 shrink-0" />
       </button>
 
-      {/* ── Right-side drawer ── */}
+      {/* ── Full-screen tree picker ── */}
       {open && (
-        <div className="fixed inset-0 z-[70] flex justify-end">
-          {/* Backdrop */}
+        <div className="fixed inset-0 z-[70] flex">
+          {/* Backdrop (thin left strip for click-to-close feel) */}
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
 
-          {/* Drawer panel */}
-          <div className="relative flex h-full w-full max-w-2xl bg-card border-l border-border shadow-2xl animate-in slide-in-from-right duration-200">
+          {/* Full-screen panel */}
+          <div className="relative flex h-full w-full bg-card animate-in fade-in slide-in-from-right-8 duration-200">
 
             {/* ── Header ── */}
             <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 py-4 border-b border-border bg-card/95 backdrop-blur-sm z-10">
