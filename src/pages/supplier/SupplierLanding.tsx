@@ -11,7 +11,11 @@ import {
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] },
+  // `as const` keeps this a fixed-length tuple instead of widening to
+  // number[] — framer-motion's cubic-bezier easing type requires the tuple
+  // shape, which TS only infers automatically for literals written directly
+  // inline in a `transition={{...}}` prop, not ones returned from a helper.
+  transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] as const },
 });
 
 // ── Portal header ─────────────────────────────────────────────────────────────
