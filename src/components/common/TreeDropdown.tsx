@@ -172,6 +172,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const recalcPosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -196,9 +197,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const inTrigger = containerRef.current?.contains(e.target as Node);
+      const inPanel = panelRef.current?.contains(e.target as Node);
+      if (!inTrigger && !inPanel) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     window.addEventListener("scroll", () => setOpen(false), { passive: true, capture: true });
@@ -295,7 +296,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
 
       {/* ── Dropdown panel (portal — escapes overflow:hidden parents) ── */}
       {open && createPortal(
-        <div style={panelStyle} className="rounded-lg border border-border bg-card shadow-xl overflow-hidden">
+        <div ref={panelRef} style={panelStyle} className="rounded-lg border border-border bg-card shadow-xl overflow-hidden">
           {variant === "tree" ? (
             /* ── Tree panel ── */
             <>
