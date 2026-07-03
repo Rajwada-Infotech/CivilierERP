@@ -1940,9 +1940,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       }
     }
 
-    // Prepend ExB/ prefix to every expense booking doc number
-    if (finalDocNo && !finalDocNo.startsWith("ExB/")) {
-      finalDocNo = `ExB/${finalDocNo}`;
+    // Prepend INV/ prefix to every expense booking doc number
+    if (finalDocNo && !finalDocNo.startsWith("INV/")) {
+      finalDocNo = `INV/${finalDocNo}`;
     }
 
     const insertReq = transaction

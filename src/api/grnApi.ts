@@ -14,7 +14,7 @@ export interface Supplier {
   LHeadType?: string;
 }
 
-// PO line item â€” mirrors POLineItem in purchaseOrdersApi.ts
+// PO line item â€" mirrors POLineItem in purchaseOrdersApi.ts
 export interface POLineItem {
   itemId?: string;
   itemName?: string;
@@ -40,7 +40,7 @@ export interface PurchaseOrder {
   Unit?: string;
   Rate?: number;
   TotalAmount?: number;
-  // Multi-item field â€” JSON blob stored on PO row
+  // Multi-item field â€" JSON blob stored on PO row
   POItems?: POLineItem[];
   // Normalised child table rows (returned by GET /:id only)
   // Fields: ItemId, ItemName, Quantity, UomName, Rate (PascalCase from SQL)
@@ -73,10 +73,10 @@ export interface UOM {
  * Represents one line item inside a GRN.
  *
  * Fields added in migration 034:
- *   rate        â€” unit rate (â‚¹) for this item
- *   quantity    â€” billing quantity (may differ from receivedQty when partial
+ *   rate        â€" unit rate (â‚¹) for this item
+ *   quantity    â€" billing quantity (may differ from receivedQty when partial
  *                 billing is allowed)
- *   totalAmount â€” derived as rate Ã— quantity; stored for audit / reporting
+ *   totalAmount â€" derived as rate Ã— quantity; stored for audit / reporting
  *                 so downstream modules (Expense Booking, etc.) don't need
  *                 to recompute it.
  */
@@ -110,7 +110,7 @@ export interface GRNFormDataPayload {
   finYear?: string | null;
   /** DocNo of the parent PO or WO (used to resolve correct GRN prefix). */
   parentDocNo?: string | null;
-  /** Root ExB DocNo â€” present when this GRN is under an Expense Booking. */
+  /** Root ExB DocNo â€" present when this GRN is under an Expense Booking. */
   rootExBDocNo?: string | null;
   /** Optional project this GRN is associated with. */
   projectId?: number | null;
@@ -301,7 +301,7 @@ export const previewNextGRNNumber = async (
   return res.json().catch(() => ({}));
 };
 
-// â”€â”€ Dropdown fetches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Dropdown fetches â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
   const res = await fetch("/api/account-head?type=S", {
@@ -352,21 +352,33 @@ export const getUoms = async (): Promise<UOM[]> => {
     : [];
 };
 
-export const getProjects = async (): Promise<
-  { id: number; name: string; short_name: string | null }[]
+export const getProjects = async (companyId?: string | number | null): Promise<
+  { id: number; name: string; short_name: string | null; enterprise_id: number | null }[]
 > => {
-  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  const params = new URLSearchParams({ business_type: "P" });
+  if (companyId) params.set("enterprise_id", String(companyId));
+  const res = await fetchWithAuth(`/api/enterprises/options?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data = await res.json().catch(() => ({}));
-  // /enterprises/options returns { id, label, belongs_to } â€” normalise to { id, name }
   return Array.isArray(data)
-    ? (data as { id: number; label: string; short_name?: string | null }[]).map(
-        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null }),
+    ? (data as { id: number; label: string; short_name?: string | null; enterprise_id?: number | null }[]).map(
+        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null, enterprise_id: p.enterprise_id ?? null }),
       )
     : [];
 };
 
-// â”€â”€ GRN from Stock Transfer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const getCompanies = async (): Promise<
+  { id: number; name: string }[]
+> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  if (!res.ok) throw new Error("Failed to fetch companies");
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray(data)
+    ? (data as { id: number; label: string }[]).map((c) => ({ id: c.id, name: c.label }))
+    : [];
+};
+
+// â"€â"€ GRN from Stock Transfer â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export interface GRNFromTransferPayload {
   remarks?: string;
@@ -384,7 +396,7 @@ export interface GRNFromTransferResult {
 
 /**
  * Create a GRN directly from a Stock Transfer document.
- * The backend maps TransferItems â†’ GRNItems and targets ToGodownID.
+ * The backend maps TransferItems â†' GRNItems and targets ToGodownID.
  */
 export const createGRNFromTransfer = async (
   transferId: number,

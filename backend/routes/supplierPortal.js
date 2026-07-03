@@ -50,7 +50,9 @@ router.get("/me", async (req, res) => {
       .input("id", sql.Int, req.supplierLHeadId)
       .query(`
         SELECT LHeadId, ISNULL(DisplayName, LHeadName) AS Name, LHeadCode,
-               LHeadEmail, LHeadPhone, LHeadAddress, LHeadContactPerson
+               LHeadEmail, LHeadPhone, LHeadAddress, LHeadContactPerson,
+               LHeadStatus, LHeadPaymentTerms, LGST, LGSTState, LCountry,
+               LBelongsTo, LDescription
         FROM dbo.AccountHeadMaster
         WHERE LHeadId = @id
       `);

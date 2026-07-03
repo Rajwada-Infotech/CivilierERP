@@ -306,11 +306,11 @@ router.get("/", authenticateToken, async (req, res) => {
         COUNT(mri.MRItemId)      AS ItemCount,
         SUM(mri.Quantity)        AS TotalQty,
         COUNT(*)  OVER ()        AS _total
-      FROM       dbo.MaterialRequests mr
-      LEFT JOIN  dbo.enterprise  ec  ON ec.id  = mr.CompanyId
-      LEFT JOIN  dbo.enterprise  ep  ON ep.id  = mr.ProjectId
-      LEFT JOIN  dbo.FinYear     fy  ON fy.FId = mr.FinYearId
-      LEFT JOIN  dbo.MaterialRequestItems mri ON mri.MRId = mr.MRId
+      FROM       dbo.MaterialRequests mr WITH (NOLOCK)
+      LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
+      LEFT JOIN  dbo.enterprise  ep  WITH (NOLOCK) ON ep.id  = mr.ProjectId
+      LEFT JOIN  dbo.FinYear     fy  WITH (NOLOCK) ON fy.FId = mr.FinYearId
+      LEFT JOIN  dbo.MaterialRequestItems mri WITH (NOLOCK) ON mri.MRId = mr.MRId
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,

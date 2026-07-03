@@ -11,6 +11,13 @@ export interface SupplierProfile {
   LHeadPhone?: string;
   LHeadAddress?: string;
   LHeadContactPerson?: string;
+  LHeadStatus?: string;
+  LHeadPaymentTerms?: string;
+  LGST?: string;
+  LGSTState?: string;
+  LCountry?: string;
+  LBelongsTo?: string;
+  LDescription?: string;
 }
 
 export interface SupplierQuotationSummary {
