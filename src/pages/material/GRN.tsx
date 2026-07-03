@@ -106,6 +106,15 @@ interface PendingItem {
   rate: number;
   pendingAmount: number;
 }
+interface PartialGRN {
+  grnId: number;
+  grnNo: string;
+  grnDate: string;
+  status: string;
+  totalAmount: number;
+  itemCount: number;
+}
+
 interface PendingItemsData {
   grnId: number;
   grnNo: string;
@@ -115,6 +124,7 @@ interface PendingItemsData {
   pendingItems: PendingItem[];
   totalPendingAmount: number;
   hasPending: boolean;
+  partialGRNs: PartialGRN[];
 }
 
 function RemainingItemsPanel({
@@ -237,11 +247,37 @@ function RemainingItemsPanel({
           </tfoot>
         </table>
       </div>
+      {data.partialGRNs?.length > 0 && (
+        <div className="border-t border-amber-500/15">
+          <div className="px-4 py-2 bg-muted/20 flex items-center gap-2">
+            <FileText size={11} className="text-muted-foreground shrink-0" />
+            <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              Other GRN receipts for this PO
+            </span>
+          </div>
+          <div className="divide-y divide-border">
+            {data.partialGRNs.map((g) => (
+              <div key={g.grnId} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                <span className="font-mono font-semibold text-foreground">{g.grnNo}</span>
+                <span className="text-muted-foreground">{new Date(g.grnDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                  g.status === "Approved" ? "bg-emerald-500/10 text-emerald-600" :
+                  g.status === "Pending" ? "bg-amber-500/10 text-amber-600" :
+                  "bg-muted text-muted-foreground"
+                }`}>{g.status}</span>
+                <span className="ml-auto font-mono text-muted-foreground">
+                  ₹{g.totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-muted-foreground/60 text-[10px]">{g.itemCount} item{g.itemCount !== 1 ? "s" : ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5 flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
           These items have been received but not yet booked as expenses. Create
-          an Expense Booking from the Material → Expense Booking page to book
-          them.
+          an Expense Booking from the Finance → Invoice page to book them.
         </p>
         {onCreateNewGRN && data && (
           <button
@@ -1232,12 +1268,13 @@ export default function GRN() {
         poNumber: po.PurchaseOrderNo ?? "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
+        companyId: po.CompanyId ? String(po.CompanyId) : "",
         projectId: po.ProjectId ? String(po.ProjectId) : "",
         items: lineItems.length ? lineItems : [createEmptyItem()],
         docTypeId: null,
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
         rootExBDocNo: po.RootExBDocNo || "",
-        finYear: activeFinYear || "",
+        finYear: po.FinYearName || activeFinYear || "",
         poTotalAmount: Number(po.TotalAmount ?? 0),
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
