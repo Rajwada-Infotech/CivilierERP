@@ -692,9 +692,18 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - Create GRN + Stock Ledger Entries
-router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodySchema), async (req, res) => {
+// ─── Internal creation function ──────────────────────────────────────────────
+// Extracted from POST / so other server-side callers (the Inter-Company
+// Stock Transfer orchestrator) can create a real, fully-validated GRN
+// in-process without duplicating this validation/numbering/stock-ledger
+// logic or making an HTTP self-call. Mechanical extraction — the POST route
+// below now just calls this, then keeps doing its own cache-bump and
+// auto-submit exactly as before, so its behavior is unchanged. The
+// orchestrator drives its own approval transition separately rather than
+// auto-submitting to Pending — see interCompanyTransfer.js. Thrown errors
+// carry a `.status` for the HTTP code to use.
+async function createGRNInternal(pool, payload, userEmail) {
   const {
-    grnNo,
     grnDate,
     supplierId,
     poId,
@@ -702,21 +711,19 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
     status,
     remarks,
     docTypeId: clientDocTypeId,
-    docNo,
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
     rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
     godownId = null, // Target godown for stock credit (null → resolve from project or Main)
     projectId = null, // Project linked to this GRN (used for godown resolution)
-  } = req.body;
+    attachmentIds,
+  } = payload;
 
   if (!grnDate || !supplierId) {
-    return res
-      .status(400)
-      .json({ error: "GRNDate and SupplierID are required" });
+    const err = new Error("GRNDate and SupplierID are required");
+    err.status = 400;
+    throw err;
   }
-
-  const pool = getPool();
 
   // ── Guard: a GRN can only be raised against an Approved PO ────────────────
   // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
@@ -729,14 +736,18 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       );
 
     if (poStatusCheck.recordset.length === 0) {
-      return res.status(404).json({ error: "Purchase Order not found" });
+      const err = new Error("Purchase Order not found");
+      err.status = 404;
+      throw err;
     }
 
     const poStatus = poStatusCheck.recordset[0].Status;
     if (poStatus !== "Approved" && poStatus !== "Received") {
-      return res.status(400).json({
-        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
-      });
+      const err = new Error(
+        `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      );
+      err.status = 400;
+      throw err;
     }
   }
 
@@ -766,7 +777,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       finYear,
       tableName: "GoodsReceiptNotes",
       docNoColumn: "DocNo",
-      issuedBy: req.user?.email || req.user?.name || null,
+      issuedBy: userEmail,
       parentDocNo,
       rootExBDocNo,
     });
@@ -847,7 +858,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
-    await linkGRNAttachments(transaction, grnId, parseIdList(req.body.attachmentIds));
+    await linkGRNAttachments(transaction, grnId, parseIdList(attachmentIds));
 
     // IMPORTANT: use transaction.request() not pool.request() — the GRN row
     // only exists inside this uncommitted transaction; pool sees nothing yet.
@@ -924,6 +935,20 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
       // Sync per-item ReceivedQty back to PurchaseOrderItems from all GRNs
       await syncPOItemReceivedQty(pool, sql, poId);
     }
+
+    return { grnId, grnNo: finalDocNo, docNo: finalDocNo };
+  } catch (err) {
+    await transaction.rollback().catch(() => {});
+    throw err;
+  }
+}
+
+router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodySchema), async (req, res) => {
+  try {
+    const userEmail = req.user?.email || req.user?.name || null;
+    const pool = getPool();
+    const { grnId, grnNo, docNo } = await createGRNInternal(pool, req.body, userEmail);
+
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
 
@@ -943,16 +968,15 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
     res.status(201).json({
       message: "GRN created successfully",
       grnId,
-      grnNo: finalDocNo,
-      docNo: finalDocNo,
+      grnNo,
+      docNo,
       status: "Pending",
     });
   } catch (err) {
-    await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
     if (res.headersSent) return; // timeout middleware already sent 503
-    res.status(500).json({
-      error: "Failed to create GRN",
+    res.status(err.status || 500).json({
+      error: err.status ? err.message : "Failed to create GRN",
       message: err.message,
       detail: err.originalError?.info || null,
     });
@@ -2029,3 +2053,4 @@ router.delete(
 );
 
 module.exports = router;
+module.exports.createGRNInternal = createGRNInternal;
