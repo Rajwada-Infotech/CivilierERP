@@ -477,13 +477,13 @@ function GroupTreePicker({
               </button>
             </div>
 
-            {/* ── Body: tree + detail ── */}
+            {/* ── Body: tree (left) + detail (right) ── */}
             <div className="flex h-full pt-[65px]">
 
-              {/* Tree panel */}
-              <div className="flex flex-col flex-1 min-w-0 border-r border-border/60">
+              {/* ── Tree panel — fixed 360px ── */}
+              <div className="w-[360px] shrink-0 flex flex-col border-r border-border/60 bg-muted/5">
                 {/* Search */}
-                <div className="px-4 py-3 border-b border-border/60 bg-muted/10 shrink-0">
+                <div className="px-4 py-3 border-b border-border/60 shrink-0">
                   <div className="relative">
                     <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
                     <input
@@ -501,9 +501,8 @@ function GroupTreePicker({
                   </div>
                 </div>
 
-                {/* Tree nodes */}
+                {/* Nodes */}
                 <div className="flex-1 overflow-y-auto py-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                  {/* Top-level option */}
                   <div
                     className={`flex items-center gap-2 px-4 py-1.5 mx-2 rounded-md text-xs cursor-pointer transition-colors mb-1 ${
                       value === "" ? "bg-primary/15 text-primary font-semibold" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -514,7 +513,6 @@ function GroupTreePicker({
                     <Layers size={11} className="shrink-0" />
                     <span>— Top-level (no parent)</span>
                   </div>
-
                   <div className="h-px bg-border/40 mx-4 mb-1.5" />
 
                   {searchResults ? (
@@ -554,92 +552,155 @@ function GroupTreePicker({
                   )}
                 </div>
 
-                {/* Footer: current selection */}
+                {/* Footer */}
                 <div className="shrink-0 px-4 py-3 border-t border-border bg-muted/10 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
-                    {selectedName ? (
-                      <><FolderOpen size={12} className="text-amber-500 shrink-0" /><span className="text-xs text-foreground truncate">{selectedName}</span></>
-                    ) : (
-                      <span className="text-xs text-muted-foreground italic">No parent selected (top-level)</span>
-                    )}
+                    {selectedName
+                      ? <><FolderOpen size={12} className="text-amber-500 shrink-0" /><span className="text-xs text-foreground truncate">{selectedName}</span></>
+                      : <span className="text-xs text-muted-foreground italic">No parent (top-level)</span>
+                    }
                   </div>
-                  <button
-                    onClick={() => setOpen(false)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white"
-                  >
+                  <button onClick={() => setOpen(false)} className="shrink-0 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white">
                     Confirm
                   </button>
                 </div>
               </div>
 
-              {/* ── Detail pane ── */}
-              <div className="w-64 shrink-0 flex flex-col bg-muted/5">
+              {/* ── Detail pane — fills remaining width ── */}
+              <div className="flex-1 flex flex-col overflow-hidden">
                 {previewGroup ? (
-                  <div className="flex-1 overflow-y-auto p-5 space-y-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                    {/* Group identity */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
+                  <div className="flex-1 overflow-y-auto p-8 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+
+                    {/* Group hero header */}
+                    <div className="flex items-start gap-5 pb-7 border-b border-border/60 mb-7">
+                      <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
                         {previewChildren.length > 0
-                          ? <FolderOpen size={16} className="text-amber-500" />
-                          : <Folder size={16} className="text-muted-foreground/50" />
+                          ? <FolderOpen size={24} className="text-amber-500" />
+                          : <Folder size={24} className="text-amber-500/60" />
                         }
-                        <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">Group</span>
                       </div>
-                      <p className="text-sm font-semibold text-foreground leading-snug">{previewGroup.name}</p>
-                      <p className="font-mono text-[11px] text-primary/70 mt-1">{previewGroup.code}</p>
-                      {previewPath && (
-                        <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed border-l-2 border-border pl-2">{previewPath}</p>
-                      )}
+                      <div className="flex-1 min-w-0">
+                        <h2 className="text-xl font-heading font-bold text-foreground leading-tight">{previewGroup.name}</h2>
+                        <p className="font-mono text-sm text-primary/70 mt-1">{previewGroup.code}</p>
+                        {previewPath ? (
+                          <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground flex-wrap">
+                            {previewPath.split(" / ").map((seg, i, arr) => (
+                              <React.Fragment key={i}>
+                                <span>{seg}</span>
+                                {i < arr.length - 1 && <ChevronRight size={10} className="text-muted-foreground/40" />}
+                              </React.Fragment>
+                            ))}
+                            <ChevronRight size={10} className="text-muted-foreground/40" />
+                            <span className="text-foreground font-medium">{previewGroup.name}</span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 mt-2 text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                            <Layers size={9} /> Root group
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleSelect(previewGroup._id)}
+                        className="shrink-0 px-4 py-2 rounded-xl text-sm font-heading font-semibold gradient-accent text-white"
+                      >
+                        Select this group
+                      </button>
                     </div>
 
-                    {/* Sub-groups */}
-                    {previewChildren.length > 0 && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2 flex items-center gap-1.5">
-                          <FolderOpen size={10} /> Sub-groups <span className="text-muted-foreground/40">({previewChildren.length})</span>
+                    {/* Stats row */}
+                    <div className="grid grid-cols-2 gap-4 mb-7">
+                      <div className="rounded-xl border border-border bg-muted/20 px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">Sub-groups</p>
+                        <p className="text-2xl font-bold text-foreground font-heading">{previewChildren.length}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Direct children</p>
+                      </div>
+                      <div className="rounded-xl border border-border bg-muted/20 px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">Ledger accounts</p>
+                        <p className="text-2xl font-bold text-foreground font-heading">
+                          {glLoading ? "…" : (glAccounts as any[])?.length ?? 0}
                         </p>
-                        <div className="space-y-1">
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Linked GL heads</p>
+                      </div>
+                    </div>
+
+                    {/* Sub-groups grid */}
+                    {previewChildren.length > 0 && (
+                      <div className="mb-7">
+                        <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-heading mb-3 flex items-center gap-2">
+                          <FolderOpen size={11} /> Sub-groups
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
                           {previewChildren.map((c) => (
-                            <div key={c._id} className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/30 text-[11px] text-foreground/70">
-                              <Folder size={10} className="text-muted-foreground/40 shrink-0" />
-                              <span className="flex-1 truncate">{c.name}</span>
-                              <span className="font-mono text-[9px] text-muted-foreground/40 shrink-0">{c.code}</span>
+                            <div
+                              key={c._id}
+                              onClick={() => handleSelect(c._id)}
+                              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-card hover:border-primary/30 hover:bg-primary/5 cursor-pointer transition-colors group"
+                            >
+                              <Folder size={13} className="text-amber-500/60 shrink-0 group-hover:text-amber-500 transition-colors" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-foreground truncate">{c.name}</p>
+                                <p className="font-mono text-[10px] text-muted-foreground/50">{c.code}</p>
+                              </div>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* Ledger accounts */}
+                    {/* Ledger accounts grid */}
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2 flex items-center gap-1.5">
-                        <BookOpen size={10} /> Ledger accounts
+                      <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-heading mb-3 flex items-center gap-2">
+                        <BookOpen size={11} /> Ledger accounts
                       </p>
                       {glLoading ? (
-                        <p className="text-[10px] text-muted-foreground/50 animate-pulse">Loading…</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[...Array(6)].map((_, i) => (
+                            <div key={i} className="h-10 rounded-xl bg-muted/30 animate-pulse" />
+                          ))}
+                        </div>
                       ) : !glAccounts || (glAccounts as any[]).length === 0 ? (
-                        <p className="text-[10px] text-muted-foreground/40 italic">None linked to this group</p>
+                        <div className="flex items-center gap-3 px-4 py-5 rounded-xl border border-dashed border-border text-muted-foreground/40">
+                          <BookOpen size={16} />
+                          <p className="text-sm">No ledger accounts linked to this group</p>
+                        </div>
                       ) : (
-                        <div className="space-y-1">
-                          {(glAccounts as any[]).slice(0, 10).map((a: any) => (
-                            <div key={a.LHeadId ?? a._id} className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/30 text-[11px] text-foreground/70">
-                              <BookOpen size={9} className="text-primary/30 shrink-0" />
+                        <div className="grid grid-cols-3 gap-2">
+                          {(glAccounts as any[]).map((a: any) => (
+                            <div key={a.LHeadId ?? a._id} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-card text-xs text-foreground/80">
+                              <BookOpen size={10} className="text-primary/30 shrink-0" />
                               <span className="truncate">{a.LHeadName ?? a.name}</span>
                             </div>
                           ))}
-                          {(glAccounts as any[]).length > 10 && (
-                            <p className="text-[9px] text-muted-foreground/40 pl-2 mt-1">+{(glAccounts as any[]).length - 10} more</p>
-                          )}
                         </div>
                       )}
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-muted/40 flex items-center justify-center">
-                      <FolderOpen size={20} className="text-muted-foreground/30" />
+                  /* Empty state — useful, not tiny */
+                  <div className="flex-1 flex flex-col items-center justify-center gap-6 px-16 text-center">
+                    <div className="w-20 h-20 rounded-3xl bg-muted/30 flex items-center justify-center">
+                      <Layers size={32} className="text-muted-foreground/20" />
                     </div>
-                    <p className="text-xs text-muted-foreground/50 leading-relaxed">Hover over a group<br />to see its details</p>
+                    <div>
+                      <p className="text-base font-heading font-semibold text-foreground/60">No group selected</p>
+                      <p className="text-sm text-muted-foreground/40 mt-1 leading-relaxed max-w-xs">
+                        Hover over any group in the tree to preview its sub-groups and linked ledger accounts here
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2 mt-2">
+                      {tree.slice(0, 4).map((n) => (
+                        <div
+                          key={n._id}
+                          onMouseEnter={() => setHoverId(n._id)}
+                          onMouseLeave={() => setHoverId(null)}
+                          onClick={() => handleSelect(n._id)}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border hover:border-amber-500/40 hover:bg-amber-500/5 cursor-pointer transition-colors text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <FolderOpen size={11} className="text-amber-500/60" />
+                          {n.name}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
