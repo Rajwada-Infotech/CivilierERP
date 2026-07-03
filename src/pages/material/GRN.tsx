@@ -1122,10 +1122,7 @@ export default function GRN() {
     }
     setLoadingPO(true);
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/purchase-orders/${poId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/purchase-orders/${poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1199,10 +1196,7 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/purchase-orders/${pending.poId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/purchase-orders/${pending.poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
