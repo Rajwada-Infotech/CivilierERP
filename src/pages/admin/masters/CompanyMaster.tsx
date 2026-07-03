@@ -442,7 +442,7 @@ function buildCompanyColumns(
       accessorKey: "Type",
       header: "Type",
       cell: ({ getValue }) => (
-        <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">
+        <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600 whitespace-nowrap">
           {getValue() as string}
         </span>
       ),
