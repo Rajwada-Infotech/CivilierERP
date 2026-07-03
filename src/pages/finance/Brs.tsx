@@ -781,7 +781,7 @@ export default function Brs() {
         </div>
 
         {/* ── Table ──────────────────────────────────────────────────────────── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-visible">
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20 rounded-t-xl">
             <p className="text-xs text-muted-foreground">
               <span className="font-semibold text-foreground">{filtered.length}</span>{" "}
@@ -798,23 +798,22 @@ export default function Brs() {
                   <th className="px-3 py-3 text-center w-10">
                     <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
                   </th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell whitespace-nowrap">Type</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company / Party</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell whitespace-nowrap">Bank</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell whitespace-nowrap">Date</th>
-                  <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Amount</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Mode / Cheque</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell whitespace-nowrap">Doc No.</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Pay Status</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">BRS</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Action</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell w-[72px]">Type</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[180px]">Company / Party</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Bank</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[90px]">Date</th>
+                  <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">Amount</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell w-[110px]">Mode / Cheque</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell w-[82px]">Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-border">
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={10} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       No entries match your filters.
                     </td>
                   </tr>
@@ -822,7 +821,7 @@ export default function Brs() {
 
                 {loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={10} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       <RotateCw size={18} className="animate-spin mx-auto mb-2 opacity-40" />
                       Loading…
                     </td>
@@ -861,19 +860,18 @@ export default function Brs() {
                       </td>
 
                       {/* Company / Party */}
-                      <td className="px-3 py-4 align-middle">
-                        <p className="text-xs font-medium text-foreground leading-snug truncate max-w-[150px]">
+                      <td className="px-3 py-4 align-middle overflow-hidden">
+                        <p className="text-xs font-medium text-foreground leading-snug truncate">
                           {entry.CompanyName || "—"}
                         </p>
                         {entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate max-w-[150px] mt-0.5">
+                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                             {entry.PaymentName}
                           </p>
                         )}
-                        {/* Re-issue chain tags — visible on small screens where Doc col is hidden */}
-                        {entry.OriginalDocNo && (
-                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-amber-600 dark:text-amber-400 xl:hidden">
-                            <CornerDownRight size={9} />Re-issue for {entry.OriginalDocNo}
+                        {entry.DocNo && (
+                          <span className="inline-block font-mono text-[10px] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
+                            {entry.DocNo}
                           </span>
                         )}
                       </td>
@@ -891,14 +889,14 @@ export default function Brs() {
                       </td>
 
                       {/* Date */}
-                      <td className="px-3 py-4 hidden lg:table-cell align-middle whitespace-nowrap">
+                      <td className="px-3 py-4 hidden lg:table-cell align-middle">
                         <span className="text-xs text-muted-foreground tabular-nums">
                           {fmt(entry.PayDate)}
                         </span>
                       </td>
 
                       {/* Amount */}
-                      <td className="px-3 py-4 text-right align-middle whitespace-nowrap">
+                      <td className="px-3 py-4 text-right align-middle">
                         <span className={`text-xs font-mono font-semibold ${bounced ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
@@ -908,45 +906,20 @@ export default function Brs() {
                       <td className="px-3 py-4 hidden md:table-cell align-middle">
                         <span className="text-xs text-foreground capitalize">{entry.Mode || "—"}</span>
                         {entry.ChequeNo && (
-                          <p className="font-mono text-[10px] text-muted-foreground/70 mt-0.5 whitespace-nowrap">
+                          <p className="font-mono text-[10px] text-muted-foreground/70 mt-0.5 truncate">
                             # {entry.ChequeNo}
                           </p>
                         )}
                       </td>
 
-                      {/* Doc No. + chain reference */}
-                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        <div className="space-y-1.5">
-                          {entry.DocNo && (
-                            <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit whitespace-nowrap">
-                              {entry.DocNo}
-                            </span>
-                          )}
-                          {/* This bounced payment was replaced by → */}
-                          {entry.ReplacementDocNo && (
-                            <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                              <ArrowRight size={9} className="shrink-0" />
-                              <span className="font-mono">{entry.ReplacementDocNo}</span>
-                            </span>
-                          )}
-                          {/* This payment is a re-issue of ↑ */}
-                          {entry.OriginalDocNo && (
-                            <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap">
-                              <CornerDownRight size={9} className="shrink-0" />
-                              <span className="font-mono">{entry.OriginalDocNo}</span>
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
                       {/* Pay Status */}
-                      <td className="px-3 py-4 hidden md:table-cell align-middle whitespace-nowrap">
+                      <td className="px-3 py-4 hidden md:table-cell align-middle">
                         <PayStatusBadge status={entry.PayStatus} />
                       </td>
 
                       {/* BRS Status */}
                       <td className="px-3 py-4 align-middle">
-                        <div className="flex flex-col items-start gap-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <ClearBadge cleared={cleared} bounced={bounced} />
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
@@ -956,38 +929,38 @@ export default function Brs() {
                       <td className="px-3 py-4 align-middle">
                         {bounced ? (
                           entry.ReplacementDocNo ? (
-                            // Already has a replacement — show the link
-                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-                              <ArrowRight size={11} />
-                              {entry.ReplacementDocNo}
+                            // Replaced — show the replacement as a styled pill
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 overflow-hidden max-w-full">
+                              <ArrowRight size={10} className="shrink-0" />
+                              <span className="font-mono truncate">{entry.ReplacementDocNo}</span>
                             </span>
                           ) : (
+                            // Not yet replaced — offer re-issue
                             <button
                               onClick={() => handleReissue(entry)}
-                              title="Create a new replacement payment for this bounced cheque"
+                              title="Create a replacement payment for this bounced cheque"
                               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
                             >
                               <CornerDownRight size={11} />
                               Re-issue
                             </button>
                           )
+                        ) : entry.OriginalDocNo ? (
+                          // This payment is a re-issue — show the bounced original it replaced
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px] font-semibold text-amber-700 dark:text-amber-400 overflow-hidden max-w-full">
+                            <CornerDownRight size={10} className="shrink-0" />
+                            <span className="font-mono truncate">{entry.OriginalDocNo}</span>
+                          </span>
                         ) : (
-                          // Show original ref if this is itself a re-issue
-                          entry.OriginalDocNo ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground whitespace-nowrap">
-                              <ArrowLeft size={11} />
-                              {entry.OriginalDocNo}
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => setBounceEntry(entry)}
-                              title="Mark this payment as bounced / dishonoured"
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
-                            >
-                              <Ban size={10} />
-                              Mark Bounced
-                            </button>
-                          )
+                          // Normal payment — can be marked bounced
+                          <button
+                            onClick={() => setBounceEntry(entry)}
+                            title="Mark this payment as bounced / dishonoured"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
+                          >
+                            <Ban size={10} />
+                            Mark Bounced
+                          </button>
                         )}
                       </td>
                     </tr>
