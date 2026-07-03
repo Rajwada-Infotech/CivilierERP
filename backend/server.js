@@ -94,6 +94,8 @@ const ALL_ROUTES = [
   { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
+  { path: "/api/journal-voucher", file: "./routes/journalVoucher" },
+  { path: "/api/reports/journal-voucher", file: "./routes/journalVoucherReports" },
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
   { path: "/api/customer-sale-orders", file: "./routes/customerSaleOrders" },
   { path: "/api/sale-invoices", file: "./routes/saleInvoices" },
