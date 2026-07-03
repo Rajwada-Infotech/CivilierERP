@@ -22,7 +22,7 @@ const isDueSoon = (d?: string | null) =>
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 16 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.45, delay, ease: [0.16, 1, 0.3, 1] },
+  transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] as const },
 });
 
 // ── Welcome hero ──────────────────────────────────────────────────────────────

@@ -107,9 +107,16 @@ router.get("/quotations/:id", async (req, res) => {
     if (!tagCheck.recordset.length)
       return res.status(403).json({ error: "You are not tagged on this quotation." });
 
+    // CompanyName/ProjectName were missing here (unlike the sibling GET
+    // /quotations list endpoint above, which already joins these) — the
+    // detail page's company/project row silently never rendered because
+    // these came back undefined. Same JOIN pattern as GET /quotations.
     const header = await pool.request().input("id", sql.Int, id).query(`
-      SELECT q.QuotationId, q.DocNo, q.Status, q.DocDate, q.DueDate, q.Remarks
+      SELECT q.QuotationId, q.DocNo, q.Status, q.DocDate, q.DueDate, q.Remarks,
+             ec.name AS CompanyName, ep.name AS ProjectName
       FROM dbo.Quotations q
+      LEFT JOIN dbo.enterprise ec ON ec.id = q.CompanyId
+      LEFT JOIN dbo.enterprise ep ON ep.id = q.ProjectId
       WHERE q.QuotationId = @id
     `);
     if (!header.recordset.length) return res.status(404).json({ error: "Quotation not found" });
@@ -160,58 +167,79 @@ router.post("/quotations/:id/prices", async (req, res) => {
     const { items = [] } = req.body;
     if (!items.length) return res.status(400).json({ error: "At least one item price is required" });
 
-    for (const item of items) {
-      const quotationItemId = parseInt(item.QuotationItemId, 10);
-      if (!quotationItemId) continue;
+    // Item price upserts + tag status flip + header status roll-up must be
+    // one atomic unit — previously each ran on the plain pool, so a failure
+    // partway through the item loop left some prices saved and others not,
+    // while the tag/header status still correctly stayed un-submitted (the
+    // error aborted before reaching those updates). Wrapping in a
+    // transaction closes the gap: either the whole submission lands, or
+    // none of it does. Same bug class found and fixed in
+    // materialRequests.js/quotations.js.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const item of items) {
+        const quotationItemId = parseInt(item.QuotationItemId, 10);
+        if (!quotationItemId) continue;
 
-      // Confirm this line item actually belongs to this quotation before upserting.
-      const itemCheck = await pool
+        // Confirm this line item actually belongs to this quotation before upserting.
+        const itemCheck = await tx
+          .request()
+          .input("qid", sql.Int, quotationItemId)
+          .input("id", sql.Int, id)
+          .query("SELECT 1 FROM dbo.QuotationItems WHERE QuotationItemId=@qid AND QuotationId=@id");
+        if (!itemCheck.recordset.length) continue;
+
+        await tx
+          .request()
+          .input("QuotationId", sql.Int, id)
+          .input("SupplierLHeadId", sql.Int, req.supplierLHeadId)
+          .input("QuotationItemId", sql.Int, quotationItemId)
+          .input("Rate", sql.Decimal(18, 2), parseFloat(item.Rate) || 0)
+          .input("SupplyDate", sql.Date, item.SupplyDate || null)
+          .input("Quality", sql.NVarChar(200), item.Quality || null).query(`
+            MERGE dbo.QuotationSupplierPrices AS target
+            USING (SELECT @QuotationItemId AS QuotationItemId, @SupplierLHeadId AS SupplierLHeadId) AS src
+              ON target.QuotationItemId = src.QuotationItemId AND target.SupplierLHeadId = src.SupplierLHeadId
+            WHEN MATCHED THEN
+              UPDATE SET Rate = @Rate, SupplyDate = @SupplyDate, Quality = @Quality, SubmittedAt = SYSDATETIME()
+            WHEN NOT MATCHED THEN
+              INSERT (QuotationId, SupplierLHeadId, QuotationItemId, Rate, SupplyDate, Quality, SubmittedAt)
+              VALUES (@QuotationId, @SupplierLHeadId, @QuotationItemId, @Rate, @SupplyDate, @Quality, SYSDATETIME());
+          `);
+      }
+
+      await tx
         .request()
-        .input("qid", sql.Int, quotationItemId)
         .input("id", sql.Int, id)
-        .query("SELECT 1 FROM dbo.QuotationItems WHERE QuotationItemId=@qid AND QuotationId=@id");
-      if (!itemCheck.recordset.length) continue;
-
-      await pool
-        .request()
-        .input("QuotationId", sql.Int, id)
-        .input("SupplierLHeadId", sql.Int, req.supplierLHeadId)
-        .input("QuotationItemId", sql.Int, quotationItemId)
-        .input("Rate", sql.Decimal(18, 2), parseFloat(item.Rate) || 0)
-        .input("SupplyDate", sql.Date, item.SupplyDate || null)
-        .input("Quality", sql.NVarChar(200), item.Quality || null).query(`
-          MERGE dbo.QuotationSupplierPrices AS target
-          USING (SELECT @QuotationItemId AS QuotationItemId, @SupplierLHeadId AS SupplierLHeadId) AS src
-            ON target.QuotationItemId = src.QuotationItemId AND target.SupplierLHeadId = src.SupplierLHeadId
-          WHEN MATCHED THEN
-            UPDATE SET Rate = @Rate, SupplyDate = @SupplyDate, Quality = @Quality, SubmittedAt = SYSDATETIME()
-          WHEN NOT MATCHED THEN
-            INSERT (QuotationId, SupplierLHeadId, QuotationItemId, Rate, SupplyDate, Quality, SubmittedAt)
-            VALUES (@QuotationId, @SupplierLHeadId, @QuotationItemId, @Rate, @SupplyDate, @Quality, SYSDATETIME());
+        .input("supplierId", sql.Int, req.supplierLHeadId).query(`
+          UPDATE dbo.QuotationSuppliers
+          SET Status = 'Submitted'
+          WHERE QuotationId = @id AND SupplierLHeadId = @supplierId
         `);
-    }
 
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("supplierId", sql.Int, req.supplierLHeadId).query(`
-        UPDATE dbo.QuotationSuppliers
-        SET Status = 'Submitted'
-        WHERE QuotationId = @id AND SupplierLHeadId = @supplierId
+      // Roll the quotation header status forward: PartiallyQuoted once at least
+      // one supplier has submitted, Quoted once every tagged supplier has.
+      await tx.request().input("id", sql.Int, id).query(`
+        UPDATE dbo.Quotations
+        SET Status = CASE
+              WHEN (SELECT COUNT(*) FROM dbo.QuotationSuppliers WHERE QuotationId = @id AND Status <> 'Submitted') = 0
+                THEN 'Quoted'
+              ELSE 'PartiallyQuoted'
+            END,
+            UpdatedAt = SYSDATETIME()
+        WHERE QuotationId = @id AND Status IN ('Sent', 'PartiallyQuoted')
       `);
 
-    // Roll the quotation header status forward: PartiallyQuoted once at least
-    // one supplier has submitted, Quoted once every tagged supplier has.
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.Quotations
-      SET Status = CASE
-            WHEN (SELECT COUNT(*) FROM dbo.QuotationSuppliers WHERE QuotationId = @id AND Status <> 'Submitted') = 0
-              THEN 'Quoted'
-            ELSE 'PartiallyQuoted'
-          END,
-          UpdatedAt = SYSDATETIME()
-      WHERE QuotationId = @id AND Status IN ('Sent', 'PartiallyQuoted')
-    `);
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
 
     res.json({ message: "Prices submitted" });
   } catch (err) {
@@ -251,27 +279,42 @@ router.put("/catalog", async (req, res) => {
     const { items = [] } = req.body;
     if (!items.length) return res.status(400).json({ error: "At least one item is required" });
 
-    for (const item of items) {
-      if (!item.ItemId) continue;
-      await pool
-        .request()
-        .input("SupplierLHeadId", sql.Int, req.supplierLHeadId)
-        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
-        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
-        .input("Rate", sql.Decimal(18, 2), parseFloat(item.Rate) || 0)
-        .input("SupplyLeadTime", sql.NVarChar(100), item.SupplyLeadTime || null)
-        .input("Quality", sql.NVarChar(200), item.Quality || null).query(`
-          MERGE dbo.SupplierItemRates AS target
-          USING (SELECT @SupplierLHeadId AS SupplierLHeadId, @ItemId AS ItemId) AS src
-            ON target.SupplierLHeadId = src.SupplierLHeadId AND target.ItemId = src.ItemId
-          WHEN MATCHED THEN
-            UPDATE SET Rate = @Rate, SupplyLeadTime = @SupplyLeadTime, Quality = @Quality,
-                       ItemName = @ItemName, UOMCode = @UOMCode, UpdatedAt = SYSDATETIME()
-          WHEN NOT MATCHED THEN
-            INSERT (SupplierLHeadId, ItemId, ItemName, UOMCode, Rate, SupplyLeadTime, Quality, UpdatedAt)
-            VALUES (@SupplierLHeadId, @ItemId, @ItemName, @UOMCode, @Rate, @SupplyLeadTime, @Quality, SYSDATETIME());
-        `);
+    // Same bug class found and fixed in materialRequests.js/quotations.js:
+    // each MERGE previously ran on the plain pool, so a failure partway
+    // through the loop left some rate-card rows updated and others not.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const item of items) {
+        if (!item.ItemId) continue;
+        await tx
+          .request()
+          .input("SupplierLHeadId", sql.Int, req.supplierLHeadId)
+          .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+          .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+          .input("Rate", sql.Decimal(18, 2), parseFloat(item.Rate) || 0)
+          .input("SupplyLeadTime", sql.NVarChar(100), item.SupplyLeadTime || null)
+          .input("Quality", sql.NVarChar(200), item.Quality || null).query(`
+            MERGE dbo.SupplierItemRates AS target
+            USING (SELECT @SupplierLHeadId AS SupplierLHeadId, @ItemId AS ItemId) AS src
+              ON target.SupplierLHeadId = src.SupplierLHeadId AND target.ItemId = src.ItemId
+            WHEN MATCHED THEN
+              UPDATE SET Rate = @Rate, SupplyLeadTime = @SupplyLeadTime, Quality = @Quality,
+                         ItemName = @ItemName, UOMCode = @UOMCode, UpdatedAt = SYSDATETIME()
+            WHEN NOT MATCHED THEN
+              INSERT (SupplierLHeadId, ItemId, ItemName, UOMCode, Rate, SupplyLeadTime, Quality, UpdatedAt)
+              VALUES (@SupplierLHeadId, @ItemId, @ItemName, @UOMCode, @Rate, @SupplyLeadTime, @Quality, SYSDATETIME());
+          `);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
     }
 
     res.json({ message: "Catalog updated" });

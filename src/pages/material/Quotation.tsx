@@ -840,9 +840,13 @@ export default function Quotation() {
             )}
           </div>
 
-          {/* Section 5: Terms & Remarks */}
-          {((tcRecords as any[]).length > 0 || true) && (
-            <div>
+          {/* Section 5: Terms & Remarks.
+              Previously gated on `(tcRecords as any[]).length > 0 || true` —
+              the `|| true` already made this always render regardless of
+              tcRecords, so the dead check is removed here rather than
+              reintroducing conditional hiding, which would change current
+              behavior. */}
+          <div>
               <SectionHeader icon={FileText} title="Remarks & Terms" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Remarks">
@@ -877,7 +881,6 @@ export default function Quotation() {
                 )}
               </div>
             </div>
-          )}
         </CardContent>
       </Card>
 
