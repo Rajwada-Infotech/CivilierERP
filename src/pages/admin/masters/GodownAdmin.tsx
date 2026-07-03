@@ -160,7 +160,7 @@ export default function GodownAdmin() {
   });
   const filteredProjects = form.EnterpriseID
     ? projectOptions.filter(
-        (p) => String(p.belongs_to) === String(form.EnterpriseID),
+        (p) => String(p.company_id) === String(form.EnterpriseID),
       )
     : projectOptions;
 

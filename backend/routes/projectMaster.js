@@ -9,6 +9,88 @@ const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
+// ── Auto-create Customer + Supplier ledger heads for a project ────────────────
+// Extracted so both POST / (new project) and PUT /:id (edit/re-save an
+// existing project) can ensure a project has its trading ledger heads before
+// it can participate in the Inter-Company Stock Transfer workflow. Projects
+// (business_type='P') carry no GST of their own in this schema — GST/PAN/TAN
+// live only on the parent Company row (see GET /company/:id below) — so a
+// project whose company has no gst_no on file is skipped with a warning
+// rather than fabricating compliance data. Idempotent: does nothing if the
+// PRJ-{id}-CUST/SUPP heads already exist.
+async function ensureProjectLedgerHeads(pool, projectId, projectName, address, createdBy) {
+  if (!projectId) return;
+
+  const projectRow = await pool
+    .request()
+    .input("id", sql.Int, projectId)
+    .query("SELECT company_id FROM dbo.enterprise WHERE id=@id AND business_type='P'");
+  const resolvedCompanyId = projectRow.recordset[0]?.company_id ?? null;
+
+  if (!resolvedCompanyId) {
+    console.warn(
+      `[projectMaster] Skipped auto-creating trading ledger heads for project ${projectId}: no company_id set.`,
+    );
+    return;
+  }
+
+  const companyRow = await pool
+    .request()
+    .input("id", sql.Int, resolvedCompanyId)
+    .query("SELECT gst_no, pan_no, name FROM dbo.enterprise WHERE id=@id AND business_type='C'");
+  const company = companyRow.recordset[0];
+
+  if (!company?.gst_no) {
+    console.warn(
+      `[projectMaster] Skipped auto-creating trading ledger heads for project ${projectId}: parent company ${resolvedCompanyId} has no GST on file.`,
+    );
+    return;
+  }
+
+  const custCode = `PRJ-${projectId}-CUST`;
+  const suppCode = `PRJ-${projectId}-SUPP`;
+  const existingLedger = await pool
+    .request()
+    .input("c1", sql.NVarChar(20), custCode)
+    .input("c2", sql.NVarChar(20), suppCode)
+    .query("SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode IN (@c1, @c2)");
+
+  if (existingLedger.recordset.length > 0) return;
+
+  const ledgerName = `${projectName} (${company.name})`;
+
+  for (const [lHeadType, lHeadCode] of [
+    ["C", custCode],
+    ["S", suppCode],
+  ]) {
+    await pool
+      .request()
+      .input("LHeadName", sql.NVarChar(200), ledgerName)
+      .input("LHeadCode", sql.NVarChar(20), lHeadCode)
+      .input("LHeadAddress", sql.VarChar(300), address || "N/A")
+      .input("LHeadContactPerson", sql.VarChar(100), "N/A")
+      .input("LHeadStatus", sql.Bit, 1)
+      .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
+      .input("LGST", sql.VarChar(20), company.gst_no)
+      .input("LCountry", sql.VarChar(50), "India")
+      .input("LHeadPan", sql.NVarChar(50), company.pan_no || null)
+      .input("LHeadType", sql.VarChar(50), lHeadType)
+      .input("Status", sql.NVarChar(20), "Approved")
+      .input("ApprovedBy", sql.NVarChar(100), createdBy)
+      .input("CreatedBy", sql.NVarChar(100), createdBy).query(`
+        INSERT INTO dbo.AccountHeadMaster
+          (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadStatus,
+           LHeadPaymentTerms, LGST, LCountry, LHeadPan, LHeadType, Status,
+           ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
+        VALUES
+          (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadStatus,
+           @LHeadPaymentTerms, @LGST, @LCountry, @LHeadPan, @LHeadType, @Status,
+           @ApprovedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
+      `);
+  }
+  await bumpCacheVersion("account-head-master");
+}
+
 // ── GET all projects ──────────────────────────────────────────────────────────
 router.get("/", cache("project-master", 60, { shared: true }), async (req, res) => {
   try {
@@ -208,89 +290,18 @@ router.post("/", adminOnly, async (req, res) => {
 
     // Auto-create Customer + Supplier ledger heads representing this
     // project, so it can immediately participate in the Inter-Company
-    // Stock Transfer workflow. Projects (business_type='P') carry no GST
-    // of their own in this schema — GST/PAN/TAN live only on the parent
-    // Company row (see GET /company/:id above) — so a project whose
-    // company has no gst_no on file is skipped with a warning rather than
-    // fabricating compliance data.
+    // Stock Transfer workflow.
     try {
       const projectRow = await pool
         .request()
         .input("name", sql.NVarChar(255), f.name || null)
         .input("btype", sql.NVarChar(10), "P")
         .query(
-          "SELECT TOP 1 id, company_id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
+          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
         );
       const newProjectId = projectRow.recordset[0]?.id;
-      const resolvedCompanyId =
-        projectRow.recordset[0]?.company_id ??
-        (f.companyId ? parseInt(f.companyId) : null);
-
-      if (newProjectId && resolvedCompanyId) {
-        const companyRow = await pool
-          .request()
-          .input("id", sql.Int, resolvedCompanyId)
-          .query(
-            "SELECT gst_no, pan_no, name FROM dbo.enterprise WHERE id=@id AND business_type='C'",
-          );
-        const company = companyRow.recordset[0];
-
-        if (company?.gst_no) {
-          const custCode = `PRJ-${newProjectId}-CUST`;
-          const suppCode = `PRJ-${newProjectId}-SUPP`;
-          const existingLedger = await pool
-            .request()
-            .input("c1", sql.NVarChar(20), custCode)
-            .input("c2", sql.NVarChar(20), suppCode)
-            .query(
-              "SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode IN (@c1, @c2)",
-            );
-
-          if (existingLedger.recordset.length === 0) {
-            const ledgerName = `${f.name} (${company.name})`;
-            const createdBy = req.user?.name || req.user?.email || "system";
-
-            for (const [lHeadType, lHeadCode] of [
-              ["C", custCode],
-              ["S", suppCode],
-            ]) {
-              await pool
-                .request()
-                .input("LHeadName", sql.NVarChar(200), ledgerName)
-                .input("LHeadCode", sql.NVarChar(20), lHeadCode)
-                .input("LHeadAddress", sql.VarChar(300), f.addressLine1 || "N/A")
-                .input("LHeadContactPerson", sql.VarChar(100), "N/A")
-                .input("LHeadStatus", sql.Bit, 1)
-                .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-                .input("LGST", sql.VarChar(20), company.gst_no)
-                .input("LCountry", sql.VarChar(50), "India")
-                .input("LHeadPan", sql.NVarChar(50), company.pan_no || null)
-                .input("LHeadType", sql.VarChar(50), lHeadType)
-                .input("Status", sql.NVarChar(20), "Approved")
-                .input("ApprovedBy", sql.NVarChar(100), createdBy)
-                .input("CreatedBy", sql.NVarChar(100), createdBy).query(`
-                  INSERT INTO dbo.AccountHeadMaster
-                    (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadStatus,
-                     LHeadPaymentTerms, LGST, LCountry, LHeadPan, LHeadType, Status,
-                     ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
-                  VALUES
-                    (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadStatus,
-                     @LHeadPaymentTerms, @LGST, @LCountry, @LHeadPan, @LHeadType, @Status,
-                     @ApprovedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
-                `);
-            }
-            await bumpCacheVersion("account-head-master");
-          }
-        } else {
-          console.warn(
-            `[projectMaster] Skipped auto-creating trading ledger heads for project ${newProjectId}: parent company ${resolvedCompanyId} has no GST on file.`,
-          );
-        }
-      } else if (newProjectId) {
-        console.warn(
-          `[projectMaster] Skipped auto-creating trading ledger heads for project ${newProjectId}: no company_id set.`,
-        );
-      }
+      const createdBy = req.user?.name || req.user?.email || "system";
+      await ensureProjectLedgerHeads(pool, newProjectId, f.name, f.addressLine1, createdBy);
     } catch (ledgerErr) {
       // Non-fatal — project was created, ledger-head creation failed
       console.warn(
@@ -388,6 +399,21 @@ router.put("/:id", adminOnly, async (req, res) => {
       console.warn(
         "[projectMaster] Godown EnterpriseID sync failed:",
         godownSyncErr.message,
+      );
+    }
+
+    // Ensure this project's trading ledger heads exist — covers projects
+    // created before this auto-creation logic existed (re-saving them via
+    // this route is the documented way to backfill), and projects whose
+    // company didn't have GST on file at creation time but does now.
+    try {
+      const projectId = parseInt(req.params.id, 10);
+      const createdBy = req.user?.name || req.user?.email || "system";
+      await ensureProjectLedgerHeads(pool, projectId, f.name, f.addressLine1, createdBy);
+    } catch (ledgerErr) {
+      console.warn(
+        "[projectMaster] Auto-ledger-head creation failed:",
+        ledgerErr.message,
       );
     }
 
