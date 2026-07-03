@@ -8,7 +8,7 @@ import React, {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1488,9 +1488,6 @@ const BOOKING_STATUSES: BookingStatus[] = [
   "Pending",
   "Approved",
   "Rejected",
-  "Booked",
-  "Hold",
-  "Received",
 ];
 const ALL_STATUSES = ["All", ...BOOKING_STATUSES] as const;
 const PAGE_SIZE = 20;
@@ -2617,14 +2614,14 @@ export default function MaterialExpenseBooking() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Invoice"]} />
-      <MaterialShell
+      <Breadcrumbs items={["Dashboard", "Finance", "Invoice"]} />
+      <FinanceShell
         title="Invoice"
         subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
         icon={Receipt}
         action={
           view === "list" ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}
@@ -2638,7 +2635,7 @@ export default function MaterialExpenseBooking() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -2646,7 +2643,7 @@ export default function MaterialExpenseBooking() {
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 transition-all"
                 >
                   <Plus size={13} /> New Invoice
                 </Button>
@@ -2658,8 +2655,8 @@ export default function MaterialExpenseBooking() {
         {/* Form View */}
         {view === "form" && (
           <Card className="border-border shadow-sm">
-            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
-              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
@@ -2669,16 +2666,16 @@ export default function MaterialExpenseBooking() {
                   <ArrowLeft size={15} />
                   <span className="hidden sm:inline">Back</span>
                 </button>
-                <span className="text-emerald-500/40">|</span>
+                <span className="text-indigo-500/40">|</span>
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
-                    <Receipt size={12} className="text-emerald-400" />
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-indigo-500/[0.18] border border-indigo-500/30 shrink-0">
+                    <Receipt size={12} className="text-indigo-400" />
                   </div>
                   <h2 className="text-sm font-heading font-bold text-foreground truncate">
                     {isEditing ? "Edit Invoice" : "New Invoice"}
                   </h2>
                   {form.bookingReference && (
-                    <span className="hidden sm:inline font-mono text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
+                    <span className="hidden sm:inline font-mono text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md shrink-0">
                       {form.bookingReference}
                     </span>
                   )}
@@ -3645,7 +3642,7 @@ export default function MaterialExpenseBooking() {
                       <button
                         onClick={handleSave}
                         disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                       >
                         {saved ? (
                           <Check size={14} />
@@ -3679,15 +3676,15 @@ export default function MaterialExpenseBooking() {
                   label="Total Booked"
                   value={`₹${fmt(totalNet)}`}
                   icon={Receipt}
-                  color="text-emerald-500 bg-emerald-500/10"
-                  accentColor="border-l-emerald-500"
+                  color="text-indigo-500 bg-indigo-500/10"
+                  accentColor="border-l-indigo-500"
                 />
                 <StatCard
                   label="Approved"
                   value={approvedCount}
                   icon={CheckCircle2}
-                  color="text-emerald-500 bg-emerald-500/10"
-                  accentColor="border-l-emerald-500"
+                  color="text-indigo-500 bg-indigo-500/10"
+                  accentColor="border-l-indigo-500"
                 />
                 <StatCard
                   label="Pending"
@@ -3707,7 +3704,7 @@ export default function MaterialExpenseBooking() {
             )}
             {loading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
-                <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 Loading bookings…
               </div>
             )}
@@ -3734,7 +3731,7 @@ export default function MaterialExpenseBooking() {
                             value={listSearch}
                             onChange={(e) => setListSearch(e.target.value)}
                             placeholder="Search doc no, supplier…"
-                            className="pl-9 pr-8 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                            className="pl-9 pr-8 h-9 text-sm focus-visible:ring-indigo-500/30 focus-visible:ring-offset-0"
                           />
                           {listSearch && (
                             <button
@@ -3752,7 +3749,7 @@ export default function MaterialExpenseBooking() {
                             key={s}
                             type="button"
                             onClick={() => setStatusFilter(s)}
-                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-indigo-500/40"}`}
                           >
                             {s}
                           </button>
@@ -4225,7 +4222,7 @@ export default function MaterialExpenseBooking() {
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}
-      </MaterialShell>
+      </FinanceShell>
     </>
   );
 }

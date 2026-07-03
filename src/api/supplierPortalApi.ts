@@ -11,6 +11,13 @@ export interface SupplierProfile {
   LHeadPhone?: string;
   LHeadAddress?: string;
   LHeadContactPerson?: string;
+  LHeadStatus?: string;
+  LHeadPaymentTerms?: string;
+  LGST?: string;
+  LGSTState?: string;
+  LCountry?: string;
+  LBelongsTo?: string;
+  LDescription?: string;
 }
 
 export interface SupplierQuotationSummary {
@@ -47,6 +54,8 @@ export interface SupplierQuotationDetail {
   DocDate: string;
   DueDate?: string;
   Remarks?: string;
+  CompanyName?: string;
+  ProjectName?: string;
   MySubmissionStatus: "Pending" | "Submitted";
   items: SupplierQuotationItem[];
 }

@@ -1273,6 +1273,52 @@ export default function VehicleInOut() {
                     )}
                   </div>
                 )}
+
+                {/* PO Items preview */}
+                {form.poId && (() => {
+                  const po = filteredPOs.find((p: any) => p.PurchaseOrderID === form.poId);
+                  const items: any[] = Array.isArray(po?.POItems) ? po.POItems : [];
+                  if (items.length === 0) return null;
+                  return (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
+                        <Package size={13} className="text-muted-foreground" />
+                        <span className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                          PO Items
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{items.length} item{items.length !== 1 ? "s" : ""}</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-border bg-muted/10">
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">#</th>
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Code</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty</th>
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Rate</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {items.map((it: any, i: number) => (
+                              <tr key={i} className="hover:bg-muted/10 transition-colors">
+                                <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
+                                <td className="px-4 py-2.5 font-medium text-foreground">{it.ItemName || it.itemName || "—"}</td>
+                                <td className="px-4 py-2.5 font-mono text-muted-foreground">{it.ItemCode || it.itemCode || "—"}</td>
+                                <td className="px-4 py-2.5 text-right font-mono">{it.Quantity ?? it.quantity ?? "—"}</td>
+                                <td className="px-4 py-2.5 text-muted-foreground">{it.UomName || it.uomName || "—"}</td>
+                                <td className="px-4 py-2.5 text-right font-mono">
+                                  {it.Rate != null ? `₹${Number(it.Rate).toLocaleString("en-IN")}` : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
               </SectionCard>
 
               {/* ── Section 3: Vehicle Details ── */}

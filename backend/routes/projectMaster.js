@@ -5,11 +5,12 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── GET all projects ──────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", cache("project-master", 60, { shared: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -35,24 +36,21 @@ router.get("/", async (req, res) => {
         p.remarks               AS Remarks,
         CASE WHEN p.discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
         p.logo                  AS ProjectImage,
-        -- enterprise FK
         p.enterprise_id         AS EnterpriseId,
         e.name                  AS EnterpriseName,
-        -- company FK
         p.company_id            AS CompanyId,
         c.name                  AS CompanyName,
-        c.gst_no                  AS CompanyGST,
-        c.gst_issue_date          AS CompanyGSTDate,
-        c.pan_no                  AS CompanyPAN,
-        c.tan                     AS CompanyTAN,
+        c.gst_no                AS CompanyGST,
+        c.gst_issue_date        AS CompanyGSTDate,
+        c.pan_no                AS CompanyPAN,
+        c.tan                   AS CompanyTAN,
         c.trade_license         AS CompanyTradeLicenseNo,
-        -- jv
         ISNULL(p.jv_enabled, 0) AS JvEnabled,
         p.jv_company_name       AS JvCompanyName,
         p.date_of_entry         AS CreatedAt
-      FROM dbo.enterprise p
-      LEFT JOIN dbo.enterprise e ON e.id = p.enterprise_id
-      LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+      FROM dbo.enterprise p WITH (NOLOCK)
+      LEFT JOIN dbo.enterprise e WITH (NOLOCK) ON e.id = p.enterprise_id
+      LEFT JOIN dbo.enterprise c WITH (NOLOCK) ON c.id = p.company_id
       WHERE p.business_type = 'P'
       ORDER BY p.name
     `);
@@ -77,7 +75,7 @@ router.get("/company/:id", async (req, res) => {
           pan_no              AS PAN,
           tan                 AS TAN,
           trade_license       AS TradeLicenseNo
-        FROM dbo.enterprise
+        FROM dbo.enterprise WITH (NOLOCK)
         WHERE id = @id AND business_type = 'C'
       `);
     if (!result.recordset.length)
