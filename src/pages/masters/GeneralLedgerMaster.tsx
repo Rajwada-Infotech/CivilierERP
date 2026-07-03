@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -639,14 +640,13 @@ const GeneralLedgerMaster: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                    <TreeDropdown
-                      variant="tree"
+                    <GroupTreePicker
                       value={form.LBelongsTo}
                       onChange={(v) => {
                         setForm((p) => ({ ...p, LBelongsTo: v }));
                         setErrors((p) => ({ ...p, LBelongsTo: false }));
                       }}
-                      items={accountGroupTree}
+                      tree={accountGroupTree}
                       allGroups={accountGroups}
                       error={errors.LBelongsTo}
                     />

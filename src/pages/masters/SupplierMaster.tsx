@@ -41,6 +41,7 @@ import {
   Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -1028,11 +1029,10 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group <span className="text-red-500">*</span>
                   </label>
-                  <TreeDropdown
-                    variant="tree"
+                  <GroupTreePicker
                     value={form.LBelongsTo}
                     onChange={(v) => { setForm((p) => ({ ...p, LBelongsTo: v })); setErrors((p) => ({ ...p, LBelongsTo: false })); }}
-                    items={accountGroupTree}
+                    tree={accountGroupTree}
                     allGroups={accountGroups}
                     error={errors.LBelongsTo}
                   />
