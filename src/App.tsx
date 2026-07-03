@@ -1210,12 +1210,16 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/expense-booking"
+        path="/finance/invoice"
         element={
           <ProtectedRoute pageKey="expense-booking">
             <MaterialExpenseBookingMaster />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/material/expense-booking"
+        element={<Navigate to="/finance/invoice" replace />}
       />
       <Route
         path="/material/debit-note"

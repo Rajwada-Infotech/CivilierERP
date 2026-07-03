@@ -7,6 +7,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
     label: "Transaction",
     icon: Bank,
     children: [
+      { label: "Invoice",          path: "/finance/invoice",   pageKey: "expense-booking" },
       { label: "Payment",          path: "/payments",          pageKey: "new-payment" },
       { label: "Received Payment", path: "/received-payments", pageKey: "received-payment" },
       { label: "BRS",              path: "/brs",               pageKey: "brs" },
