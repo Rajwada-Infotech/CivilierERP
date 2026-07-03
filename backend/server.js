@@ -24,7 +24,7 @@ const {
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
 const { initSocket } = require("./socket");
-const { ALLOWED_ORIGINS } = require("./config/origins");
+const { ALLOWED_ORIGINS, isOriginAllowed } = require("./config/origins");
 const { validateApprovalModuleMap } = require("./services/approvalService");
 
 const {
@@ -255,7 +255,7 @@ async function createApp() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (isOriginAllowed(origin)) {
           callback(null, true);
         } else {
           logger.warn(`[BLOCK] CORS rejected: ${origin}`);
