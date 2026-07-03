@@ -514,7 +514,7 @@ export default function Login() {
           const role = result.role;
           const uid = result.userId ?? "";
           if (role === "customer") navigate(`/customer-portal/${uid}`, { replace: true });
-          else if (role === "supplier") navigate(`/supplier-portal/${uid}`, { replace: true });
+          else if (role === "supplier") navigate("/supplier", { replace: true });
           else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
         }, 1800);
