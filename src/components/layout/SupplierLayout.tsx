@@ -4,9 +4,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Link, useLocation } from "react-router-dom";
-import { FileSpreadsheet, ListChecks, Building2 } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { FileSpreadsheet, ListChecks, Building2, Bell } from "lucide-react";
 import { Logout } from "iconsax-react";
+import { useQuery } from "@tanstack/react-query";
+import * as spApi from "@/api/supplierPortalApi";
 
 // ── click-outside helper ───────────────────────────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement>, onClose: () => void, open: boolean) {
@@ -75,6 +77,40 @@ function UserDropdown({ open, onClose, onToggle, handleLogout }: {
   );
 }
 
+// ── Supplier notification bell ────────────────────────────────────────────────
+function SupplierBell() {
+  const navigate = useNavigate();
+  const { data: quotations = [] } = useQuery({
+    queryKey: ["supplier-quotations"],
+    queryFn: spApi.getSupplierQuotations,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const now = Date.now();
+  const THREE_DAYS = 3 * 86_400_000;
+  const urgentCount = quotations.filter((q) => {
+    if (q.MySubmissionStatus !== "Pending") return false;
+    const due = q.DueDate ? new Date(q.DueDate).getTime() : null;
+    return due !== null && due - now <= THREE_DAYS;
+  }).length;
+
+  return (
+    <button
+      onClick={() => navigate("/supplier/notifications")}
+      className="relative w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all"
+      aria-label="Notifications"
+    >
+      <Bell size={16} />
+      {urgentCount > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center leading-none">
+          {urgentCount > 9 ? "9+" : urgentCount}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ── SupplierLayout ─────────────────────────────────────────────────────────────
 export function SupplierLayout({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
@@ -93,8 +129,8 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
   const closeTheme = useCallback(() => setThemeOpen(false), []);
 
   const navItems = [
-    { label: "Quotations", to: `/supplier-portal/${uid}`, icon: FileSpreadsheet, exact: true },
-    { label: "Price Catalog", to: `/supplier-portal/${uid}/catalog`, icon: ListChecks, exact: false },
+    { label: "Quotations", to: "/supplier", icon: FileSpreadsheet, exact: true },
+    { label: "Price Catalog", to: "/supplier/catalog", icon: ListChecks, exact: false },
   ];
 
   const isActive = (item: (typeof navItems)[0]) =>
@@ -156,7 +192,7 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
 
       <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3 border-b border-border bg-card/90 backdrop-blur-xl">
         {/* Logo */}
-        <Link to={`/supplier-portal/${uid}`} className="flex items-center hover:opacity-80 transition-opacity shrink-0">
+        <Link to="/supplier" className="flex items-center hover:opacity-80 transition-opacity shrink-0">
           <LogoFull />
         </Link>
 
@@ -203,6 +239,7 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
         {/* Right side */}
         <div className="flex-1 min-w-0" />
         <div className="flex items-center gap-1.5 shrink-0">
+          <SupplierBell />
           <ThemeSwitcher open={themeOpen} onToggle={toggleTheme} onClose={closeTheme} />
           <UserDropdown open={userOpen} onClose={closeUser} onToggle={toggleUser} handleLogout={handleLogout} />
         </div>

@@ -135,59 +135,108 @@ export default function SupplierQuotationDetail() {
           )}
         </div>
 
-        {/* ── Hero info bar ─────────────────────────────────────────────── */}
+        {/* ── Quotation reference banner ────────────────────────────────── */}
         <div
-          className="relative overflow-hidden rounded-2xl px-6 py-5"
-          style={isDark ? {
-            background: "rgba(15,17,26,0.52)",
-            border: "1px solid rgba(255,255,255,0.10)",
-            boxShadow: "0 4px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08)",
-            backdropFilter: "blur(22px) saturate(160%)",
-          } : submitted ? {
-            background: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-            border: "1px solid #6ee7b7",
-            boxShadow: "0 4px 20px rgba(16,185,129,0.12)",
-          } : {
-            background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-            border: "1px solid #fcd34d",
-            boxShadow: "0 4px 20px rgba(245,158,11,0.10)",
+          className="relative overflow-hidden rounded-2xl"
+          style={{
+            background: isDark
+              ? "linear-gradient(135deg, rgba(5,46,22,0.85) 0%, rgba(6,78,59,0.70) 50%, rgba(4,120,87,0.55) 100%)"
+              : "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)",
+            border: isDark ? "1px solid rgba(16,185,129,0.25)" : "1px solid rgba(6,78,59,0.3)",
+            boxShadow: isDark
+              ? "0 8px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(16,185,129,0.10), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 8px 32px rgba(4,120,87,0.30), inset 0 1px 0 rgba(255,255,255,0.15)",
           }}
         >
+          {/* Dot grid texture */}
           <div className="absolute inset-0 pointer-events-none" style={{
-            backgroundImage: `radial-gradient(circle, ${isDark ? "rgba(255,255,255,0.07)" : submitted ? "rgba(5,150,105,0.10)" : "rgba(180,83,9,0.08)"} 1px, transparent 1px)`,
-            backgroundSize: "20px 20px",
+            backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }} />
+          {/* Radial glow top-right */}
+          <div className="absolute inset-0 pointer-events-none" style={{
+            background: "radial-gradient(ellipse at 80% -10%, rgba(52,211,153,0.25) 0%, transparent 60%)",
           }} />
 
-          <div className="relative flex flex-wrap items-center gap-x-6 gap-y-2">
-            {detail.CompanyName && (
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Building2 size={13} className="text-muted-foreground/60" />
-                {detail.CompanyName}
+          <div className="relative px-6 py-5">
+            {/* Top row: DocNo + status badges */}
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/60 mb-1">Quotation Reference</div>
+                <h2 className="font-mono text-2xl font-extrabold text-white tracking-tight leading-none">
+                  {detail.DocNo}
+                </h2>
               </div>
-            )}
-            {detail.ProjectName && (
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Package size={13} className="text-muted-foreground/60" />
-                {detail.ProjectName}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {submitted ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/30 px-3 py-1 rounded-full">
+                    <CheckCircle2 size={11} /> Submitted
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-300 bg-amber-400/15 border border-amber-400/30 px-3 py-1 rounded-full">
+                    <Clock size={11} /> Pending
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white/60 bg-white/10 border border-white/15 px-3 py-1 rounded-full">
+                  <Package size={10} /> {totalCount} item{totalCount !== 1 ? "s" : ""}
+                </span>
               </div>
-            )}
-            {detail.DueDate && (
-              <div className={`flex items-center gap-1.5 text-sm font-medium ${new Date(detail.DueDate) < new Date() ? "text-red-500 dark:text-red-400" : "text-muted-foreground"}`}>
-                <CalendarDays size={13} className="opacity-60" />
-                Due {fmtDate(detail.DueDate)}
-              </div>
-            )}
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground ml-auto">
-              <Package size={12} />
-              {totalCount} item{totalCount !== 1 ? "s" : ""}
             </div>
-          </div>
 
-          {detail.Remarks && (
-            <div className="relative mt-3 pt-3 border-t border-border/40 text-xs text-muted-foreground italic">
-              "{detail.Remarks}"
+            {/* Divider */}
+            <div className="mt-4 mb-3.5 h-px bg-gradient-to-r from-white/[0.12] via-white/[0.08] to-transparent" />
+
+            {/* Meta grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
+              {detail.CompanyName && (
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Company</div>
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-white/90 truncate">
+                    <Building2 size={12} className="text-emerald-400/70 shrink-0" />
+                    <span className="truncate">{detail.CompanyName}</span>
+                  </div>
+                </div>
+              )}
+              {detail.ProjectName && (
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Project</div>
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-white/90 truncate">
+                    <Package size={12} className="text-emerald-400/70 shrink-0" />
+                    <span className="truncate">{detail.ProjectName}</span>
+                  </div>
+                </div>
+              )}
+              {detail.DocDate && (
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Issued On</div>
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-white/90">
+                    <CalendarDays size={12} className="text-emerald-400/70 shrink-0" />
+                    {fmtDate(detail.DocDate)}
+                  </div>
+                </div>
+              )}
+              {detail.DueDate && (
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Due Date</div>
+                  <div className={`flex items-center gap-1.5 text-sm font-semibold ${new Date(detail.DueDate) < new Date() ? "text-red-300" : "text-white/90"}`}>
+                    <CalendarDays size={12} className={`shrink-0 ${new Date(detail.DueDate) < new Date() ? "text-red-400" : "text-emerald-400/70"}`} />
+                    {fmtDate(detail.DueDate)}
+                    {new Date(detail.DueDate) < new Date() && (
+                      <span className="ml-1 text-[9px] font-bold text-red-300 bg-red-400/15 border border-red-400/25 px-1.5 py-0.5 rounded-full">Overdue</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Remarks */}
+            {detail.Remarks && (
+              <div className="mt-4 pt-3.5 border-t border-white/[0.08] text-xs text-white/50 italic flex items-start gap-1.5">
+                <span className="text-emerald-400/50 mt-0.5 shrink-0">✦</span>
+                {detail.Remarks}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Progress bar (only if pending) ───────────────────────────── */}

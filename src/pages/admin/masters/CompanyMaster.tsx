@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -225,8 +226,8 @@ function printCompanyPreview(c: Company) {
         title: "Address",
         fields: [
           { label: "Registered Address", value: c.registeredAddress },
-          { label: "City", value: c.city },
           { label: "State", value: c.state },
+          { label: "City", value: c.city },
           { label: "Country", value: c.country },
           { label: "Pincode", value: c.pincode },
           { label: "Phone", value: c.phone },
@@ -277,8 +278,8 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
     </div>
   );
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
@@ -339,8 +340,8 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
 
             <Section title="Address" />
             <Row label="Registered Address" value={c.registeredAddress} />
-            <Row label="City" value={c.city} />
             <Row label="State" value={c.state} />
+            <Row label="City" value={c.city} />
             <Row label="Country" value={c.country} />
             <Row label="Pincode" value={c.pincode} />
             <Row label="Phone" value={c.phone} />
@@ -386,7 +387,8 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1162,8 +1164,8 @@ export default function CompanyMaster() {
         )}
 
         {/* Delete confirm modal */}
-        {deleteConfirm !== null && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        {deleteConfirm !== null && createPortal(
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -1198,7 +1200,8 @@ export default function CompanyMaster() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </AdminShell>
     </>

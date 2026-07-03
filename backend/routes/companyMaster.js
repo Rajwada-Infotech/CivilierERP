@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const GST_STATUSES = new Set(["Registered", "Unregistered"]);
@@ -41,7 +42,7 @@ function normalizeCompanyGst(f) {
 }
 
 // GET all — reads from enterprise where business_type = 'C'
-router.get("/", async (req, res) => {
+router.get("/", cache("company-master", 60, { shared: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -86,14 +87,11 @@ router.get("/", async (req, res) => {
         c.remarks                   AS Remarks,
         c.logo                      AS LogoUrl,
         c.status,
-        COALESCE(parent.id, legacyParent.id) AS EnterpriseId,
-        COALESCE(parent.name, legacyParent.name, c.belongs_to) AS belongs_to
-      FROM dbo.enterprise c
-      LEFT JOIN dbo.enterprise parent
+        COALESCE(parent.id, c.enterprise_id)     AS EnterpriseId,
+        COALESCE(parent.name, c.belongs_to)      AS belongs_to
+      FROM dbo.enterprise c WITH (NOLOCK)
+      LEFT JOIN dbo.enterprise parent WITH (NOLOCK)
         ON parent.id = c.enterprise_id AND parent.business_type = 'E'
-      LEFT JOIN dbo.enterprise legacyParent
-        ON legacyParent.business_type = 'E'
-       AND LTRIM(RTRIM(legacyParent.name)) = LTRIM(RTRIM(c.belongs_to))
       WHERE c.business_type = 'C'
         AND (c.discontinue IS NULL OR c.discontinue = 0)
       ORDER BY c.name
@@ -177,7 +175,7 @@ router.post("/", adminOnly, async (req, res) => {
           @phone_number, @fax, @email, @website,
           @authorized_capital, @paid_up_capital, @currency, @fiscal_year_start, @auditor_name,
           @remarks, @logo, @enterprise_id,
-          (SELECT name FROM dbo.enterprise WHERE id = @enterprise_id AND business_type = 'E'),
+          (SELECT name FROM dbo.enterprise WITH (NOLOCK) WHERE id = @enterprise_id AND business_type = 'E'),
           @discontinue, @status, @date_of_entry
         )
       `);

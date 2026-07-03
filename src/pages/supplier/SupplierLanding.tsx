@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -7,7 +7,7 @@ import * as spApi from "@/api/supplierPortalApi";
 import { toast } from "sonner";
 import {
   FileText, Bell, CheckCircle, Clock, ChevronRight,
-  LogOut, IndianRupee, Building2, RefreshCw, AlertCircle,
+  IndianRupee, Building2, AlertCircle,
   Package, Search, Save, Edit3, X,
 } from "lucide-react";
 
@@ -24,42 +24,6 @@ const fade = (delay = 0) => ({
   animate: { opacity: 1, y: 0 },
   transition: { duration: 0.45, delay, ease: [0.16, 1, 0.3, 1] },
 });
-
-// ── Portal header ─────────────────────────────────────────────────────────────
-function PortalHeader({ companyName }: { companyName?: string }) {
-  const { currentUser, logout } = useAuth();
-  const navigate = useNavigate();
-  const initial = (companyName ?? currentUser?.name ?? "S")[0].toUpperCase();
-
-  return (
-    <header className="sticky top-0 z-50 flex items-center justify-between px-6 sm:px-10 py-3.5 font-body"
-      style={{ background: "rgba(255,255,255,0.96)", borderBottom: "1px solid rgba(0,0,0,0.07)", backdropFilter: "blur(12px)" }}>
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-lg border border-slate-200 shadow-sm overflow-hidden shrink-0">
-          <img src="/Civilier.png" alt="" className="w-full h-full object-cover" />
-        </div>
-        <span className="font-heading font-bold text-slate-800 tracking-tight text-sm">CivilierERP</span>
-        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 ml-0.5">Supplier</span>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-xs font-bold text-white">
-            {initial}
-          </div>
-          <span className="text-sm font-medium text-slate-700 max-w-[180px] truncate">
-            {companyName ?? currentUser?.name ?? "Supplier"}
-          </span>
-        </div>
-        <div className="w-px h-5 bg-slate-200" />
-        <button onClick={() => { logout(); navigate("/supplier-login"); }}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-500 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-red-50">
-          <LogOut size={13} /> Sign out
-        </button>
-      </div>
-    </header>
-  );
-}
 
 // ── Welcome hero ──────────────────────────────────────────────────────────────
 function WelcomeHero({ name, total, pending, submitted, loading }: {
@@ -137,14 +101,14 @@ function QuotationsSection({ quotations, loading }: {
   const submitted = quotations.filter((q) => q.MySubmissionStatus === "Submitted");
 
   return (
-    <section className="px-6 sm:px-10 py-8 font-body">
+    <section id="quotations-section" className="px-6 sm:px-10 py-8 font-body">
       <div className="max-w-6xl mx-auto">
         <motion.div className="flex items-center justify-between mb-5" {...fade(0)}>
           <div>
             <h2 className="font-heading text-lg font-bold text-slate-900">Active Quotations</h2>
             <p className="text-xs text-slate-400 mt-0.5">RFQs you have been tagged on</p>
           </div>
-          <button onClick={() => navigate(`/supplier-portal/${uid}`)}
+          <button onClick={() => navigate("/supplier")}
             className="flex items-center gap-1 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
             View all <ChevronRight size={14} />
           </button>
@@ -186,7 +150,7 @@ function QuotationsSection({ quotations, loading }: {
                 className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-50/40 transition-colors cursor-pointer border-b border-slate-50 last:border-0"
                 initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
-                onClick={() => navigate(`/supplier-portal/${uid}/quotation/${q.QuotationId}`)}>
+                onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
                 <div className="flex items-center gap-2 min-w-0">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
                   <span className="text-xs font-mono font-semibold text-slate-700 truncate">{q.DocNo}</span>
@@ -221,6 +185,17 @@ function PriceCatalogSection({ catalog, loading }: {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Lock the initial display order (unpriced first) so saving a rate doesn't
+  // cause the row to jump to the bottom on re-render.
+  const initialOrderRef = useRef<string[] | null>(null);
+  useEffect(() => {
+    if (catalog.length && !initialOrderRef.current) {
+      initialOrderRef.current = [...catalog]
+        .sort((a, b) => (a.Rate === null ? -1 : b.Rate === null ? 1 : 0))
+        .map((c) => c.ItemId);
+    }
+  }, [catalog]);
+
   const mutation = useMutation({
     mutationFn: spApi.updateSupplierCatalog,
     onSuccess: () => {
@@ -236,9 +211,12 @@ function PriceCatalogSection({ catalog, loading }: {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return catalog
-      .filter((c) => !q || c.ItemName.toLowerCase().includes(q))
-      .sort((a, b) => (a.Rate === null ? -1 : b.Rate === null ? 1 : 0)); // unpriced first
+    const items = catalog.filter((c) => !q || c.ItemName.toLowerCase().includes(q));
+    if (initialOrderRef.current) {
+      const orderMap = new Map(initialOrderRef.current.map((id, i) => [id, i]));
+      return [...items].sort((a, b) => (orderMap.get(a.ItemId) ?? 999) - (orderMap.get(b.ItemId) ?? 999));
+    }
+    return items;
   }, [catalog, search]);
 
   const saveRate = (item: spApi.SupplierCatalogItem) => {
@@ -266,7 +244,7 @@ function PriceCatalogSection({ catalog, loading }: {
               </div>
               <span className="text-xs font-semibold text-emerald-600">{pct}% covered</span>
             </div>
-            <button onClick={() => navigate(`/supplier-portal/${uid}/catalog`)}
+            <button onClick={() => navigate("/supplier/catalog")}
               className="flex items-center gap-1 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
               Full view <ChevronRight size={14} />
             </button>
@@ -355,7 +333,7 @@ function PriceCatalogSection({ catalog, loading }: {
 
             {filtered.length > 30 && (
               <div className="px-4 py-2.5 text-center border-t border-slate-50">
-                <button onClick={() => navigate(`/supplier-portal/${uid}/catalog`)}
+                <button onClick={() => navigate("/supplier/catalog")}
                   className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
                   View all {catalog.length} items in full catalog →
                 </button>
@@ -371,14 +349,35 @@ function PriceCatalogSection({ catalog, loading }: {
 // ── Quick actions ─────────────────────────────────────────────────────────────
 function QuickActions() {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
-  const uid = currentUser?.id ?? "";
 
-  const actions = [
-    { icon: FileText, label: "My Quotations", desc: "View & respond to RFQs", href: `/supplier-portal/${uid}`, col: "text-blue-600", bg: "bg-blue-50" },
-    { icon: IndianRupee, label: "Price Catalog", desc: "Update your rates", href: `/supplier-portal/${uid}/catalog`, col: "text-emerald-600", bg: "bg-emerald-50" },
-    { icon: Building2, label: "Company Profile", desc: "Contact & address details", href: `/supplier-portal/${uid}`, col: "text-violet-600", bg: "bg-violet-50" },
-    { icon: Bell, label: "Notifications", desc: "Alerts & reminders", href: `/supplier-portal/${uid}`, col: "text-amber-600", bg: "bg-amber-50" },
+  const actions: {
+    icon: React.ElementType; label: string; desc: string;
+    col: string; bg: string; badge?: string;
+    onClick: () => void;
+  }[] = [
+    {
+      icon: FileText, label: "My Quotations", desc: "View & respond to RFQs",
+      col: "text-blue-600", bg: "bg-blue-50",
+      onClick: () => {
+        const el = document.getElementById("quotations-section");
+        el ? el.scrollIntoView({ behavior: "smooth", block: "start" }) : navigate("/supplier");
+      },
+    },
+    {
+      icon: IndianRupee, label: "Price Catalog", desc: "Update your rates",
+      col: "text-emerald-600", bg: "bg-emerald-50",
+      onClick: () => navigate("/supplier/catalog"),
+    },
+    {
+      icon: Building2, label: "Company Profile", desc: "Contact & address details",
+      col: "text-violet-600", bg: "bg-violet-50",
+      onClick: () => navigate("/supplier/profile"),
+    },
+    {
+      icon: Bell, label: "Notifications", desc: "Alerts & reminders",
+      col: "text-amber-600", bg: "bg-amber-50",
+      onClick: () => navigate("/supplier/notifications"),
+    },
   ];
 
   return (
@@ -387,10 +386,15 @@ function QuickActions() {
         <motion.h2 className="font-heading text-lg font-bold text-slate-900 mb-4" {...fade(0)}>Quick Actions</motion.h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {actions.map((a, i) => (
-            <motion.button key={a.label} onClick={() => navigate(a.href)}
-              className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
+            <motion.button key={a.label} onClick={a.onClick}
+              className="relative flex flex-col items-start p-4 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 + i * 0.06, duration: 0.4 }}>
+              {a.badge && (
+                <span className="absolute top-3 right-3 text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                  {a.badge}
+                </span>
+              )}
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${a.bg}`}>
                 <a.icon size={16} className={a.col} />
               </div>
@@ -429,7 +433,6 @@ export default function SupplierLanding() {
 
   return (
     <div className="min-h-screen font-body" style={{ background: "#f8fafc" }}>
-      <PortalHeader companyName={profile?.Name} />
       <WelcomeHero
         name={profile?.Name ?? "Supplier"}
         total={quotations.length}

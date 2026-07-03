@@ -172,6 +172,8 @@ const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
 const SupplierCatalog = lazy(() => import("./pages/supplier/SupplierCatalog"));
+const SupplierCompanyProfile = lazy(() => import("./pages/supplier/SupplierCompanyProfile"));
+const SupplierNotifications = lazy(() => import("./pages/supplier/SupplierNotifications"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
 const AccountGroupMaster = lazy(
@@ -1926,9 +1928,70 @@ function AppRoutes() {
         path="/supplier"
         element={
           <RequireAuth>
-            <Suspense fallback={<PageSkeleton />}>
-              <SupplierLanding />
-            </Suspense>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierLanding />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      {/* SUPPLIER sub-pages — accessible to suppliers directly */}
+      <Route
+        path="/supplier/catalog"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierCatalog />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier/quotation/:qtId"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierQuotationDetail />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier/profile"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierCompanyProfile />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier/notifications"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierNotifications />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
           </RequireAuth>
         }
       />

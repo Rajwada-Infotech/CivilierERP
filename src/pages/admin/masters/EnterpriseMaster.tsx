@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -37,6 +38,48 @@ const GST_TYPES = [
   "SEZ",
   "Deemed Export",
 ];
+
+// Indian states + major cities
+const INDIA_STATE_CITIES: Record<string, string[]> = {
+  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Kurnool", "Rajamahendravaram", "Tirupati", "Kadapa", "Kakinada", "Anantapur"],
+  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tezpur"],
+  "Assam": ["Guwahati", "Silchar", "Dibrugarh", "Jorhat", "Nagaon", "Tinsukia", "Tezpur", "Bongaigaon"],
+  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Bihar Sharif", "Arrah", "Begusarai"],
+  "Chhattisgarh": ["Raipur", "Bhilai", "Korba", "Bilaspur", "Durg", "Rajnandgaon", "Jagdalpur"],
+  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa", "Ponda"],
+  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar", "Junagadh", "Anand", "Bharuch", "Morbi", "Nadiad"],
+  "Haryana": ["Faridabad", "Gurgaon", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar", "Karnal", "Sonipat", "Panchkula"],
+  "Himachal Pradesh": ["Shimla", "Solan", "Dharamsala", "Mandi", "Palampur", "Baddi", "Kullu", "Hamirpur"],
+  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar", "Phusro", "Hazaribagh", "Giridih"],
+  "Karnataka": ["Bengaluru", "Mysuru", "Hubli", "Mangaluru", "Belagavi", "Kalaburagi", "Davanagere", "Ballari", "Shivamogga", "Tumakuru", "Udupi"],
+  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Palakkad", "Alappuzha", "Kannur", "Kottayam", "Malappuram"],
+  "Madhya Pradesh": ["Bhopal", "Indore", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas", "Satna", "Ratlam", "Rewa", "Murwara"],
+  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur", "Kolhapur", "Amravati", "Navi Mumbai", "Vasai-Virar", "Mira-Bhayandar"],
+  "Manipur": ["Imphal", "Thoubal", "Bishnupur", "Churachandpur"],
+  "Meghalaya": ["Shillong", "Tura", "Jowai"],
+  "Mizoram": ["Aizawl", "Lunglei", "Champhai"],
+  "Nagaland": ["Kohima", "Dimapur", "Mokokchung"],
+  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Brahmapur", "Sambalpur", "Puri", "Balasore", "Bhadrak"],
+  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda", "Mohali", "Hoshiarpur", "Batala"],
+  "Rajasthan": ["Jaipur", "Jodhpur", "Kota", "Bikaner", "Ajmer", "Udaipur", "Bhilwara", "Alwar", "Sikar", "Bharatpur", "Sri Ganganagar"],
+  "Sikkim": ["Gangtok", "Namchi", "Gyalshing"],
+  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tirunelveli", "Tiruppur", "Vellore", "Erode", "Thoothukudi", "Ambattur"],
+  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Khammam", "Karimnagar", "Ramagundam", "Mahbubnagar", "Nalgonda", "Secunderabad"],
+  "Tripura": ["Agartala", "Dharmanagar", "Udaipur"],
+  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Bareilly", "Aligarh", "Moradabad", "Noida", "Gorakhpur", "Mathura"],
+  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani", "Rishikesh", "Kashipur", "Rudrapur"],
+  "West Bengal": ["Kolkata", "Howrah", "Durgapur", "Asansol", "Siliguri", "Bardhaman", "Malda", "Baharampur", "Habra"],
+  "Delhi": ["New Delhi", "Dwarka", "Rohini", "Janakpuri", "Laxmi Nagar", "Saket", "Pitampura", "Vasant Kunj"],
+  "Chandigarh": ["Chandigarh"],
+  "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag", "Baramulla", "Sopore"],
+  "Ladakh": ["Leh", "Kargil"],
+  "Puducherry": ["Puducherry", "Karaikal", "Mahe", "Yanam"],
+  "Andaman and Nicobar Islands": ["Port Blair"],
+  "Dadra and Nagar Haveli and Daman and Diu": ["Daman", "Diu", "Silvassa"],
+  "Lakshadweep": ["Kavaratti"],
+};
+
+const INDIA_STATES = Object.keys(INDIA_STATE_CITIES).sort();
 
 const empty: Partial<Enterprise> = {
   name: "",
@@ -161,8 +204,8 @@ function EnterpriseViewModal({
           fields: [
             { label: "Address Line 1", value: enterprise.address },
             { label: "Address Line 2", value: enterprise.address_line2 },
-            { label: "City", value: enterprise.city },
             { label: "State", value: enterprise.state },
+            { label: "City", value: enterprise.city },
             { label: "Country", value: enterprise.country },
             { label: "Pincode", value: enterprise.pincode },
             { label: "Phone", value: enterprise.phone_number },
@@ -200,8 +243,8 @@ function EnterpriseViewModal({
       ],
     });
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
@@ -271,8 +314,8 @@ function EnterpriseViewModal({
             <Section title="Address" />
             <Row label="Address Line 1" value={enterprise.address} />
             <Row label="Address Line 2" value={enterprise.address_line2} />
-            <Row label="City" value={enterprise.city} />
             <Row label="State" value={enterprise.state} />
+            <Row label="City" value={enterprise.city} />
             <Row label="Country" value={enterprise.country} />
             <Row label="Pincode" value={enterprise.pincode} />
             <Row label="Phone" value={enterprise.phone_number} />
@@ -328,7 +371,8 @@ function EnterpriseViewModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -854,8 +898,47 @@ export default function EnterpriseMaster() {
                   <div className="col-span-full">
                     {field("Address Line 2", "address_line2")}
                   </div>
-                  {field("City", "city")}
-                  {field("State", "state")}
+
+                  {/* State dropdown */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">State</label>
+                    <div className="relative">
+                      <select
+                        value={(form.state as string) ?? ""}
+                        onChange={(e) => {
+                          set("state", e.target.value);
+                          set("city", ""); // reset city when state changes
+                        }}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Select State —</option>
+                        {INDIA_STATES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+
+                  {/* City dropdown — filtered by selected state */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+                    <div className="relative">
+                      <select
+                        value={(form.city as string) ?? ""}
+                        onChange={(e) => set("city", e.target.value)}
+                        disabled={!form.state}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value="">{form.state ? "— Select City —" : "— Select State first —"}</option>
+                        {(INDIA_STATE_CITIES[form.state as string] ?? []).map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+
                   {field("Country", "country")}
                   {field("Pincode", "pincode")}
                   {field("Phone", "phone_number", "tel")}
@@ -915,8 +998,8 @@ export default function EnterpriseMaster() {
         )}
 
         {/* Delete Confirm */}
-        {deleteTarget && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        {deleteTarget && createPortal(
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -946,7 +1029,8 @@ export default function EnterpriseMaster() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </AdminShell>
     </>
