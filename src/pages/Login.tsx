@@ -259,7 +259,10 @@ function FloatingCard({ children, className, delay = 0, style }: { children: Rea
   );
 }
 
-function HeroCards() {
+function HeroCards({ stats }: { stats: PublicStats | null }) {
+  const pct = stats?.workOrderCompletionPct ?? 0;
+  const pendingWO = stats ? stats.workOrders - Math.round(stats.workOrders * pct / 100) : null;
+
   return (
     <div className="relative w-full h-full">
       <FloatingCard delay={0.3} className="top-[8%] left-[5%] w-56 p-4" style={{ zIndex: 2 }}>
@@ -267,26 +270,36 @@ function HeroCards() {
           <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(124,58,237,0.12)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
           </div>
-          <span className="text-xs font-semibold text-white/80">Project Overview</span>
+          <span className="text-xs font-semibold text-white/80">Work Order Status</span>
         </div>
-        {[{ label: "Site A", pct: 78, col: "#7c3aed" }, { label: "Site B", pct: 45, col: "#a78bfa" }, { label: "Site C", pct: 91, col: "#c4b5fd" }].map((p) => (
+        {[
+          { label: "Completed", pct: pct, col: "#7c3aed" },
+          { label: "In Progress", pct: Math.min(100, Math.max(0, 100 - pct)), col: "#a78bfa" },
+        ].map((p) => (
           <div key={p.label} className="mb-2 last:mb-0">
             <div className="flex justify-between text-[10px] text-white/45 mb-1"><span>{p.label}</span><span style={{ color: p.col }}>{p.pct}%</span></div>
             <div className="h-1 rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${p.pct}%`, background: p.col }} /></div>
           </div>
         ))}
+        {stats && (
+          <p className="text-[9px] text-white/25 mt-2">{stats.workOrders.toLocaleString("en-IN")} total work orders</p>
+        )}
       </FloatingCard>
 
       <FloatingCard delay={0.6} className="top-[32%] right-[2%] w-44 p-4" style={{ zIndex: 2 }}>
-        <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Monthly Revenue</p>
-        <p className="text-xl font-bold text-white">₹12.4L</p>
-        <p className="text-[10px] mt-1 flex items-center gap-1" style={{ color: "#7c3aed" }}>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="18 15 12 9 6 15"/></svg>
-          +18.2% vs last month
+        <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Active Projects</p>
+        {stats ? (
+          <p className="text-xl font-bold text-white">{stats.projects.toLocaleString("en-IN")}</p>
+        ) : (
+          <div className="h-6 w-10 rounded bg-white/10 animate-pulse mb-1" />
+        )}
+        <p className="text-[10px] mt-1 flex items-center gap-1 text-white/30">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          Tracking live progress
         </p>
-        <div className="flex gap-1 mt-3">
-          {[40, 60, 45, 75, 55, 80, 65].map((h, i) => (
-            <div key={i} className="flex-1 rounded-sm" style={{ height: h * 0.4, background: i === 5 ? "#7c3aed" : "rgba(124,58,237,0.2)", alignSelf: "flex-end" }} />
+        <div className="flex gap-1 mt-3 items-end">
+          {[30, 55, 40, 70, 50, 80, 60].map((h, i) => (
+            <div key={i} className="flex-1 rounded-sm" style={{ height: h * 0.35, background: i >= 5 ? "#7c3aed" : "rgba(124,58,237,0.2)" }} />
           ))}
         </div>
       </FloatingCard>
@@ -294,22 +307,30 @@ function HeroCards() {
       <FloatingCard delay={0.9} className="bottom-[22%] left-[8%] w-52 p-3.5" style={{ zIndex: 2 }}>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg, #7c3aed, #5b21b6)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
           </div>
           <div>
-            <p className="text-xs font-semibold text-white/80">MR Approved</p>
-            <p className="text-[10px] text-white/35">Steel – 2.5 MT · Site A</p>
+            <p className="text-xs font-semibold text-white/80">Supplier Network</p>
+            {stats ? (
+              <p className="text-[10px] text-white/35">{stats.activeSuppliers} active · {stats.quotations} quotations</p>
+            ) : (
+              <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse mt-1" />
+            )}
           </div>
         </div>
       </FloatingCard>
 
       <FloatingCard delay={1.2} className="bottom-[8%] right-[4%] w-48 p-3.5" style={{ zIndex: 2 }}>
         <div className="flex items-center gap-2 mb-2">
-          <div className="w-2 h-2 rounded-full animate-pulse bg-purple-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-purple-600">Live GRN</span>
+          <div className="w-2 h-2 rounded-full animate-pulse bg-emerald-400" />
+          <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(167,139,250,0.8)" }}>GRN Module</span>
         </div>
-        <p className="text-xs text-white/60">Cement · 150 bags received</p>
-        <p className="text-[10px] text-white/35 mt-1">Royal Garden · Just now</p>
+        {stats ? (
+          <p className="text-xs text-white/60">{stats.grns.toLocaleString("en-IN")} receipts recorded</p>
+        ) : (
+          <div className="h-3 w-32 rounded bg-white/10 animate-pulse" />
+        )}
+        <p className="text-[10px] text-white/35 mt-1">Goods receipt tracking</p>
       </FloatingCard>
     </div>
   );
@@ -487,6 +508,15 @@ function WelcomeBackCard({ name }: { name?: string }) {
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
+interface PublicStats {
+  projects: number;
+  workOrders: number;
+  workOrderCompletionPct: number;
+  grns: number;
+  activeSuppliers: number;
+  quotations: number;
+}
+
 export default function Login() {
   const [showPass, setShowPass] = useState(false);
   const [email, setEmail] = useState("");
@@ -495,6 +525,14 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [loginName, setLoginName] = useState("");
+  const [stats, setStats] = useState<PublicStats | null>(null);
+
+  useEffect(() => {
+    fetch("/api/public-stats")
+      .then((r) => r.json())
+      .then((d) => setStats(d))
+      .catch(() => {/* keep null, cards show skeleton */});
+  }, []);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -607,18 +645,86 @@ export default function Login() {
             From procurement and material tracking to contractor management and live project dashboards — CivilierERP gives your team total visibility and control.
           </motion.p>
 
-          <motion.div className="flex items-center gap-6"
+          <motion.div className="flex items-center gap-3"
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
-            {[["12+", "Modules"], ["99.9%", "Uptime"], ["500+", "Projects"]].map(([val, label]) => (
-              <div key={label} className="flex flex-col">
-                <span className="text-2xl font-bold text-white">{val}</span>
-                <span className="text-[11px] text-white/35">{label}</span>
+
+            {/* Card 1 — Projects */}
+            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 110 }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Projects</span>
+                <motion.span className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                  animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1.4, repeat: Infinity }} />
               </div>
-            ))}
+              {stats ? (
+                <span className="text-2xl font-bold text-white leading-none">{stats.projects.toLocaleString("en-IN")}</span>
+              ) : (
+                <div className="h-7 w-12 rounded bg-white/10 animate-pulse" />
+              )}
+              <div className="flex gap-1 items-end">
+                {[40, 65, 50, 80, 60, 75, 55].map((h, i) => (
+                  <div key={i} className="flex-1 rounded-sm"
+                    style={{ height: h * 0.28, background: i >= 5 ? "rgba(167,139,250,0.7)" : "rgba(167,139,250,0.2)" }} />
+                ))}
+              </div>
+            </div>
+
+            {/* Card 2 — GRNs / Receipts */}
+            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 120 }}>
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">GRNs Received</span>
+              {stats ? (
+                <span className="text-2xl font-bold text-white leading-none">{stats.grns.toLocaleString("en-IN")}</span>
+              ) : (
+                <div className="h-7 w-16 rounded bg-white/10 animate-pulse" />
+              )}
+              <div className="space-y-1.5">
+                {[
+                  { label: "Suppliers", val: stats?.activeSuppliers },
+                  { label: "Quotations", val: stats?.quotations },
+                ].map((m) => (
+                  <div key={m.label} className="flex justify-between text-[9px] text-white/30">
+                    <span>{m.label}</span>
+                    {m.val !== undefined ? <span className="text-white/50 font-medium">{m.val}</span> : <span className="w-6 h-2.5 rounded bg-white/10 animate-pulse inline-block" />}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Card 3 — Work orders */}
+            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 108 }}>
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Work Orders</span>
+              {stats ? (
+                <span className="text-2xl font-bold text-white leading-none">{stats.workOrders.toLocaleString("en-IN")}</span>
+              ) : (
+                <div className="h-7 w-14 rounded bg-white/10 animate-pulse" />
+              )}
+              <div className="flex items-center gap-2">
+                <svg width="36" height="36" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+                  <motion.circle cx="18" cy="18" r="14" fill="none" stroke="rgba(167,139,250,0.75)" strokeWidth="4"
+                    strokeLinecap="round" strokeDasharray="87.96" strokeDashoffset="87.96"
+                    initial={{ strokeDashoffset: 87.96 }}
+                    animate={{ strokeDashoffset: stats ? 87.96 * (1 - stats.workOrderCompletionPct / 100) : 87.96 }}
+                    transition={{ duration: 1.2, delay: 0.9, ease: "easeOut" }}
+                    transform="rotate(-90 18 18)" />
+                </svg>
+                <div>
+                  {stats ? (
+                    <p className="text-xs font-bold text-white/80">{stats.workOrderCompletionPct}%</p>
+                  ) : (
+                    <div className="h-3 w-8 rounded bg-white/10 animate-pulse mb-1" />
+                  )}
+                  <p className="text-[9px] text-white/30">Completed</p>
+                </div>
+              </div>
+            </div>
+
           </motion.div>
 
           <div className="relative h-64 mt-2">
-            <HeroCards />
+            <HeroCards stats={stats} />
           </div>
           </div>{/* end z-10 wrapper */}
         </motion.div>
@@ -730,6 +836,13 @@ export default function Login() {
 
                 <p className="text-center text-[10px] text-white/20 mt-5">
                   Secure access · Role-based permissions · v1.0.0
+                </p>
+                <p className="text-center text-[11px] text-white/30 mt-2">
+                  Are you a supplier?{" "}
+                  <button onClick={() => navigate("/supplier-login")}
+                    className="text-violet-400 hover:text-violet-300 font-medium transition-colors underline underline-offset-2">
+                    Sign in to Supplier Portal
+                  </button>
                 </p>
               </div>
             </TiltCard>

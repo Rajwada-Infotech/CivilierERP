@@ -41,10 +41,12 @@ router.get(
         client_name, client_code, team_size,
         jv_enabled, jv_company_name,
         remarks, description, tds_limit,
-        gst_no, pan_no, contact_person, phone,
-        logo, business_type
-      FROM dbo.enterprise
-      WHERE (business_type = @businessType OR (business_type IS NULL AND @businessType = 'E'))
+        contact_person, phone,
+        business_type,
+        logo
+      FROM dbo.enterprise WITH (NOLOCK)
+      WHERE business_type = @businessType
+         OR (business_type IS NULL AND @businessType = 'E')
       ORDER BY name
     `);
       res.json(result.recordset);
@@ -73,7 +75,9 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     start_date,
     start_fin_year,
     currency,
+    pan,
     pan_no,
+    gst_no,
     cin,
     address,
     address_line2,
@@ -101,6 +105,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     cost_center,
     profit_center,
   } = req.body;
+  const panValue = pan || pan_no || null;
   try {
     const pool = getPool();
     await pool
@@ -110,7 +115,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
       .input("business_type", sql.NVarChar(100), "E")
-      .input("gst_no", sql.NVarChar(20), gst_no || null)
+      .input("gst_no", sql.NVarChar(50), gst_no ? String(gst_no).trim() : null)
       .input("belongs_to", sql.Int, belongs_to || null)
       .input("logo", sql.NVarChar(sql.MAX), logo || null)
       .input("date_of_entry", sql.Date, date_of_entry || null)
@@ -118,8 +123,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("start_date", sql.Date, start_date || null)
       .input("start_fin_year", sql.NVarChar(50), start_fin_year || null)
       .input("currency", sql.NVarChar(10), currency || null)
-      .input("pan", sql.NVarChar(20), pan || null)
-      .input("pan_no", sql.NVarChar(20), pan || null)
+      .input("pan", sql.NVarChar(20), panValue)
+      .input("pan_no", sql.NVarChar(20), panValue)
       .input("cin", sql.NVarChar(50), cin || null)
       .input("address", sql.NVarChar(sql.MAX), address || null)
       .input("address_line2", sql.NVarChar(sql.MAX), address_line2 || null)
@@ -170,7 +175,11 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
           @fiscal_year_start, @cost_center, @profit_center
         )
       `);
-    await bumpCacheVersion("enterprises");
+    await Promise.all([
+      bumpCacheVersion("enterprises"),
+      bumpCacheVersion("company-master"),
+      bumpCacheVersion("project-master"),
+    ]);
     res.json({ message: "Enterprise added successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -195,6 +204,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     start_fin_year,
     currency,
     pan,
+    pan_no,
+    gst_no,
     cin,
     address,
     address_line2,
@@ -222,6 +233,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     cost_center,
     profit_center,
   } = req.body;
+  const panValue = pan || pan_no || null;
   try {
     const pool = getPool();
     await pool
@@ -232,7 +244,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
       .input("business_type", sql.NVarChar(100), "E")
-      .input("gst_no", sql.NVarChar(20), gst_no || null)
+      .input("gst_no", sql.NVarChar(50), gst_no ? String(gst_no).trim() : null)
       .input("belongs_to", sql.Int, belongs_to || null)
       .input("logo", sql.NVarChar(sql.MAX), logo || null)
       .input("date_of_entry", sql.Date, date_of_entry || null)
@@ -240,7 +252,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("start_date", sql.Date, start_date || null)
       .input("start_fin_year", sql.NVarChar(50), start_fin_year || null)
       .input("currency", sql.NVarChar(10), currency || null)
-      .input("pan_no", sql.NVarChar(20), pan_no || null)
+      .input("pan_no", sql.NVarChar(20), panValue)
       .input("cin", sql.NVarChar(50), cin || null)
       .input("address", sql.NVarChar(sql.MAX), address || null)
       .input("address_line2", sql.NVarChar(sql.MAX), address_line2 || null)
@@ -285,7 +297,11 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           fiscal_year_start=@fiscal_year_start, cost_center=@cost_center, profit_center=@profit_center
         WHERE id=@id AND (business_type='E' OR business_type IS NULL)
       `);
-    await bumpCacheVersion("enterprises");
+    await Promise.all([
+      bumpCacheVersion("enterprises"),
+      bumpCacheVersion("company-master"),
+      bumpCacheVersion("project-master"),
+    ]);
     res.json({ message: "Enterprise updated successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });

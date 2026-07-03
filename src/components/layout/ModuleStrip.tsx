@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight } from "lucide-react";
 import {
   Bank,
-  Receipt21,
+  Box,
   Category2,
   ClipboardText,
   Message2,
@@ -36,7 +36,7 @@ const MODULES = [
   },
   {
     id: "material" as Module,
-    icon: Receipt21,
+    icon: Box,
     label: "Material",
     desc: "GRN, PO & inventory",
     color: "#10b981",
