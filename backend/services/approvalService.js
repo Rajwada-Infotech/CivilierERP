@@ -8,6 +8,7 @@ const {
   postGRNApproval,
   postExpenseBookingApproval,
   postPaymentApproval,
+  postJournalVoucherApproval,
 } = require("./generalLedger");
 
 // Module slug → general ledger poster, called once a record reaches full
@@ -18,6 +19,7 @@ const GL_POSTERS = {
   grn: postGRNApproval,
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
+  "journal-voucher": postJournalVoucherApproval,
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -62,6 +64,11 @@ const MODULE_MAP = {
     pk: "VehicleInOutID",
     status: "Status",
   },
+  "journal-voucher": {
+    table: "dbo.JournalVoucher",
+    pk: "JVID",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {
@@ -73,6 +80,7 @@ const MODULE_DOC_LINKS = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "Payment",
+  "journal-voucher": "Journal Voucher",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
@@ -134,6 +142,7 @@ const WORKFLOW_ID_MAP = {
   "material-issues": "MaterialIssues",
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
+  "journal-voucher": "JournalVoucher",
 };
 
 /**
