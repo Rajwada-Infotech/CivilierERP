@@ -834,7 +834,6 @@ export default function Brs() {
                   const cleared = isCleared(entry);
                   const bounced = isBounced(entry);
                   const toggling = togglingId === key;
-                  const unbounding = unboundingId === key;
 
                   return (
                     <tr
