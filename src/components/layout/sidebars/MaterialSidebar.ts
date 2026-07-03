@@ -14,7 +14,6 @@ export const materialNavItems: NavItem[] = [
       { label: "GRN",              path: "/material/grn",              pageKey: "grn-master" },
       { label: "Issues",           path: "/material/issues",           pageKey: "material-issues" },
       { label: "Issue Return",     path: "/material/issue-return",     pageKey: "material-issue-return" },
-      { label: "Invoice",          path: "/material/expense-booking",  pageKey: "expense-booking" },
     ],
   },
   { label: "L1 Chart",       icon: TrendUp,       path: "/material/l1-chart",       pageKey: "l1-chart" },
