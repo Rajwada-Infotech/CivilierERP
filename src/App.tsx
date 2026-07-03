@@ -589,7 +589,7 @@ function AppRoutes() {
         element={
           currentUser
             ? currentUser.role === "supplier"
-              ? <Navigate to={`/supplier-portal/${currentUser.id}`} replace />
+              ? <Navigate to="/supplier" replace />
               : currentUser.role === "customer"
                 ? <Navigate to={`/customer-portal/${currentUser.id}`} replace />
                 : currentUser.role === "dba"
@@ -603,9 +603,9 @@ function AppRoutes() {
       <Route
         path="/home/:userId?"
         element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
+          currentUser?.role === "supplier"
+            ? <Navigate to="/supplier" replace />
+            : <ProtectedRoute><Home /></ProtectedRoute>
         }
       />
       <Route
@@ -1921,30 +1921,32 @@ function AppRoutes() {
         }
       />
 
-      {/* SUPPLIER PUBLIC PAGES */}
+      {/* SUPPLIER HOME — requires auth (supplier sees their portal here) */}
       <Route
         path="/supplier"
         element={
-          <Suspense fallback={<PageSkeleton />}>
-            <SupplierLanding />
-          </Suspense>
+          <RequireAuth>
+            <Suspense fallback={<PageSkeleton />}>
+              <SupplierLanding />
+            </Suspense>
+          </RequireAuth>
         }
       />
       <Route
         path="/supplier-login"
         element={
-          currentUser && currentUser.role === "supplier"
-            ? <Navigate to={`/supplier-portal/${currentUser.id}`} replace />
+          currentUser
+            ? <Navigate to="/supplier" replace />
             : <Suspense fallback={<PageSkeleton />}><SupplierLogin /></Suspense>
         }
       />
 
-      {/* SUPPLIER PORTAL */}
+      {/* SUPPLIER PORTAL — admin/super_admin monitoring view only */}
       <Route
         path="/supplier-portal/:userId?"
         element={
           <RequireAuth>
-            <RequireRole allowed={["supplier"]}>
+            <RequireRole allowed={["admin", "super_admin", "dba"]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>
@@ -1960,7 +1962,7 @@ function AppRoutes() {
         path="/supplier-portal/:userId/quotation/:qtId"
         element={
           <RequireAuth>
-            <RequireRole allowed={["supplier"]}>
+            <RequireRole allowed={["admin", "super_admin", "dba"]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>
@@ -1976,7 +1978,7 @@ function AppRoutes() {
         path="/supplier-portal/:userId/catalog"
         element={
           <RequireAuth>
-            <RequireRole allowed={["supplier"]}>
+            <RequireRole allowed={["admin", "super_admin", "dba"]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>
