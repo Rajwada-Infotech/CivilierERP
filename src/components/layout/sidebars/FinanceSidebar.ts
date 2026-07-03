@@ -1,4 +1,4 @@
-import { Chart2, Bank, Judge } from "iconsax-react";
+import { Chart2, Bank, Judge, DocumentText } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
@@ -13,6 +13,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
       { label: "BRS",              path: "/brs",               pageKey: "brs" },
     ],
   },
+  { label: "Journal Voucher", icon: DocumentText, path: "/journal-voucher", pageKey: "journal-voucher" },
   {
     label: "Query",
     icon: Judge,

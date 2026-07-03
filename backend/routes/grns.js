@@ -14,7 +14,14 @@ const upload = multer({
 });
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 1000,
+    validate: false,
+    message: { error: "Too many requests, please try again later." },
+  }),
+);
 const { getPool, sql } = require("../db");
 const {
   lockNextDocNumber,
@@ -70,9 +77,12 @@ function computeGRNTotal(grnItems) {
 async function syncPOItemReceivedQty(pool, sql, poId) {
   if (!poId) return;
   try {
-    const grns = await pool.request()
+    const grns = await pool
+      .request()
       .input("POID", sql.Int, parseInt(poId, 10))
-      .query("SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE POID = @POID AND Status != 'Rejected'");
+      .query(
+        "SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE POID = @POID AND Status != 'Rejected'",
+      );
 
     // Sum receivedQty per itemId across all GRNs
     const sumByItem = {};
@@ -81,22 +91,29 @@ async function syncPOItemReceivedQty(pool, sql, poId) {
       for (const it of items) {
         const id = String(it.itemId || it.ItemId || "");
         if (!id) continue;
-        sumByItem[id] = (sumByItem[id] || 0) + Number(it.receivedQty || it.ReceivedQty || 0);
+        sumByItem[id] =
+          (sumByItem[id] || 0) + Number(it.receivedQty || it.ReceivedQty || 0);
       }
     }
 
     // Fetch all PO items to know their ItemIds
-    const poItems = await pool.request()
+    const poItems = await pool
+      .request()
       .input("POID2", sql.Int, parseInt(poId, 10))
-      .query("SELECT Id, ItemId FROM dbo.PurchaseOrderItems WHERE PurchaseOrderID = @POID2");
+      .query(
+        "SELECT Id, ItemId FROM dbo.PurchaseOrderItems WHERE PurchaseOrderID = @POID2",
+      );
 
     for (const poItem of poItems.recordset) {
       const itemId = String(poItem.ItemId || "");
       const received = sumByItem[itemId] ?? 0;
-      await pool.request()
+      await pool
+        .request()
         .input("Id", sql.Int, poItem.Id)
         .input("ReceivedQty", sql.Decimal(18, 4), received)
-        .query("UPDATE dbo.PurchaseOrderItems SET ReceivedQty = @ReceivedQty WHERE Id = @Id");
+        .query(
+          "UPDATE dbo.PurchaseOrderItems SET ReceivedQty = @ReceivedQty WHERE Id = @Id",
+        );
     }
   } catch (err) {
     console.warn("syncPOItemReceivedQty failed (non-fatal):", err.message);
@@ -692,149 +709,161 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - Create GRN + Stock Ledger Entries
-router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodySchema), async (req, res) => {
-  const {
-    grnNo,
-    grnDate,
-    supplierId,
-    poId,
-    grnItems,
-    status,
-    remarks,
-    docTypeId: clientDocTypeId,
-    docNo,
-    finYear,
-    parentDocNo = null, // DocNo of the parent PO or WO
-    rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
-    godownId = null, // Target godown for stock credit (null → resolve from project or Main)
-    projectId = null, // Project linked to this GRN (used for godown resolution)
-  } = req.body;
-
-  if (!grnDate || !supplierId) {
-    return res
-      .status(400)
-      .json({ error: "GRNDate and SupplierID are required" });
-  }
-
-  const pool = getPool();
-
-  // ── Guard: a GRN can only be raised against an Approved PO ────────────────
-  // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
-  if (poId) {
-    const poStatusCheck = await pool
-      .request()
-      .input("POID", sql.Int, parseInt(poId, 10))
-      .query(
-        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
-      );
-
-    if (poStatusCheck.recordset.length === 0) {
-      return res.status(404).json({ error: "Purchase Order not found" });
-    }
-
-    const poStatus = poStatusCheck.recordset[0].Status;
-    if (poStatus !== "Approved" && poStatus !== "Received") {
-      return res.status(400).json({
-        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
-      });
-    }
-  }
-
-  const transaction = pool.transaction();
-
-  try {
-    await transaction.begin();
-
-    let resolvedDocTypeId = clientDocTypeId
-      ? parseInt(clientDocTypeId, 10)
-      : null;
-
-    // ── Auto-resolve GRN prefix from parent chain ────────────────────────────
-    // If no explicit docTypeId was passed but we have a parentDocNo, derive the
-    // correct prefix automatically:
-    //   parent starts with ExB-PO-  →  ExB-PO-GRN
-    //   parent starts with ExB-WO-  →  ExB-WO-GRN
-    //   parent starts with ExB-     →  ExB-GRN
-    //   otherwise                   →  GRN
-    if (!resolvedDocTypeId) {
-      const grnPrefix = resolveGRNPrefix(parentDocNo);
-      resolvedDocTypeId = await resolveDocTypeId(pool, sql, grnPrefix);
-    }
-
-    const finalDocNo = await lockNextDocNumber(pool, sql, {
-      docTypeId: resolvedDocTypeId,
+router.post(
+  "/",
+  requirePageRight("grn-master", "create"),
+  validateBody(grnBodySchema),
+  async (req, res) => {
+    const {
+      grnNo,
+      grnDate,
+      supplierId,
+      poId,
+      grnItems,
+      status,
+      remarks,
+      docTypeId: clientDocTypeId,
+      docNo,
       finYear,
-      tableName: "GoodsReceiptNotes",
-      docNoColumn: "DocNo",
-      issuedBy: req.user?.email || req.user?.name || null,
-      parentDocNo,
-      rootExBDocNo,
-    });
+      parentDocNo = null, // DocNo of the parent PO or WO
+      rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
+      godownId = null, // Target godown for stock credit (null → resolve from project or Main)
+      projectId = null, // Project linked to this GRN (used for godown resolution)
+    } = req.body;
 
-    // Parse year + serial for storage
-    const parts = (finalDocNo || "").split("-");
-    const docYear =
-      parts.length >= 2 ? parseInt(parts[parts.length - 2], 10) || null : null;
-    const docSerial =
-      parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
+    if (!grnDate || !supplierId) {
+      return res
+        .status(400)
+        .json({ error: "GRNDate and SupplierID are required" });
+    }
 
-    // Godown resolution priority (resolved BEFORE the insert so the row is
-    // written correctly the first time):
-    // 1. Explicit godownId from client
-    // 2. Project's linked godown (when PO has a ProjectId)
-    // 3. Main Godown fallback
-    // NOTE: this used to run AFTER the insert, then patch GodownID via a
-    // separate `pool.request()` UPDATE on the same row. That UPDATE ran on a
-    // different pooled connection than the still-open `transaction`, which
-    // already held an exclusive lock on this row from the INSERT below.
-    // The UPDATE would block waiting on that lock, but the only thing that
-    // could release the lock (transaction.commit()) was sequenced AFTER the
-    // UPDATE — a self-deadlock that hung until the client request timeout
-    // fired (ETIMEOUT), every single time a GRN was created. Resolving the
-    // godown first and inserting it directly removes the second statement
-    // — and the deadlock — entirely.
-    let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
-    if (!resolvedGodownId) {
-      // Try to get ProjectId from the PO if not provided in body
-      let resolvedProjectId = projectId ? parseInt(projectId, 10) : null;
-      if (!resolvedProjectId && poId) {
-        const poRow = await pool
-          .request()
-          .input("POID", sql.Int, parseInt(poId, 10))
-          .query(
-            "SELECT TOP 1 ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
-          );
-        resolvedProjectId = poRow.recordset[0]?.ProjectId || null;
-      }
-      if (resolvedProjectId) {
-        resolvedGodownId = await resolveProjectGodownId(
-          pool,
-          resolvedProjectId,
+    const pool = getPool();
+
+    // ── Guard: a GRN can only be raised against an Approved PO ────────────────
+    // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
+    if (poId) {
+      const poStatusCheck = await pool
+        .request()
+        .input("POID", sql.Int, parseInt(poId, 10))
+        .query(
+          "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
         );
+
+      if (poStatusCheck.recordset.length === 0) {
+        return res.status(404).json({ error: "Purchase Order not found" });
       }
-      if (!resolvedGodownId) {
-        resolvedGodownId = await resolveMainGodownId(pool);
+
+      const poStatus = poStatusCheck.recordset[0].Status;
+      if (poStatus !== "Approved" && poStatus !== "Received") {
+        return res.status(400).json({
+          error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+        });
       }
     }
 
-    const grnResult = await transaction
-      .request()
-      .input("GRNNo", sql.NVarChar(50), finalDocNo)
-      .input("GRNDate", sql.Date, grnDate)
-      .input("SupplierID", sql.Int, supplierId)
-      .input("POID", sql.Int, poId || null)
-      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
-      .input("Status", sql.NVarChar(50), status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
-      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo)
-      .input("DocYear", sql.SmallInt, docYear)
-      .input("DocSerial", sql.Int, docSerial)
-      .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
-      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
-      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
-      .input("GodownID", sql.Int, resolvedGodownId)
-      .input("CreatedDate", sql.DateTime2, new Date()).query(`
+    const transaction = pool.transaction();
+
+    try {
+      await transaction.begin();
+
+      let resolvedDocTypeId = clientDocTypeId
+        ? parseInt(clientDocTypeId, 10)
+        : null;
+
+      // ── Auto-resolve GRN prefix from parent chain ────────────────────────────
+      // If no explicit docTypeId was passed but we have a parentDocNo, derive the
+      // correct prefix automatically:
+      //   parent starts with ExB-PO-  →  ExB-PO-GRN
+      //   parent starts with ExB-WO-  →  ExB-WO-GRN
+      //   parent starts with ExB-     →  ExB-GRN
+      //   otherwise                   →  GRN
+      if (!resolvedDocTypeId) {
+        const grnPrefix = resolveGRNPrefix(parentDocNo);
+        resolvedDocTypeId = await resolveDocTypeId(pool, sql, grnPrefix);
+      }
+
+      const finalDocNo = await lockNextDocNumber(pool, sql, {
+        docTypeId: resolvedDocTypeId,
+        finYear,
+        tableName: "GoodsReceiptNotes",
+        docNoColumn: "DocNo",
+        issuedBy: req.user?.email || req.user?.name || null,
+        parentDocNo,
+        rootExBDocNo,
+      });
+
+      // Parse year + serial for storage
+      const parts = (finalDocNo || "").split("-");
+      const docYear =
+        parts.length >= 2
+          ? parseInt(parts[parts.length - 2], 10) || null
+          : null;
+      const docSerial =
+        parts.length >= 1
+          ? parseInt(parts[parts.length - 1], 10) || null
+          : null;
+
+      // Godown resolution priority (resolved BEFORE the insert so the row is
+      // written correctly the first time):
+      // 1. Explicit godownId from client
+      // 2. Project's linked godown (when PO has a ProjectId)
+      // 3. Main Godown fallback
+      // NOTE: this used to run AFTER the insert, then patch GodownID via a
+      // separate `pool.request()` UPDATE on the same row. That UPDATE ran on a
+      // different pooled connection than the still-open `transaction`, which
+      // already held an exclusive lock on this row from the INSERT below.
+      // The UPDATE would block waiting on that lock, but the only thing that
+      // could release the lock (transaction.commit()) was sequenced AFTER the
+      // UPDATE — a self-deadlock that hung until the client request timeout
+      // fired (ETIMEOUT), every single time a GRN was created. Resolving the
+      // godown first and inserting it directly removes the second statement
+      // — and the deadlock — entirely.
+      let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
+      if (!resolvedGodownId) {
+        // Try to get ProjectId from the PO if not provided in body
+        let resolvedProjectId = projectId ? parseInt(projectId, 10) : null;
+        if (!resolvedProjectId && poId) {
+          const poRow = await pool
+            .request()
+            .input("POID", sql.Int, parseInt(poId, 10))
+            .query(
+              "SELECT TOP 1 ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+            );
+          resolvedProjectId = poRow.recordset[0]?.ProjectId || null;
+        }
+        if (resolvedProjectId) {
+          resolvedGodownId = await resolveProjectGodownId(
+            pool,
+            resolvedProjectId,
+          );
+        }
+        if (!resolvedGodownId) {
+          resolvedGodownId = await resolveMainGodownId(pool);
+        }
+      }
+
+      const grnResult = await transaction
+        .request()
+        .input("GRNNo", sql.NVarChar(50), finalDocNo)
+        .input("GRNDate", sql.Date, grnDate)
+        .input("SupplierID", sql.Int, supplierId)
+        .input("POID", sql.Int, poId || null)
+        .input(
+          "GRNItems",
+          sql.NVarChar(sql.MAX),
+          JSON.stringify(grnItems || []),
+        )
+        .input("Status", sql.NVarChar(50), status || "Draft")
+        .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+        .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocYear", sql.SmallInt, docYear)
+        .input("DocSerial", sql.Int, docSerial)
+        .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
+        .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
+        .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+        .input("GodownID", sql.Int, resolvedGodownId)
+        .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
           (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
@@ -846,31 +875,41 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
            @TotalAmount, @GodownID, @CreatedDate)
       `);
 
-    const grnId = grnResult.recordset[0].GRNID;
-    await linkGRNAttachments(transaction, grnId, parseIdList(req.body.attachmentIds));
+      const grnId = grnResult.recordset[0].GRNID;
+      await linkGRNAttachments(
+        transaction,
+        grnId,
+        parseIdList(req.body.attachmentIds),
+      );
 
-    // IMPORTANT: use transaction.request() not pool.request() — the GRN row
-    // only exists inside this uncommitted transaction; pool sees nothing yet.
-    await insertStockLedgerEntries(
-      transaction,
-      grnId,
-      grnItems,
-      finalDocNo,
-      resolvedGodownId,
-    );
+      // IMPORTANT: use transaction.request() not pool.request() — the GRN row
+      // only exists inside this uncommitted transaction; pool sees nothing yet.
+      await insertStockLedgerEntries(
+        transaction,
+        grnId,
+        grnItems,
+        finalDocNo,
+        resolvedGodownId,
+      );
 
-    await transaction.commit();
+      await transaction.commit();
 
-    // backPatchRecordId uses pool directly — must run after commit
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
+      // backPatchRecordId uses pool directly — must run after commit
+      await backPatchRecordId(
+        pool,
+        sql,
+        finalDocNo,
+        "GoodsReceiptNotes",
+        grnId,
+      );
 
-    // ── Update parent PO status ───────────────────────────────────────────────
-    // Check if all ordered quantities are now received; set status accordingly.
-    if (poId) {
-      try {
-        const poCheck = await pool
-          .request()
-          .input("POID", sql.Int, parseInt(poId, 10)).query(`
+      // ── Update parent PO status ───────────────────────────────────────────────
+      // Check if all ordered quantities are now received; set status accordingly.
+      if (poId) {
+        try {
+          const poCheck = await pool
+            .request()
+            .input("POID", sql.Int, parseInt(poId, 10)).query(`
             SELECT
               po.Status          AS POStatus,
               po.TotalAmount     AS POTotalAmount,
@@ -883,144 +922,153 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
             GROUP BY po.Status, po.TotalAmount
           `);
 
-        if (poCheck.recordset.length > 0) {
-          const poRow = poCheck.recordset[0];
-          // Use PO's stored TotalAmount (incl. GST) as the ordered baseline,
-          // because grn.TotalAmount is also stored inclusive of GST.
-          // Previously this compared qty*rate (ex-GST) against GST-inclusive
-          // GRN totals, causing POs to never be marked Received.
-          const totalOrdered = Number(poRow.POTotalAmount || 0);
-          // Only promote PO to "Received" when all items are fully received.
-          // Never write "Partially Received" back to PO — that belongs on GRN.
-          const newPOStatus =
-            poRow.GRNCount > 0 &&
-            totalOrdered > 0 &&
-            poRow.TotalReceived >= totalOrdered
-              ? "Received"
-              : null;
+          if (poCheck.recordset.length > 0) {
+            const poRow = poCheck.recordset[0];
+            // Use PO's stored TotalAmount (incl. GST) as the ordered baseline,
+            // because grn.TotalAmount is also stored inclusive of GST.
+            // Previously this compared qty*rate (ex-GST) against GST-inclusive
+            // GRN totals, causing POs to never be marked Received.
+            const totalOrdered = Number(poRow.POTotalAmount || 0);
+            // Only promote PO to "Received" when all items are fully received.
+            // Never write "Partially Received" back to PO — that belongs on GRN.
+            const newPOStatus =
+              poRow.GRNCount > 0 &&
+              totalOrdered > 0 &&
+              poRow.TotalReceived >= totalOrdered
+                ? "Received"
+                : null;
 
-          if (
-            newPOStatus &&
-            newPOStatus !== poRow.POStatus &&
-            ["Approved"].includes(poRow.POStatus)
-          ) {
-            await pool
-              .request()
-              .input("POID", sql.Int, parseInt(poId, 10))
-              .input("Status", sql.NVarChar(50), newPOStatus)
-              .query(
-                `UPDATE PurchaseOrders SET Status = @Status WHERE PurchaseOrderID = @POID`,
-              );
-            await bumpCacheVersion("purchase-orders");
+            if (
+              newPOStatus &&
+              newPOStatus !== poRow.POStatus &&
+              ["Approved"].includes(poRow.POStatus)
+            ) {
+              await pool
+                .request()
+                .input("POID", sql.Int, parseInt(poId, 10))
+                .input("Status", sql.NVarChar(50), newPOStatus)
+                .query(
+                  `UPDATE PurchaseOrders SET Status = @Status WHERE PurchaseOrderID = @POID`,
+                );
+              await bumpCacheVersion("purchase-orders");
+            }
           }
+        } catch (poErr) {
+          // Non-fatal — GRN was saved; PO status update is best-effort
+          console.warn(
+            "PO status update after GRN failed (non-fatal):",
+            poErr.message,
+          );
         }
-      } catch (poErr) {
-        // Non-fatal — GRN was saved; PO status update is best-effort
-        console.warn(
-          "PO status update after GRN failed (non-fatal):",
-          poErr.message,
-        );
+        // Sync per-item ReceivedQty back to PurchaseOrderItems from all GRNs
+        await syncPOItemReceivedQty(pool, sql, poId);
       }
-      // Sync per-item ReceivedQty back to PurchaseOrderItems from all GRNs
-      await syncPOItemReceivedQty(pool, sql, poId);
-    }
-    await bumpCacheVersion("stock-ledger");
-    await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
+      await bumpCacheVersion("grns");
 
-    // Auto-submit: transition Draft → Pending immediately after creation.
-    try {
-      await transition(
-        "goods-receipt",
+      // Auto-submit: transition Draft → Pending immediately after creation.
+      try {
+        await transition(
+          "goods-receipt",
+          grnId,
+          "Pending",
+          req.user?.email,
+          req.user?.role,
+        );
+      } catch (submitErr) {
+        console.warn("GRN auto-submit failed (non-fatal):", submitErr.message);
+      }
+
+      res.status(201).json({
+        message: "GRN created successfully",
         grnId,
-        "Pending",
-        req.user?.email,
-        req.user?.role,
-      );
-    } catch (submitErr) {
-      console.warn("GRN auto-submit failed (non-fatal):", submitErr.message);
-    }
-
-    res.status(201).json({
-      message: "GRN created successfully",
-      grnId,
-      grnNo: finalDocNo,
-      docNo: finalDocNo,
-      status: "Pending",
-    });
-  } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("CREATE GRN FULL ERROR:", err);
-    if (res.headersSent) return; // timeout middleware already sent 503
-    res.status(500).json({
-      error: "Failed to create GRN",
-      message: err.message,
-      detail: err.originalError?.info || null,
-    });
-  }
-});
-
-// PUT - Update GRN
-router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodySchema), async (req, res) => {
-  try {
-    await guardEdit("goods-receipt", req.params.id);
-  } catch (err) {
-    return res.status(400).json({ error: err.message });
-  }
-
-  const {
-    grnNo,
-    grnDate,
-    supplierId,
-    poId,
-    grnItems,
-    status,
-    remarks,
-    docTypeId,
-    docNo,
-  } = req.body;
-  const grnId = parseInt(req.params.id, 10);
-
-  const pool = getPool();
-
-  // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
-  if (poId) {
-    const poStatusCheck = await pool
-      .request()
-      .input("POID", sql.Int, parseInt(poId, 10))
-      .query(
-        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
-      );
-
-    if (poStatusCheck.recordset.length === 0) {
-      return res.status(404).json({ error: "Purchase Order not found" });
-    }
-
-    const poStatus = poStatusCheck.recordset[0].Status;
-    if (poStatus !== "Approved" && poStatus !== "Received") {
-      return res.status(400).json({
-        error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+        grnNo: finalDocNo,
+        docNo: finalDocNo,
+        status: "Pending",
+      });
+    } catch (err) {
+      await transaction.rollback().catch(() => {});
+      console.error("CREATE GRN FULL ERROR:", err);
+      if (res.headersSent) return; // timeout middleware already sent 503
+      res.status(500).json({
+        error: "Failed to create GRN",
+        message: err.message,
+        detail: err.originalError?.info || null,
       });
     }
-  }
+  },
+);
 
-  const transaction = pool.transaction();
-  try {
-    await transaction.begin();
+// PUT - Update GRN
+router.put(
+  "/:id",
+  requirePageRight("grn-master", "edit"),
+  validateBody(grnBodySchema),
+  async (req, res) => {
+    try {
+      await guardEdit("goods-receipt", req.params.id);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
-    const result = await transaction
-      .request()
-      .input("GRNID", sql.Int, grnId)
-      .input("GRNNo", sql.NVarChar(50), grnNo)
-      .input("GRNDate", sql.Date, grnDate)
-      .input("SupplierID", sql.Int, supplierId)
-      .input("POID", sql.Int, poId || null)
-      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
-      .input("Status", sql.NVarChar(50), status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
-      .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), docNo || null)
-      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
-      .input("UpdatedDate", sql.DateTime2, new Date()).query(`
+    const {
+      grnNo,
+      grnDate,
+      supplierId,
+      poId,
+      grnItems,
+      status,
+      remarks,
+      docTypeId,
+      docNo,
+    } = req.body;
+    const grnId = parseInt(req.params.id, 10);
+
+    const pool = getPool();
+
+    // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
+    if (poId) {
+      const poStatusCheck = await pool
+        .request()
+        .input("POID", sql.Int, parseInt(poId, 10))
+        .query(
+          "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+        );
+
+      if (poStatusCheck.recordset.length === 0) {
+        return res.status(404).json({ error: "Purchase Order not found" });
+      }
+
+      const poStatus = poStatusCheck.recordset[0].Status;
+      if (poStatus !== "Approved" && poStatus !== "Received") {
+        return res.status(400).json({
+          error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+        });
+      }
+    }
+
+    const transaction = pool.transaction();
+    try {
+      await transaction.begin();
+
+      const result = await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .input("GRNNo", sql.NVarChar(50), grnNo)
+        .input("GRNDate", sql.Date, grnDate)
+        .input("SupplierID", sql.Int, supplierId)
+        .input("POID", sql.Int, poId || null)
+        .input(
+          "GRNItems",
+          sql.NVarChar(sql.MAX),
+          JSON.stringify(grnItems || []),
+        )
+        .input("Status", sql.NVarChar(50), status || "Draft")
+        .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+        .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
+        .input("DocNo", sql.NVarChar(100), docNo || null)
+        .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+        .input("UpdatedDate", sql.DateTime2, new Date()).query(`
         UPDATE GoodsReceiptNotes
         SET GRNNo = @GRNNo,
             GRNDate = @GRNDate,
@@ -1035,57 +1083,63 @@ router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodyS
         WHERE GRNID = @GRNID
       `);
 
-    if (result.rowsAffected[0] === 0) {
-      await transaction.rollback();
-      return res.status(404).json({ error: "GRN not found" });
+      if (result.rowsAffected[0] === 0) {
+        await transaction.rollback();
+        return res.status(404).json({ error: "GRN not found" });
+      }
+
+      await transaction
+        .request()
+        .input("RefID", sql.Int, grnId)
+        .query(
+          "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
+        );
+
+      // Preserve the godown that was set when the GRN was created.
+      // Must read via `transaction`, not `pool` — the UPDATE above is still
+      // uncommitted and holds a lock on this row on the transaction's
+      // connection. A read from a different pooled connection would block
+      // waiting on that lock until transaction.commit() runs, but commit()
+      // is sequenced after this read — the same self-deadlock as the POST
+      // handler's old GodownID UPDATE, just with a SELECT instead.
+      const grnGodownRes = await transaction
+        .request()
+        .input("GID", sql.Int, grnId)
+        .query(
+          "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+        );
+      const putGodownId =
+        grnGodownRes.recordset[0]?.GodownID ??
+        (await resolveMainGodownId(pool));
+      await insertStockLedgerEntries(
+        transaction,
+        grnId,
+        grnItems,
+        docNo,
+        putGodownId,
+      );
+      await transaction.commit();
+      await linkGRNAttachments(
+        pool,
+        grnId,
+        parseIdList(req.body.attachmentIds),
+      );
+
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("expense-booking-options");
+      await bumpCacheVersion("stock-ledger");
+      res.json({ message: "GRN updated successfully" });
+    } catch (err) {
+      await transaction.rollback().catch(() => {});
+      console.error("UPDATE GRN ERROR:", err);
+      if (res.headersSent) return; // timeout middleware already sent 503
+      res.status(500).json({
+        error: "Failed to update GRN",
+        message: err.message,
+      });
     }
-
-    await transaction
-      .request()
-      .input("RefID", sql.Int, grnId)
-      .query(
-        "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
-      );
-
-    // Preserve the godown that was set when the GRN was created.
-    // Must read via `transaction`, not `pool` — the UPDATE above is still
-    // uncommitted and holds a lock on this row on the transaction's
-    // connection. A read from a different pooled connection would block
-    // waiting on that lock until transaction.commit() runs, but commit()
-    // is sequenced after this read — the same self-deadlock as the POST
-    // handler's old GodownID UPDATE, just with a SELECT instead.
-    const grnGodownRes = await transaction
-      .request()
-      .input("GID", sql.Int, grnId)
-      .query(
-        "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
-      );
-    const putGodownId =
-      grnGodownRes.recordset[0]?.GodownID ?? (await resolveMainGodownId(pool));
-    await insertStockLedgerEntries(
-      transaction,
-      grnId,
-      grnItems,
-      docNo,
-      putGodownId,
-    );
-    await transaction.commit();
-    await linkGRNAttachments(pool, grnId, parseIdList(req.body.attachmentIds));
-
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("expense-booking-options");
-    await bumpCacheVersion("stock-ledger");
-    res.json({ message: "GRN updated successfully" });
-  } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("UPDATE GRN ERROR:", err);
-    if (res.headersSent) return; // timeout middleware already sent 503
-    res.status(500).json({
-      error: "Failed to update GRN",
-      message: err.message,
-    });
-  }
-});
+  },
+);
 
 // GET /:id/can-delete — check whether GRN can be safely deleted
 // Chain: GRN → ExpenseBooking → NewPayment → BankReconciliation
@@ -1117,7 +1171,10 @@ router.get("/:id/can-delete", async (req, res) => {
     // ── 2. BRS-cleared payments ───────────────────────────────────────────────
     if (docNoList.length > 0) {
       const brsReq = pool.request();
-      const brsParams = docNoList.map((d, i) => { brsReq.input(`dn${i}`, sql.NVarChar(100), d); return `@dn${i}`; });
+      const brsParams = docNoList.map((d, i) => {
+        brsReq.input(`dn${i}`, sql.NVarChar(100), d);
+        return `@dn${i}`;
+      });
       const brsCheck = await brsReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
         FROM dbo.NewPayment np
@@ -1143,7 +1200,10 @@ router.get("/:id/can-delete", async (req, res) => {
 
       // ── 3. Uncleared payments ─────────────────────────────────────────────
       const payReq = pool.request();
-      const payParams = docNoList.map((d, i) => { payReq.input(`pdn${i}`, sql.NVarChar(100), d); return `@pdn${i}`; });
+      const payParams = docNoList.map((d, i) => {
+        payReq.input(`pdn${i}`, sql.NVarChar(100), d);
+        return `@pdn${i}`;
+      });
       const payCheck = await payReq.query(`
         SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
         FROM dbo.NewPayment np
@@ -1178,69 +1238,72 @@ router.get("/:id/can-delete", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res) => {
-  const grnId = parseInt(req.params.id, 10);
-  const pool = getPool();
+router.delete(
+  "/:id",
+  requirePageRight("grn-master", "delete"),
+  async (req, res) => {
+    const grnId = parseInt(req.params.id, 10);
+    const pool = getPool();
 
-  // ── Guard: linked expense bookings ────────────────────────────────────────
-  const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
+    // ── Guard: linked expense bookings ────────────────────────────────────────
+    const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT COUNT(*) AS cnt
       FROM dbo.ExpenseBooking eb
       WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
         AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
     `);
-  if (Number(expGuard.recordset[0]?.cnt) > 0) {
-    return res.status(409).json({
-      error: "has_expense",
-      message:
-        "This GRN has linked Expense Booking(s). Delete the expense booking(s) first, then delete the GRN.",
-    });
-  }
-
-  const transaction = pool.transaction();
-
-  try {
-    await transaction.begin();
-
-    // Capture the linked POID before deleting so we can revert PO status after
-    const grnMeta = await pool
-      .request()
-      .input("GRNID", sql.Int, grnId)
-      .query("SELECT POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
-    const linkedPOId = grnMeta.recordset[0]?.POID ?? null;
-
-    await transaction
-      .request()
-      .input("RefID", sql.Int, grnId)
-      .query(
-        "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
-      );
-
-    const result = await transaction
-      .request()
-      .input("GRNID", sql.Int, grnId)
-      .query("DELETE FROM GoodsReceiptNotes WHERE GRNID = @GRNID");
-
-    if (result.rowsAffected[0] === 0) {
-      await transaction.rollback();
-      return res.status(404).json({ error: "GRN not found" });
+    if (Number(expGuard.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_expense",
+        message:
+          "This GRN has linked Expense Booking(s). Delete the expense booking(s) first, then delete the GRN.",
+      });
     }
 
-    await transaction.commit();
+    const transaction = pool.transaction();
 
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("expense-booking-options");
-    await bumpCacheVersion("stock-ledger");
+    try {
+      await transaction.begin();
 
-    // If this GRN was linked to a PO, recalculate PO status now that the GRN
-    // is gone. If no active GRNs remain, revert PO to 'Approved' so a new GRN
-    // can be raised. If GRNs remain but total received < PO total, also revert
-    // (partial-receipt case where a GRN was deleted mid-way).
-    if (linkedPOId) {
-      try {
-        const poRecheck = await pool
-          .request()
-          .input("POID", sql.Int, linkedPOId).query(`
+      // Capture the linked POID before deleting so we can revert PO status after
+      const grnMeta = await pool
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .query("SELECT POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+      const linkedPOId = grnMeta.recordset[0]?.POID ?? null;
+
+      await transaction
+        .request()
+        .input("RefID", sql.Int, grnId)
+        .query(
+          "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
+        );
+
+      const result = await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .query("DELETE FROM GoodsReceiptNotes WHERE GRNID = @GRNID");
+
+      if (result.rowsAffected[0] === 0) {
+        await transaction.rollback();
+        return res.status(404).json({ error: "GRN not found" });
+      }
+
+      await transaction.commit();
+
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("expense-booking-options");
+      await bumpCacheVersion("stock-ledger");
+
+      // If this GRN was linked to a PO, recalculate PO status now that the GRN
+      // is gone. If no active GRNs remain, revert PO to 'Approved' so a new GRN
+      // can be raised. If GRNs remain but total received < PO total, also revert
+      // (partial-receipt case where a GRN was deleted mid-way).
+      if (linkedPOId) {
+        try {
+          const poRecheck = await pool
+            .request()
+            .input("POID", sql.Int, linkedPOId).query(`
             SELECT
               po.Status         AS POStatus,
               po.TotalAmount    AS POTotalAmount,
@@ -1254,120 +1317,133 @@ router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res)
             GROUP BY po.Status, po.TotalAmount
           `);
 
-        if (poRecheck.recordset.length > 0) {
-          const poRow = poRecheck.recordset[0];
-          const totalOrdered = Number(poRow.POTotalAmount || 0);
-          const totalReceived = Number(poRow.TotalReceived || 0);
-          const grnCount = Number(poRow.GRNCount || 0);
+          if (poRecheck.recordset.length > 0) {
+            const poRow = poRecheck.recordset[0];
+            const totalOrdered = Number(poRow.POTotalAmount || 0);
+            const totalReceived = Number(poRow.TotalReceived || 0);
+            const grnCount = Number(poRow.GRNCount || 0);
 
-          // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
-          // fully cover the PO total — meaning it's no longer fully received.
-          const shouldRevert =
-            poRow.POStatus === "Received" &&
-            (grnCount === 0 || totalReceived < totalOrdered);
+            // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
+            // fully cover the PO total — meaning it's no longer fully received.
+            const shouldRevert =
+              poRow.POStatus === "Received" &&
+              (grnCount === 0 || totalReceived < totalOrdered);
 
-          if (shouldRevert) {
-            await pool
-              .request()
-              .input("POID", sql.Int, linkedPOId)
-              .query(
-                "UPDATE dbo.PurchaseOrders SET Status = 'Approved', UpdatedAt = GETDATE() WHERE PurchaseOrderID = @POID AND Status = 'Received'",
-              );
-            await bumpCacheVersion("purchase-orders");
+            if (shouldRevert) {
+              await pool
+                .request()
+                .input("POID", sql.Int, linkedPOId)
+                .query(
+                  "UPDATE dbo.PurchaseOrders SET Status = 'Approved', UpdatedAt = GETDATE() WHERE PurchaseOrderID = @POID AND Status = 'Received'",
+                );
+              await bumpCacheVersion("purchase-orders");
+            }
           }
+        } catch (poErr) {
+          console.error(
+            "PO status revert after GRN delete failed (non-fatal):",
+            poErr.message,
+          );
         }
-      } catch (poErr) {
-        console.error(
-          "PO status revert after GRN delete failed (non-fatal):",
-          poErr.message,
-        );
+        await syncPOItemReceivedQty(pool, sql, linkedPOId);
       }
-      await syncPOItemReceivedQty(pool, sql, linkedPOId);
-    }
 
-    res.json({ message: "GRN deleted successfully" });
-  } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("DELETE GRN ERROR:", err);
-    res.status(500).json({
-      error: "Failed to delete GRN",
-      message: err.message,
-    });
-  }
-});
+      res.json({ message: "GRN deleted successfully" });
+    } catch (err) {
+      await transaction.rollback().catch(() => {});
+      console.error("DELETE GRN ERROR:", err);
+      res.status(500).json({
+        error: "Failed to delete GRN",
+        message: err.message,
+      });
+    }
+  },
+);
 
 // ── PUT /:id/submit — Draft/Partially Received → Pending ──────────────────────
-router.put("/:id/submit", requirePageRight("grn-master", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+router.put(
+  "/:id/submit",
+  requirePageRight("grn-master", "edit"),
+  async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    try {
+      const userEmail = requireUserEmail(req, res);
+      if (!userEmail) return;
 
-    const result = await transition(
-      "goods-receipt",
-      id,
-      "Pending",
-      userEmail,
-      req.user?.role,
-    );
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("expense-booking-options");
-    res.json({ message: "GRN submitted for approval", ...result });
-  } catch (err) {
-    console.error("GRN submit error:", err.message);
-    res.status(400).json({ error: err.message });
-  }
-});
+      const result = await transition(
+        "goods-receipt",
+        id,
+        "Pending",
+        userEmail,
+        req.user?.role,
+      );
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("expense-booking-options");
+      res.json({ message: "GRN submitted for approval", ...result });
+    } catch (err) {
+      console.error("GRN submit error:", err.message);
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", requirePageRight("grns", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+router.put(
+  "/:id/approve",
+  requirePageRight("grns", "edit"),
+  async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    try {
+      const userEmail = requireUserEmail(req, res);
+      if (!userEmail) return;
 
-    const result = await transition(
-      "goods-receipt",
-      id,
-      "Approved",
-      userEmail,
-      req.user?.role,
-    );
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("expense-booking-options");
-    res.json({ message: "GRN approved", ...result });
-  } catch (err) {
-    console.error("GRN approve error:", err.message);
-    const status = err.message.includes("not authorized") ? 403 : 400;
-    res.status(status).json({ error: err.message });
-  }
-});
+      const result = await transition(
+        "goods-receipt",
+        id,
+        "Approved",
+        userEmail,
+        req.user?.role,
+      );
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("expense-booking-options");
+      res.json({ message: "GRN approved", ...result });
+    } catch (err) {
+      console.error("GRN approve error:", err.message);
+      const status = err.message.includes("not authorized") ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  },
+);
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", requirePageRight("grns", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { note } = req.body;
-  try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+router.put(
+  "/:id/reject",
+  requirePageRight("grns", "edit"),
+  async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const { note } = req.body;
+    try {
+      const userEmail = requireUserEmail(req, res);
+      if (!userEmail) return;
 
-    const result = await transition(
-      "goods-receipt",
-      id,
-      "Rejected",
-      userEmail,
-      req.user?.role,
-      note || null,
-    );
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("expense-booking-options");
-    res.json({ message: "GRN rejected", ...result });
-  } catch (err) {
-    console.error("GRN reject error:", err.message);
-    const status = err.message.includes("not authorized") ? 403 : 400;
-    res.status(status).json({ error: err.message });
-  }
-});
+      const result = await transition(
+        "goods-receipt",
+        id,
+        "Rejected",
+        userEmail,
+        req.user?.role,
+        note || null,
+      );
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("expense-booking-options");
+      res.json({ message: "GRN rejected", ...result });
+    } catch (err) {
+      console.error("GRN reject error:", err.message);
+      const status = err.message.includes("not authorized") ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  },
+);
 
 // ── GET /:id/gst-breakdown ────────────────────────────────────────────────────
 // Returns GRN items enriched with HSN code + CGST/SGST rates from Item_Master_Group.
@@ -1596,6 +1672,7 @@ router.get("/:id/pending-items", async (req, res) => {
       grnId: row.GRNID,
       grnNo: row.GRNNo || row.DocNo,
       supplierName: row.SupplierName || null,
+      poId: row.POID ?? null,
       poNo: row.PurchaseOrderNo || null,
       pendingItems,
       totalPendingAmount: Math.round(totalPendingAmount * 100) / 100,
@@ -1622,20 +1699,23 @@ router.get("/:id/pending-items", async (req, res) => {
 // The caller may pass { remarks, supplierId } in the request body to optionally
 // attach a supplier and free-text note.  All other fields are derived from the
 // transfer.
-router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create"), async (req, res) => {
-  const transferId = parseInt(req.params.transferId, 10);
-  if (isNaN(transferId)) {
-    return res.status(400).json({ error: "Invalid transferId" });
-  }
+router.post(
+  "/from-transfer/:transferId",
+  requirePageRight("grn-master", "create"),
+  async (req, res) => {
+    const transferId = parseInt(req.params.transferId, 10);
+    if (isNaN(transferId)) {
+      return res.status(400).json({ error: "Invalid transferId" });
+    }
 
-  const pool = getPool();
+    const pool = getPool();
 
-  // ── 1. Fetch transfer ──────────────────────────────────────────────────────
-  let transfer;
-  try {
-    const trResult = await pool
-      .request()
-      .input("TransferID", sql.Int, transferId).query(`
+    // ── 1. Fetch transfer ──────────────────────────────────────────────────────
+    let transfer;
+    try {
+      const trResult = await pool
+        .request()
+        .input("TransferID", sql.Int, transferId).query(`
         SELECT
           st.TransferID, st.DocNo, st.TransferDate,
           st.FromGodownID, fg.GodownName AS FromGodownName,
@@ -1647,122 +1727,126 @@ router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create
         WHERE st.TransferID = @TransferID
       `);
 
-    if (!trResult.recordset.length) {
-      return res.status(404).json({ error: "Stock Transfer not found" });
+      if (!trResult.recordset.length) {
+        return res.status(404).json({ error: "Stock Transfer not found" });
+      }
+
+      transfer = trResult.recordset[0];
+
+      // Parse TransferItems JSON
+      if (
+        typeof transfer.TransferItems === "string" &&
+        transfer.TransferItems.trim()
+      ) {
+        transfer.TransferItems = JSON.parse(transfer.TransferItems);
+      }
+      if (
+        !Array.isArray(transfer.TransferItems) ||
+        !transfer.TransferItems.length
+      ) {
+        return res.status(400).json({ error: "Transfer has no items" });
+      }
+    } catch (err) {
+      console.error("[grns] from-transfer fetch error:", err.message);
+      return res.status(500).json({ error: err.message });
     }
 
-    transfer = trResult.recordset[0];
-
-    // Parse TransferItems JSON
-    if (
-      typeof transfer.TransferItems === "string" &&
-      transfer.TransferItems.trim()
-    ) {
-      transfer.TransferItems = JSON.parse(transfer.TransferItems);
-    }
-    if (
-      !Array.isArray(transfer.TransferItems) ||
-      !transfer.TransferItems.length
-    ) {
-      return res.status(400).json({ error: "Transfer has no items" });
-    }
-  } catch (err) {
-    console.error("[grns] from-transfer fetch error:", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-
-  // ── 2. Check for duplicate GRN (idempotency guard) ──────────────────────
-  const dupCheck = await pool
-    .request()
-    .input("SourceTransferID", sql.Int, transferId)
-    .query(
-      "SELECT GRNID, GRNNo FROM dbo.GoodsReceiptNotes WHERE SourceTransferID = @SourceTransferID AND Status != 'Rejected'",
-    );
-  if (dupCheck.recordset.length > 0) {
-    const existing = dupCheck.recordset[0];
-    return res.status(409).json({
-      error: `A GRN (${existing.GRNNo}) already exists for this transfer`,
-      existingGrnId: existing.GRNID,
-      existingGrnNo: existing.GRNNo,
-    });
-  }
-
-  const { remarks = null, supplierId = null } = req.body || {};
-  const grnDate = transfer.TransferDate
-    ? transfer.TransferDate.toISOString
-      ? transfer.TransferDate.toISOString().slice(0, 10)
-      : String(transfer.TransferDate).slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
-
-  // ── 3. Map TransferItems → GRNItems ────────────────────────────────────────
-  const grnItems = transfer.TransferItems.map((item) => ({
-    itemId: String(item.itemId),
-    itemName: item.itemName || item.itemId,
-    orderedQty: Number(item.qty),
-    receivedQty: Number(item.qty),
-    remainingQty: 0,
-    uom: item.uom || "",
-    rate: Number(item.rate || 0),
-    quantity: Number(item.qty),
-    totalAmount: Number(item.rate || 0) * Number(item.qty),
-    gstPct: 0,
-    gstAmount: 0,
-  }));
-
-  const transaction = pool.transaction();
-  try {
-    await transaction.begin();
-
-    // ── 4. Lock doc number using the standard "GRN" prefix ───────────────────
-    // Transfer GRNs share the same GRN-YYYY-NNNNN number series as all other
-    // GRNs. The source transfer is tracked via SourceTransferDocNo (Ref Doc).
-    const resolvedDocTypeId = await resolveDocTypeId(pool, sql, "GRN");
-
-    const finalDocNo = await lockNextDocNumber(pool, sql, {
-      docTypeId: resolvedDocTypeId,
-      finYear: null,
-      tableName: "GoodsReceiptNotes",
-      docNoColumn: "DocNo",
-      issuedBy: req.user?.email || req.user?.name || null,
-      parentDocNo: transfer.DocNo,
-      rootExBDocNo: null,
-    });
-
-    const parts = (finalDocNo || "").split("-");
-    const docYear =
-      parts.length >= 2 ? parseInt(parts[parts.length - 2], 10) || null : null;
-    const docSerial =
-      parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
-
-    // ── 5. Insert GoodsReceiptNotes ────────────────────────────────────────
-    const grnResult = await transaction
+    // ── 2. Check for duplicate GRN (idempotency guard) ──────────────────────
+    const dupCheck = await pool
       .request()
-      .input("GRNNo", sql.NVarChar(50), finalDocNo)
-      .input("GRNDate", sql.Date, grnDate)
-      .input(
-        "SupplierID",
-        sql.Int,
-        supplierId ? parseInt(supplierId, 10) : null,
-      )
-      .input("POID", sql.Int, null)
-      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems))
-      .input("Status", sql.NVarChar(50), "Draft")
-      .input(
-        "Remarks",
-        sql.NVarChar(sql.MAX),
-        remarks || `Auto-generated from Stock Transfer ${transfer.DocNo}`,
-      )
-      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo)
-      .input("DocYear", sql.SmallInt, docYear)
-      .input("DocSerial", sql.Int, docSerial)
-      .input("ParentDocNo", sql.NVarChar(100), transfer.DocNo)
-      .input("RootExBDocNo", sql.NVarChar(100), null)
-      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
-      .input("GodownID", sql.Int, parseInt(transfer.ToGodownID, 10))
       .input("SourceTransferID", sql.Int, transferId)
-      .input("SourceTransferDocNo", sql.NVarChar(100), transfer.DocNo)
-      .input("CreatedDate", sql.DateTime2, new Date()).query(`
+      .query(
+        "SELECT GRNID, GRNNo FROM dbo.GoodsReceiptNotes WHERE SourceTransferID = @SourceTransferID AND Status != 'Rejected'",
+      );
+    if (dupCheck.recordset.length > 0) {
+      const existing = dupCheck.recordset[0];
+      return res.status(409).json({
+        error: `A GRN (${existing.GRNNo}) already exists for this transfer`,
+        existingGrnId: existing.GRNID,
+        existingGrnNo: existing.GRNNo,
+      });
+    }
+
+    const { remarks = null, supplierId = null } = req.body || {};
+    const grnDate = transfer.TransferDate
+      ? transfer.TransferDate.toISOString
+        ? transfer.TransferDate.toISOString().slice(0, 10)
+        : String(transfer.TransferDate).slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    // ── 3. Map TransferItems → GRNItems ────────────────────────────────────────
+    const grnItems = transfer.TransferItems.map((item) => ({
+      itemId: String(item.itemId),
+      itemName: item.itemName || item.itemId,
+      orderedQty: Number(item.qty),
+      receivedQty: Number(item.qty),
+      remainingQty: 0,
+      uom: item.uom || "",
+      rate: Number(item.rate || 0),
+      quantity: Number(item.qty),
+      totalAmount: Number(item.rate || 0) * Number(item.qty),
+      gstPct: 0,
+      gstAmount: 0,
+    }));
+
+    const transaction = pool.transaction();
+    try {
+      await transaction.begin();
+
+      // ── 4. Lock doc number using the standard "GRN" prefix ───────────────────
+      // Transfer GRNs share the same GRN-YYYY-NNNNN number series as all other
+      // GRNs. The source transfer is tracked via SourceTransferDocNo (Ref Doc).
+      const resolvedDocTypeId = await resolveDocTypeId(pool, sql, "GRN");
+
+      const finalDocNo = await lockNextDocNumber(pool, sql, {
+        docTypeId: resolvedDocTypeId,
+        finYear: null,
+        tableName: "GoodsReceiptNotes",
+        docNoColumn: "DocNo",
+        issuedBy: req.user?.email || req.user?.name || null,
+        parentDocNo: transfer.DocNo,
+        rootExBDocNo: null,
+      });
+
+      const parts = (finalDocNo || "").split("-");
+      const docYear =
+        parts.length >= 2
+          ? parseInt(parts[parts.length - 2], 10) || null
+          : null;
+      const docSerial =
+        parts.length >= 1
+          ? parseInt(parts[parts.length - 1], 10) || null
+          : null;
+
+      // ── 5. Insert GoodsReceiptNotes ────────────────────────────────────────
+      const grnResult = await transaction
+        .request()
+        .input("GRNNo", sql.NVarChar(50), finalDocNo)
+        .input("GRNDate", sql.Date, grnDate)
+        .input(
+          "SupplierID",
+          sql.Int,
+          supplierId ? parseInt(supplierId, 10) : null,
+        )
+        .input("POID", sql.Int, null)
+        .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems))
+        .input("Status", sql.NVarChar(50), "Draft")
+        .input(
+          "Remarks",
+          sql.NVarChar(sql.MAX),
+          remarks || `Auto-generated from Stock Transfer ${transfer.DocNo}`,
+        )
+        .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocYear", sql.SmallInt, docYear)
+        .input("DocSerial", sql.Int, docSerial)
+        .input("ParentDocNo", sql.NVarChar(100), transfer.DocNo)
+        .input("RootExBDocNo", sql.NVarChar(100), null)
+        .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+        .input("GodownID", sql.Int, parseInt(transfer.ToGodownID, 10))
+        .input("SourceTransferID", sql.Int, transferId)
+        .input("SourceTransferDocNo", sql.NVarChar(100), transfer.DocNo)
+        .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.GoodsReceiptNotes
           (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
@@ -1774,59 +1858,66 @@ router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create
            @TotalAmount, @GodownID, @SourceTransferID, @SourceTransferDocNo, @CreatedDate)
       `);
 
-    const grnId = grnResult.recordset[0].GRNID;
+      const grnId = grnResult.recordset[0].GRNID;
 
-    // ── 6. Insert StockLedger IN entries for the destination godown ─────────
-    await insertStockLedgerEntries(
-      transaction,
-      grnId,
-      grnItems,
-      finalDocNo,
-      parseInt(transfer.ToGodownID, 10),
-    );
-
-    await transaction.commit();
-
-    // Back-patch the doc number reservation record with the real GRNID
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
-
-    // Auto-submit: Draft → Pending
-    try {
-      const { transition } = require("../services/approvalService");
-      await transition(
-        "goods-receipt",
+      // ── 6. Insert StockLedger IN entries for the destination godown ─────────
+      await insertStockLedgerEntries(
+        transaction,
         grnId,
-        "Pending",
-        req.user?.email,
-        req.user?.role,
+        grnItems,
+        finalDocNo,
+        parseInt(transfer.ToGodownID, 10),
       );
-    } catch (submitErr) {
-      console.warn(
-        "[grns] from-transfer auto-submit failed (non-fatal):",
-        submitErr.message,
+
+      await transaction.commit();
+
+      // Back-patch the doc number reservation record with the real GRNID
+      await backPatchRecordId(
+        pool,
+        sql,
+        finalDocNo,
+        "GoodsReceiptNotes",
+        grnId,
       );
+
+      // Auto-submit: Draft → Pending
+      try {
+        const { transition } = require("../services/approvalService");
+        await transition(
+          "goods-receipt",
+          grnId,
+          "Pending",
+          req.user?.email,
+          req.user?.role,
+        );
+      } catch (submitErr) {
+        console.warn(
+          "[grns] from-transfer auto-submit failed (non-fatal):",
+          submitErr.message,
+        );
+      }
+
+      await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
+
+      return res.status(201).json({
+        message: `GRN created from transfer ${transfer.DocNo}`,
+        grnId,
+        grnNo: finalDocNo,
+        docNo: finalDocNo,
+        sourceTransferDocNo: transfer.DocNo,
+        toGodownName: transfer.ToGodownName,
+      });
+    } catch (err) {
+      await transaction.rollback().catch(() => {});
+      console.error("[grns] from-transfer create error:", err.message);
+      return res.status(500).json({
+        error: "Failed to create GRN from transfer",
+        message: err.message,
+      });
     }
-
-    await bumpCacheVersion("grns");
-    await bumpCacheVersion("stock-ledger");
-
-    return res.status(201).json({
-      message: `GRN created from transfer ${transfer.DocNo}`,
-      grnId,
-      grnNo: finalDocNo,
-      docNo: finalDocNo,
-      sourceTransferDocNo: transfer.DocNo,
-      toGodownName: transfer.ToGodownName,
-    });
-  } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("[grns] from-transfer create error:", err.message);
-    return res.status(500).json({
-      error: "Failed to create GRN from transfer",
-      message: err.message,
-    });
-  }
-});
+  },
+);
 
 // ─── GET /by-transfer/:transferId ─────────────────────────────────────────────
 // Returns all GRNs linked to a specific stock transfer (for UI badge/check).
@@ -1852,7 +1943,6 @@ router.get("/by-transfer/:transferId", async (req, res) => {
   }
 });
 
-
 // ─── GRN Attachments ──────────────────────────────────────────────────────────
 // Mirrors the Vehicle In/Out attachment pattern: files stored as binary in
 // the DB (not disk), uploaded while the form is still being filled out
@@ -1871,16 +1961,18 @@ function attachmentRowToDto(a) {
 let _grnAttachTableExists = null;
 async function grnAttachTableExists(pool) {
   if (_grnAttachTableExists !== null) return _grnAttachTableExists;
-  const r = await pool.request().query(
-    "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.GRNAttachments')"
-  );
+  const r = await pool
+    .request()
+    .query(
+      "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.GRNAttachments')",
+    );
   _grnAttachTableExists = !!r.recordset[0];
   return _grnAttachTableExists;
 }
 
 async function linkGRNAttachments(pool, grnId, attachmentIds) {
   if (!attachmentIds.length) return;
-  if (!await grnAttachTableExists(pool)) return;
+  if (!(await grnAttachTableExists(pool))) return;
   for (const attachId of attachmentIds) {
     await pool
       .request()
@@ -1894,10 +1986,8 @@ async function linkGRNAttachments(pool, grnId, attachmentIds) {
 }
 
 async function getGRNAttachmentsFor(pool, grnId) {
-  if (!await grnAttachTableExists(pool)) return [];
-  const result = await pool
-    .request()
-    .input("GRNID", sql.Int, grnId).query(`
+  if (!(await grnAttachTableExists(pool))) return [];
+  const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT AttachmentId, FileName, MimeType, FileSize
       FROM dbo.GRNAttachments
       WHERE GRNID = @GRNID
@@ -1929,7 +2019,8 @@ router.post(
   upload.array("file", 20),
   async (req, res) => {
     const userEmail = req.user?.email;
-    if (!userEmail) return res.status(401).json({ error: "User context missing" });
+    if (!userEmail)
+      return res.status(401).json({ error: "User context missing" });
 
     const files = req.files;
     if (!files || files.length === 0)
@@ -1937,8 +2028,13 @@ router.post(
 
     try {
       const pool = getPool();
-      if (!await grnAttachTableExists(pool))
-        return res.status(503).json({ error: "GRN attachments not yet available. Please run pending database migrations." });
+      if (!(await grnAttachTableExists(pool)))
+        return res
+          .status(503)
+          .json({
+            error:
+              "GRN attachments not yet available. Please run pending database migrations.",
+          });
       const results = [];
 
       for (const file of files) {
@@ -1966,7 +2062,11 @@ router.post(
         });
       }
 
-      res.json({ success: true, attachments: results, ids: results.map((r) => r.id) });
+      res.json({
+        success: true,
+        attachments: results,
+        ids: results.map((r) => r.id),
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1977,17 +2077,21 @@ router.post(
 router.get("/attachment/:attachId", async (req, res) => {
   try {
     const attachId = parseInt(req.params.attachId, 10);
-    if (isNaN(attachId)) return res.status(400).json({ error: "Invalid attachment id" });
+    if (isNaN(attachId))
+      return res.status(400).json({ error: "Invalid attachment id" });
 
     const pool = getPool();
-    if (!await grnAttachTableExists(pool)) return res.status(404).json({ error: "Attachment not found" });
-    const result = await pool.request().input("AttachmentId", sql.Int, attachId).query(`
+    if (!(await grnAttachTableExists(pool)))
+      return res.status(404).json({ error: "Attachment not found" });
+    const result = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query(`
         SELECT AttachmentId, FileName, MimeType, FileData
         FROM dbo.GRNAttachments
         WHERE AttachmentId = @AttachmentId
       `);
 
-    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Attachment not found" });
 
     const attachment = result.recordset[0];
     res.setHeader("Content-Type", attachment.MimeType);
@@ -2009,13 +2113,16 @@ router.delete(
   async (req, res) => {
     try {
       const attachId = parseInt(req.params.attachId, 10);
-      if (isNaN(attachId)) return res.status(400).json({ error: "Invalid attachment id" });
+      if (isNaN(attachId))
+        return res.status(400).json({ error: "Invalid attachment id" });
 
       const pool = getPool();
       const result = await pool
         .request()
         .input("AttachmentId", sql.Int, attachId)
-        .query(`DELETE FROM dbo.GRNAttachments WHERE AttachmentId = @AttachmentId`);
+        .query(
+          `DELETE FROM dbo.GRNAttachments WHERE AttachmentId = @AttachmentId`,
+        );
 
       if (result.rowsAffected[0] === 0)
         return res.status(404).json({ error: "Attachment not found" });
