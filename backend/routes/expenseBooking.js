@@ -1152,6 +1152,433 @@ router.get("/:id/approval-trail", async (req, res) => {
 });
 
 // ─── POST Create ──────────────────────────────────────────────────────────────
+// ─── Internal creation function (GRN-sourced bookings only) ──────────────────
+// Extracted/scoped from POST / so other server-side callers (the
+// Inter-Company Stock Transfer orchestrator) can create a real, fully-
+// validated GRN-sourced Expense Booking in-process without duplicating this
+// validation/numbering/insert logic or making an HTTP self-call. Unlike the
+// other internal-function extractions this session, this one is
+// deliberately narrower than the full POST / handler: that handler also
+// branches on PO/WO_PO/WORK_DONE/standalone sources and EMI scheduling,
+// none of which the orchestrator ever needs (it always books against a
+// GRN). Reproduces the GRN branch and shared insert/doc-numbering logic
+// verbatim; the general POST / route is unchanged and still handles every
+// source type. Thrown errors carry a `.status` for the HTTP code to use.
+async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
+  const {
+    EName,
+    EProjectName,
+    EDocumentType,
+    EDocDate,
+    EAmount,
+    ENetAmount,
+    ECgstRate,
+    ESgstRate,
+    EDiscountData,
+    EDocNo,
+    ERemarks,
+    EStatus = "Draft",
+    ECompanyId,
+    EDocTypeId,
+    EFinYear,
+    ESourceId,
+    EBillingTermId,
+    EBillingTermName,
+    EBillingTermsData,
+    ETCId,
+    ETCName,
+    ETCText,
+    EVendorInvoiceNo,
+    EVendorInvoiceDate,
+    EAdditionalCharges,
+    ECostCenter,
+    EGLAccount,
+    PaymentTermId,
+  } = payload;
+  const ESourceType = "GRN";
+  const EEmiPayment = false;
+  const EEmiData = null;
+  const EInstallmentCount = null;
+  const EEmiAmount = null;
+  const EEmiStartDate = null;
+  const EReminder = null;
+  const EWorkDoneRef = null;
+
+  if (!EProjectName) {
+    const err = new Error("EProjectName is required.");
+    err.status = 400;
+    throw err;
+  }
+  if (!EDocumentType) {
+    const err = new Error("EDocumentType is required.");
+    err.status = 400;
+    throw err;
+  }
+  if (!EDocDate) {
+    const err = new Error("EDocDate is required.");
+    err.status = 400;
+    throw err;
+  }
+  if (!ECompanyId) {
+    const err = new Error("ECompanyId is required.");
+    err.status = 400;
+    throw err;
+  }
+
+  const hasPayTermCol = await ebHasPaymentTermId(pool);
+  const transaction = pool.transaction();
+
+  let finalDocNo = EDocNo || null;
+  let bookingAmount = EAmount;
+  let bookingNetAmount = ENetAmount;
+  let bookingCgstRate = ECgstRate;
+  let bookingSgstRate = ESgstRate;
+
+  try {
+    await transaction.begin();
+
+    {
+      const grnId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(grnId) || grnId <= 0) {
+        const err = new Error("GRN source is required.");
+        err.status = 400;
+        throw err;
+      }
+
+      const grnGst = await buildGrnGstData(pool, grnId);
+      if (!grnGst) {
+        const err = new Error("Linked GRN not found.");
+        err.status = 404;
+        throw err;
+      }
+
+      // Enforce: an expense can only be booked against an Approved GRN.
+      const grnStatusResult = await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .query("SELECT Status FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+      const grnStatus = grnStatusResult.recordset[0]?.Status;
+      if (grnStatus !== "Approved") {
+        const err = new Error(
+          `Cannot book expense: GRN is "${grnStatus}". Only Approved GRNs can be used for expense booking.`,
+        );
+        err.status = 400;
+        throw err;
+      }
+
+      // Enforce: only one active expense booking per GRN at a time.
+      // If the previous booking was deleted (hard-deleted), no row remains, so
+      // this check passes and a fresh booking is allowed.
+      const dupCheck = await transaction
+        .request()
+        .input("DupGRNId", sql.Int, grnId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'GRN'
+            AND ESourceId = @DupGRNId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(dupCheck.recordset[0]?.cnt) > 0) {
+        const err = new Error(
+          "An expense booking already exists for this GRN. Delete the existing booking before creating a new one.",
+        );
+        err.status = 409;
+        throw err;
+      }
+
+      if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
+        const err = new Error(
+          "Cannot book expense for a GRN with no received quantity.",
+        );
+        err.status = 400;
+        throw err;
+      }
+
+      bookingAmount = grnGst.totals.taxableAmount;
+      bookingNetAmount = grnGst.totals.netAmount;
+      bookingCgstRate = grnGst.cgstRate;
+      bookingSgstRate = grnGst.sgstRate;
+      // Apply billing terms on top of the GRN gross amount
+      bookingNetAmount = applyBillingTermsToAmount(
+        bookingNetAmount,
+        bookingAmount,
+        bookingCgstRate,
+        bookingSgstRate,
+        EBillingTermsData,
+        EDiscountData,
+      );
+    }
+
+    if (EDocTypeId) {
+      const typeId = parseInt(EDocTypeId, 10);
+      const finYear = (EFinYear || "").toString().trim();
+
+      const typeResult = await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId).query(`
+          SELECT Prefix, FullPrefix, StartingDocNo
+          FROM dbo.TypeOfDoc
+          WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
+        `);
+
+      const typeRow = typeResult.recordset[0];
+      if (!typeRow) {
+        const err = new Error("Selected document type not found or inactive.");
+        err.status = 400;
+        throw err;
+      }
+
+      const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
+      const prefix = rawPrefix.replace(/\d+$/, "");
+      const startFrom = typeRow.StartingDocNo ?? 1;
+
+      // Count globally across ALL fin years — fin year is only a suffix
+      const maxResult = await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId)
+        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          WHERE TypeOfDocId = @TypeOfDocId
+            AND DocNo LIKE @Prefix
+        `);
+
+      // Also check ExpenseBooking across ALL fin years
+      const ebMaxResult = await transaction
+        .request()
+        .input("EDocTypeId2", sql.Int, typeId)
+        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          WHERE EDocTypeId = @EDocTypeId2
+            AND EDocNo LIKE @Prefix2
+        `);
+
+      const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
+      const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
+      const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
+      const maxSeq = combinedMax > 0 ? combinedMax : startFrom - 1;
+      const nextSeq = Math.max(maxSeq + 1, startFrom);
+      const padded = String(nextSeq).padStart(6, "0");
+
+      finalDocNo = finYear
+        ? `${prefix}${padded}/${finYear}`
+        : `${prefix}${padded}`;
+
+      // ── Doc number reservation ──────────────────────────────────────────────
+      // Loop until we find a sequence slot we can safely claim.
+      //   (a) Row doesn't exist          → INSERT fresh, done.
+      //   (b) Row exists, RecordId NULL  → reserved by a previous failed attempt;
+      //                                    claim it by updating IssuedBy, done.
+      //   (c) Row exists, RecordId set   → already committed; bump seq and retry.
+      let seqCandidate = nextSeq;
+      let reserved = false;
+      const MAX_RETRIES = 20;
+
+      for (let attempt = 0; attempt < MAX_RETRIES && !reserved; attempt++) {
+        const candidatePadded = String(seqCandidate).padStart(6, "0");
+        finalDocNo = finYear
+          ? `${prefix}${candidatePadded}/${finYear}`
+          : `${prefix}${candidatePadded}`;
+
+        const existingSeq = await transaction
+          .request()
+          .input("DocNoCheck", sql.NVarChar(100), finalDocNo)
+          .query(
+            `SELECT RecordId FROM dbo.DocNumberSequence WHERE DocNo = @DocNoCheck`,
+          );
+
+        if (existingSeq.recordset.length === 0) {
+          await transaction
+            .request()
+            .input("TypeOfDocId", sql.Int, typeId)
+            .input("DocNo", sql.NVarChar(100), finalDocNo)
+            .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+            .input("IssuedBy", sql.NVarChar(200), userEmail || null)
+            .query(`
+              INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+              VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+            `);
+          reserved = true;
+        } else if (!existingSeq.recordset[0]?.RecordId) {
+          await transaction
+            .request()
+            .input("DocNoCheck", sql.NVarChar(100), finalDocNo)
+            .input("IssuedBy", sql.NVarChar(200), userEmail || null)
+            .query(`
+              UPDATE dbo.DocNumberSequence
+              SET IssuedBy = @IssuedBy
+              WHERE DocNo = @DocNoCheck AND RecordId IS NULL
+            `);
+          reserved = true;
+        } else {
+          seqCandidate++;
+        }
+      }
+
+      if (!reserved) {
+        const err = new Error(
+          "Could not reserve a document number after multiple attempts.",
+        );
+        err.status = 500;
+        throw err;
+      }
+    }
+
+    // Prepend ExB/ prefix to every expense booking doc number
+    if (finalDocNo && !finalDocNo.startsWith("ExB/")) {
+      finalDocNo = `ExB/${finalDocNo}`;
+    }
+
+    const insertReq = transaction
+      .request()
+      .input("EName", sql.NVarChar(200), EName || null)
+      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
+      .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
+      .input("EDocDate", sql.Date, EDocDate || null)
+      .input(
+        "EAmount",
+        sql.Decimal(18, 2),
+        bookingAmount != null && bookingAmount !== ""
+          ? Number(bookingAmount)
+          : 0,
+      )
+      .input(
+        "ENetAmount",
+        sql.Decimal(18, 2),
+        bookingNetAmount != null && bookingNetAmount !== ""
+          ? Math.round(Number(bookingNetAmount) * 100) / 100
+          : 0,
+      )
+      .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
+      .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
+      .input(
+        "EDiscountData",
+        sql.NVarChar(sql.MAX),
+        EDiscountData
+          ? typeof EDiscountData === "string"
+            ? EDiscountData
+            : JSON.stringify(EDiscountData)
+          : null,
+      )
+      .input("EDocNo", sql.NVarChar(100), finalDocNo)
+      .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
+      .input(
+        "EEmiData",
+        sql.NVarChar(sql.MAX),
+        EEmiData ? JSON.stringify(EEmiData) : null,
+      )
+      .input("EInstallmentCount", sql.Int, EInstallmentCount || null)
+      .input("EEmiAmount", sql.Decimal(18, 2), EEmiAmount || null)
+      .input("EEmiStartDate", sql.Date, EEmiStartDate || null)
+      .input("EReminder", sql.Date, EReminder || null)
+      .input("ERemarks", sql.NVarChar(300), ERemarks || null)
+      .input("EStatus", sql.NVarChar(50), EStatus)
+      .input("ECreatedAt", sql.DateTime2, new Date())
+      .input("EUpdatedAt", sql.DateTime2, new Date())
+      .input("ECreatedBy", sql.Int, userId || null)
+      .input("EApprovedBy", sql.Int, null)
+      .input(
+        "ECompanyId",
+        sql.Int,
+        ECompanyId ? parseInt(ECompanyId, 10) : null,
+      )
+      .input(
+        "EDocTypeId",
+        sql.Int,
+        EDocTypeId ? parseInt(EDocTypeId, 10) : null,
+      )
+      .input("EFinYear", sql.NVarChar(20), EFinYear || null)
+      .input("ESourceType", sql.NVarChar(20), ESourceType || null)
+      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
+      .input(
+        "EBillingTermId",
+        sql.Int,
+        EBillingTermId ? parseInt(EBillingTermId, 10) : null,
+      )
+      .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input(
+        "EBillingTermsData",
+        sql.NVarChar(sql.MAX),
+        EBillingTermsData
+          ? typeof EBillingTermsData === "string"
+            ? EBillingTermsData
+            : JSON.stringify(EBillingTermsData)
+          : null,
+      )
+      .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
+      .input("ETCName", sql.NVarChar(200), ETCName || null)
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
+      .input("EVendorInvoiceNo", sql.NVarChar(100), EVendorInvoiceNo || null)
+      .input("EVendorInvoiceDate", sql.Date, EVendorInvoiceDate || null)
+      .input(
+        "EAdditionalCharges",
+        sql.NVarChar(sql.MAX),
+        EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
+      )
+      .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
+      .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+
+    if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+
+    const insertResult = await insertReq.query(`
+        INSERT INTO dbo.ExpenseBooking (
+          EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
+          ECgstRate, ESgstRate, EDiscountData, EDocNo,
+          EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
+          EReminder, ERemarks, EStatus,
+          ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
+          ECompanyId, EDocTypeId, EFinYear,
+          ESourceType, ESourceId,
+          EBillingTermId, EBillingTermName, EBillingTermsData,
+          ETCId, ETCName, ETCText,
+          EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
+          ECostCenter, EGLAccount, EWorkDoneRef
+          ${hasPayTermCol ? ", PaymentTermId" : ""}
+        ) VALUES (
+          @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
+          @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
+          @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
+          @EReminder, @ERemarks, @EStatus,
+          @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
+          @ECompanyId, @EDocTypeId, @EFinYear,
+          @ESourceType, @ESourceId,
+          @EBillingTermId, @EBillingTermName, @EBillingTermsData,
+          @ETCId, @ETCName, @ETCText,
+          @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
+          @ECostCenter, @EGLAccount, @EWorkDoneRef
+          ${hasPayTermCol ? ", @PaymentTermId" : ""}
+        );
+        SELECT SCOPE_IDENTITY() AS NewId;
+      `);
+
+    const newExpenseId = insertResult.recordset[0]?.NewId;
+
+    if (finalDocNo && newExpenseId) {
+      await transaction
+        .request()
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
+          UPDATE dbo.DocNumberSequence
+          SET RecordId = @RecordId
+          WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
+        `);
+    }
+
+    await transaction.commit();
+
+    return { id: newExpenseId, docNo: finalDocNo };
+  } catch (err) {
+    try {
+      await transaction.rollback();
+    } catch (rbErr) {
+      console.error("Transaction rollback failed:", rbErr.message);
+    }
+    throw err;
+  }
+}
+
 router.post("/", requirePageRight("expense-booking", "create"), validateBody(expenseBookingBodySchema), async (req, res) => {
   const {
     EName,
@@ -2702,3 +3129,4 @@ router.get("/:id/grns", async (req, res) => {
 });
 
 module.exports = router;
+module.exports.createExpenseBookingInternal = createExpenseBookingInternal;
