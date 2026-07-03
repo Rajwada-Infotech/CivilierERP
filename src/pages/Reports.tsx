@@ -358,6 +358,32 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "journal-voucher-report",
+    label: "Journal Voucher",
+    description: "Forced account-head corrections, year & filter wise",
+    icon: FileBarChart2,
+    color: "#a855f7",
+    apiPath: "/api/reports/journal-voucher/list",
+    // journalVoucherReports.js accepts companyId/projectId/status/dateFrom/dateTo.
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: null,
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "JV No", accessor: (r) => (r.JVNo ?? `JV-${r.JVID}`) as string },
+      {
+        header: "Date",
+        accessor: (r) => (r.JVDate ? String(r.JVDate).slice(0, 10) : "—"),
+      },
+      { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
     id: "po-register",
     label: "PO Register",
     description: "All purchase orders with vendor & value",
@@ -740,6 +766,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "bank-report",
       "brs-report",
       "ledger-report",
+      "journal-voucher-report",
     ],
   },
   {
