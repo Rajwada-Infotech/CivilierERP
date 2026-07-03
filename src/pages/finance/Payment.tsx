@@ -1228,9 +1228,7 @@ function ExpenseBookingPicker({
               </span>
             </span>
           ) : (
-            <span className="text-muted-foreground">
-              — Choose invoice —
-            </span>
+            <span className="text-muted-foreground">— Choose invoice —</span>
           )}
           <ChevronDown
             size={14}
@@ -2140,7 +2138,10 @@ const Payment: React.FC = () => {
       field("Purchase Order Ref.", docChain?.poNo || null),
       field("GRN Ref.", docChain?.grnNo || null),
       field("Material Request Ref.", docChain?.mrDocNo || null),
-      field("Expense Booking Ref.", docChain?.expenseDocNo || rec.expenseRef || null),
+      field(
+        "Expense Booking Ref.",
+        docChain?.expenseDocNo || rec.expenseRef || null,
+      ),
     ].join("");
 
     const paymentRows = [
@@ -2150,7 +2151,17 @@ const Payment: React.FC = () => {
       field("Date", rec.date || "—"),
       field("Mode", rec.mode || "—"),
       field("Bank Account", rec.bankName || null),
-      field("Reference / Txn ID", rec.chequeNo ? `Cheque #${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference || null),
+      field(
+        "Reference / Txn ID",
+        rec.chequeNo
+          ? `Cheque #${rec.chequeNo}`
+          : rec.neftNumber ||
+              rec.upiTransactionId ||
+              rec.rtgsReference ||
+              rec.impsReference ||
+              rec.cardReference ||
+              null,
+      ),
       field("Cheque Date", rec.chequeDate || null),
       field("Cheque Lot", rec.chequeLotNumber || null),
       field("Card Used", rec.cardDisplay || null),
@@ -2164,10 +2175,14 @@ const Payment: React.FC = () => {
     const cgstRate = rec.cgstRate ?? null;
     const sgstRate = rec.sgstRate ?? null;
     const igstRate = rec.igstRate ?? null;
-    const hasTaxDetails = baseAmount != null && (cgstRate || sgstRate || igstRate);
-    const cgstAmt = hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
-    const sgstAmt = hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
-    const igstAmt = hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
+    const hasTaxDetails =
+      baseAmount != null && (cgstRate || sgstRate || igstRate);
+    const cgstAmt =
+      hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
+    const sgstAmt =
+      hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
+    const igstAmt =
+      hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
 
     const taxRows = hasTaxDetails
       ? [
@@ -2438,7 +2453,11 @@ const Payment: React.FC = () => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
-      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef + " ") || o.label.startsWith(rest.expenseRef + " —"))
+      ? expenseOptions.find(
+          (o) =>
+            o.label.startsWith(rest.expenseRef + " ") ||
+            o.label.startsWith(rest.expenseRef + " —"),
+        )
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
@@ -4567,7 +4586,10 @@ const Payment: React.FC = () => {
                       </div>
                       {rec.paidTo && (
                         <p className="text-xs text-muted-foreground truncate">
-                          Paid to <span className="text-foreground font-medium">{rec.paidTo}</span>
+                          Paid to{" "}
+                          <span className="text-foreground font-medium">
+                            {rec.paidTo}
+                          </span>
                         </p>
                       )}
                       {rec.docNo && (
@@ -4609,7 +4631,9 @@ const Payment: React.FC = () => {
                                 queryKey: ["payments"],
                                 exact: false,
                               });
-                              queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+                              queryClient.invalidateQueries({
+                                queryKey: ["expense-options-payment"],
+                              });
                               refetchPayments();
                               window.dispatchEvent(
                                 new CustomEvent("approval-action"),
@@ -4706,7 +4730,10 @@ const Payment: React.FC = () => {
                             </p>
                             {rec.paidTo && (
                               <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[180px]">
-                                Paid to <span className="text-foreground/80">{rec.paidTo}</span>
+                                Paid to{" "}
+                                <span className="text-foreground/80">
+                                  {rec.paidTo}
+                                </span>
                               </p>
                             )}
                             <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -4789,7 +4816,15 @@ const Payment: React.FC = () => {
                           </td>
                           {/* Status */}
                           <td className="px-4 py-2.5">
-                            <StatusBadge status={rec.status} />
+                            <div className="flex flex-col gap-1">
+                              <StatusBadge status={rec.status} />
+                              {rec.status === "Pending" && (
+                                <ApprovalStatusChain
+                                  table="NewPayment"
+                                  recordId={rec.id}
+                                />
+                              )}
+                            </div>
                           </td>
                           {/* Actions */}
                           <td className="px-4 py-2.5">
@@ -4972,7 +5007,11 @@ const Payment: React.FC = () => {
                       {viewingCompanyDetail.name || viewingRec.company}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      {[viewingCompanyDetail.address, viewingCompanyDetail.city, viewingCompanyDetail.state]
+                      {[
+                        viewingCompanyDetail.address,
+                        viewingCompanyDetail.city,
+                        viewingCompanyDetail.state,
+                      ]
                         .filter(Boolean)
                         .join(", ")}
                     </p>
@@ -4980,8 +5019,12 @@ const Payment: React.FC = () => {
                       {[
                         viewingCompanyDetail.phone_number,
                         viewingCompanyDetail.email,
-                        viewingCompanyDetail.gst_no ? `GSTIN: ${viewingCompanyDetail.gst_no}` : null,
-                        viewingCompanyDetail.pan_no ? `PAN: ${viewingCompanyDetail.pan_no}` : null,
+                        viewingCompanyDetail.gst_no
+                          ? `GSTIN: ${viewingCompanyDetail.gst_no}`
+                          : null,
+                        viewingCompanyDetail.pan_no
+                          ? `PAN: ${viewingCompanyDetail.pan_no}`
+                          : null,
                       ]
                         .filter(Boolean)
                         .join("  ·  ")}
@@ -4994,23 +5037,33 @@ const Payment: React.FC = () => {
               {viewingChain?.supplier && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-1.5">
                   <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                    <Building2 size={9} className="text-primary" /> Supplier / Vendor
+                    <Building2 size={9} className="text-primary" /> Supplier /
+                    Vendor
                   </p>
                   <p className="text-xs font-medium text-foreground">
                     {viewingChain.supplier.name}
                     {viewingChain.supplier.code ? (
-                      <span className="text-muted-foreground font-normal"> · {viewingChain.supplier.code}</span>
+                      <span className="text-muted-foreground font-normal">
+                        {" "}
+                        · {viewingChain.supplier.code}
+                      </span>
                     ) : null}
                   </p>
                   {viewingChain.supplier.address && (
-                    <p className="text-[10px] text-muted-foreground">{viewingChain.supplier.address}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {viewingChain.supplier.address}
+                    </p>
                   )}
                   <p className="text-[10px] text-muted-foreground">
                     {[
                       viewingChain.supplier.phone,
                       viewingChain.supplier.email,
-                      viewingChain.supplier.gst ? `GSTIN: ${viewingChain.supplier.gst}` : null,
-                      viewingChain.supplier.pan ? `PAN: ${viewingChain.supplier.pan}` : null,
+                      viewingChain.supplier.gst
+                        ? `GSTIN: ${viewingChain.supplier.gst}`
+                        : null,
+                      viewingChain.supplier.pan
+                        ? `PAN: ${viewingChain.supplier.pan}`
+                        : null,
                     ]
                       .filter(Boolean)
                       .join("  ·  ")}
@@ -5219,7 +5272,11 @@ const Payment: React.FC = () => {
               {rights.canPrint && (
                 <button
                   onClick={() =>
-                    handlePrintPayment(viewingRec, viewingCompanyDetail, viewingChain)
+                    handlePrintPayment(
+                      viewingRec,
+                      viewingCompanyDetail,
+                      viewingChain,
+                    )
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >

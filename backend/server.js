@@ -24,7 +24,7 @@ const {
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
 const { initSocket } = require("./socket");
-const { ALLOWED_ORIGINS } = require("./config/origins");
+const { ALLOWED_ORIGINS, isOriginAllowed } = require("./config/origins");
 const { validateApprovalModuleMap } = require("./services/approvalService");
 
 const {
@@ -94,6 +94,8 @@ const ALL_ROUTES = [
   { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
+  { path: "/api/journal-voucher", file: "./routes/journalVoucher" },
+  { path: "/api/reports/journal-voucher", file: "./routes/journalVoucherReports" },
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
   { path: "/api/customer-sale-orders", file: "./routes/customerSaleOrders" },
   { path: "/api/sale-invoices", file: "./routes/saleInvoices" },
@@ -193,6 +195,7 @@ const ALL_ROUTES = [
   { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/inter-company-transfer", file: "./routes/interCompanyTransfer" },
   { path: "/api/sale-orders", file: "./routes/saleOrders" },
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
@@ -253,7 +256,7 @@ async function createApp() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (isOriginAllowed(origin)) {
           callback(null, true);
         } else {
           logger.warn(`[BLOCK] CORS rejected: ${origin}`);

@@ -1,4 +1,4 @@
-import { generateUUID } from '../../utils/cryptoPolyfill';  
+import { generateUUID } from "../../utils/cryptoPolyfill";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -107,7 +107,10 @@ const PO_TEMPLATE_COLUMNS = [
   { header: "Company", accessor: "Company" },
   { header: "Project/Site", accessor: "Project/Site" },
   { header: "PO Date (YYYY-MM-DD)", accessor: "PO Date (YYYY-MM-DD)" },
-  { header: "Expected Delivery Date (YYYY-MM-DD)", accessor: "Expected Delivery Date (YYYY-MM-DD)" },
+  {
+    header: "Expected Delivery Date (YYYY-MM-DD)",
+    accessor: "Expected Delivery Date (YYYY-MM-DD)",
+  },
   { header: "Payment Terms", accessor: "Payment Terms" },
   { header: "Remarks", accessor: "Remarks" },
   { header: "Item Name", accessor: "Item Name" },
@@ -383,9 +386,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingPO, setViewingPO] = useState<any | null>(null);
-  const [viewingPOSupplier, setViewingPOSupplier] = useState<SupplierDetails | null>(null);
-  const [viewingPOCompany, setViewingPOCompany] = useState<CompanyDetails | null>(null);
-  const [viewingPOProject, setViewingPOProject] = useState<CompanyDetails | null>(null);
+  const [viewingPOSupplier, setViewingPOSupplier] =
+    useState<SupplierDetails | null>(null);
+  const [viewingPOCompany, setViewingPOCompany] =
+    useState<CompanyDetails | null>(null);
+  const [viewingPOProject, setViewingPOProject] =
+    useState<CompanyDetails | null>(null);
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
@@ -414,17 +420,22 @@ const PurchaseOrderMaster: React.FC = () => {
         setPoDocTypes(filtered);
         // Auto-select DPO for direct POs (no MR/Sale Invoice source yet)
         if (!poDocTypeId && filtered.length > 0) {
-          const dpo = filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === "DPO") ?? filtered[0];
-          fetchNextDocNumber(dpo.TypeOfDocId, selectedFinYear || undefined).then(
-            (docNo) => applyPoDocNumber(dpo.TypeOfDocId, docNo),
-          );
+          const dpo =
+            filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === "DPO") ??
+            filtered[0];
+          fetchNextDocNumber(
+            dpo.TypeOfDocId,
+            selectedFinYear || undefined,
+          ).then((docNo) => applyPoDocNumber(dpo.TypeOfDocId, docNo));
         }
       })
       .finally(() => setPoDocTypesLoading(false));
   }, []);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
+  const finYearOptions = finYears.filter(
+    (fy) => fy.status === "Active" && !fy.locked,
+  );
   const [selectedFinYear, setSelectedFinYear] = useState<string | undefined>(
     undefined,
   );
@@ -566,7 +577,9 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["cost-centers-po"],
     queryFn: () =>
-      fetchWithAuth("/api/cost-center/options").then((r) => r.json().catch(() => ({}))),
+      fetchWithAuth("/api/cost-center/options").then((r) =>
+        r.json().catch(() => ({})),
+      ),
   });
 
   // ── Normalise data ────────────────────────────────────────────────────────
@@ -996,7 +1009,9 @@ const PurchaseOrderMaster: React.FC = () => {
       ...prev,
       companyId: matchCompany?.id ?? prev.companyId,
       projectId: matchProject?.id ?? prev.projectId,
-      supplierId: qtPrefill.SupplierId ? String(qtPrefill.SupplierId) : prev.supplierId,
+      supplierId: qtPrefill.SupplierId
+        ? String(qtPrefill.SupplierId)
+        : prev.supplierId,
       remarks: qtPrefill.Remarks ?? prev.remarks,
     }));
 
@@ -1156,21 +1171,21 @@ const PurchaseOrderMaster: React.FC = () => {
       }
 
       return {
-  id: generateUUID(),
-  itemId: it.itemId || "",
-  itemName: it.itemDescription,
-  itemDescription: it.itemDescription,
-  quantity: qty,
-  uomId: uomMatch?.id ?? null,
-  unit: uomMatch?.name ?? it.unit ?? "",
-  rate,
-  cgstRate: halfGst,
-  sgstRate: halfGst,
-  igstRate: 0,
-  gstRate: totalGst,
-  taxAmount: taxAmt,
-  amount: base + taxAmt,
-};
+        id: generateUUID(),
+        itemId: it.itemId || "",
+        itemName: it.itemDescription,
+        itemDescription: it.itemDescription,
+        quantity: qty,
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.unit ?? "",
+        rate,
+        cgstRate: halfGst,
+        sgstRate: halfGst,
+        igstRate: 0,
+        gstRate: totalGst,
+        taxAmount: taxAmt,
+        amount: base + taxAmt,
+      };
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceWO({
@@ -1368,7 +1383,9 @@ const PurchaseOrderMaster: React.FC = () => {
     if (viewMode !== "create" || sourceWO) return; // WO has its own effect
     const hasMROrSI = !!(sourceMR || sourceSaleInvoice);
     const targetPrefix = hasMROrSI ? "PO" : "DPO";
-    const target = poDocTypes.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix);
+    const target = poDocTypes.find(
+      (dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix,
+    );
     if (!target) return;
     // Use ref to avoid stale closure on poDocTypeId
     if (poDocTypeIdRef.current === target.TypeOfDocId) return;
@@ -1500,7 +1517,7 @@ const PurchaseOrderMaster: React.FC = () => {
       Status:
         viewMode === "edit"
           ? (listData.find((r) => r._id === editingId)?.status ?? "Draft")
-          : "Draft",
+          : "Pending", // creation always auto-submits; backend ignores this field on create anyway
       Remarks: form.remarks || null,
       CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
       VendorInvoiceDate: form.vendorInvoiceDate || null,
@@ -1678,39 +1695,48 @@ const PurchaseOrderMaster: React.FC = () => {
     const comp = viewingPOCompany;
     const proj = viewingPOProject;
 
-    const supplierName = viewingPO.SupplierName ?? viewingPO.supplierName ?? "—";
-    const companyName  = viewingPO.CompanyName  ?? viewingPO.companyName  ?? "—";
-    const projectName  = viewingPO.ProjectName  ?? viewingPO.projectName  ?? "—";
-    const poNumber     = viewingPO.PurchaseOrderNo ?? viewingPO.poNumber   ?? "—";
-    const poDate       = viewingPO.PODate ?? viewingPO.poDate ?? "";
+    const supplierName =
+      viewingPO.SupplierName ?? viewingPO.supplierName ?? "—";
+    const companyName = viewingPO.CompanyName ?? viewingPO.companyName ?? "—";
+    const projectName = viewingPO.ProjectName ?? viewingPO.projectName ?? "—";
+    const poNumber = viewingPO.PurchaseOrderNo ?? viewingPO.poNumber ?? "—";
+    const poDate = viewingPO.PODate ?? viewingPO.poDate ?? "";
     const expectedDate = viewingPO.ExpectedDeliveryDate ?? "";
-    const poStatus     = viewingPO.Status ?? viewingPO.status ?? "Draft";
-    const remarks      = viewingPO.Remarks ?? viewingPO.remarks ?? "";
-    const payTerms     = viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "";
+    const poStatus = viewingPO.Status ?? viewingPO.status ?? "Draft";
+    const remarks = viewingPO.Remarks ?? viewingPO.remarks ?? "";
+    const payTerms = viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "";
 
     const logoHtml = activeLogo
       ? `<img src="${activeLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
       : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${companyName}</span>`;
 
-    const statusColors: Record<string, { bg: string; color: string; border: string }> = {
+    const statusColors: Record<
+      string,
+      { bg: string; color: string; border: string }
+    > = {
       approved: { bg: "#f0fdf4", color: "#166534", border: "#86efac" },
-      pending:  { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
-      draft:    { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" },
+      pending: { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
+      draft: { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" },
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
     const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
 
-    const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems) ? viewingPO.LineItems : Array.isArray(viewingPO.POItems) ? viewingPO.POItems : [];
-    const itemRows = lineItemsArr.map((li: any, i: number) => {
-      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
-      const desc = li.itemDescription ?? li.Description ?? "—";
-      const qty  = Number(li.Quantity ?? li.quantity ?? 0);
-      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
-      const rate = Number(li.Rate ?? li.rate ?? 0);
-      const tax  = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
-      const amt  = Number(li.LineAmount ?? li.amount ?? qty * rate);
-      return `<tr style="border-bottom:1px solid #e5e7eb;">
+    const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems)
+      ? viewingPO.LineItems
+      : Array.isArray(viewingPO.POItems)
+        ? viewingPO.POItems
+        : [];
+    const itemRows = lineItemsArr
+      .map((li: any, i: number) => {
+        const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
+        const desc = li.itemDescription ?? li.Description ?? "—";
+        const qty = Number(li.Quantity ?? li.quantity ?? 0);
+        const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+        const rate = Number(li.Rate ?? li.rate ?? 0);
+        const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
+        const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
+        return `<tr style="border-bottom:1px solid #e5e7eb;">
         <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
         <td style="padding:8px 10px;font-weight:500;">${name}</td>
         <td style="padding:8px 10px;color:#6b7280;font-size:12px;">${desc}</td>
@@ -1720,22 +1746,41 @@ const PurchaseOrderMaster: React.FC = () => {
         <td style="padding:8px 10px;text-align:center;">${tax > 0 ? tax + "%" : "—"}</td>
         <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${amt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
       </tr>`;
-    }).join("");
+      })
+      .join("");
 
-    const grandTotal = Number(viewingPO.TotalAmount ?? viewingPO.totalAmount ?? 0);
-    const subtotalVal = lineItemsArr.reduce((s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0), 0);
+    const grandTotal = Number(
+      viewingPO.TotalAmount ?? viewingPO.totalAmount ?? 0,
+    );
+    const subtotalVal = lineItemsArr.reduce(
+      (s: number, li: any) =>
+        s +
+        Number(li.Quantity ?? li.quantity ?? 0) *
+          Number(li.Rate ?? li.rate ?? 0),
+      0,
+    );
 
-    const tcHtml = payTerms ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTerms}</div></div>` : "";
+    const tcHtml = payTerms
+      ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTerms}</div></div>`
+      : "";
 
-    const supAddr    = sup?.LHeadAddress ?? "";
+    const supAddr = sup?.LHeadAddress ?? "";
     const supContact = sup?.LHeadContactPerson ?? "";
-    const supGST     = sup?.LGST ?? "";
-    const supPhone   = sup?.LHeadPhone ?? "";
-    const supEmail   = sup?.LHeadEmail ?? "";
-    const compAddr   = [comp?.address, comp?.address_line2, comp?.city, comp?.state, comp?.pincode].filter(Boolean).join(", ");
-    const compGST    = comp?.gst_no ?? "";
-    const compEmail  = comp?.email ?? "";
-    const compPhone  = comp?.phone_number ?? "";
+    const supGST = sup?.LGST ?? "";
+    const supPhone = sup?.LHeadPhone ?? "";
+    const supEmail = sup?.LHeadEmail ?? "";
+    const compAddr = [
+      comp?.address,
+      comp?.address_line2,
+      comp?.city,
+      comp?.state,
+      comp?.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const compGST = comp?.gst_no ?? "";
+    const compEmail = comp?.email ?? "";
+    const compPhone = comp?.phone_number ?? "";
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumber}</title>
 <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
@@ -1801,9 +1846,16 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const blobUrl = URL.createObjectURL(blob);
     const win = window.open(blobUrl, "_blank", "width=960,height=720");
-    if (!win) { URL.revokeObjectURL(blobUrl); toast.error("Pop-up blocked — please allow pop-ups for this site."); return; }
+    if (!win) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Pop-up blocked — please allow pop-ups for this site.");
+      return;
+    }
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => { win.focus(); win.print(); };
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
   };
 
   // ── Auto-fetch details for preview pop-out ────────────────────────────────
@@ -1817,9 +1869,18 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
     const suppId = viewingPO.SupplierID ?? viewingPO.supplierId;
     const compId = viewingPO.CompanyID ?? viewingPO.companyId;
     const projId = viewingPO.ProjectID ?? viewingPO.projectId;
-    if (suppId) getSupplierDetails(suppId).then(setViewingPOSupplier).catch(() => {});
-    if (compId) getCompanyDetails(compId).then(setViewingPOCompany).catch(() => {});
-    if (projId) getCompanyDetails(projId).then(setViewingPOProject).catch(() => {});
+    if (suppId)
+      getSupplierDetails(suppId)
+        .then(setViewingPOSupplier)
+        .catch(() => {});
+    if (compId)
+      getCompanyDetails(compId)
+        .then(setViewingPOCompany)
+        .catch(() => {});
+    if (projId)
+      getCompanyDetails(projId)
+        .then(setViewingPOProject)
+        .catch(() => {});
   }, [viewingPO]);
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -1905,7 +1966,9 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
       docNo,
       status: raw.Status ?? "Draft",
       costCenterId: String(raw.CostCenterId ?? ""),
-      vendorInvoiceDate: raw.VendorInvoiceDate ? raw.VendorInvoiceDate.slice(0, 10) : "",
+      vendorInvoiceDate: raw.VendorInvoiceDate
+        ? raw.VendorInvoiceDate.slice(0, 10)
+        : "",
       vendorInvoiceNo: raw.VendorInvoiceNo ?? "",
     });
 
@@ -2068,8 +2131,12 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
   const handleDownloadTemplate = () => {
     exportToCsv([], PO_TEMPLATE_COLUMNS, "purchase-order-template");
   };
-  const handleImportClick = () => { importFileInputRef.current?.click(); };
-  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
@@ -2077,7 +2144,10 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
     try {
       const text = await file.text();
       const rows = parseCsv(text);
-      if (!rows.length) { toast.error("CSV is empty"); return; }
+      if (!rows.length) {
+        toast.error("CSV is empty");
+        return;
+      }
       toast.success(`${rows.length} rows read — full import coming soon`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
@@ -2102,7 +2172,13 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
           icon={ShoppingCart}
           action={
             <div className="flex items-center gap-2">
-              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleImportFileChange}
+                className="hidden"
+              />
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
@@ -2117,8 +2193,14 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                 title="Import from CSV"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {importing ? <Loader2Icon size={13} className="animate-spin" /> : <Upload size={13} />}
-                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+                {importing ? (
+                  <Loader2Icon size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing..." : "Import CSV"}
+                </span>
               </button>
               {rights.canCreate && (
                 <button
@@ -2132,442 +2214,450 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
             </div>
           }
         >
-
-        <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base font-semibold">Purchase Order Register</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">{totalRecords} record{totalRecords !== 1 ? "s" : ""}</p>
+          <Card className="border-border shadow-sm">
+            <CardHeader className="pb-3 border-b border-border">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base font-semibold">
+                      Purchase Order Register
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {totalRecords} record{totalRecords !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search PO number, supplier…"
+                      className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                    />
+                  </div>
                 </div>
-                <div className="relative w-full sm:w-64">
-                  <Search
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search PO number, supplier…"
-                    className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                  />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { value: "", label: "All POs" },
+                    { value: "WO_PO", label: "WO-POs" },
+                    { value: "Direct", label: "Direct" },
+                    { value: "Normal", label: "From MR" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.value}
+                      onClick={() => {
+                        setPoTypeFilter(tab.value);
+                        setPage(1);
+                      }}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        poTypeFilter === tab.value
+                          ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                          : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {[
-                  { value: "", label: "All POs" },
-                  { value: "WO_PO", label: "WO-POs" },
-                  { value: "Direct", label: "Direct" },
-                  { value: "Normal", label: "From MR" },
-                ].map((tab) => (
-                  <button
-                    key={tab.value}
-                    onClick={() => {
-                      setPoTypeFilter(tab.value);
-                      setPage(1);
-                    }}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                      poTypeFilter === tab.value
-                        ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
-                        : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    PO No
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden md:table-cell">
-                    Company
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden lg:table-cell">
-                    Project / Site
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Amount
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i}>
-                      {Array.from({ length: 8 }).map((_, j) => (
-                        <td key={j} className="px-4 py-3">
-                          <div className="h-4 bg-muted/50 animate-pulse rounded" />
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        PO No
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Supplier
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden md:table-cell">
+                        Company
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden lg:table-cell">
+                        Project / Site
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {isLoading ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <tr key={i}>
+                          {Array.from({ length: 8 }).map((_, j) => (
+                            <td key={j} className="px-4 py-3">
+                              <div className="h-4 bg-muted/50 animate-pulse rounded" />
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : filteredList.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="px-4 py-12 text-center text-muted-foreground"
+                        >
+                          <p>
+                            No purchase orders found. Click 'New PO' to create
+                            one.
+                          </p>
                         </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : filteredList.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="px-4 py-12 text-center text-muted-foreground"
-                    >
-                      <p>No purchase orders found. Click 'New PO' to create one.</p>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredList.map((item) => (
-                    <tr
-                      key={item._id}
-                      className="hover:bg-muted/20 transition-colors group"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs font-semibold text-foreground">
-                            {item.poNumber || item.docNo || "—"}
-                          </span>
-                          {item.poType === "WO_PO" && (
-                            <span
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                              title={
-                                item.sourceWODocNo
-                                  ? `From Work Order: ${item.sourceWODocNo}`
-                                  : "Auto-generated from Work Order"
-                              }
+                      </tr>
+                    ) : (
+                      filteredList.map((item) => (
+                        <tr
+                          key={item._id}
+                          className="hover:bg-muted/20 transition-colors group"
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs font-semibold text-foreground">
+                                {item.poNumber || item.docNo || "—"}
+                              </span>
+                              {item.poType === "WO_PO" && (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                                  title={
+                                    item.sourceWODocNo
+                                      ? `From Work Order: ${item.sourceWODocNo}`
+                                      : "Auto-generated from Work Order"
+                                  }
+                                >
+                                  WO-PO
+                                </span>
+                              )}
+                              {item.poType === "Direct" && (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                                  title="Direct Purchase Order"
+                                >
+                                  Direct
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {fmtDate(item.poDate)}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-foreground">
+                            {item.supplierName || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                            {item.companyName || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                            {item.projectName || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-foreground">
+                            {fmt(item.totalAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <ApprovalStatusChain
+                                table="PurchaseOrders"
+                                recordId={item._id}
+                              />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              <ApprovalActions
+                                status={item.status}
+                                recordId={item._id}
+                                endpoint="/api/purchase-orders"
+                                submitOnly
+                                onSuccess={(action) =>
+                                  handleApprovalSuccess(item._id, action)
+                                }
+                              />
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const full = await getPurchaseOrderById(
+                                      item._id,
+                                    );
+                                    setViewingPO(full);
+                                  } catch {
+                                    setViewingPO(item);
+                                  }
+                                }}
+                                className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                title="View details"
+                              >
+                                <Eye size={15} />
+                              </button>
+                              {rights.canDelete && (
+                                <button
+                                  onClick={() => handleDelete(item._id)}
+                                  className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                                  title="Delete this order"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
+                <span>
+                  Page {page} of {totalPages} ({totalRecords} records)
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    disabled={page <= 1}
+                    className="px-3 py-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 transition text-xs"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={page >= totalPages}
+                    className="px-3 py-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 transition text-xs"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ── PO Delete Block Dialog ─────────────────────────────────────────── */}
+          <Dialog
+            open={!!deleteBlockInfo}
+            onOpenChange={() => setDeleteBlockInfo(null)}
+          >
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-amber-600">
+                  <AlertTriangle size={18} className="shrink-0" />
+                  Cannot Delete Purchase Order
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                {deleteBlockInfo?.reason === "grn_expense_brs_cleared" && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-destructive">
+                      This PO has GRNs with expense bookings cleared in BRS.
+                      Follow these steps to delete:
+                    </p>
+                    <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                      <li>
+                        Go to <strong>BRS</strong> and <strong>unclear</strong>{" "}
+                        the matched payment entries.
+                      </li>
+                      <li>
+                        Go to <strong>Payment Management</strong> and{" "}
+                        <strong>delete</strong> the payment records.
+                      </li>
+                      <li>
+                        Go to <strong>Expense Booking</strong> and{" "}
+                        <strong>delete</strong> the expense booking(s).
+                      </li>
+                      <li>
+                        Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
+                        the GRN(s).
+                      </li>
+                      <li>Return here and delete this Purchase Order.</li>
+                    </ol>
+                    {deleteBlockInfo.clearedPayments &&
+                      deleteBlockInfo.clearedPayments.length > 0 && (
+                        <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                          <p className="font-semibold">
+                            Cleared payments blocking deletion:
+                          </p>
+                          {deleteBlockInfo.clearedPayments.map((p) => (
+                            <div
+                              key={p.paymentId}
+                              className="flex justify-between"
                             >
-                              WO-PO
-                            </span>
-                          )}
-                          {item.poType === "Direct" && (
-                            <span
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                              title="Direct Purchase Order"
-                            >
-                              Direct
-                            </span>
-                          )}
+                              <span>
+                                {p.paymentName || "Payment #" + p.paymentId}{" "}
+                                (Exp: {p.expenseDocNo})
+                              </span>
+                              <span className="font-medium">
+                                {Number(p.amount).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {fmtDate(item.poDate)}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-foreground">
-                        {item.supplierName || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                        {item.companyName || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
-                        {item.projectName || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-foreground">
-                        {fmt(item.totalAmount)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <ApprovalStatusChain
-                            table="PurchaseOrders"
-                            recordId={item._id}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-1">
-                          <ApprovalActions
-                            status={item.status}
-                            recordId={item._id}
-                            endpoint="/api/purchase-orders"
-                            submitOnly
-                            onSuccess={(action) =>
-                              handleApprovalSuccess(item._id, action)
-                            }
-                          />
-                          <button
-                            onClick={async () => {
-                              try {
-                                const full = await getPurchaseOrderById(item._id);
-                                setViewingPO(full);
-                              } catch {
-                                setViewingPO(item);
-                              }
-                            }}
-                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                            title="View details"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          {rights.canDelete && (
-                          <button
-                            onClick={() => handleDelete(item._id)}
-                            className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                            title="Delete this order"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                      )}
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
-            <span>
-              Page {page} of {totalPages} ({totalRecords} records)
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 transition text-xs"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 transition text-xs"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-          </CardContent>
-        </Card>
-
-        {/* ── PO Delete Block Dialog ─────────────────────────────────────────── */}
-        <Dialog
-          open={!!deleteBlockInfo}
-          onOpenChange={() => setDeleteBlockInfo(null)}
-        >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-amber-600">
-                <AlertTriangle size={18} className="shrink-0" />
-                Cannot Delete Purchase Order
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3 text-sm">
-              {deleteBlockInfo?.reason === "grn_expense_brs_cleared" && (
-                <div className="space-y-2">
-                  <p className="font-medium text-destructive">
-                    This PO has GRNs with expense bookings cleared in BRS.
-                    Follow these steps to delete:
-                  </p>
-                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
-                    <li>
-                      Go to <strong>BRS</strong> and <strong>unclear</strong>{" "}
-                      the matched payment entries.
-                    </li>
-                    <li>
-                      Go to <strong>Payment Management</strong> and{" "}
-                      <strong>delete</strong> the payment records.
-                    </li>
-                    <li>
-                      Go to <strong>Expense Booking</strong> and{" "}
-                      <strong>delete</strong> the expense booking(s).
-                    </li>
-                    <li>
-                      Go to <strong>GRN</strong> and <strong>delete</strong> the
-                      GRN(s).
-                    </li>
-                    <li>Return here and delete this Purchase Order.</li>
-                  </ol>
-                  {deleteBlockInfo.clearedPayments &&
-                    deleteBlockInfo.clearedPayments.length > 0 && (
-                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
-                        <p className="font-semibold">
-                          Cleared payments blocking deletion:
-                        </p>
-                        {deleteBlockInfo.clearedPayments.map((p) => (
-                          <div
-                            key={p.paymentId}
-                            className="flex justify-between"
-                          >
-                            <span>
-                              {p.paymentName || "Payment #" + p.paymentId} (Exp:{" "}
-                              {p.expenseDocNo})
-                            </span>
-                            <span className="font-medium">
-                              {Number(p.amount).toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              )}
-              {deleteBlockInfo?.reason === "grn_expense_has_payments" && (
-                <div className="space-y-2">
-                  <p className="font-medium text-amber-700">
-                    This PO has GRNs with expense bookings that have linked
-                    payment records.
-                  </p>
-                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
-                    <li>
-                      Go to <strong>Payment Management</strong> and{" "}
-                      <strong>delete</strong> the payment records.
-                    </li>
-                    <li>
-                      Go to <strong>Expense Booking</strong> and{" "}
-                      <strong>delete</strong> the expense booking(s).
-                    </li>
-                    <li>
-                      Go to <strong>GRN</strong> and <strong>delete</strong> the
-                      GRN(s).
-                    </li>
-                    <li>Return here and delete this Purchase Order.</li>
-                  </ol>
-                  {deleteBlockInfo.linkedPayments &&
-                    deleteBlockInfo.linkedPayments.length > 0 && (
-                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
-                        <p className="font-semibold">Linked payments:</p>
-                        {deleteBlockInfo.linkedPayments.map((p) => (
-                          <div
-                            key={p.paymentId}
-                            className="flex justify-between"
-                          >
-                            <span>
-                              {p.paymentName || "Payment #" + p.paymentId} (Exp:{" "}
-                              {p.expenseDocNo})
-                            </span>
-                            <span className="font-medium">
-                              {Number(p.amount).toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              )}
-              {deleteBlockInfo?.reason === "grn_has_expense" && (
-                <div className="space-y-2">
-                  <p className="font-medium text-amber-700">
-                    This PO has GRNs with linked expense bookings.
-                  </p>
-                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
-                    <li>
-                      Go to <strong>Expense Booking</strong> and{" "}
-                      <strong>delete</strong> the expense booking(s).
-                    </li>
-                    <li>
-                      Go to <strong>GRN</strong> and <strong>delete</strong> the
-                      GRN(s).
-                    </li>
-                    <li>Return here and delete this Purchase Order.</li>
-                  </ol>
-                  {deleteBlockInfo.expenseBookings &&
-                    deleteBlockInfo.expenseBookings.length > 0 && (
-                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
-                        {deleteBlockInfo.expenseBookings.map((e) => (
-                          <div key={e.id} className="flex justify-between">
-                            <span>{e.docNo || "Expense #" + e.id}</span>
-                            <span className="text-muted-foreground">
-                              {e.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              )}
-              {deleteBlockInfo?.reason === "has_grns" && (
-                <div className="space-y-2">
-                  <p className="font-medium text-amber-700">
-                    This PO has linked GRN(s). Delete the GRN(s) first, then
-                    delete the PO.
-                  </p>
-                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
-                    <li>
-                      Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
-                      each linked GRN.
-                    </li>
-                    <li>Return here and delete this Purchase Order.</li>
-                  </ol>
-                  {deleteBlockInfo.grns && deleteBlockInfo.grns.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
-                      {deleteBlockInfo.grns.map((g) => (
-                        <div key={g.grnId} className="flex justify-between">
-                          <span>{g.grnNo || "GRN #" + g.grnId}</span>
-                          <span className="text-muted-foreground">
-                            {g.status}
-                          </span>
+                {deleteBlockInfo?.reason === "grn_expense_has_payments" && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-amber-700">
+                      This PO has GRNs with expense bookings that have linked
+                      payment records.
+                    </p>
+                    <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                      <li>
+                        Go to <strong>Payment Management</strong> and{" "}
+                        <strong>delete</strong> the payment records.
+                      </li>
+                      <li>
+                        Go to <strong>Expense Booking</strong> and{" "}
+                        <strong>delete</strong> the expense booking(s).
+                      </li>
+                      <li>
+                        Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
+                        the GRN(s).
+                      </li>
+                      <li>Return here and delete this Purchase Order.</li>
+                    </ol>
+                    {deleteBlockInfo.linkedPayments &&
+                      deleteBlockInfo.linkedPayments.length > 0 && (
+                        <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                          <p className="font-semibold">Linked payments:</p>
+                          {deleteBlockInfo.linkedPayments.map((p) => (
+                            <div
+                              key={p.paymentId}
+                              className="flex justify-between"
+                            >
+                              <span>
+                                {p.paymentName || "Payment #" + p.paymentId}{" "}
+                                (Exp: {p.expenseDocNo})
+                              </span>
+                              <span className="font-medium">
+                                {Number(p.amount).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {deleteBlockInfo?.reason === "has_expense" && (
-                <div className="space-y-2">
-                  <p className="font-medium text-amber-700">
-                    This PO has linked expense bookings. Delete them first.
-                  </p>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setDeleteBlockInfo(null)}
-              >
-                Close
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                      )}
+                  </div>
+                )}
+                {deleteBlockInfo?.reason === "grn_has_expense" && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-amber-700">
+                      This PO has GRNs with linked expense bookings.
+                    </p>
+                    <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                      <li>
+                        Go to <strong>Expense Booking</strong> and{" "}
+                        <strong>delete</strong> the expense booking(s).
+                      </li>
+                      <li>
+                        Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
+                        the GRN(s).
+                      </li>
+                      <li>Return here and delete this Purchase Order.</li>
+                    </ol>
+                    {deleteBlockInfo.expenseBookings &&
+                      deleteBlockInfo.expenseBookings.length > 0 && (
+                        <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                          {deleteBlockInfo.expenseBookings.map((e) => (
+                            <div key={e.id} className="flex justify-between">
+                              <span>{e.docNo || "Expense #" + e.id}</span>
+                              <span className="text-muted-foreground">
+                                {e.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                )}
+                {deleteBlockInfo?.reason === "has_grns" && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-amber-700">
+                      This PO has linked GRN(s). Delete the GRN(s) first, then
+                      delete the PO.
+                    </p>
+                    <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                      <li>
+                        Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
+                        each linked GRN.
+                      </li>
+                      <li>Return here and delete this Purchase Order.</li>
+                    </ol>
+                    {deleteBlockInfo.grns &&
+                      deleteBlockInfo.grns.length > 0 && (
+                        <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                          {deleteBlockInfo.grns.map((g) => (
+                            <div key={g.grnId} className="flex justify-between">
+                              <span>{g.grnNo || "GRN #" + g.grnId}</span>
+                              <span className="text-muted-foreground">
+                                {g.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                )}
+                {deleteBlockInfo?.reason === "has_expense" && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-amber-700">
+                      This PO has linked expense bookings. Delete them first.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteBlockInfo(null)}
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-        {/* ── PO Delete Confirm Dialog ───────────────────────────────────────── */}
-        <Dialog
-          open={!!deleteConfirmId}
-          onOpenChange={() => setDeleteConfirmId(null)}
-        >
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Delete Purchase Order?</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              This action cannot be undone.
-            </p>
-            <DialogFooter className="gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setDeleteConfirmId(null)}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={confirmDelete}>
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          {/* ── PO Delete Confirm Dialog ───────────────────────────────────────── */}
+          <Dialog
+            open={!!deleteConfirmId}
+            onOpenChange={() => setDeleteConfirmId(null)}
+          >
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Delete Purchase Order?</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                This action cannot be undone.
+              </p>
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteConfirmId(null)}
+                >
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={confirmDelete}>
+                  Delete
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </MaterialShell>
 
         {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
         {viewingPO && (
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
-
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
                 <div>
@@ -2582,7 +2672,9 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                       <StatusChip status={viewingPO.Status} />
                     )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Purchase Order</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">
+                    Purchase Order
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2594,7 +2686,11 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   {rights.canEdit && (
                     <button
                       onClick={() => {
-                        const item = listData.find((r) => r._id === String(viewingPO.PurchaseOrderID ?? viewingPO._id));
+                        const item = listData.find(
+                          (r) =>
+                            r._id ===
+                            String(viewingPO.PurchaseOrderID ?? viewingPO._id),
+                        );
                         setViewingPO(null);
                         if (item) goToAmend(item);
                       }}
@@ -2616,31 +2712,106 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                 {/* Order details grid */}
                 <div>
                   <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                    <FileText size={10} className="text-emerald-500" /> Order Details
+                    <FileText size={10} className="text-emerald-500" /> Order
+                    Details
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {([
-                      { label: "PO Number", value: viewingPO.PurchaseOrderNo ?? viewingPO.poNumber, mono: true },
-                      { label: "PO Type", value: viewingPO.POType ?? viewingPO.poType ?? "—" },
-                      { label: "PO Date", value: viewingPO.PODate ? new Date(viewingPO.PODate).toLocaleDateString("en-IN") : (viewingPO.poDate ?? "—") },
-                      { label: "Expected Delivery", value: viewingPO.ExpectedDeliveryDate ? new Date(viewingPO.ExpectedDeliveryDate).toLocaleDateString("en-IN") : "—" },
-                      { label: "Supplier", value: viewingPO.SupplierName ?? viewingPO.supplierName },
-                      { label: "Company", value: viewingPO.CompanyName ?? viewingPO.companyName },
-                      { label: "Project / Site", value: viewingPO.ProjectName ?? viewingPO.projectName },
-                      { label: "Cost Center", value: viewingPO.CostCenterName ?? viewingPO.costCenterName ?? "—" },
-                      { label: "Vendor Invoice No", value: viewingPO.VendorInvoiceNo ?? viewingPO.vendorInvoiceNo ?? "—" },
-                      { label: "Vendor Invoice Date", value: viewingPO.VendorInvoiceDate ? new Date(viewingPO.VendorInvoiceDate).toLocaleDateString("en-IN") : "—" },
-                      { label: "Total Amount", value: (viewingPO.TotalAmount ?? viewingPO.totalAmount) != null ? `₹${Number(viewingPO.TotalAmount ?? viewingPO.totalAmount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—" },
-                      { label: "Status", value: viewingPO.Status ?? viewingPO.status ?? "—" },
-                    ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
-                      <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
-                        <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
+                    {(
+                      [
+                        {
+                          label: "PO Number",
+                          value:
+                            viewingPO.PurchaseOrderNo ?? viewingPO.poNumber,
+                          mono: true,
+                        },
+                        {
+                          label: "PO Type",
+                          value: viewingPO.POType ?? viewingPO.poType ?? "—",
+                        },
+                        {
+                          label: "PO Date",
+                          value: viewingPO.PODate
+                            ? new Date(viewingPO.PODate).toLocaleDateString(
+                                "en-IN",
+                              )
+                            : (viewingPO.poDate ?? "—"),
+                        },
+                        {
+                          label: "Expected Delivery",
+                          value: viewingPO.ExpectedDeliveryDate
+                            ? new Date(
+                                viewingPO.ExpectedDeliveryDate,
+                              ).toLocaleDateString("en-IN")
+                            : "—",
+                        },
+                        {
+                          label: "Supplier",
+                          value:
+                            viewingPO.SupplierName ?? viewingPO.supplierName,
+                        },
+                        {
+                          label: "Company",
+                          value: viewingPO.CompanyName ?? viewingPO.companyName,
+                        },
+                        {
+                          label: "Project / Site",
+                          value: viewingPO.ProjectName ?? viewingPO.projectName,
+                        },
+                        {
+                          label: "Cost Center",
+                          value:
+                            viewingPO.CostCenterName ??
+                            viewingPO.costCenterName ??
+                            "—",
+                        },
+                        {
+                          label: "Vendor Invoice No",
+                          value:
+                            viewingPO.VendorInvoiceNo ??
+                            viewingPO.vendorInvoiceNo ??
+                            "—",
+                        },
+                        {
+                          label: "Vendor Invoice Date",
+                          value: viewingPO.VendorInvoiceDate
+                            ? new Date(
+                                viewingPO.VendorInvoiceDate,
+                              ).toLocaleDateString("en-IN")
+                            : "—",
+                        },
+                        {
+                          label: "Total Amount",
+                          value:
+                            (viewingPO.TotalAmount ?? viewingPO.totalAmount) !=
+                            null
+                              ? `₹${Number(viewingPO.TotalAmount ?? viewingPO.totalAmount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
+                              : "—",
+                        },
+                        {
+                          label: "Status",
+                          value: viewingPO.Status ?? viewingPO.status ?? "—",
+                        },
+                      ] as { label: string; value: any; mono?: boolean }[]
+                    ).map(({ label, value, mono }) => (
+                      <div
+                        key={label}
+                        className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                      >
+                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                          {label}
+                        </p>
+                        <p
+                          className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}
+                        >
+                          {value || "—"}
+                        </p>
                       </div>
                     ))}
                   </div>
                   {/* Source document references */}
-                  {(viewingPO.SourceMRDocNo || viewingPO.SourceWODocNo || viewingPO.SourceWDDocNo) && (
+                  {(viewingPO.SourceMRDocNo ||
+                    viewingPO.SourceWODocNo ||
+                    viewingPO.SourceWDDocNo) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {viewingPO.SourceMRDocNo && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
@@ -2662,50 +2833,85 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   {/* Payment Terms */}
                   {(viewingPO.PaymentTerms ?? viewingPO.paymentTerms) && (
                     <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Payment Terms / T&C</p>
-                      <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">{viewingPO.PaymentTerms ?? viewingPO.paymentTerms}</p>
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
+                        Payment Terms / T&C
+                      </p>
+                      <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+                        {viewingPO.PaymentTerms ?? viewingPO.paymentTerms}
+                      </p>
                     </div>
                   )}
                 </div>
 
                 {/* Supplier / Billing / Project panels */}
-                {(viewingPOSupplier || viewingPOCompany || viewingPOProject) && (
+                {(viewingPOSupplier ||
+                  viewingPOCompany ||
+                  viewingPOProject) && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {/* Supplier Details */}
                     {viewingPOSupplier && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
                         <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" /> Supplier Details
+                          <Building2 size={9} className="text-emerald-500" />{" "}
+                          Supplier Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
                           {viewingPOSupplier.LHeadAddress && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Address</dt>
-                              <dd className="text-foreground font-medium mt-0.5">{viewingPOSupplier.LHeadAddress}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Address
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5">
+                                {viewingPOSupplier.LHeadAddress}
+                              </dd>
                             </div>
                           )}
                           {viewingPOSupplier.LHeadContactPerson && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Contact</dt>
-                              <dd className="text-foreground font-medium mt-0.5">{viewingPOSupplier.LHeadContactPerson}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Contact
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5">
+                                {viewingPOSupplier.LHeadContactPerson}
+                              </dd>
                             </div>
                           )}
                           {viewingPOSupplier.LHeadPhone && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
-                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOSupplier.LHeadPhone}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Phone
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
+                                <Phone
+                                  size={10}
+                                  className="text-muted-foreground"
+                                />
+                                {viewingPOSupplier.LHeadPhone}
+                              </dd>
                             </div>
                           )}
                           {viewingPOSupplier.LHeadEmail && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Email</dt>
-                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Mail size={10} className="text-muted-foreground" />{viewingPOSupplier.LHeadEmail}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Email
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
+                                <Mail
+                                  size={10}
+                                  className="text-muted-foreground"
+                                />
+                                {viewingPOSupplier.LHeadEmail}
+                              </dd>
                             </div>
                           )}
                           {viewingPOSupplier.LGST && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOSupplier.LGST}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                GSTIN
+                              </dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                {viewingPOSupplier.LGST}
+                              </dd>
                             </div>
                           )}
                         </dl>
@@ -2715,31 +2921,64 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                     {viewingPOCompany && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
                         <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" /> Billing Details
+                          <Building2 size={9} className="text-emerald-500" />{" "}
+                          Billing Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
-                          {(viewingPOCompany.address || viewingPOCompany.city) && (
+                          {(viewingPOCompany.address ||
+                            viewingPOCompany.city) && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Address</dt>
-                              <dd className="text-foreground font-medium mt-0.5">{[viewingPOCompany.address, viewingPOCompany.city, viewingPOCompany.state, viewingPOCompany.pincode].filter(Boolean).join(", ")}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Address
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5">
+                                {[
+                                  viewingPOCompany.address,
+                                  viewingPOCompany.city,
+                                  viewingPOCompany.state,
+                                  viewingPOCompany.pincode,
+                                ]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </dd>
                             </div>
                           )}
                           {viewingPOCompany.phone_number && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
-                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOCompany.phone_number}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Phone
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
+                                <Phone
+                                  size={10}
+                                  className="text-muted-foreground"
+                                />
+                                {viewingPOCompany.phone_number}
+                              </dd>
                             </div>
                           )}
                           {viewingPOCompany.email && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Email</dt>
-                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Mail size={10} className="text-muted-foreground" />{viewingPOCompany.email}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Email
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
+                                <Mail
+                                  size={10}
+                                  className="text-muted-foreground"
+                                />
+                                {viewingPOCompany.email}
+                              </dd>
                             </div>
                           )}
                           {viewingPOCompany.gst_no && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOCompany.gst_no}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                GSTIN
+                              </dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                {viewingPOCompany.gst_no}
+                              </dd>
                             </div>
                           )}
                         </dl>
@@ -2749,25 +2988,51 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                     {viewingPOProject && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
                         <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <MapPin size={9} className="text-emerald-500" /> Project Details
+                          <MapPin size={9} className="text-emerald-500" />{" "}
+                          Project Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
-                          {(viewingPOProject.address || viewingPOProject.city) && (
+                          {(viewingPOProject.address ||
+                            viewingPOProject.city) && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery Address</dt>
-                              <dd className="text-foreground font-medium mt-0.5">{[viewingPOProject.address, viewingPOProject.address_line2, viewingPOProject.city, viewingPOProject.state, viewingPOProject.pincode].filter(Boolean).join(", ")}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Delivery Address
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5">
+                                {[
+                                  viewingPOProject.address,
+                                  viewingPOProject.address_line2,
+                                  viewingPOProject.city,
+                                  viewingPOProject.state,
+                                  viewingPOProject.pincode,
+                                ]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </dd>
                             </div>
                           )}
                           {viewingPOProject.phone_number && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
-                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1"><Phone size={10} className="text-muted-foreground" />{viewingPOProject.phone_number}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Phone
+                              </dt>
+                              <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
+                                <Phone
+                                  size={10}
+                                  className="text-muted-foreground"
+                                />
+                                {viewingPOProject.phone_number}
+                              </dd>
                             </div>
                           )}
                           {viewingPOProject.gst_no && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN</dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">{viewingPOProject.gst_no}</dd>
+                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                GSTIN
+                              </dt>
+                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                {viewingPOProject.gst_no}
+                              </dd>
                             </div>
                           )}
                         </dl>
@@ -2787,35 +3052,86 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   return (
                     <div>
                       <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Package size={10} className="text-emerald-500" /> Order Items ({lineItems.length})
+                        <Package size={10} className="text-emerald-500" /> Order
+                        Items ({lineItems.length})
                       </p>
                       <div className="rounded-xl border border-border overflow-hidden">
-                        <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
+                        <table
+                          className="w-full text-xs"
+                          style={{ tableLayout: "fixed" }}
+                        >
                           <thead className="bg-muted/40 border-b border-border">
                             <tr>
-                              {[["Item / Description", "32%"], ["Qty", "9%"], ["Unit", "9%"], ["Rate", "13%"], ["GST%", "9%"], ["Amount", "13%"], ["Received", "15%"]].map(([h, w]) => (
-                                <th key={h} className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${["Qty","Rate","GST%","Amount","Received"].includes(h) ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
+                              {[
+                                ["Item / Description", "32%"],
+                                ["Qty", "9%"],
+                                ["Unit", "9%"],
+                                ["Rate", "13%"],
+                                ["GST%", "9%"],
+                                ["Amount", "13%"],
+                                ["Received", "15%"],
+                              ].map(([h, w]) => (
+                                <th
+                                  key={h}
+                                  className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${["Qty", "Rate", "GST%", "Amount", "Received"].includes(h) ? "text-right" : "text-left"}`}
+                                  style={{ width: w }}
+                                >
+                                  {h}
+                                </th>
                               ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/50">
                             {lineItems.map((li: any, i: number) => {
-                              const name = li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—";
-                              const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                              const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+                              const name =
+                                li.ItemName ??
+                                li.itemName ??
+                                li.Description ??
+                                li.itemDescription ??
+                                "—";
+                              const qty = Number(
+                                li.Quantity ?? li.quantity ?? 0,
+                              );
+                              const unit =
+                                li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
                               const rate = Number(li.Rate ?? li.rate ?? 0);
                               const tax = Number(li.TaxPct ?? li.tax ?? 0);
-                              const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-                              const received = li.ReceivedQty != null ? Number(li.ReceivedQty) : null;
+                              const amount = Number(
+                                li.LineAmount ?? li.amount ?? qty * rate,
+                              );
+                              const received =
+                                li.ReceivedQty != null
+                                  ? Number(li.ReceivedQty)
+                                  : null;
                               return (
-                                <tr key={i} className="hover:bg-muted/20 transition-colors">
-                                  <td className="px-3 py-2 truncate font-medium">{name}</td>
-                                  <td className="px-3 py-2 text-right">{qty}</td>
-                                  <td className="px-3 py-2 text-muted-foreground">{unit}</td>
-                                  <td className="px-3 py-2 text-right">₹{rate.toLocaleString("en-IN")}</td>
-                                  <td className="px-3 py-2 text-right text-muted-foreground">{tax ? `${tax}%` : "—"}</td>
-                                  <td className="px-3 py-2 text-right font-semibold">₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</td>
-                                  <td className={`px-3 py-2 text-right ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}>
+                                <tr
+                                  key={i}
+                                  className="hover:bg-muted/20 transition-colors"
+                                >
+                                  <td className="px-3 py-2 truncate font-medium">
+                                    {name}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {qty}
+                                  </td>
+                                  <td className="px-3 py-2 text-muted-foreground">
+                                    {unit}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    ₹{rate.toLocaleString("en-IN")}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground">
+                                    {tax ? `${tax}%` : "—"}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-semibold">
+                                    ₹
+                                    {amount.toLocaleString("en-IN", {
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </td>
+                                  <td
+                                    className={`px-3 py-2 text-right ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}
+                                  >
                                     {received != null ? received : "—"}
                                   </td>
                                 </tr>
@@ -2831,8 +3147,12 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                 {/* Remarks */}
                 {(viewingPO.Remarks ?? viewingPO.remarks) && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
-                    <p className="text-xs text-foreground">{viewingPO.Remarks ?? viewingPO.remarks}</p>
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      Remarks
+                    </p>
+                    <p className="text-xs text-foreground">
+                      {viewingPO.Remarks ?? viewingPO.remarks}
+                    </p>
                   </div>
                 )}
               </div>
@@ -2864,1475 +3184,1584 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
         subtitle="Create and manage purchase orders"
         icon={ShoppingCart}
       >
-
-      {/* Form Header — Card matching Material Request style */}
-      <Card className="border-border shadow-sm">
-        <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
-          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={goToList}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            >
-              <ArrowLeft size={15} />
-              <span className="hidden sm:inline">Back</span>
-            </button>
-            <span className="text-emerald-500/40">|</span>
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
-                <ShoppingCart size={12} className="text-emerald-400" />
-              </div>
-              <h2 className="text-sm font-heading font-bold text-foreground truncate flex items-center gap-2">
-                {viewMode === "create"
-                  ? "New Purchase Order"
-                  : viewMode === "edit"
-                    ? "Edit Purchase Order"
-                    : `Purchase Order — ${escapeHtml(form.poNumber || "—")}`}
-                {viewMode === "view" && form.status && (
-                  <StatusChip status={form.status} />
-                )}
-              </h2>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {isReadOnly && (
-              <>
-                <StatusChip status={listData.find((r) => r._id === editingId)?.status ?? "Draft"} />
-                {rights.canPrint && (
-                <button
-                  onClick={handlePrint}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
-                >
-                  <Printer size={14} /> Print
-                </button>
-                )}
-                {rights.canEdit && (
-                <button
-                  onClick={() => { const item = listData.find((r) => r._id === editingId); if (item) goToAmend(item); }}
-                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
-                >
-                  <FilePenLine size={14} /> Amend
-                </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      <div className="space-y-5">
-        {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
-        {/* ── MR Doc Number Lookup (only shown in create mode, before any source is set) ── */}
-        {viewMode === "create" &&
-          !sourceMR &&
-          !sourceWD &&
-          !sourceWO &&
-          !isReadOnly && (
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                <ClipboardList size={11} className="text-emerald-600 dark:text-emerald-400" />
-                Load from Material Request
-              </h3>
-              <p className="text-xs text-muted-foreground mb-3">
-                Filter by company and project, then select an approved Material
-                Request to auto-fill items and details.
-              </p>
-
-              {/* MR Filters: Company + Project */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <div className="relative">
-                  <select
-                    value={mrFilterCompanyId}
-                    onChange={(e) => {
-                      setMrFilterCompanyId(e.target.value);
-                      setMrFilterProjectId("");
-                      setMrDropdownValue("");
-                    }}
-                    className={`${inputCls} pr-8 appearance-none`}
-                  >
-                    <option value="">— Filter by Company —</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-                <div className="relative">
-                  <select
-                    value={mrFilterProjectId}
-                    onChange={(e) => {
-                      setMrFilterProjectId(e.target.value);
-                      setMrDropdownValue("");
-                    }}
-                    disabled={filteredMRProjects.length === 0}
-                    className={`${inputCls} pr-8 appearance-none`}
-                  >
-                    <option value="">— Filter by Project —</option>
-                    {filteredMRProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-              </div>
-
-              {/* MR Dropdown */}
-              <div className="flex items-start gap-2">
-                <div className="flex-1 relative">
-                  <select
-                    value={mrDropdownValue}
-                    onChange={(e) =>
-                      void handleMRDropdownSelect(e.target.value)
-                    }
-                    disabled={approvedMRsLoading || mrDropdownLoading}
-                    className={`${inputCls} pr-8 appearance-none ${mrDropdownError ? "border-red-400" : ""}`}
-                  >
-                    <option value="">
-                      {approvedMRsLoading
-                        ? "Loading approved MRs…"
-                        : approvedMRs.length === 0
-                          ? "No approved Material Requests"
-                          : "— Select a Material Request —"}
-                    </option>
-                    {approvedMRs.map((mr) => (
-                      <option key={mr.MRId} value={String(mr.MRId)}>
-                        {mr.DocNo}
-                        {mr.ProjectName ? ` · ${mr.ProjectName}` : ""}
-                        {mr.FinYearName ? ` (${mr.FinYearName})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  {mrDropdownError && (
-                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                      <AlertCircle size={11} />
-                      {mrDropdownError}
-                    </p>
-                  )}
-                </div>
-                {mrDropdownLoading && (
-                  <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground shrink-0">
-                    <RefreshCw size={13} className="animate-spin" />
-                    Loading…
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-        {viewMode === "create" &&
-          !sourceMR &&
-          !sourceWD &&
-          !sourceWO &&
-          !isReadOnly && (
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                <Receipt size={11} className="text-blue-500" />
-                Link to Sale Invoice (optional)
-              </h3>
-              <p className="text-xs text-muted-foreground mb-3">
-                Enter a paid Sale Invoice doc number to link this PO to a
-                Sale Invoice. The backend will validate that the invoice is
-                fully paid before saving.
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={saleInvoiceInput}
-                  onChange={(e) => setSaleInvoiceInput(e.target.value)}
-                  placeholder="Sale Invoice ID (numeric)"
-                  className={`${inputCls} flex-1`}
-                  disabled={!!sourceSaleInvoice}
-                  min={1}
-                />
-                {!sourceSaleInvoice ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const id = parseInt(saleInvoiceInput.trim(), 10);
-                      if (!id || id <= 0) return;
-                      setSourceSaleInvoice({ id, docNo: `SI-${id}` });
-                    }}
-                    disabled={!saleInvoiceInput.trim()}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-                  >
-                    Link
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSourceSaleInvoice(null);
-                      setSaleInvoiceInput("");
-                    }}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-        {sourceSaleInvoice && !isReadOnly && (
-          <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 flex items-center gap-3 text-sm">
-            <Receipt
-              size={15}
-              className="text-blue-600 dark:text-blue-400 shrink-0"
-            />
-            <span className="text-blue-700 dark:text-blue-300 flex-1">
-              Linked to Sale Invoice{" "}
-              <span className="font-mono font-bold">
-                {sourceSaleInvoice.docNo}
-              </span>
-              . The backend will validate that this invoice is fully paid
-              before saving.
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setSourceSaleInvoice(null);
-                setSaleInvoiceInput("");
-              }}
-              className="text-blue-400 hover:text-blue-600 transition-colors"
-              title="Remove link"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        {sourceMR && !isReadOnly && (
-          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
-            <ClipboardList
-              size={15}
-              className="text-emerald-600 dark:text-emerald-400 shrink-0"
-            />
-            <span className="text-emerald-700 dark:text-emerald-300">
-              Creating <span className="font-semibold">Normal PO</span> from
-              Material Request{" "}
-              <span className="font-mono font-bold">{sourceMR.docNo}</span>.
-              Items, company and project have been pre-filled.
-            </span>
-          </div>
-        )}
-
-        {sourceWD && !isReadOnly && (
-          <div className="rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 flex items-center gap-3 text-sm">
-            <ClipboardList
-              size={15}
-              className="text-orange-600 dark:text-orange-400 shrink-0"
-            />
-            <span className="text-orange-700 dark:text-orange-300">
-              Creating <span className="font-semibold">Material PO</span> from
-              Work Done{" "}
-              <span className="font-mono font-bold">{sourceWD.docNo}</span>.
-              Company, project and line items have been pre-filled.
-            </span>
-          </div>
-        )}
-
-        {sourceWO && !isReadOnly && (
-          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
-            <ClipboardList
-              size={15}
-              className="text-emerald-600 dark:text-emerald-400 shrink-0"
-            />
-            <span className="text-emerald-700 dark:text-emerald-300">
-              Creating <span className="font-semibold">Material PO</span> from
-              Work Order{" "}
-              <span className="font-mono font-bold">{sourceWO.docNo}</span>.
-              Company, project and material line items have been pre-filled.
-            </span>
-          </div>
-        )}
-
-        {!isReadOnly && (
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-              <Hash size={11} className="text-emerald-600 dark:text-emerald-400" />
-              Document Configuration
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Financial Year</FieldLabel>
-                <div className="relative">
-                  <select
-                    value={selectedFinYear ?? ""}
-                    onChange={(e) => {
-                      const nextFinYear = e.target.value || undefined;
-                      setSelectedFinYear(nextFinYear);
-                      if (poDocTypeId)
-                        void refreshPoDocNumber(poDocTypeId, nextFinYear);
-                    }}
-                    className={selectCls}
-                  >
-                    <option value="">Select Fin Year…</option>
-                    {finYearOptions.map((fy) => (
-                      <option key={fy.id} value={fy.year}>
-                        {fy.year}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-              </div>
-              <div>
-                <FieldLabel>Document Type &amp; Number</FieldLabel>
-                {sourceWO ? (
-                  // Locked to WO_PO type — no dropdown
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/30 text-foreground">
-                      <Hash
-                        size={13}
-                        className="text-muted-foreground shrink-0"
-                      />
-                      <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                        WO_PO
-                      </span>
-                      <span className="text-xs opacity-40">·</span>
-                      <span className="text-xs text-muted-foreground">
-                        Work Order for Materials
-                      </span>
-                    </div>
-                    {poDocNo && (
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
-                          {poDocNo}
-                        </span>
-                        {selectedFinYear && (
-                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
-                            FY {selectedFinYear}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <select
-                        value={poDocTypeId ? String(poDocTypeId) : ""}
-                        onChange={async (e) => {
-                          const id = e.target.value ? parseInt(e.target.value, 10) : null;
-                          if (!id) { applyPoDocNumber(null, ""); return; }
-                          const docNo = await fetchNextDocNumber(id, selectedFinYear || undefined);
-                          applyPoDocNumber(id, docNo);
-                        }}
-                        disabled={poDocTypesLoading || viewMode === "edit"}
-                        className={selectCls}
-                      >
-                        {poDocTypesLoading ? (
-                          <option value="">Loading…</option>
-                        ) : poDocTypes.length === 0 ? (
-                          <option value="">No document types found</option>
-                        ) : (
-                          poDocTypes.map((dt) => {
-                            const label =
-                              dt.ProjectCode && dt.ModuleCode
-                                ? `${dt.ProjectCode}-${dt.ModuleCode}`
-                                : dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
-                            return (
-                              <option key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
-                                {label} — {dt.Description}
-                              </option>
-                            );
-                          })
-                        )}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
-                    {poDocNo && (
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
-                          {poDocNo}
-                        </span>
-                        {selectedFinYear && (
-                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
-                            FY {selectedFinYear}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Header Details Card ───────────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-            <FileText size={11} className="text-emerald-600 dark:text-emerald-400" />
-            Order Details
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Company */}
-            <div>
-              <FieldLabel>Company Name</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {companies.find((c) => c.id === form.companyId)?.name || "—"}
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={form.companyId}
-                    onChange={(e) => {
-                      setField("companyId", e.target.value);
-                      setField("projectId", "");
-                    }}
-                    className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
-                  >
-                    <option value="">— Select Company —</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-              )}
-              {errors.companyId && (
-                <p className="text-xs text-destructive mt-1">
-                  Company is required
-                </p>
-              )}
-            </div>
-
-            {/* Project */}
-            <div>
-              <FieldLabel required>Project / Site</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {allProjects.find((p) => p.id === form.projectId)?.name ||
-                    "—"}
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={form.projectId}
-                    onChange={(e) => setField("projectId", e.target.value)}
-                    className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
-                  >
-                    <option value="">— Select Project —</option>
-                    {filteredFormProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-              )}
-              {errors.projectId && (
-                <p className="text-xs text-destructive mt-1">
-                  Project is required
-                </p>
-              )}
-            </div>
-
-            {/* Supplier */}
-            <div>
-              <FieldLabel required>Supplier</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {suppliers.find((s) => s.id === form.supplierId)?.name || "—"}
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={form.supplierId}
-                    onChange={(e) => setField("supplierId", e.target.value)}
-                    className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
-                  >
-                    <option value="">— Select Supplier —</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* PO Number */}
-            <div>
-              <FieldLabel required>PO Number</FieldLabel>
-              <input
-                value={form.poNumber}
-                onChange={(e) =>
-                  setField("poNumber", e.target.value.toUpperCase())
-                }
-                readOnly={
-                  isReadOnly ||
-                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
-                }
-                className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
-                  isReadOnly ||
-                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
-                    ? "bg-muted/30 cursor-not-allowed"
-                    : ""
-                }`}
-                placeholder="Auto-generated"
-              />
-            </div>
-
-            {/* PO Date */}
-            <div>
-              <FieldLabel required>PO Date</FieldLabel>
-              <div className="relative">
-                <CalendarDays
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-                <input
-                  type="date"
-                  value={form.poDate}
-                  onChange={(e) => setField("poDate", e.target.value)}
-                  readOnly={isReadOnly}
-                  className={`${inputCls} pl-8 ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                />
-              </div>
-            </div>
-
-            {/* Expected Delivery */}
-            <div>
-              <FieldLabel>Expected Delivery</FieldLabel>
-              <div className="relative">
-                <CalendarDays
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-                <input
-                  type="date"
-                  value={form.expectedDate}
-                  onChange={(e) => setField("expectedDate", e.target.value)}
-                  readOnly={isReadOnly}
-                  className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                />
-              </div>
-            </div>
-
-            {/* Cost Center */}
-            <div>
-              <FieldLabel>Cost Center</FieldLabel>
-              <select
-                value={form.costCenterId}
-                onChange={(e) => setField("costCenterId", e.target.value)}
-                disabled={isReadOnly}
-                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              >
-                <option value="">— Select Cost Center —</option>
-                {costCenters.map((cc) => (
-                  <option key={cc.id} value={cc.id}>{cc.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Vendor Invoice No */}
-            <div>
-              <FieldLabel>Vendor Invoice No</FieldLabel>
-              <input
-                type="text"
-                placeholder="Vendor invoice number"
-                value={form.vendorInvoiceNo}
-                onChange={(e) => setField("vendorInvoiceNo", e.target.value)}
-                readOnly={isReadOnly}
-                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
-            </div>
-
-            {/* Vendor Invoice Date */}
-            <div>
-              <FieldLabel>Vendor Invoice Date</FieldLabel>
-              <div className="relative">
-                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <input
-                  type="date"
-                  value={form.vendorInvoiceDate}
-                  onChange={(e) => setField("vendorInvoiceDate", e.target.value)}
-                  readOnly={isReadOnly}
-                  className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-        {/* ── Supplier, Company & Project Info Panels (auto-fetched on selection) ──── */}
-        {(supplierDetails || companyDetails || projectDetails) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Supplier info */}
-            {supplierDetails && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <Truck size={11} className="text-emerald-600 dark:text-emerald-400" />
-                  Supplier Details
-                </h3>
-                <dl className="space-y-2 text-sm">
-                  {supplierDetails.LHeadAddress && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Address
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5">
-                        {supplierDetails.LHeadAddress}
-                      </dd>
-                    </div>
-                  )}
-                  {supplierDetails.LHeadContactPerson && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Contact Person
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <User size={12} className="text-muted-foreground" />
-                        {supplierDetails.LHeadContactPerson}
-                      </dd>
-                    </div>
-                  )}
-                  {supplierDetails.LHeadPhone && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Phone
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Phone size={12} className="text-muted-foreground" />
-                        {supplierDetails.LHeadPhone}
-                      </dd>
-                    </div>
-                  )}
-                  {supplierDetails.LHeadEmail && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Email
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Mail size={12} className="text-muted-foreground" />
-                        {supplierDetails.LHeadEmail}
-                      </dd>
-                    </div>
-                  )}
-                  {supplierDetails.LGST && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        GSTIN
-                      </dt>
-                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
-                        {supplierDetails.LGST}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-            )}
-
-            {/* Billing details */}
-            {companyDetails && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <CircleDollarSign size={11} className="text-emerald-600 dark:text-emerald-400" />
-                  Billing Details
-                </h3>
-                <dl className="space-y-2 text-sm">
-                  {(companyDetails.address || companyDetails.city) && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Billing Address
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5">
-                        {[
-                          companyDetails.address,
-                          companyDetails.address_line2,
-                          companyDetails.city,
-                          companyDetails.state,
-                          companyDetails.pincode,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </dd>
-                    </div>
-                  )}
-                  {companyDetails.phone_number && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Phone
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Phone size={12} className="text-muted-foreground" />
-                        {companyDetails.phone_number}
-                      </dd>
-                    </div>
-                  )}
-                  {companyDetails.email && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Email
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Mail size={12} className="text-muted-foreground" />
-                        {companyDetails.email}
-                      </dd>
-                    </div>
-                  )}
-                  {companyDetails.gst_no && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        GSTIN
-                      </dt>
-                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
-                        {companyDetails.gst_no}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-            )}
-
-            {/* Project info — delivery address */}
-            {projectDetails && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <MapPin size={11} className="text-emerald-600 dark:text-emerald-400" />
-                  Project Details
-                </h3>
-                <dl className="space-y-2 text-sm">
-                  {(projectDetails.address || projectDetails.city) && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Delivery Address
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5">
-                        {[
-                          projectDetails.address,
-                          projectDetails.address_line2,
-                          projectDetails.city,
-                          projectDetails.state,
-                          projectDetails.pincode,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </dd>
-                    </div>
-                  )}
-                  {projectDetails.phone_number && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Phone
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Phone size={12} className="text-muted-foreground" />
-                        {projectDetails.phone_number}
-                      </dd>
-                    </div>
-                  )}
-                  {projectDetails.email && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Email
-                      </dt>
-                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
-                        <Mail size={12} className="text-muted-foreground" />
-                        {projectDetails.email}
-                      </dd>
-                    </div>
-                  )}
-                  {projectDetails.gst_no && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        GSTIN
-                      </dt>
-                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
-                        {projectDetails.gst_no}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Line Items Card ───────────────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <Boxes size={11} className="text-emerald-600 dark:text-emerald-400" />
-              Item Cart
-              <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 min-w-[18px]">
-                {lineItems.length}
-              </span>
-            </h3>
-            {!isReadOnly && (
-              <Button
+        {/* Form Header — Card matching Material Request style */}
+        <Card className="border-border shadow-sm">
+          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+            <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+            <div className="flex items-center gap-3 min-w-0">
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={addLine}
-                className="gap-1.5 h-8 text-xs"
+                onClick={goToList}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
               >
-                <Plus size={13} /> Add Item
-              </Button>
-            )}
-          </div>
-
-          {errors.lineItems && (
-            <p className="px-5 pb-2 text-xs text-destructive">
-              Add at least one line item
-            </p>
-          )}
-
-          {/* Table header */}
-          <div
-            className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
-          >
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/10">
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-8">
-                    #
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[180px]">
-                    Item
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[200px]">
-                    Description
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-24">
-                    Qty
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
-                    UOM
-                  </th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
-                    Rate (₹)
-                  </th>
-                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
-                    GST %
-                  </th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
-                    Amount (₹)
-                  </th>
-                  {!isReadOnly && <th className="px-3 py-2.5 w-10" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {lineItems.map((li, idx) => (
-                  <tr
-                    key={li.id}
-                    className="group hover:bg-muted/10 transition-colors"
-                  >
-                    {/* Row number */}
-                    <td className="px-3 py-2 text-center text-xs text-muted-foreground font-mono">
-                      {idx + 1}
-                    </td>
-
-                    {/* Item selector */}
-                    <td className="px-3 py-2">
-                      {isReadOnly ? (
-                        <span className="text-sm font-medium text-foreground">
-                          {li.itemName || "—"}
-                        </span>
-                      ) : (
-                        <div className="relative">
-                          <select
-                            value={li.itemId}
-                            onChange={(e) =>
-                              handleItemSelect(idx, e.target.value)
-                            }
-                            className={cellSelect}
-                          >
-                            <option value="">— Select Item —</option>
-                            {items.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown
-                            size={11}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Description (auto-filled or editable) */}
-                    <td className="px-3 py-2">
-                      {isReadOnly ? (
-                        <span className="text-xs text-muted-foreground">
-                          {li.itemDescription || "—"}
-                        </span>
-                      ) : (
-                        <input
-                          value={li.itemDescription}
-                          onChange={(e) =>
-                            updateLine(idx, { itemDescription: e.target.value })
-                          }
-                          placeholder="Description…"
-                          className={cellInput}
-                        />
-                      )}
-                    </td>
-
-                    {/* Qty */}
-                    <td className="px-3 py-2">
-                      {isReadOnly ? (
-                        <span className="text-sm font-medium">
-                          {Number.isFinite(li.quantity) ? li.quantity.toLocaleString("en-IN", { maximumFractionDigits: 4 }) : "0"}
-                        </span>
-                      ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={li.quantity}
-                          onChange={(e) =>
-                            updateLine(idx, {
-                              quantity: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className={`${cellInput} text-right`}
-                        />
-                      )}
-                    </td>
-
-                    {/* UOM */}
-                    <td className="px-3 py-2">
-                      {isReadOnly ? (
-                        <span className="text-sm text-muted-foreground">
-                          {li.unit || "—"}
-                        </span>
-                      ) : (
-                        <div className="relative">
-                          <select
-                            value={
-                              li.uomId ??
-                              uoms.find(
-                                (u) =>
-                                  u.name.toLowerCase() ===
-                                    li.unit.toLowerCase() ||
-                                  u.code.toLowerCase() ===
-                                    li.unit.toLowerCase(),
-                              )?.id ??
-                              ""
-                            }
-                            onChange={(e) => {
-                              const uom = uoms.find(
-                                (u) => u.id === Number(e.target.value),
-                              );
-                              updateLine(idx, {
-                                uomId: uom?.id ?? null,
-                                unit: uom?.name ?? "",
-                              });
-                            }}
-                            className={cellSelect}
-                          >
-                            <option value="">— UOM —</option>
-                            {uoms.map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.name}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown
-                            size={11}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Rate */}
-                    <td className="px-3 py-2">
-                      {isReadOnly ? (
-                        <span className="text-sm text-right block font-mono">
-                          ₹{Number.isFinite(li.rate) ? li.rate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
-                        </span>
-                      ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={li.rate}
-                          onChange={(e) =>
-                            updateLine(idx, {
-                              rate: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className={`${cellInput} text-right font-mono`}
-                        />
-                      )}
-                    </td>
-
-                    {/* GST % */}
-                    <td className="px-3 py-2 text-center">
-                      {li.gstRate > 0 ? (
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
-                            {li.gstRate}%
-                          </span>
-                          {li.igstRate > 0 ? (
-                            <span className="text-[10px] text-muted-foreground font-medium">
-                              IGST
-                            </span>
-                          ) : (
-                            <>
-                              <span className="text-[10px] text-muted-foreground font-medium">
-                                CGST {li.cgstRate}%
-                              </span>
-                              <span className="text-[10px] text-muted-foreground font-medium">
-                                SGST {li.sgstRate}%
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-
-                    {/* Amount (base + GST) */}
-                    <td className="px-3 py-2 text-right">
-                      <span className="text-sm font-semibold font-mono text-foreground">
-                        ₹
-                        {(Number.isFinite(li.amount) ? li.amount : 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </span>
-                      {li.taxAmount > 0 && (
-                        <span className="block text-[10px] text-muted-foreground font-normal">
-                          +₹
-                          {li.taxAmount.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}{" "}
-                          GST
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Remove */}
-                    {!isReadOnly && (
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          onClick={() => removeLine(idx)}
-                          disabled={lineItems.length === 1}
-                          className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition disabled:opacity-30"
-                        >
-                          <X size={14} />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Totals footer */}
-          <div className="border-t border-border bg-muted/10 px-5 py-5 space-y-4">
-            {/* Amount summary */}
-            <div className="flex justify-end">
-              <div className="w-full max-w-xs space-y-2">
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Subtotal (excl. GST)</span>
-                  <span className="font-mono">{fmt(subtotal)}</span>
+                <ArrowLeft size={15} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="text-emerald-500/40">|</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                  <ShoppingCart size={12} className="text-emerald-400" />
                 </div>
-                {totalCgst > 0 && (
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>CGST</span>
-                    <span className="font-mono">{fmt(totalCgst)}</span>
-                  </div>
-                )}
-                {totalSgst > 0 && (
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>SGST</span>
-                    <span className="font-mono">{fmt(totalSgst)}</span>
-                  </div>
-                )}
-                {totalIgst > 0 && (
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>IGST</span>
-                    <span className="font-mono">{fmt(totalIgst)}</span>
-                  </div>
-                )}
-                {/* Combined total tax row when both CGST/SGST and IGST exist */}
-                {totalTax > 0 && totalCgst > 0 && totalIgst > 0 && (
-                  <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-border pt-1">
-                    <span>Total GST</span>
-                    <span className="font-mono">{fmt(totalTax)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-bold text-foreground border-t border-border pt-2">
-                  <span>Grand Total</span>
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                    {fmt(grandTotal)}
-                  </span>
-                </div>
+                <h2 className="text-sm font-heading font-bold text-foreground truncate flex items-center gap-2">
+                  {viewMode === "create"
+                    ? "New Purchase Order"
+                    : viewMode === "edit"
+                      ? "Edit Purchase Order"
+                      : `Purchase Order — ${escapeHtml(form.poNumber || "—")}`}
+                  {viewMode === "view" && form.status && (
+                    <StatusChip status={form.status} />
+                  )}
+                </h2>
               </div>
             </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {isReadOnly && (
+                <>
+                  <StatusChip
+                    status={
+                      listData.find((r) => r._id === editingId)?.status ??
+                      "Draft"
+                    }
+                  />
+                  {rights.canPrint && (
+                    <button
+                      onClick={handlePrint}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
+                    >
+                      <Printer size={14} /> Print
+                    </button>
+                  )}
+                  {rights.canEdit && (
+                    <button
+                      onClick={() => {
+                        const item = listData.find((r) => r._id === editingId);
+                        if (item) goToAmend(item);
+                      }}
+                      className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
+                    >
+                      <FilePenLine size={14} /> Amend
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        </Card>
 
-        {/* ── Terms & Conditions Card ───────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <ClipboardList size={11} className="text-emerald-600 dark:text-emerald-400" />
-              Terms &amp; Conditions
-            </h3>
-            {!isReadOnly && (
-              <div className="relative">
-                <button
-                  onClick={() => setTcDropdownOpen((o) => !o)}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
-                >
-                  <Plus size={13} />
-                  Add T&amp;C
-                </button>
-                {tcDropdownOpen && (
-                  <>
-                    {/* Backdrop */}
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setTcDropdownOpen(false)}
+        <div className="space-y-5">
+          {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
+          {/* ── MR Doc Number Lookup (only shown in create mode, before any source is set) ── */}
+          {viewMode === "create" &&
+            !sourceMR &&
+            !sourceWD &&
+            !sourceWO &&
+            !isReadOnly && (
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                  <ClipboardList
+                    size={11}
+                    className="text-emerald-600 dark:text-emerald-400"
+                  />
+                  Load from Material Request
+                </h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Filter by company and project, then select an approved
+                  Material Request to auto-fill items and details.
+                </p>
+
+                {/* MR Filters: Company + Project */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div className="relative">
+                    <select
+                      value={mrFilterCompanyId}
+                      onChange={(e) => {
+                        setMrFilterCompanyId(e.target.value);
+                        setMrFilterProjectId("");
+                        setMrDropdownValue("");
+                      }}
+                      className={`${inputCls} pr-8 appearance-none`}
+                    >
+                      <option value="">— Filter by Company —</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    {/* Dropdown */}
-                    <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
-                      <div className="px-3 py-2 border-b border-border">
-                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                          Select Terms &amp; Conditions
-                        </p>
-                      </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-border">
-                        {tcRecords.length === 0 ? (
-                          <p className="px-4 py-6 text-xs text-center text-muted-foreground">
-                            No T&amp;C records found
-                          </p>
-                        ) : (
-                          tcRecords.map((tc) => {
-                            const isSelected = selectedTCs.some(
-                              (s) => s.id === tc.id,
-                            );
-                            return (
-                              <button
-                                key={tc.id}
-                                onClick={() => {
-                                  setSelectedTCs((prev) =>
-                                    isSelected
-                                      ? prev.filter((s) => s.id !== tc.id)
-                                      : [...prev, tc],
-                                  );
-                                }}
-                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
-                              >
-                                <span
-                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}
-                                >
-                                  {isSelected && (
-                                    <Check
-                                      size={10}
-                                      className="text-primary-foreground"
-                                    />
-                                  )}
-                                </span>
-                                <span className="flex-1 min-w-0">
-                                  <span className="block text-sm font-medium text-foreground truncate">
-                                    {tc.name}
-                                  </span>
-                                  <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
-                                    {tc.terms}
-                                  </span>
-                                </span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                      <div className="px-3 py-2 border-t border-border">
-                        <button
-                          onClick={() => setTcDropdownOpen(false)}
-                          className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
-                        >
-                          Done
-                        </button>
-                      </div>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={mrFilterProjectId}
+                      onChange={(e) => {
+                        setMrFilterProjectId(e.target.value);
+                        setMrDropdownValue("");
+                      }}
+                      disabled={filteredMRProjects.length === 0}
+                      className={`${inputCls} pr-8 appearance-none`}
+                    >
+                      <option value="">— Filter by Project —</option>
+                      {filteredMRProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* MR Dropdown */}
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 relative">
+                    <select
+                      value={mrDropdownValue}
+                      onChange={(e) =>
+                        void handleMRDropdownSelect(e.target.value)
+                      }
+                      disabled={approvedMRsLoading || mrDropdownLoading}
+                      className={`${inputCls} pr-8 appearance-none ${mrDropdownError ? "border-red-400" : ""}`}
+                    >
+                      <option value="">
+                        {approvedMRsLoading
+                          ? "Loading approved MRs…"
+                          : approvedMRs.length === 0
+                            ? "No approved Material Requests"
+                            : "— Select a Material Request —"}
+                      </option>
+                      {approvedMRs.map((mr) => (
+                        <option key={mr.MRId} value={String(mr.MRId)}>
+                          {mr.DocNo}
+                          {mr.ProjectName ? ` · ${mr.ProjectName}` : ""}
+                          {mr.FinYearName ? ` (${mr.FinYearName})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    {mrDropdownError && (
+                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                        <AlertCircle size={11} />
+                        {mrDropdownError}
+                      </p>
+                    )}
+                  </div>
+                  {mrDropdownLoading && (
+                    <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground shrink-0">
+                      <RefreshCw size={13} className="animate-spin" />
+                      Loading…
                     </div>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
             )}
-          </div>
 
-          {/* Selected T&C list */}
-          {selectedTCs.length > 0 ? (
-            <div className="space-y-2 mb-4">
-              {selectedTCs.map((tc, idx) => (
-                <div
-                  key={tc.id}
-                  className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
-                >
-                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
-                    {idx + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">
-                      {tc.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
-                      {tc.terms}
-                    </p>
-                  </div>
-                  {!isReadOnly && (
+          {viewMode === "create" &&
+            !sourceMR &&
+            !sourceWD &&
+            !sourceWO &&
+            !isReadOnly && (
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                  <Receipt size={11} className="text-blue-500" />
+                  Link to Sale Invoice (optional)
+                </h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Enter a paid Sale Invoice doc number to link this PO to a Sale
+                  Invoice. The backend will validate that the invoice is fully
+                  paid before saving.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={saleInvoiceInput}
+                    onChange={(e) => setSaleInvoiceInput(e.target.value)}
+                    placeholder="Sale Invoice ID (numeric)"
+                    className={`${inputCls} flex-1`}
+                    disabled={!!sourceSaleInvoice}
+                    min={1}
+                  />
+                  {!sourceSaleInvoice ? (
                     <button
-                      onClick={() =>
-                        setSelectedTCs((prev) =>
-                          prev.filter((s) => s.id !== tc.id),
-                        )
-                      }
-                      className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                      type="button"
+                      onClick={() => {
+                        const id = parseInt(saleInvoiceInput.trim(), 10);
+                        if (!id || id <= 0) return;
+                        setSourceSaleInvoice({ id, docNo: `SI-${id}` });
+                      }}
+                      disabled={!saleInvoiceInput.trim()}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
                     >
-                      <X size={13} />
+                      Link
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSourceSaleInvoice(null);
+                        setSaleInvoiceInput("");
+                      }}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      Clear
                     </button>
                   )}
                 </div>
-              ))}
-            </div>
-          ) : (
-            !isReadOnly && (
-              <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-5 mb-4 text-muted-foreground text-xs">
-                <ClipboardList size={14} className="opacity-40" />
-                <span>
-                  No terms selected — click <strong>+ Add T&amp;C</strong> to
-                  add from master
-                </span>
               </div>
-            )
+            )}
+
+          {sourceSaleInvoice && !isReadOnly && (
+            <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+              <Receipt
+                size={15}
+                className="text-blue-600 dark:text-blue-400 shrink-0"
+              />
+              <span className="text-blue-700 dark:text-blue-300 flex-1">
+                Linked to Sale Invoice{" "}
+                <span className="font-mono font-bold">
+                  {sourceSaleInvoice.docNo}
+                </span>
+                . The backend will validate that this invoice is fully paid
+                before saving.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSourceSaleInvoice(null);
+                  setSaleInvoiceInput("");
+                }}
+                className="text-blue-400 hover:text-blue-600 transition-colors"
+                title="Remove link"
+              >
+                <X size={14} />
+              </button>
+            </div>
           )}
 
-          {/* Remarks */}
-          <div>
-            <FieldLabel>Remarks</FieldLabel>
-            <textarea
-              value={form.remarks}
-              onChange={(e) => setField("remarks", e.target.value)}
-              readOnly={isReadOnly}
-              rows={3}
-              placeholder="Additional notes…"
-              className={`${inputCls} resize-none ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-            />
-          </div>
-        </div>
+          {sourceMR && !isReadOnly && (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+              <ClipboardList
+                size={15}
+                className="text-emerald-600 dark:text-emerald-400 shrink-0"
+              />
+              <span className="text-emerald-700 dark:text-emerald-300">
+                Creating <span className="font-semibold">Normal PO</span> from
+                Material Request{" "}
+                <span className="font-mono font-bold">{sourceMR.docNo}</span>.
+                Items, company and project have been pre-filled.
+              </span>
+            </div>
+          )}
 
-        {/* ── Flow Status Panel (view mode only) ────────────────────────────── */}
-        {isReadOnly && (
+          {sourceWD && !isReadOnly && (
+            <div className="rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+              <ClipboardList
+                size={15}
+                className="text-orange-600 dark:text-orange-400 shrink-0"
+              />
+              <span className="text-orange-700 dark:text-orange-300">
+                Creating <span className="font-semibold">Material PO</span> from
+                Work Done{" "}
+                <span className="font-mono font-bold">{sourceWD.docNo}</span>.
+                Company, project and line items have been pre-filled.
+              </span>
+            </div>
+          )}
+
+          {sourceWO && !isReadOnly && (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+              <ClipboardList
+                size={15}
+                className="text-emerald-600 dark:text-emerald-400 shrink-0"
+              />
+              <span className="text-emerald-700 dark:text-emerald-300">
+                Creating <span className="font-semibold">Material PO</span> from
+                Work Order{" "}
+                <span className="font-mono font-bold">{sourceWO.docNo}</span>.
+                Company, project and material line items have been pre-filled.
+              </span>
+            </div>
+          )}
+
+          {!isReadOnly && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
+                <Hash
+                  size={11}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />
+                Document Configuration
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel>Financial Year</FieldLabel>
+                  <div className="relative">
+                    <select
+                      value={selectedFinYear ?? ""}
+                      onChange={(e) => {
+                        const nextFinYear = e.target.value || undefined;
+                        setSelectedFinYear(nextFinYear);
+                        if (poDocTypeId)
+                          void refreshPoDocNumber(poDocTypeId, nextFinYear);
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">Select Fin Year…</option>
+                      {finYearOptions.map((fy) => (
+                        <option key={fy.id} value={fy.year}>
+                          {fy.year}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <FieldLabel>Document Type &amp; Number</FieldLabel>
+                  {sourceWO ? (
+                    // Locked to WO_PO type — no dropdown
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/30 text-foreground">
+                        <Hash
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                          WO_PO
+                        </span>
+                        <span className="text-xs opacity-40">·</span>
+                        <span className="text-xs text-muted-foreground">
+                          Work Order for Materials
+                        </span>
+                      </div>
+                      {poDocNo && (
+                        <div className="flex items-center gap-2 px-1">
+                          <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+                            {poDocNo}
+                          </span>
+                          {selectedFinYear && (
+                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                              FY {selectedFinYear}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={poDocTypeId ? String(poDocTypeId) : ""}
+                          onChange={async (e) => {
+                            const id = e.target.value
+                              ? parseInt(e.target.value, 10)
+                              : null;
+                            if (!id) {
+                              applyPoDocNumber(null, "");
+                              return;
+                            }
+                            const docNo = await fetchNextDocNumber(
+                              id,
+                              selectedFinYear || undefined,
+                            );
+                            applyPoDocNumber(id, docNo);
+                          }}
+                          disabled={poDocTypesLoading || viewMode === "edit"}
+                          className={selectCls}
+                        >
+                          {poDocTypesLoading ? (
+                            <option value="">Loading…</option>
+                          ) : poDocTypes.length === 0 ? (
+                            <option value="">No document types found</option>
+                          ) : (
+                            poDocTypes.map((dt) => {
+                              const label =
+                                dt.ProjectCode && dt.ModuleCode
+                                  ? `${dt.ProjectCode}-${dt.ModuleCode}`
+                                  : (dt.DocNoPrefix ??
+                                    dt.FullPrefix ??
+                                    dt.Prefix);
+                              return (
+                                <option
+                                  key={dt.TypeOfDocId}
+                                  value={String(dt.TypeOfDocId)}
+                                >
+                                  {label} — {dt.Description}
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                        <ChevronDown
+                          size={13}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                      {poDocNo && (
+                        <div className="flex items-center gap-2 px-1">
+                          <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+                            {poDocNo}
+                          </span>
+                          {selectedFinYear && (
+                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                              FY {selectedFinYear}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Header Details Card ───────────────────────────────────────────── */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-              <Link2 size={11} className="text-emerald-600 dark:text-emerald-400" />
-              Purchase Flow Status
+              <FileText
+                size={11}
+                className="text-emerald-600 dark:text-emerald-400"
+              />
+              Order Details
             </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Company */}
+              <div>
+                <FieldLabel>Company Name</FieldLabel>
+                {isReadOnly ? (
+                  <div className={`${inputCls} bg-muted/30`}>
+                    {companies.find((c) => c.id === form.companyId)?.name ||
+                      "—"}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      value={form.companyId}
+                      onChange={(e) => {
+                        setField("companyId", e.target.value);
+                        setField("projectId", "");
+                      }}
+                      className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
+                    >
+                      <option value="">— Select Company —</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                )}
+                {errors.companyId && (
+                  <p className="text-xs text-destructive mt-1">
+                    Company is required
+                  </p>
+                )}
+              </div>
 
-            {poChainLoading ? (
-              <div className="flex items-center gap-3">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="h-16 flex-1 bg-muted animate-pulse rounded-xl"
+              {/* Project */}
+              <div>
+                <FieldLabel required>Project / Site</FieldLabel>
+                {isReadOnly ? (
+                  <div className={`${inputCls} bg-muted/30`}>
+                    {allProjects.find((p) => p.id === form.projectId)?.name ||
+                      "—"}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      value={form.projectId}
+                      onChange={(e) => setField("projectId", e.target.value)}
+                      className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
+                    >
+                      <option value="">— Select Project —</option>
+                      {filteredFormProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                )}
+                {errors.projectId && (
+                  <p className="text-xs text-destructive mt-1">
+                    Project is required
+                  </p>
+                )}
+              </div>
+
+              {/* Supplier */}
+              <div>
+                <FieldLabel required>Supplier</FieldLabel>
+                {isReadOnly ? (
+                  <div className={`${inputCls} bg-muted/30`}>
+                    {suppliers.find((s) => s.id === form.supplierId)?.name ||
+                      "—"}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      value={form.supplierId}
+                      onChange={(e) => setField("supplierId", e.target.value)}
+                      className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
+                    >
+                      <option value="">— Select Supplier —</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* PO Number */}
+              <div>
+                <FieldLabel required>PO Number</FieldLabel>
+                <input
+                  value={form.poNumber}
+                  onChange={(e) =>
+                    setField("poNumber", e.target.value.toUpperCase())
+                  }
+                  readOnly={
+                    isReadOnly ||
+                    (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                  }
+                  className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
+                    isReadOnly ||
+                    (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                      ? "bg-muted/30 cursor-not-allowed"
+                      : ""
+                  }`}
+                  placeholder="Auto-generated"
+                />
+              </div>
+
+              {/* PO Date */}
+              <div>
+                <FieldLabel required>PO Date</FieldLabel>
+                <div className="relative">
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
+                  <input
+                    type="date"
+                    value={form.poDate}
+                    onChange={(e) => setField("poDate", e.target.value)}
+                    readOnly={isReadOnly}
+                    className={`${inputCls} pl-8 ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                  />
+                </div>
+              </div>
+
+              {/* Expected Delivery */}
+              <div>
+                <FieldLabel>Expected Delivery</FieldLabel>
+                <div className="relative">
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.expectedDate}
+                    onChange={(e) => setField("expectedDate", e.target.value)}
+                    readOnly={isReadOnly}
+                    className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                  />
+                </div>
+              </div>
+
+              {/* Cost Center */}
+              <div>
+                <FieldLabel>Cost Center</FieldLabel>
+                <select
+                  value={form.costCenterId}
+                  onChange={(e) => setField("costCenterId", e.target.value)}
+                  disabled={isReadOnly}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                >
+                  <option value="">— Select Cost Center —</option>
+                  {costCenters.map((cc) => (
+                    <option key={cc.id} value={cc.id}>
+                      {cc.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Vendor Invoice No */}
+              <div>
+                <FieldLabel>Vendor Invoice No</FieldLabel>
+                <input
+                  type="text"
+                  placeholder="Vendor invoice number"
+                  value={form.vendorInvoiceNo}
+                  onChange={(e) => setField("vendorInvoiceNo", e.target.value)}
+                  readOnly={isReadOnly}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                />
+              </div>
+
+              {/* Vendor Invoice Date */}
+              <div>
+                <FieldLabel>Vendor Invoice Date</FieldLabel>
+                <div className="relative">
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.vendorInvoiceDate}
+                    onChange={(e) =>
+                      setField("vendorInvoiceDate", e.target.value)
+                    }
+                    readOnly={isReadOnly}
+                    className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* ── Supplier, Company & Project Info Panels (auto-fetched on selection) ──── */}
+          {(supplierDetails || companyDetails || projectDetails) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Supplier info */}
+              {supplierDetails && (
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <Truck
+                      size={11}
+                      className="text-emerald-600 dark:text-emerald-400"
+                    />
+                    Supplier Details
+                  </h3>
+                  <dl className="space-y-2 text-sm">
+                    {supplierDetails.LHeadAddress && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Address
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5">
+                          {supplierDetails.LHeadAddress}
+                        </dd>
+                      </div>
+                    )}
+                    {supplierDetails.LHeadContactPerson && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Contact Person
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <User size={12} className="text-muted-foreground" />
+                          {supplierDetails.LHeadContactPerson}
+                        </dd>
+                      </div>
+                    )}
+                    {supplierDetails.LHeadPhone && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Phone
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Phone size={12} className="text-muted-foreground" />
+                          {supplierDetails.LHeadPhone}
+                        </dd>
+                      </div>
+                    )}
+                    {supplierDetails.LHeadEmail && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Email
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Mail size={12} className="text-muted-foreground" />
+                          {supplierDetails.LHeadEmail}
+                        </dd>
+                      </div>
+                    )}
+                    {supplierDetails.LGST && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          GSTIN
+                        </dt>
+                        <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                          {supplierDetails.LGST}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Billing details */}
+              {companyDetails && (
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <CircleDollarSign
+                      size={11}
+                      className="text-emerald-600 dark:text-emerald-400"
+                    />
+                    Billing Details
+                  </h3>
+                  <dl className="space-y-2 text-sm">
+                    {(companyDetails.address || companyDetails.city) && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Billing Address
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5">
+                          {[
+                            companyDetails.address,
+                            companyDetails.address_line2,
+                            companyDetails.city,
+                            companyDetails.state,
+                            companyDetails.pincode,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </dd>
+                      </div>
+                    )}
+                    {companyDetails.phone_number && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Phone
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Phone size={12} className="text-muted-foreground" />
+                          {companyDetails.phone_number}
+                        </dd>
+                      </div>
+                    )}
+                    {companyDetails.email && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Email
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Mail size={12} className="text-muted-foreground" />
+                          {companyDetails.email}
+                        </dd>
+                      </div>
+                    )}
+                    {companyDetails.gst_no && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          GSTIN
+                        </dt>
+                        <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                          {companyDetails.gst_no}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Project info — delivery address */}
+              {projectDetails && (
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <MapPin
+                      size={11}
+                      className="text-emerald-600 dark:text-emerald-400"
+                    />
+                    Project Details
+                  </h3>
+                  <dl className="space-y-2 text-sm">
+                    {(projectDetails.address || projectDetails.city) && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Delivery Address
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5">
+                          {[
+                            projectDetails.address,
+                            projectDetails.address_line2,
+                            projectDetails.city,
+                            projectDetails.state,
+                            projectDetails.pincode,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </dd>
+                      </div>
+                    )}
+                    {projectDetails.phone_number && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Phone
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Phone size={12} className="text-muted-foreground" />
+                          {projectDetails.phone_number}
+                        </dd>
+                      </div>
+                    )}
+                    {projectDetails.email && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Email
+                        </dt>
+                        <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                          <Mail size={12} className="text-muted-foreground" />
+                          {projectDetails.email}
+                        </dd>
+                      </div>
+                    )}
+                    {projectDetails.gst_no && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          GSTIN
+                        </dt>
+                        <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                          {projectDetails.gst_no}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Line Items Card ───────────────────────────────────────────────── */}
+          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                <Boxes
+                  size={11}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />
+                Item Cart
+                <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 min-w-[18px]">
+                  {lineItems.length}
+                </span>
+              </h3>
+              {!isReadOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addLine}
+                  className="gap-1.5 h-8 text-xs"
+                >
+                  <Plus size={13} /> Add Item
+                </Button>
+              )}
+            </div>
+
+            {errors.lineItems && (
+              <p className="px-5 pb-2 text-xs text-destructive">
+                Add at least one line item
+              </p>
+            )}
+
+            {/* Table header */}
+            <div
+              className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
+            >
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/10">
+                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-8">
+                      #
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[180px]">
+                      Item
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[200px]">
+                      Description
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-24">
+                      Qty
+                    </th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
+                      UOM
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
+                      Rate (₹)
+                    </th>
+                    <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
+                      GST %
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
+                      Amount (₹)
+                    </th>
+                    {!isReadOnly && <th className="px-3 py-2.5 w-10" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {lineItems.map((li, idx) => (
+                    <tr
+                      key={li.id}
+                      className="group hover:bg-muted/10 transition-colors"
+                    >
+                      {/* Row number */}
+                      <td className="px-3 py-2 text-center text-xs text-muted-foreground font-mono">
+                        {idx + 1}
+                      </td>
+
+                      {/* Item selector */}
+                      <td className="px-3 py-2">
+                        {isReadOnly ? (
+                          <span className="text-sm font-medium text-foreground">
+                            {li.itemName || "—"}
+                          </span>
+                        ) : (
+                          <div className="relative">
+                            <select
+                              value={li.itemId}
+                              onChange={(e) =>
+                                handleItemSelect(idx, e.target.value)
+                              }
+                              className={cellSelect}
+                            >
+                              <option value="">— Select Item —</option>
+                              {items.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Description (auto-filled or editable) */}
+                      <td className="px-3 py-2">
+                        {isReadOnly ? (
+                          <span className="text-xs text-muted-foreground">
+                            {li.itemDescription || "—"}
+                          </span>
+                        ) : (
+                          <input
+                            value={li.itemDescription}
+                            onChange={(e) =>
+                              updateLine(idx, {
+                                itemDescription: e.target.value,
+                              })
+                            }
+                            placeholder="Description…"
+                            className={cellInput}
+                          />
+                        )}
+                      </td>
+
+                      {/* Qty */}
+                      <td className="px-3 py-2">
+                        {isReadOnly ? (
+                          <span className="text-sm font-medium">
+                            {Number.isFinite(li.quantity)
+                              ? li.quantity.toLocaleString("en-IN", {
+                                  maximumFractionDigits: 4,
+                                })
+                              : "0"}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={li.quantity}
+                            onChange={(e) =>
+                              updateLine(idx, {
+                                quantity: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className={`${cellInput} text-right`}
+                          />
+                        )}
+                      </td>
+
+                      {/* UOM */}
+                      <td className="px-3 py-2">
+                        {isReadOnly ? (
+                          <span className="text-sm text-muted-foreground">
+                            {li.unit || "—"}
+                          </span>
+                        ) : (
+                          <div className="relative">
+                            <select
+                              value={
+                                li.uomId ??
+                                uoms.find(
+                                  (u) =>
+                                    u.name.toLowerCase() ===
+                                      li.unit.toLowerCase() ||
+                                    u.code.toLowerCase() ===
+                                      li.unit.toLowerCase(),
+                                )?.id ??
+                                ""
+                              }
+                              onChange={(e) => {
+                                const uom = uoms.find(
+                                  (u) => u.id === Number(e.target.value),
+                                );
+                                updateLine(idx, {
+                                  uomId: uom?.id ?? null,
+                                  unit: uom?.name ?? "",
+                                });
+                              }}
+                              className={cellSelect}
+                            >
+                              <option value="">— UOM —</option>
+                              {uoms.map((u) => (
+                                <option key={u.id} value={u.id}>
+                                  {u.name}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Rate */}
+                      <td className="px-3 py-2">
+                        {isReadOnly ? (
+                          <span className="text-sm text-right block font-mono">
+                            ₹
+                            {Number.isFinite(li.rate)
+                              ? li.rate.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })
+                              : "0.00"}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={li.rate}
+                            onChange={(e) =>
+                              updateLine(idx, {
+                                rate: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className={`${cellInput} text-right font-mono`}
+                          />
+                        )}
+                      </td>
+
+                      {/* GST % */}
+                      <td className="px-3 py-2 text-center">
+                        {li.gstRate > 0 ? (
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                              {li.gstRate}%
+                            </span>
+                            {li.igstRate > 0 ? (
+                              <span className="text-[10px] text-muted-foreground font-medium">
+                                IGST
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-[10px] text-muted-foreground font-medium">
+                                  CGST {li.cgstRate}%
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-medium">
+                                  SGST {li.sgstRate}%
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            —
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Amount (base + GST) */}
+                      <td className="px-3 py-2 text-right">
+                        <span className="text-sm font-semibold font-mono text-foreground">
+                          ₹
+                          {(Number.isFinite(li.amount)
+                            ? li.amount
+                            : 0
+                          ).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                        {li.taxAmount > 0 && (
+                          <span className="block text-[10px] text-muted-foreground font-normal">
+                            +₹
+                            {li.taxAmount.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}{" "}
+                            GST
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Remove */}
+                      {!isReadOnly && (
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => removeLine(idx)}
+                            disabled={lineItems.length === 1}
+                            className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition disabled:opacity-30"
+                          >
+                            <X size={14} />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals footer */}
+            <div className="border-t border-border bg-muted/10 px-5 py-5 space-y-4">
+              {/* Amount summary */}
+              <div className="flex justify-end">
+                <div className="w-full max-w-xs space-y-2">
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Subtotal (excl. GST)</span>
+                    <span className="font-mono">{fmt(subtotal)}</span>
+                  </div>
+                  {totalCgst > 0 && (
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>CGST</span>
+                      <span className="font-mono">{fmt(totalCgst)}</span>
+                    </div>
+                  )}
+                  {totalSgst > 0 && (
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>SGST</span>
+                      <span className="font-mono">{fmt(totalSgst)}</span>
+                    </div>
+                  )}
+                  {totalIgst > 0 && (
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>IGST</span>
+                      <span className="font-mono">{fmt(totalIgst)}</span>
+                    </div>
+                  )}
+                  {/* Combined total tax row when both CGST/SGST and IGST exist */}
+                  {totalTax > 0 && totalCgst > 0 && totalIgst > 0 && (
+                    <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-border pt-1">
+                      <span>Total GST</span>
+                      <span className="font-mono">{fmt(totalTax)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-base font-bold text-foreground border-t border-border pt-2">
+                    <span>Grand Total</span>
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                      {fmt(grandTotal)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Terms & Conditions Card ───────────────────────────────────────── */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                <ClipboardList
+                  size={11}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />
+                Terms &amp; Conditions
+              </h3>
+              {!isReadOnly && (
+                <div className="relative">
+                  <button
+                    onClick={() => setTcDropdownOpen((o) => !o)}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    <Plus size={13} />
+                    Add T&amp;C
+                  </button>
+                  {tcDropdownOpen && (
+                    <>
+                      {/* Backdrop */}
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setTcDropdownOpen(false)}
+                      />
+                      {/* Dropdown */}
+                      <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                        <div className="px-3 py-2 border-b border-border">
+                          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            Select Terms &amp; Conditions
+                          </p>
+                        </div>
+                        <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                          {tcRecords.length === 0 ? (
+                            <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                              No T&amp;C records found
+                            </p>
+                          ) : (
+                            tcRecords.map((tc) => {
+                              const isSelected = selectedTCs.some(
+                                (s) => s.id === tc.id,
+                              );
+                              return (
+                                <button
+                                  key={tc.id}
+                                  onClick={() => {
+                                    setSelectedTCs((prev) =>
+                                      isSelected
+                                        ? prev.filter((s) => s.id !== tc.id)
+                                        : [...prev, tc],
+                                    );
+                                  }}
+                                  className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
+                                >
+                                  <span
+                                    className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}
+                                  >
+                                    {isSelected && (
+                                      <Check
+                                        size={10}
+                                        className="text-primary-foreground"
+                                      />
+                                    )}
+                                  </span>
+                                  <span className="flex-1 min-w-0">
+                                    <span className="block text-sm font-medium text-foreground truncate">
+                                      {tc.name}
+                                    </span>
+                                    <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                      {tc.terms}
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                        <div className="px-3 py-2 border-t border-border">
+                          <button
+                            onClick={() => setTcDropdownOpen(false)}
+                            className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Selected T&C list */}
+            {selectedTCs.length > 0 ? (
+              <div className="space-y-2 mb-4">
+                {selectedTCs.map((tc, idx) => (
+                  <div
+                    key={tc.id}
+                    className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                  >
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        {tc.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                        {tc.terms}
+                      </p>
+                    </div>
+                    {!isReadOnly && (
+                      <button
+                        onClick={() =>
+                          setSelectedTCs((prev) =>
+                            prev.filter((s) => s.id !== tc.id),
+                          )
+                        }
+                        className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Step 1: GRN */}
-                <div className="rounded-xl border border-border bg-muted/20 p-3 flex items-start gap-3">
-                  <div className="mt-0.5 w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center shrink-0">
-                    <Truck
-                      size={13}
-                      className="text-emerald-600 dark:text-emerald-400"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-                      GRN
-                    </p>
-                    <p className="text-xs font-semibold text-foreground">
-                      Goods Received
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Check GRN list for receipts against this PO
-                    </p>
-                  </div>
+              !isReadOnly && (
+                <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-5 mb-4 text-muted-foreground text-xs">
+                  <ClipboardList size={14} className="opacity-40" />
+                  <span>
+                    No terms selected — click <strong>+ Add T&amp;C</strong> to
+                    add from master
+                  </span>
                 </div>
+              )
+            )}
 
-                {/* Step 2: Expense Booking */}
-                <div
-                  className={`rounded-xl border p-3 flex items-start gap-3 ${
-                    (poChainStatus?.expenseCount ?? 0) > 0
-                      ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
-                      : "border-border bg-muted/20"
-                  }`}
-                >
-                  <div
-                    className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                      (poChainStatus?.expenseCount ?? 0) > 0
-                        ? "bg-emerald-100 dark:bg-emerald-950/40"
-                        : "bg-muted"
-                    }`}
-                  >
-                    {(poChainStatus?.expenseCount ?? 0) > 0 ? (
-                      <CheckCircle2
+            {/* Remarks */}
+            <div>
+              <FieldLabel>Remarks</FieldLabel>
+              <textarea
+                value={form.remarks}
+                onChange={(e) => setField("remarks", e.target.value)}
+                readOnly={isReadOnly}
+                rows={3}
+                placeholder="Additional notes…"
+                className={`${inputCls} resize-none ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              />
+            </div>
+          </div>
+
+          {/* ── Flow Status Panel (view mode only) ────────────────────────────── */}
+          {isReadOnly && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
+                <Link2
+                  size={11}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />
+                Purchase Flow Status
+              </h3>
+
+              {poChainLoading ? (
+                <div className="flex items-center gap-3">
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="h-16 flex-1 bg-muted animate-pulse rounded-xl"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Step 1: GRN */}
+                  <div className="rounded-xl border border-border bg-muted/20 p-3 flex items-start gap-3">
+                    <div className="mt-0.5 w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center shrink-0">
+                      <Truck
                         size={13}
                         className="text-emerald-600 dark:text-emerald-400"
                       />
-                    ) : (
-                      <Receipt size={13} className="text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-                      Expense Booking
-                    </p>
-                    {(poChainStatus?.expenseCount ?? 0) > 0 ? (
-                      <>
-                        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                          {poChainStatus!.expenseCount} booking
-                          {poChainStatus!.expenseCount > 1 ? "s" : ""}
-                        </p>
-                        {poChainStatus?.latestExpenseDocNo && (
-                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5 truncate">
-                            {poChainStatus.latestExpenseDocNo}
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Not booked yet
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                        GRN
                       </p>
-                    )}
+                      <p className="text-xs font-semibold text-foreground">
+                        Goods Received
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Check GRN list for receipts against this PO
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                {/* Step 3: Payment */}
-                <div
-                  className={`rounded-xl border p-3 flex items-start gap-3 ${
-                    poChainStatus?.isPaid
-                      ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
-                      : "border-border bg-muted/20"
-                  }`}
-                >
+                  {/* Step 2: Expense Booking */}
                   <div
-                    className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                      poChainStatus?.isPaid
-                        ? "bg-emerald-100 dark:bg-emerald-950/40"
-                        : "bg-muted"
+                    className={`rounded-xl border p-3 flex items-start gap-3 ${
+                      (poChainStatus?.expenseCount ?? 0) > 0
+                        ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
+                        : "border-border bg-muted/20"
                     }`}
                   >
-                    <CircleDollarSign
-                      size={13}
-                      className={
-                        poChainStatus?.isPaid
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-muted-foreground"
-                      }
-                    />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-                      Payment
-                    </p>
-                    {poChainStatus?.isPaid ? (
-                      <>
-                        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                          {poChainStatus.paymentCount} payment
-                          {poChainStatus.paymentCount > 1 ? "s" : ""}
-                        </p>
-                        {poChainStatus.latestPaymentAmount != null && (
-                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                            ₹
-                            {poChainStatus.latestPaymentAmount.toLocaleString(
-                              "en-IN",
-                            )}
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Not paid yet
+                    <div
+                      className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                        (poChainStatus?.expenseCount ?? 0) > 0
+                          ? "bg-emerald-100 dark:bg-emerald-950/40"
+                          : "bg-muted"
+                      }`}
+                    >
+                      {(poChainStatus?.expenseCount ?? 0) > 0 ? (
+                        <CheckCircle2
+                          size={13}
+                          className="text-emerald-600 dark:text-emerald-400"
+                        />
+                      ) : (
+                        <Receipt size={13} className="text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                        Expense Booking
                       </p>
-                    )}
+                      {(poChainStatus?.expenseCount ?? 0) > 0 ? (
+                        <>
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            {poChainStatus!.expenseCount} booking
+                            {poChainStatus!.expenseCount > 1 ? "s" : ""}
+                          </p>
+                          {poChainStatus?.latestExpenseDocNo && (
+                            <p className="text-[10px] font-mono text-muted-foreground mt-0.5 truncate">
+                              {poChainStatus.latestExpenseDocNo}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Not booked yet
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step 3: Payment */}
+                  <div
+                    className={`rounded-xl border p-3 flex items-start gap-3 ${
+                      poChainStatus?.isPaid
+                        ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
+                        : "border-border bg-muted/20"
+                    }`}
+                  >
+                    <div
+                      className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                        poChainStatus?.isPaid
+                          ? "bg-emerald-100 dark:bg-emerald-950/40"
+                          : "bg-muted"
+                      }`}
+                    >
+                      <CircleDollarSign
+                        size={13}
+                        className={
+                          poChainStatus?.isPaid
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-muted-foreground"
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                        Payment
+                      </p>
+                      {poChainStatus?.isPaid ? (
+                        <>
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            {poChainStatus.paymentCount} payment
+                            {poChainStatus.paymentCount > 1 ? "s" : ""}
+                          </p>
+                          {poChainStatus.latestPaymentAmount != null && (
+                            <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                              ₹
+                              {poChainStatus.latestPaymentAmount.toLocaleString(
+                                "en-IN",
+                              )}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Not paid yet
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-            <DocumentChainPanel docType="po" id={editingId ? Number(editingId) : null} />
-          </div>
-        )}
-
-        {/* Bottom action bar */}
-        {!isReadOnly && (() => {
-          const poCanSave = !!(form.supplierId && form.companyId && form.projectId && lineItems.some((li) => li.itemName || li.rate > 0));
-          const poIsDirty = !!(form.supplierId || form.companyId || form.projectId || form.remarks || form.expectedDate || lineItems.some((li) => li.itemName || li.rate > 0));
-          return (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-              <p className="text-[11px] text-muted-foreground hidden sm:block">
-                {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : poCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
-              </p>
-              <div className="flex items-center gap-2 sm:ml-auto">
-                <button
-                  onClick={goToCreate}
-                  disabled={saving || saved || !poIsDirty}
-                  className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                >
-                  <RotateCcw size={12} /> Reset
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || saved || !poCanSave}
-                  className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
-                >
-                  {saved ? <Check size={14} /> : saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                  {saved ? "Saved!" : saving ? "Saving…" : "Save Purchase Order"}
-                </button>
-              </div>
+              )}
+              <DocumentChainPanel
+                docType="po"
+                id={editingId ? Number(editingId) : null}
+              />
             </div>
-          );
-        })()}
-      </div>
+          )}
+
+          {/* Bottom action bar */}
+          {!isReadOnly &&
+            (() => {
+              const poCanSave = !!(
+                form.supplierId &&
+                form.companyId &&
+                form.projectId &&
+                lineItems.some((li) => li.itemName || li.rate > 0)
+              );
+              const poIsDirty = !!(
+                form.supplierId ||
+                form.companyId ||
+                form.projectId ||
+                form.remarks ||
+                form.expectedDate ||
+                lineItems.some((li) => li.itemName || li.rate > 0)
+              );
+              return (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+                  <p className="text-[11px] text-muted-foreground hidden sm:block">
+                    {saved ? (
+                      <span className="text-emerald-500 font-medium">
+                        Saved!
+                      </span>
+                    ) : poCanSave ? (
+                      <span className="text-emerald-500 font-medium">
+                        Ready to save
+                      </span>
+                    ) : (
+                      "Fill in the required fields to save"
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2 sm:ml-auto">
+                    <button
+                      onClick={goToCreate}
+                      disabled={saving || saved || !poIsDirty}
+                      className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    >
+                      <RotateCcw size={12} /> Reset
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={saving || saved || !poCanSave}
+                      className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                    >
+                      {saved ? (
+                        <Check size={14} />
+                      ) : saving ? (
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Save size={14} />
+                      )}
+                      {saved
+                        ? "Saved!"
+                        : saving
+                          ? "Saving…"
+                          : "Save Purchase Order"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+        </div>
       </MaterialShell>
     </>
   );

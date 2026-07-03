@@ -18,6 +18,11 @@ const PRODUCTION_ORIGINS = [
   "https://www.civiliererp.in",
 ];
 
+// RFC 1918 private network ranges — allowed in dev so LAN access works
+// e.g. http://192.168.1.5:8081 from another device on the same Wi-Fi
+const PRIVATE_IP_RE =
+  /^https?:\/\/(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/;
+
 function parseOrigins(value) {
   return String(value || "")
     .split(",")
@@ -36,4 +41,13 @@ const ALLOWED_ORIGINS =
       ? PRODUCTION_ORIGINS
       : [...LOCAL_ORIGINS, ...PRODUCTION_ORIGINS];
 
-module.exports = { ALLOWED_ORIGINS };
+const isDev = process.env.NODE_ENV !== "production";
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (isDev && PRIVATE_IP_RE.test(origin)) return true;
+  return false;
+}
+
+module.exports = { ALLOWED_ORIGINS, isOriginAllowed };
