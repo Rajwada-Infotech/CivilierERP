@@ -8,6 +8,7 @@ const {
   postGRNApproval,
   postExpenseBookingApproval,
   postPaymentApproval,
+  postJournalVoucherApproval,
 } = require("./generalLedger");
 
 // Module slug → general ledger poster, called once a record reaches full
@@ -18,6 +19,7 @@ const GL_POSTERS = {
   grn: postGRNApproval,
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
+  "journal-voucher": postJournalVoucherApproval,
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -62,6 +64,11 @@ const MODULE_MAP = {
     pk: "VehicleInOutID",
     status: "Status",
   },
+  "journal-voucher": {
+    table: "dbo.JournalVoucher",
+    pk: "JVID",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {
@@ -73,6 +80,7 @@ const MODULE_DOC_LINKS = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "Payment",
+  "journal-voucher": "Journal Voucher",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
@@ -134,6 +142,7 @@ const WORKFLOW_ID_MAP = {
   "material-issues": "MaterialIssues",
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
+  "journal-voucher": "JournalVoucher",
 };
 
 /**
@@ -161,13 +170,21 @@ async function getWorkflow(module) {
   } catch {
     levels = [];
   }
-  return { Id: row.Id, Levels: (Array.isArray(levels) ? levels.length : Number(levels)) || 1 };
+  return {
+    Id: row.Id,
+    Levels: (Array.isArray(levels) ? levels.length : Number(levels)) || 1,
+  };
 }
 
 /**
  * Fetch the current status of a record.
  */
-async function getRecordStatus(module, id, executor = null, { lock = false } = {}) {
+async function getRecordStatus(
+  module,
+  id,
+  executor = null,
+  { lock = false } = {},
+) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
 
@@ -376,14 +393,32 @@ async function transition(
         throw new Error(`Cannot submit from status "${currentStatus}"`);
       }
       await setRecordStatus(module, id, "Pending", tx);
-      await writeAuditLog(tableName, id, 0, userRole, userEmail, "Pending", note, tx);
+      await writeAuditLog(
+        tableName,
+        id,
+        0,
+        userRole,
+        userEmail,
+        "Pending",
+        note,
+        tx,
+      );
       result = { newStatus: "Pending" };
     } else if (targetStatus === "Rejected") {
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot reject from status "${currentStatus}"`);
       }
       await setRecordStatus(module, id, "Rejected", tx);
-      await writeAuditLog(tableName, id, 0, userRole, userEmail, "Rejected", note, tx);
+      await writeAuditLog(
+        tableName,
+        id,
+        0,
+        userRole,
+        userEmail,
+        "Rejected",
+        note,
+        tx,
+      );
       result = { newStatus: "Rejected" };
     } else if (targetStatus === "Approved") {
       if (currentStatus !== "Pending") {
@@ -394,7 +429,16 @@ async function transition(
       const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
       const nextLevel = approvedSoFar + 1;
 
-      await writeAuditLog(tableName, id, nextLevel, userRole, userEmail, "Approved", note, tx);
+      await writeAuditLog(
+        tableName,
+        id,
+        nextLevel,
+        userRole,
+        userEmail,
+        "Approved",
+        note,
+        tx,
+      );
 
       if (nextLevel >= totalLevels) {
         await setRecordStatus(module, id, "Approved", tx);
@@ -430,13 +474,23 @@ async function transition(
   if (fullyApproved) {
     const poster = GL_POSTERS[module];
     if (!poster) {
-      await recordGLPosting(module, id, { none: true, reason: "no GL poster for module" }, userEmail);
+      await recordGLPosting(
+        module,
+        id,
+        { none: true, reason: "no GL poster for module" },
+        userEmail,
+      );
     } else {
       try {
         const outcome = await poster(getPool(), id, userEmail);
         await recordGLPosting(module, id, outcome, userEmail);
       } catch (glErr) {
-        await recordGLPosting(module, id, { failed: true, reason: glErr.message }, userEmail);
+        await recordGLPosting(
+          module,
+          id,
+          { failed: true, reason: glErr.message },
+          userEmail,
+        );
       }
     }
   }
@@ -452,4 +506,5 @@ module.exports = {
   getRecordStatus,
   validateApprovalModuleMap,
   recordGLPosting,
+  writeAuditLog,
 };

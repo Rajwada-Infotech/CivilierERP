@@ -50,6 +50,7 @@ import {
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -725,11 +726,10 @@ const CustomerMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <TreeDropdown
-                    variant="tree"
+                  <GroupTreePicker
                     value={form.LBelongsTo}
                     onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
-                    items={accountGroupTree}
+                    tree={accountGroupTree}
                     allGroups={accountGroups}
                     placeholder="— No group assigned"
                   />

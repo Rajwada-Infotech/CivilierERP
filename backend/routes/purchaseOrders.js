@@ -190,6 +190,312 @@ const syncLineItems = async (
   }
 };
 
+// ─── Internal creation function ──────────────────────────────────────────────
+// Extracted from POST / so other server-side callers (the Inter-Company
+// Stock Transfer orchestrator) can create a real, fully-validated Purchase
+// Order in-process without duplicating this validation/numbering/insert
+// logic or making an HTTP self-call. Mechanical extraction — the POST route
+// below now just calls this for the DB write, then keeps doing its own
+// cache-bump, MR/QT status updates, and auto-submit exactly as before, so
+// its behavior is unchanged. The orchestrator, by contrast, drives its own
+// approval transition separately rather than auto-submitting to Pending —
+// see interCompanyTransfer.js. Thrown errors carry a `.status` for the HTTP
+// code to use.
+const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
+  const {
+    PurchaseOrderNo: poNoFromClient,
+    PODate,
+    ExpectedDeliveryDate,
+    SupplierID,
+    CompanyId,
+    ProjectId,
+    ItemDescription,
+    Quantity,
+    Unit,
+    Rate,
+    TotalAmount,
+    PaymentTerms,
+    Status,
+    Remarks,
+    DocTypeId,
+    finYear,
+    POItems,
+    Discount,
+    GST,
+    SourceWOId,
+    SourceWODocNo,
+    SourceMRId,
+    SourceMRDocNo,
+    SourceWDId,
+    SourceWDDocNo,
+    SourceQTId,
+    SourceQTDocNo,
+    POType,
+    SourceSaleOrderId,
+    SourceSaleOrderDocNo,
+    SourceSaleInvoiceId,
+    SourceSaleInvoiceDocNo,
+    CostCenterId,
+    VendorInvoiceDate,
+    VendorInvoiceNo,
+  } = payload;
+
+  const poItemsArray = Array.isArray(POItems)
+    ? POItems
+    : (safeJson(parseJson(POItems)) ?? []);
+  const poItemsJson = JSON.stringify(poItemsArray);
+  const discountJson = parseJson(Discount);
+  const gstJson = parseJson(GST);
+  const { hsnCode, gstType, gstRate } = extractGstScalars(GST);
+  const subtotal =
+    computeSubtotal(poItemsArray) ??
+    (parseFloat(Quantity) * parseFloat(Rate) || 0);
+
+  if (!PODate) {
+    const err = new Error("PODate is required.");
+    err.status = 400;
+    throw err;
+  }
+  if (!SupplierID) {
+    const err = new Error("SupplierID is required.");
+    err.status = 400;
+    throw err;
+  }
+
+  // Enforce: a PO can only be raised against a paid Sale Invoice
+  // (Sale Order workflow — Migration 111).
+  if (SourceSaleInvoiceId) {
+    const siId = parseInt(SourceSaleInvoiceId, 10);
+    const siCheck = await pool
+      .request()
+      .input("SIId", sql.Int, siId)
+      .query(
+        "SELECT SaleInvoiceID, PaymentStatus, Amount FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SIId AND IsDeleted = 0",
+      );
+
+    if (!siCheck.recordset.length) {
+      const err = new Error("Source Sale Invoice not found.");
+      err.status = 404;
+      throw err;
+    }
+
+    const siStatus = siCheck.recordset[0].PaymentStatus;
+    if (siStatus !== "Paid") {
+      const err = new Error(
+        `Cannot create Purchase Order: Sale Invoice is "${siStatus}". Only fully Paid Sale Invoices can be used to raise a Purchase Order.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  // Enforce: a PO can only be raised against an Approved Material Request.
+  if (SourceMRId) {
+    const mrId = parseInt(SourceMRId, 10);
+    const mrCheck = await pool
+      .request()
+      .input("MRId", sql.Int, mrId)
+      .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+
+    if (!mrCheck.recordset.length) {
+      const err = new Error("Source Material Request not found.");
+      err.status = 404;
+      throw err;
+    }
+
+    const mrStatus = mrCheck.recordset[0].Status;
+    if (mrStatus !== "Approved") {
+      const err = new Error(
+        `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  const uomMap = await buildUomMap(pool);
+  const fyId = await resolveFyId(pool, finYear);
+  const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
+
+  const transaction = pool.transaction();
+  await transaction.begin();
+
+  try {
+    // Generate document number server-side when a document type is selected.
+    // Client-provided values are previews only and are intentionally ignored
+    // for numbered PO documents.
+    let finalDocNo = null;
+    if (DocTypeId) {
+      finalDocNo = await lockNextDocNumber(pool, sql, {
+        docTypeId: parseInt(DocTypeId, 10),
+        finYear,
+        tableName: "PurchaseOrders",
+        issuedBy: userEmail,
+      });
+    } else {
+      finalDocNo = poNoFromClient || null;
+    }
+
+    if (!finalDocNo) {
+      const err = new Error(
+        "PurchaseOrderNo is required. Select a document type or enter a PO number manually.",
+      );
+      err.status = 400;
+      throw err;
+    }
+
+    const insertReq = transaction
+      .request()
+      .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo)
+      .input("PODate", sql.Date, PODate || null)
+      .input(
+        "ExpectedDeliveryDate",
+        sql.Date,
+        ExpectedDeliveryDate || PODate || null,
+      )
+      .input(
+        "SupplierID",
+        sql.Int,
+        SupplierID ? parseInt(SupplierID, 10) : null,
+      )
+      .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
+      .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
+      .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
+      .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
+      .input("Unit", sql.NVarChar(50), Unit || "NOS")
+      .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
+      .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
+      .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
+      .input("HsnCode", sql.NVarChar(20), hsnCode)
+      .input("GstType", sql.NVarChar(20), gstType)
+      .input("GstRate", sql.Decimal(5, 2), gstRate)
+      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
+      .input("Status", sql.NVarChar(50), Status || "Draft")
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("CreatedBy", sql.NVarChar(100), userEmail)
+      .input("CreatedAt", sql.DateTime2, new Date())
+      .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
+      .input("Discount", sql.NVarChar(sql.MAX), discountJson)
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input(
+        "SourceWOId",
+        sql.Int,
+        SourceWOId ? parseInt(SourceWOId, 10) : null,
+      )
+      .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null)
+      .input(
+        "SourceMRId",
+        sql.Int,
+        SourceMRId ? parseInt(SourceMRId, 10) : null,
+      )
+      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+      .input(
+        "SourceWDId",
+        sql.Int,
+        SourceWDId ? parseInt(SourceWDId, 10) : null,
+      )
+      .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
+      .input(
+        "SourceQTId",
+        sql.Int,
+        SourceQTId ? parseInt(SourceQTId, 10) : null,
+      )
+      .input("SourceQTDocNo", sql.NVarChar(100), SourceQTDocNo || null)
+      .input(
+        "SourceSaleOrderId",
+        sql.Int,
+        SourceSaleOrderId ? parseInt(SourceSaleOrderId, 10) : null,
+      )
+      .input("SourceSaleOrderDocNo", sql.NVarChar(100), SourceSaleOrderDocNo || null)
+      .input(
+        "SourceSaleInvoiceId",
+        sql.Int,
+        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+      )
+      .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
+      .input(
+        "POType",
+        sql.NVarChar(20),
+        POType ||
+          (SourceSaleInvoiceId
+            ? "SaleOrder"
+            : SourceWOId
+            ? "WO_PO"
+            : SourceMRId
+            ? "Normal"
+            : SourceWDId
+            ? "WO_PO"
+            : "Direct"),
+      )
+      .input("FyId", sql.Int, fyId);
+
+    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+    if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
+    if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
+
+    const result = await insertReq.query(`
+        INSERT INTO dbo.PurchaseOrders (
+          PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
+          ProjectId, ItemDescription, Quantity, Unit, Rate,
+          SubtotalAmount, TotalAmount,
+          HsnCode, GstType, GstRate,
+          PaymentTerms, Status, Remarks, DocTypeId, DocNo,
+          CreatedBy, CreatedAt, POItems, Discount, GST,
+          SourceWOId, SourceWODocNo,
+          SourceMRId, SourceMRDocNo,
+          SourceWDId, SourceWDDocNo,
+          SourceQTId, SourceQTDocNo,
+          SourceSaleOrderId, SourceSaleOrderDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          POType, fy_id
+          ${hasCC ? ", CostCenterId" : ""}
+          ${hasVID ? ", VendorInvoiceDate" : ""}
+          ${hasVIN ? ", VendorInvoiceNo" : ""}
+        )
+        OUTPUT INSERTED.PurchaseOrderID
+        VALUES (
+          @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate, @SupplierID, @CompanyId,
+          @ProjectId, @ItemDescription, @Quantity, @Unit, @Rate,
+          @SubtotalAmount, @TotalAmount,
+          @HsnCode, @GstType, @GstRate,
+          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo,
+          @CreatedBy, @CreatedAt, @POItems, @Discount, @GST,
+          @SourceWOId, @SourceWODocNo,
+          @SourceMRId, @SourceMRDocNo,
+          @SourceWDId, @SourceWDDocNo,
+          @SourceQTId, @SourceQTDocNo,
+          @SourceSaleOrderId, @SourceSaleOrderDocNo,
+          @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
+          @POType, @FyId
+          ${hasCC ? ", @CostCenterId" : ""}
+          ${hasVID ? ", @VendorInvoiceDate" : ""}
+          ${hasVIN ? ", @VendorInvoiceNo" : ""}
+        )
+      `);
+
+    const newId = result.recordset[0].PurchaseOrderID;
+
+    await syncLineItems(transaction, sql, newId, poItemsArray, uomMap);
+
+    if (DocTypeId) {
+      await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
+    }
+
+    await transaction.commit();
+
+    return { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo };
+  } catch (err) {
+    try {
+      await transaction.rollback();
+    } catch {
+      /* already rolled back */
+    }
+    throw err;
+  }
+};
+
 // ─── SELECT columns shared by GET / and GET /:id ─────────────────────────────
 // Built lazily on first use — migration-148 columns may not exist yet.
 
@@ -427,293 +733,17 @@ router.get("/:id", async (req, res) => {
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
 router.post("/", requirePageRight("purchase-orders", "create"), validateBody(purchaseOrderBodySchema), async (req, res) => {
-  const {
-    PurchaseOrderNo: poNoFromClient,
-    PODate,
-    ExpectedDeliveryDate,
-    SupplierID,
-    CompanyId,
-    ProjectId,
-    ItemDescription,
-    Quantity,
-    Unit,
-    Rate,
-    TotalAmount,
-    PaymentTerms,
-    Status,
-    Remarks,
-    DocTypeId,
-    finYear,
-    POItems,
-    Discount,
-    GST,
-    SourceWOId,
-    SourceWODocNo,
-    SourceMRId,
-    SourceMRDocNo,
-    SourceWDId,
-    SourceWDDocNo,
-    SourceQTId,
-    SourceQTDocNo,
-    POType,
-    // ── Sale-Order workflow fields (Migration 111) ──
-    SourceSaleOrderId,
-    SourceSaleOrderDocNo,
-    SourceSaleInvoiceId,
-    SourceSaleInvoiceDocNo,
-    CostCenterId,
-    VendorInvoiceDate,
-    VendorInvoiceNo,
-  } = req.body;
-
-  const poItemsArray = Array.isArray(POItems)
-    ? POItems
-    : (safeJson(parseJson(POItems)) ?? []);
-  const poItemsJson = JSON.stringify(poItemsArray);
-  const discountJson = parseJson(Discount);
-  const gstJson = parseJson(GST);
-  const { hsnCode, gstType, gstRate } = extractGstScalars(GST);
-  const subtotal =
-    computeSubtotal(poItemsArray) ??
-    (parseFloat(Quantity) * parseFloat(Rate) || 0);
-
-  let transaction;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
-    // PODate and SupplierID are NOT NULL columns with no fallback default
-    // below — omitting either used to reach the INSERT and crash with a raw,
-    // unhandled SQL "Cannot insert the value NULL" 500 (leaking internal
-    // table/column names to the client) instead of a clean validation error.
-    // Caught live: creating a PO without PODate 500'd instead of 400'ing.
-    if (!PODate) {
-      return res.status(400).json({ error: "PODate is required." });
-    }
-    if (!SupplierID) {
-      return res.status(400).json({ error: "SupplierID is required." });
-    }
-
     const pool = getPool();
+    const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
+      await createPurchaseOrderInternal(pool, req.body, userEmail);
 
-    // Enforce: a PO can only be raised against a paid Sale Invoice
-    // (Sale Order workflow — Migration 111).
-    if (SourceSaleInvoiceId) {
-      const siId = parseInt(SourceSaleInvoiceId, 10);
-      const siCheck = await pool
-        .request()
-        .input("SIId", sql.Int, siId)
-        .query(
-          "SELECT SaleInvoiceID, PaymentStatus, Amount FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SIId AND IsDeleted = 0",
-        );
-
-      if (!siCheck.recordset.length) {
-        return res.status(404).json({ error: "Source Sale Invoice not found." });
-      }
-
-      const siStatus = siCheck.recordset[0].PaymentStatus;
-      if (siStatus !== "Paid") {
-        return res.status(400).json({
-          error: `Cannot create Purchase Order: Sale Invoice is "${siStatus}". Only fully Paid Sale Invoices can be used to raise a Purchase Order.`,
-        });
-      }
-    }
-
-    // Enforce: a PO can only be raised against an Approved Material Request.
-    if (SourceMRId) {
-      const mrId = parseInt(SourceMRId, 10);
-      const mrCheck = await pool
-        .request()
-        .input("MRId", sql.Int, mrId)
-        .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
-
-      if (!mrCheck.recordset.length) {
-        return res
-          .status(404)
-          .json({ error: "Source Material Request not found." });
-      }
-
-      const mrStatus = mrCheck.recordset[0].Status;
-      if (mrStatus !== "Approved") {
-        return res.status(400).json({
-          error: `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
-        });
-      }
-    }
-
-    const uomMap = await buildUomMap(pool);
-    const fyId = await resolveFyId(pool, finYear);
-    const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
-
-    transaction = pool.transaction();
-    await transaction.begin();
-
-    // Generate document number server-side when a document type is selected.
-    // Client-provided values are previews only and are intentionally ignored
-    // for numbered PO documents.
-    let finalDocNo = null;
-    if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: parseInt(DocTypeId, 10),
-        finYear,
-        tableName: "PurchaseOrders",
-        issuedBy: req.user?.email,
-      });
-    } else {
-      finalDocNo = poNoFromClient || null;
-    }
-
-    if (!finalDocNo) {
-      await transaction.rollback();
-      return res.status(400).json({
-        error:
-          "PurchaseOrderNo is required. Select a document type or enter a PO number manually.",
-      });
-    }
-
-    const insertReq = transaction
-      .request()
-      .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo)
-      .input("PODate", sql.Date, PODate || null)
-      .input(
-        "ExpectedDeliveryDate",
-        sql.Date,
-        ExpectedDeliveryDate || PODate || null,
-      )
-      .input(
-        "SupplierID",
-        sql.Int,
-        SupplierID ? parseInt(SupplierID, 10) : null,
-      )
-      .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
-      .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
-      .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
-      .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
-      .input("Unit", sql.NVarChar(50), Unit || "NOS")
-      .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
-      .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
-      .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
-      .input("HsnCode", sql.NVarChar(20), hsnCode)
-      .input("GstType", sql.NVarChar(20), gstType)
-      .input("GstRate", sql.Decimal(5, 2), gstRate)
-      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
-      .input("Status", sql.NVarChar(50), Status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo)
-      .input("CreatedBy", sql.NVarChar(100), userEmail)
-      .input("CreatedAt", sql.DateTime2, new Date())
-      .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
-      .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-      .input("GST", sql.NVarChar(sql.MAX), gstJson)
-      .input(
-        "SourceWOId",
-        sql.Int,
-        SourceWOId ? parseInt(SourceWOId, 10) : null,
-      )
-      .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null)
-      .input(
-        "SourceMRId",
-        sql.Int,
-        SourceMRId ? parseInt(SourceMRId, 10) : null,
-      )
-      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
-      .input(
-        "SourceWDId",
-        sql.Int,
-        SourceWDId ? parseInt(SourceWDId, 10) : null,
-      )
-      .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
-      .input(
-        "SourceQTId",
-        sql.Int,
-        SourceQTId ? parseInt(SourceQTId, 10) : null,
-      )
-      .input("SourceQTDocNo", sql.NVarChar(100), SourceQTDocNo || null)
-      // ── Sale-Order workflow (Migration 111) ──────────────────────────────
-      .input(
-        "SourceSaleOrderId",
-        sql.Int,
-        SourceSaleOrderId ? parseInt(SourceSaleOrderId, 10) : null,
-      )
-      .input("SourceSaleOrderDocNo", sql.NVarChar(100), SourceSaleOrderDocNo || null)
-      .input(
-        "SourceSaleInvoiceId",
-        sql.Int,
-        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
-      )
-      .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
-      .input(
-        "POType",
-        sql.NVarChar(20),
-        POType ||
-          (SourceSaleInvoiceId
-            ? "SaleOrder"
-            : SourceWOId
-            ? "WO_PO"
-            : SourceMRId
-            ? "Normal"
-            : SourceWDId
-            ? "WO_PO"
-            : "Direct"),
-      )
-      .input("FyId", sql.Int, fyId);
-
-    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
-    if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
-    if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
-
-    const result = await insertReq.query(`
-        INSERT INTO dbo.PurchaseOrders (
-          PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
-          ProjectId, ItemDescription, Quantity, Unit, Rate,
-          SubtotalAmount, TotalAmount,
-          HsnCode, GstType, GstRate,
-          PaymentTerms, Status, Remarks, DocTypeId, DocNo,
-          CreatedBy, CreatedAt, POItems, Discount, GST,
-          SourceWOId, SourceWODocNo,
-          SourceMRId, SourceMRDocNo,
-          SourceWDId, SourceWDDocNo,
-          SourceQTId, SourceQTDocNo,
-          SourceSaleOrderId, SourceSaleOrderDocNo,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
-          POType, fy_id
-          ${hasCC ? ", CostCenterId" : ""}
-          ${hasVID ? ", VendorInvoiceDate" : ""}
-          ${hasVIN ? ", VendorInvoiceNo" : ""}
-        )
-        OUTPUT INSERTED.PurchaseOrderID
-        VALUES (
-          @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate, @SupplierID, @CompanyId,
-          @ProjectId, @ItemDescription, @Quantity, @Unit, @Rate,
-          @SubtotalAmount, @TotalAmount,
-          @HsnCode, @GstType, @GstRate,
-          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo,
-          @CreatedBy, @CreatedAt, @POItems, @Discount, @GST,
-          @SourceWOId, @SourceWODocNo,
-          @SourceMRId, @SourceMRDocNo,
-          @SourceWDId, @SourceWDDocNo,
-          @SourceQTId, @SourceQTDocNo,
-          @SourceSaleOrderId, @SourceSaleOrderDocNo,
-          @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
-          @POType, @FyId
-          ${hasCC ? ", @CostCenterId" : ""}
-          ${hasVID ? ", @VendorInvoiceDate" : ""}
-          ${hasVIN ? ", @VendorInvoiceNo" : ""}
-        )
-      `);
-
-    const newId = result.recordset[0].PurchaseOrderID;
-
-    // Sync normalised child table
-    await syncLineItems(transaction, sql, newId, poItemsArray, uomMap);
-
-    if (DocTypeId) {
-      await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
-    }
-
-    await transaction.commit();
     await bumpCacheVersion("purchase-orders");
+
+    const { SourceMRId, SourceQTId } = req.body;
 
     // Mark the source MR as Ordered once a PO is raised against it.
     if (SourceMRId) {
@@ -774,13 +804,8 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
       Status: "Pending",
     });
   } catch (err) {
-    try {
-      if (transaction) await transaction.rollback();
-    } catch (_) {
-      /* ignore */
-    }
     console.error("POST PurchaseOrders error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1279,3 +1304,5 @@ router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (re
 });
 
 module.exports = router;
+module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
+

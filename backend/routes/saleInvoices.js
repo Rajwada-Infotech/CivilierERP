@@ -222,74 +222,75 @@ router.get("/:id", requirePageRight("sale-invoice", "view"), async (req, res) =>
 //  2. Invoice amount defaults to the Sale Order's TotalAmount when not provided.
 //  3. PaymentStatus starts as "Pending Payment".
 //
-router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) => {
-  const {
-    SaleOrderID,
-    InvoiceDate,
-    Amount,
-    DocTypeId,
-    RPFinYear: finYear,
-    Remarks,
-  } = req.body;
+// ─── Internal creation function ──────────────────────────────────────────────
+// Extracted from POST / so other server-side callers (the Inter-Company
+// Stock Transfer orchestrator) can create a real, fully-validated Sale
+// Invoice in-process without duplicating this validation/numbering/insert
+// logic or making an HTTP self-call. Mechanical extraction — the POST route
+// below now just calls this and maps thrown errors to a response; behavior
+// is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
+async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail) {
+  const { SaleOrderID, InvoiceDate, Amount, DocTypeId, RPFinYear: finYear, Remarks } = payload;
 
-  if (!SaleOrderID)
-    return res.status(400).json({ error: "SaleOrderID is required." });
+  if (!SaleOrderID) {
+    const err = new Error("SaleOrderID is required.");
+    err.status = 400;
+    throw err;
+  }
 
-  let transaction;
+  // ── Guard: Sale Order must exist ─────────────────────────────────────────
+  const soCheck = await pool
+    .request()
+    .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
+      SELECT SaleOrderID, SaleOrderNo, CustomerID, CompanyId, ProjectId,
+             TotalAmount, fy_id, Status
+      FROM   dbo.CustomerSaleOrders
+      WHERE  SaleOrderID = @SaleOrderID AND IsDeleted = 0
+    `);
+
+  if (!soCheck.recordset.length) {
+    const err = new Error("Sale Order not found.");
+    err.status = 404;
+    throw err;
+  }
+
+  const so = soCheck.recordset[0];
+
+  // ── Guard: no existing active invoice for this SO ────────────────────────
+  const dupCheck = await pool
+    .request()
+    .input("SaleOrderID", sql.Int, so.SaleOrderID).query(`
+      SELECT COUNT(*) AS cnt
+      FROM   dbo.SaleInvoices
+      WHERE  SaleOrderID = @SaleOrderID
+        AND  PaymentStatus NOT IN ('Cancelled')
+        AND  IsDeleted = 0
+    `);
+
+  if (Number(dupCheck.recordset[0]?.cnt) > 0) {
+    const err = new Error(
+      "An active Sale Invoice already exists for this Sale Order. Only one active invoice per Sale Order is allowed.",
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  // Resolve FinYear
+  let fyId = so.fy_id;
+  if (finYear) {
+    const fyRow = await pool
+      .request()
+      .input("FName", sql.NVarChar, finYear)
+      .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
+    fyId = fyRow.recordset[0]?.FId ?? fyId;
+  }
+
+  const invoiceAmount = parseFloat(Amount) || parseFloat(so.TotalAmount) || 0;
+
+  const transaction = pool.transaction();
+  await transaction.begin();
+
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
-
-    const pool = getPool();
-
-    // ── Guard: Sale Order must exist ─────────────────────────────────────────
-    const soCheck = await pool
-      .request()
-      .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
-        SELECT SaleOrderID, SaleOrderNo, CustomerID, CompanyId, ProjectId,
-               TotalAmount, fy_id, Status
-        FROM   dbo.CustomerSaleOrders
-        WHERE  SaleOrderID = @SaleOrderID AND IsDeleted = 0
-      `);
-
-    if (!soCheck.recordset.length)
-      return res.status(404).json({ error: "Sale Order not found." });
-
-    const so = soCheck.recordset[0];
-
-    // ── Guard: no existing active invoice for this SO ────────────────────────
-    const dupCheck = await pool
-      .request()
-      .input("SaleOrderID", sql.Int, so.SaleOrderID).query(`
-        SELECT COUNT(*) AS cnt
-        FROM   dbo.SaleInvoices
-        WHERE  SaleOrderID = @SaleOrderID
-          AND  PaymentStatus NOT IN ('Cancelled')
-          AND  IsDeleted = 0
-      `);
-
-    if (Number(dupCheck.recordset[0]?.cnt) > 0) {
-      return res.status(409).json({
-        error:
-          "An active Sale Invoice already exists for this Sale Order. Only one active invoice per Sale Order is allowed.",
-      });
-    }
-
-    // Resolve FinYear
-    let fyId = so.fy_id;
-    if (finYear) {
-      const fyRow = await pool
-        .request()
-        .input("FName", sql.NVarChar, finYear)
-        .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
-      fyId = fyRow.recordset[0]?.FId ?? fyId;
-    }
-
-    const invoiceAmount = parseFloat(Amount) || parseFloat(so.TotalAmount) || 0;
-
-    transaction = pool.transaction();
-    await transaction.begin();
-
     // Generate doc number
     // SaleInvoice.tsx doesn't yet have a doc-type selector UI, so DocTypeId
     // is usually not sent from the frontend — resolve a sensible default
@@ -313,15 +314,15 @@ router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) =>
         finYear,
         tableName: "SaleInvoices",
         docNoColumn: "SaleInvoiceNo",
-        issuedBy: req.user?.email,
+        issuedBy: issuedByEmail,
       });
     }
     if (!finalDocNo) {
-      await transaction.rollback();
-      return res.status(400).json({
-        error:
-          "SaleInvoiceNo could not be generated. Select a document type with SI prefix.",
-      });
+      const err = new Error(
+        "SaleInvoiceNo could not be generated. Select a document type with SI prefix.",
+      );
+      err.status = 400;
+      throw err;
     }
 
     const result = await transaction
@@ -355,24 +356,37 @@ router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) =>
 
     await transaction.commit();
     await backPatchRecordId(pool, sql, finalDocNo, "SaleInvoices", newId);
-    await invalidateCaches();
 
-    res.status(201).json({
+    return {
       SaleInvoiceID: newId,
       DocNo: finalDocNo,
       SaleInvoiceNo: finalDocNo,
       TotalAmount: invoiceAmount,
       PaymentStatus: "Pending Payment",
-      message: "Sale invoice created successfully",
-    });
+    };
   } catch (err) {
-    if (transaction) {
-      try {
-        await transaction.rollback();
-      } catch (_) {}
+    try {
+      await transaction.rollback();
+    } catch {
+      /* already rolled back */
     }
+    throw err;
+  }
+}
+
+router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) => {
+  try {
+    const userEmail = requireUserName(req, res);
+    if (!userEmail) return;
+
+    const pool = getPool();
+    const result = await createSaleInvoiceInternal(pool, req.body, userEmail, req.user?.email);
+    await invalidateCaches();
+
+    res.status(201).json({ ...result, message: "Sale invoice created successfully" });
+  } catch (err) {
     console.error("POST SaleInvoice error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -419,3 +433,4 @@ async function recalcInvoicePaymentStatus(pool, saleInvoiceId) {
 
 module.exports = router;
 module.exports.recalcInvoicePaymentStatus = recalcInvoicePaymentStatus;
+module.exports.createSaleInvoiceInternal = createSaleInvoiceInternal;
