@@ -61,6 +61,12 @@ function makeFakePool() {
         if (/SELECT TOP 1 id, company_id FROM dbo\.enterprise WHERE name=@name/i.test(text)) {
           return { recordset: [{ id: 99, company_id: 5 }], rowsAffected: [1] };
         }
+        if (/SELECT TOP 1 id FROM dbo\.enterprise WHERE name=@name/i.test(text)) {
+          return { recordset: [{ id: 99 }], rowsAffected: [1] };
+        }
+        if (/SELECT company_id FROM dbo\.enterprise WHERE id=@id AND business_type='P'/i.test(text)) {
+          return { recordset: [{ company_id: 5 }], rowsAffected: [1] };
+        }
         if (/SELECT TOP 1 GodownID FROM dbo\.Godowns/i.test(text)) {
           return { recordset: [], rowsAffected: [0] };
         }
@@ -150,6 +156,12 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
           if (/SELECT TOP 1 id, company_id FROM dbo\.enterprise WHERE name=@name/i.test(text)) {
             return { recordset: [{ id: 100, company_id: null }], rowsAffected: [1] };
           }
+          if (/SELECT TOP 1 id FROM dbo\.enterprise WHERE name=@name/i.test(text)) {
+            return { recordset: [{ id: 100 }], rowsAffected: [1] };
+          }
+          if (/SELECT company_id FROM dbo\.enterprise WHERE id=@id AND business_type='P'/i.test(text)) {
+            return { recordset: [{ company_id: null }], rowsAffected: [1] };
+          }
           if (/SELECT TOP 1 GodownID FROM dbo\.Godowns/i.test(text)) return { recordset: [], rowsAffected: [0] };
           if (/INSERT INTO dbo\.Godowns/i.test(text)) return { recordset: [], rowsAffected: [1] };
           if (/INSERT INTO dbo\.AccountHeadMaster/i.test(text)) {
@@ -186,5 +198,18 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
 
     expect(res.status).toBe(200);
     expect(insertedLedgerHeads.length).toBe(0);
+  });
+
+  test("PUT /:id also backfills ledger heads for a project that predates this feature", async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+
+    const res = await request(app)
+      .put("/api/project-master/99")
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .send({ name: "Existing Project", companyId: 5 });
+
+    expect(res.status).toBe(200);
+    expect(insertedLedgerHeads.length).toBe(2);
   });
 });

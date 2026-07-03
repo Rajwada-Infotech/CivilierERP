@@ -20,6 +20,7 @@ import {
   ChevronDown,
   FileText,
   ExternalLink,
+  Eye,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -28,7 +29,12 @@ import {
   getStockTransfers,
   type StockTransfer,
 } from "@/api/stockTransferApi";
-import { createInterCompanyTransfer } from "@/api/interCompanyTransferApi";
+import {
+  createInterCompanyTransfer,
+  getInterCompanyTransfers,
+  getInterCompanyTransfer,
+  type InterCompanyTransferSummary,
+} from "@/api/interCompanyTransferApi";
 import {
   createGRNFromTransfer,
   getGRNsByTransfer,
@@ -617,6 +623,250 @@ function MakeGRNModal({
   );
 }
 
+function TransferPreviewModal({
+  transfer,
+  linkedGRNs,
+  onClose,
+}: {
+  transfer: StockTransfer;
+  linkedGRNs: TransferGRNSummary[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10">
+              <Eye size={16} className="text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {transfer.DocNo}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {fmtDate(transfer.TransferDate)} · by{" "}
+                {transfer.CreatedBy?.split("@")[0] || "—"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="px-5 pt-4 flex items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 border border-orange-400/20">
+            <Warehouse size={10} /> {transfer.FromGodownName}
+          </span>
+          <ArrowRight size={12} className="text-muted-foreground" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
+            <Warehouse size={10} /> {transfer.ToGodownName}
+          </span>
+          <div className="ml-auto">
+            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+          </div>
+        </div>
+
+        <div className="px-5 pt-3 pb-2">
+          <p className="text-xs font-semibold text-muted-foreground mb-2">
+            Items ({transfer.TransferItems.length})
+          </p>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 border-b border-border">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Item</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Qty</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">UOM</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfer.TransferItems.map((item, i) => (
+                  <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20">
+                    <td className="px-3 py-2 text-foreground">{item.itemName || item.itemId}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmtNum(item.qty)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{item.uom || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {transfer.Remarks && (
+          <div className="px-5 pb-2">
+            <p className="text-xs font-semibold text-muted-foreground mb-1">Remarks</p>
+            <p className="text-xs text-foreground bg-muted/30 rounded-lg px-3 py-2">
+              {transfer.Remarks}
+            </p>
+          </div>
+        )}
+
+        {linkedGRNs.length > 0 && (
+          <div className="px-5 pb-4">
+            <p className="text-xs font-semibold text-muted-foreground mb-1.5">Linked GRN</p>
+            <div className="flex flex-wrap gap-1.5">
+              {linkedGRNs.map((g) => (
+                <span
+                  key={g.GRNID}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono"
+                >
+                  <FileText size={9} /> {g.GRNNo || g.DocNo}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 py-3 border-t border-border flex justify-end bg-muted/20">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ICTPreviewModal({
+  ictId,
+  onClose,
+}: {
+  ictId: number;
+  onClose: () => void;
+}) {
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ["inter-company-transfer", ictId],
+    queryFn: () => getInterCompanyTransfer(ictId),
+  });
+
+  const DOC_LINKS = detail
+    ? [
+        { label: "Sale Order", id: detail.SaleOrderId },
+        { label: "Sale Invoice", id: detail.SaleInvoiceId },
+        { label: "Received Payment", id: detail.ReceivedPaymentId },
+        { label: "Purchase Order", id: detail.PurchaseOrderId },
+        { label: "GRN", id: detail.GRNId },
+        { label: "Expense Booking", id: detail.ExpenseBookingId },
+        { label: "Payment Made", id: detail.NewPaymentId },
+      ]
+    : [];
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-teal-500/10">
+              <Building2 size={16} className="text-teal-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {detail?.DocNo || "Inter-Company Transfer"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {detail ? fmtDate(detail.TransferDate) : ""} · by{" "}
+                {detail?.CreatedBy?.split("@")[0] || "—"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {isLoading || !detail ? (
+          <div className="px-5 py-10 text-center text-xs text-muted-foreground">
+            Loading…
+          </div>
+        ) : (
+          <>
+            <div className="px-5 pt-4 flex items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 border border-orange-400/20">
+                <Building2 size={10} /> {detail.SenderProjectName} ({detail.SenderCompanyName})
+              </span>
+              <ArrowRight size={12} className="text-muted-foreground shrink-0" />
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
+                <Building2 size={10} /> {detail.ReceiverProjectName} ({detail.ReceiverCompanyName})
+              </span>
+            </div>
+
+            <div className="px-5 pt-3">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
+                <CheckCircle2 size={11} /> {detail.Status} — every step (Sale Invoice, GRN, Expense Booking,
+                Payment) auto-generated via the Dummy Bank, no manual action required.
+              </span>
+            </div>
+
+            <div className="px-5 pt-3 pb-2">
+              <p className="text-xs font-semibold text-muted-foreground mb-2">
+                Items ({detail.items.length}) — priced at the sender's last purchase rate
+              </p>
+              <div className="rounded-lg border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Item</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Qty</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Rate</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.items.map((item) => (
+                      <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                        <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
+                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
+                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Rate)}</td>
+                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="px-5 pb-4">
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                Auto-generated documents
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {DOC_LINKS.filter((d) => d.id).map((d) => (
+                  <span
+                    key={d.label}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
+                  >
+                    <FileText size={9} /> {d.label} #{d.id}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="px-5 py-3 border-t border-border flex justify-end bg-muted/20">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Transfer History ─────────────────────────────────────────────────────────
 function TransferHistory() {
   const rights = usePageRights("stock-transfers");
@@ -627,8 +877,24 @@ function TransferHistory() {
   });
   const transfers: StockTransfer[] = data?.data ?? [];
 
+  // Inter-company transfers (routed via Dummy Bank) live in a separate
+  // table with their own fully auto-generated document chain — merge them
+  // into the same history view so a completed inter-company transfer is
+  // actually visible here instead of only appearing in the plain
+  // StockTransfers list (which never contained it), so completed transfers
+  // don't look like nothing happened.
+  const { data: ictData, isFetching: isFetchingIct, refetch: refetchIct } = useQuery({
+    queryKey: ["inter-company-transfer-list"],
+    queryFn: () => getInterCompanyTransfers({}),
+    staleTime: 60_000,
+  });
+  const ictTransfers: InterCompanyTransferSummary[] = ictData?.data ?? [];
+
   const [grnModalTransfer, setGrnModalTransfer] =
     useState<StockTransfer | null>(null);
+  const [previewTransfer, setPreviewTransfer] =
+    useState<StockTransfer | null>(null);
+  const [previewIctId, setPreviewIctId] = useState<number | null>(null);
   const [successGrnNo, setSuccessGrnNo] = useState<string | null>(null);
   // Track which transfers already have a GRN (transferId → GRN summary[])
   const [grnMap, setGrnMap] = useState<Record<number, TransferGRNSummary[]>>(
@@ -657,6 +923,15 @@ function TransferHistory() {
     refetch();
   };
 
+  type UnifiedRow =
+    | { kind: "plain"; date: string; data: StockTransfer }
+    | { kind: "ict"; date: string; data: InterCompanyTransferSummary };
+
+  const unifiedRows: UnifiedRow[] = [
+    ...transfers.map((t): UnifiedRow => ({ kind: "plain", date: t.TransferDate, data: t })),
+    ...ictTransfers.map((t): UnifiedRow => ({ kind: "ict", date: t.TransferDate, data: t })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
   return (
     <>
       {grnModalTransfer && (
@@ -665,6 +940,18 @@ function TransferHistory() {
           onClose={() => setGrnModalTransfer(null)}
           onSuccess={handleGRNSuccess}
         />
+      )}
+
+      {previewTransfer && (
+        <TransferPreviewModal
+          transfer={previewTransfer}
+          linkedGRNs={grnMap[previewTransfer.TransferID] ?? []}
+          onClose={() => setPreviewTransfer(null)}
+        />
+      )}
+
+      {previewIctId != null && (
+        <ICTPreviewModal ictId={previewIctId} onClose={() => setPreviewIctId(null)} />
       )}
 
       {successGrnNo && (
@@ -692,11 +979,14 @@ function TransferHistory() {
             </p>
           </div>
           <button
-            onClick={() => refetch()}
-            disabled={isFetching}
+            onClick={() => {
+              refetch();
+              refetchIct();
+            }}
+            disabled={isFetching || isFetchingIct}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
           >
-            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
+            <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
             Refresh
           </button>
         </div>
@@ -704,47 +994,91 @@ function TransferHistory() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/40">
               <tr>
-                {[
-                  "Doc No",
-                  "Date",
-                  "From",
-                  "To",
-                  "Items",
-                  "Status",
-                  "By",
-                  "GRN",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left font-semibold text-muted-foreground"
-                  >
-                    {h}
-                  </th>
-                ))}
+                {["Doc No", "Date", "Route", "Items", "Status", ""].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2.5 text-left font-semibold text-muted-foreground"
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b border-border">
-                    {Array.from({ length: 8 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <td key={j} className="px-3 py-2.5">
                         <div className="h-3 bg-muted rounded animate-pulse" />
                       </td>
                     ))}
                   </tr>
                 ))
-              ) : transfers.length === 0 ? (
+              ) : unifiedRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={6}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
                     No transfers yet.
                   </td>
                 </tr>
               ) : (
-                transfers.map((t) => {
+                unifiedRows.map((row) => {
+                  if (row.kind === "ict") {
+                    const t = row.data;
+                    return (
+                      <tr
+                        key={`ict-${t.ICTId}`}
+                        className="border-b border-border hover:bg-muted/20 transition-colors bg-teal-500/[0.03]"
+                      >
+                        <td className="px-3 py-2.5 font-mono text-teal-600 dark:text-teal-400 font-semibold whitespace-nowrap">
+                          {t.DocNo}
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {fmtDate(t.TransferDate)}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <span className="text-orange-600 dark:text-orange-400">
+                              {t.SenderProjectName}
+                            </span>
+                            <ArrowRight size={10} className="text-muted-foreground shrink-0" />
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              {t.ReceiverProjectName}
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] bg-teal-500/10 text-teal-600 border border-teal-400/20 ml-1">
+                              Inter-Company
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {fmtNum(t.TotalAmount)}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
+                            <CheckCircle2 size={10} /> {t.Status} (auto)
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setPreviewIctId(t.ICTId)}
+                              title="Preview"
+                              className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
+                            >
+                              <Eye size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const t = row.data;
                   const linkedGRNs = grnMap[t.TransferID] ?? [];
                   const hasGRN = linkedGRNs.length > 0;
                   return (
@@ -752,60 +1086,61 @@ function TransferHistory() {
                       key={t.TransferID}
                       className="border-b border-border hover:bg-muted/20 transition-colors"
                     >
-                      <td className="px-4 py-3 font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                      <td className="px-3 py-2.5 font-mono text-emerald-600 dark:text-emerald-400 font-semibold whitespace-nowrap">
                         {t.DocNo}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                         {fmtDate(t.TransferDate)}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-600 border border-orange-400/20">
-                          <Warehouse size={9} /> {t.FromGodownName}
-                        </span>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-orange-600 dark:text-orange-400">
+                            {t.FromGodownName}
+                          </span>
+                          <ArrowRight size={10} className="text-muted-foreground shrink-0" />
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            {t.ToGodownName}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
-                          <Warehouse size={9} /> {t.ToGodownName}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                         {t.TransferItems.length} item
                         {t.TransferItems.length !== 1 ? "s" : ""}
                       </td>
-                      <td className="px-4 py-3">
-                        <div>
-                          <ApprovalStatusChain
-                            table="StockTransfers"
-                            recordId={t.TransferID}
-                          />
-                        </div>
+                      <td className="px-3 py-2.5">
+                        <ApprovalStatusChain
+                          table="StockTransfers"
+                          recordId={t.TransferID}
+                        />
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
-                        {t.CreatedBy?.split("@")[0] || "—"}
-                      </td>
-                      {/* ── GRN column ── */}
-                      <td className="px-4 py-3">
-                        {hasGRN ? (
-                          <div className="flex flex-col gap-0.5">
-                            {linkedGRNs.map((g) => (
-                              <span
-                                key={g.GRNID}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono whitespace-nowrap"
-                              >
-                                <FileText size={9} /> {g.GRNNo || g.DocNo}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          rights.canCreate && (
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => setGrnModalTransfer(t)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium border border-emerald-400/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors whitespace-nowrap"
+                            onClick={() => setPreviewTransfer(t)}
+                            title="Preview"
+                            className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
                           >
-                            <FileText size={9} /> Make GRN
+                            <Eye size={12} />
                           </button>
-                          )
-                        )}
+                          {hasGRN ? (
+                            <span
+                              title={linkedGRNs.map((g) => g.GRNNo || g.DocNo).join(", ")}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono whitespace-nowrap"
+                            >
+                              <FileText size={9} /> {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}
+                            </span>
+                          ) : (
+                            rights.canCreate && (
+                            <button
+                              onClick={() => setGrnModalTransfer(t)}
+                              title="Make GRN"
+                              className="p-1.5 rounded-lg border border-emerald-400/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors"
+                            >
+                              <FileText size={12} />
+                            </button>
+                            )
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
