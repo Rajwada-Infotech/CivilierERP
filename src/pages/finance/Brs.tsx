@@ -22,13 +22,13 @@ import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { format, parseISO } from "date-fns";
+import { useNavigate } from "react-router-dom";
 import {
   getBRS,
   getBRSFilters,
   markClear,
   markUnclear,
   markBounced,
-  unmarkBounced,
   type BrsEntry,
   type BrsFilterOption,
 } from "@/api/brsApi";
@@ -49,10 +49,12 @@ import {
   CalendarDays,
   Hash,
   ShieldCheck,
-  Hourglass,
   AlertTriangle,
   Ban,
   Info,
+  ArrowRight,
+  ArrowLeft,
+  CornerDownRight,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -415,7 +417,8 @@ export default function Brs() {
   // ── Bounce modal state ────────────────────────────────────────────────────
   const [bounceEntry, setBounceEntry] = useState<BrsEntry | null>(null);
   const [bounceSaving, setBounceSaving] = useState(false);
-  const [unboundingId, setUnboundingId] = useState<string | null>(null);
+
+  const navigate = useNavigate();
 
   // ── Filter options load ───────────────────────────────────────────────────
   useEffect(() => {
@@ -502,20 +505,19 @@ export default function Brs() {
     }
   }, [bounceEntry, fetchData]);
 
-  const handleUnbound = useCallback(async (entry: BrsEntry) => {
-    const key = `${entry.SourceType}-${entry.SourceID}`;
-    setUnboundingId(key);
-    try {
-      await unmarkBounced(entry.SourceType, entry.SourceID);
-      toast.success("Bounce cleared — entry is now Unclear");
-      await fetchData();
-    } catch (err) {
-      console.error("BRS unbound error", err);
-      toast.error("Failed to clear bounce");
-    } finally {
-      setUnboundingId(null);
-    }
-  }, [fetchData]);
+  // ── Re-issue navigation ───────────────────────────────────────────────────
+  const handleReissue = useCallback((entry: BrsEntry) => {
+    // Store context in sessionStorage so the payment page can pre-fill
+    sessionStorage.setItem("reissue_payment", JSON.stringify({
+      replacesPaymentId: entry.SourceID,
+      replacesDocNo: entry.DocNo,
+      amount: entry.Amount,
+      paymentName: entry.PaymentName,
+      companyName: entry.CompanyName,
+      bounceReason: entry.BounceReason,
+    }));
+    navigate("/payments");
+  }, [navigate]);
 
   // ── Client-side search ────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -789,22 +791,22 @@ export default function Brs() {
             {loading && <RotateCw size={13} className="animate-spin text-muted-foreground" />}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
+          <div>
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/10">
-                  <th className="px-3 py-3 text-center w-10 shrink-0">
+                  <th className="px-3 py-3 text-center w-10">
                     <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
                   </th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Type</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell whitespace-nowrap">Type</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company / Party</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Bank</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell whitespace-nowrap">Bank</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell whitespace-nowrap">Date</th>
                   <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Amount</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell whitespace-nowrap">Mode / Cheque</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell whitespace-nowrap">Doc / Txn ID</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Pay Status</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">BRS Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Mode / Cheque</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell whitespace-nowrap">Doc No.</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Pay Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">BRS</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Action</th>
                 </tr>
               </thead>
@@ -855,29 +857,35 @@ export default function Brs() {
                       </td>
 
                       {/* Type */}
-                      <td className="px-3 py-4 align-middle">
+                      <td className="px-3 py-4 align-middle hidden sm:table-cell">
                         <TypePill type={entry.SourceType} />
                       </td>
 
                       {/* Company / Party */}
-                      <td className="px-3 py-4 align-middle max-w-[160px]">
-                        <p className="text-xs font-medium text-foreground leading-snug truncate">
+                      <td className="px-3 py-4 align-middle">
+                        <p className="text-xs font-medium text-foreground leading-snug truncate max-w-[150px]">
                           {entry.CompanyName || "—"}
                         </p>
                         {entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                          <p className="text-[10px] text-muted-foreground truncate max-w-[150px] mt-0.5">
                             {entry.PaymentName}
                           </p>
+                        )}
+                        {/* Re-issue chain tags — visible on small screens where Doc col is hidden */}
+                        {entry.OriginalDocNo && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-amber-600 dark:text-amber-400 xl:hidden">
+                            <CornerDownRight size={9} />Re-issue for {entry.OriginalDocNo}
+                          </span>
                         )}
                       </td>
 
                       {/* Bank */}
-                      <td className="px-3 py-4 hidden md:table-cell align-middle">
+                      <td className="px-3 py-4 hidden lg:table-cell align-middle">
                         <div className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
                             <Landmark size={10} className="text-blue-500" />
                           </div>
-                          <span className="text-xs text-foreground truncate max-w-[130px]">
+                          <span className="text-xs text-foreground truncate max-w-[120px]">
                             {entry.BankName || "—"}
                           </span>
                         </div>
@@ -898,7 +906,7 @@ export default function Brs() {
                       </td>
 
                       {/* Mode / Cheque */}
-                      <td className="px-3 py-4 hidden sm:table-cell align-middle">
+                      <td className="px-3 py-4 hidden md:table-cell align-middle">
                         <span className="text-xs text-foreground capitalize">{entry.Mode || "—"}</span>
                         {entry.ChequeNo && (
                           <p className="font-mono text-[10px] text-muted-foreground/70 mt-0.5 whitespace-nowrap">
@@ -907,28 +915,33 @@ export default function Brs() {
                         )}
                       </td>
 
-                      {/* Doc / Txn ID */}
+                      {/* Doc No. + chain reference */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        <div className="space-y-1">
+                        <div className="space-y-1.5">
                           {entry.DocNo && (
                             <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit whitespace-nowrap">
                               {entry.DocNo}
                             </span>
                           )}
-                          {entry.TxnId && (
-                            <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-                              <Hash size={9} />
-                              {entry.TxnId}
+                          {/* This bounced payment was replaced by → */}
+                          {entry.ReplacementDocNo && (
+                            <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                              <ArrowRight size={9} className="shrink-0" />
+                              <span className="font-mono">{entry.ReplacementDocNo}</span>
                             </span>
                           )}
-                          {!entry.DocNo && !entry.TxnId && (
-                            <span className="text-muted-foreground/40 text-xs">—</span>
+                          {/* This payment is a re-issue of ↑ */}
+                          {entry.OriginalDocNo && (
+                            <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                              <CornerDownRight size={9} className="shrink-0" />
+                              <span className="font-mono">{entry.OriginalDocNo}</span>
+                            </span>
                           )}
                         </div>
                       </td>
 
                       {/* Pay Status */}
-                      <td className="px-3 py-4 align-middle whitespace-nowrap">
+                      <td className="px-3 py-4 hidden md:table-cell align-middle whitespace-nowrap">
                         <PayStatusBadge status={entry.PayStatus} />
                       </td>
 
@@ -941,26 +954,41 @@ export default function Brs() {
                       </td>
 
                       {/* Actions */}
-                      <td className="px-3 py-4 align-middle whitespace-nowrap">
+                      <td className="px-3 py-4 align-middle">
                         {bounced ? (
-                          <button
-                            onClick={() => handleUnbound(entry)}
-                            disabled={unbounding}
-                            title="Remove bounce flag — returns to Unclear"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 whitespace-nowrap"
-                          >
-                            {unbounding ? <RotateCw size={10} className="animate-spin" /> : <X size={10} />}
-                            Clear Bounce
-                          </button>
+                          entry.ReplacementDocNo ? (
+                            // Already has a replacement — show the link
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
+                              <ArrowRight size={11} />
+                              {entry.ReplacementDocNo}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleReissue(entry)}
+                              title="Create a new replacement payment for this bounced cheque"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
+                            >
+                              <CornerDownRight size={11} />
+                              Re-issue
+                            </button>
+                          )
                         ) : (
-                          <button
-                            onClick={() => setBounceEntry(entry)}
-                            title="Mark this payment as bounced / dishonoured"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
-                          >
-                            <Ban size={10} />
-                            Mark Bounced
-                          </button>
+                          // Show original ref if this is itself a re-issue
+                          entry.OriginalDocNo ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground whitespace-nowrap">
+                              <ArrowLeft size={11} />
+                              {entry.OriginalDocNo}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setBounceEntry(entry)}
+                              title="Mark this payment as bounced / dishonoured"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
+                            >
+                              <Ban size={10} />
+                              Mark Bounced
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>

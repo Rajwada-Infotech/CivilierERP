@@ -25,6 +25,11 @@ export interface BrsEntry {
   BounceDate: string | null;
   BounceReason: string | null;
   BounceRemarks: string | null;
+  // Re-issue chain
+  ReplacementDocNo: string | null;       // DocNo of payment that replaced this bounced one
+  ReplacementPaymentId: number | null;
+  OriginalDocNo: string | null;          // DocNo of the bounced payment this one replaced
+  OriginalPaymentId: number | null;
   CreatedAt: string;
 }
 
@@ -83,6 +88,3 @@ export const markBounced = (
   payload: { bounceDate: string; bounceReason: string; bounceRemarks?: string }
 ) => axios.put(`/brs/${sourceType}/${sourceId}/bounce`, payload);
 
-/** Remove the bounce flag (re-enters Unclear state) */
-export const unmarkBounced = (sourceType: BrsSourceType, sourceId: number) =>
-  axios.put(`/brs/${sourceType}/${sourceId}/unbound`);

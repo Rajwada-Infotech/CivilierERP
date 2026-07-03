@@ -175,8 +175,19 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc.BounceDate           AS BounceDate,
           brc.BounceReason         AS BounceReason,
           brc.BounceRemarks        AS BounceRemarks,
-          brc.BRSID                AS BRSID
+          brc.BRSID                AS BRSID,
+          -- Re-issue chain: DocNo of the payment that replaced this one (if any)
+          repl.DocNo               AS ReplacementDocNo,
+          repl.PPaymentID          AS ReplacementPaymentId,
+          -- Re-issue chain: DocNo of the bounced payment this one replaced (if any)
+          orig.DocNo               AS OriginalDocNo,
+          orig.PPaymentID          AS OriginalPaymentId
         FROM dbo.NewPayment np
+        LEFT JOIN dbo.NewPayment repl
+          ON  repl.ReplacesPaymentId = np.PPaymentID
+          AND repl.Status NOT IN ('Draft', 'Rejected')
+        LEFT JOIN dbo.NewPayment orig
+          ON  orig.PPaymentID = np.ReplacesPaymentId
         LEFT JOIN dbo.enterprise ent
           ON  ent.business_type = 'C'
           AND (
@@ -223,7 +234,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc2.BounceDate          AS BounceDate,
           brc2.BounceReason        AS BounceReason,
           brc2.BounceRemarks       AS BounceRemarks,
-          brc2.BRSID               AS BRSID
+          brc2.BRSID               AS BRSID,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
         FROM dbo.ReceivedPayment rp
         -- Join by ID first (reliable), then fall back to name match
         LEFT JOIN dbo.AccountHeadMaster bk
@@ -294,6 +309,10 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.BounceDate,
         u.BounceReason,
         u.BounceRemarks,
+        u.ReplacementDocNo,
+        u.ReplacementPaymentId,
+        u.OriginalDocNo,
+        u.OriginalPaymentId,
         u.CreatedAt
       FROM UnifiedPayments u
       ${where}
@@ -434,35 +453,6 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
   } catch (err) {
     console.error("BRS bounce error:", err);
     res.status(500).json({ error: "Failed to mark as bounced" });
-  }
-});
-
-router.put("/:sourceType/:sourceId/unbound", async (req, res) => {
-  const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
-    return res.status(400).json({ error: "Invalid sourceType" });
-
-  try {
-    const pool = getPool();
-    await pool
-      .request()
-      .input("SourceType", sql.NVarChar(20), sourceType)
-      .input("SourceID",   sql.Int,          parseInt(sourceId))
-      .query(`
-        UPDATE BankReconciliation
-        SET IsBounced     = 0,
-            BounceDate    = NULL,
-            BounceReason  = NULL,
-            BounceRemarks = NULL,
-            UpdatedAt     = GETDATE()
-        WHERE SourceType = @SourceType AND SourceID = @SourceID
-      `);
-
-    await bumpCacheVersion("brs");
-    res.json({ message: "Bounce cleared" });
-  } catch (err) {
-    console.error("BRS unbound error:", err);
-    res.status(500).json({ error: "Failed to clear bounce" });
   }
 });
 

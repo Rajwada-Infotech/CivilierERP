@@ -456,6 +456,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // identical SourceSaleInvoiceId handling for the mirror-image case on
     // the customer/receiving side of that feature.
     IsInterCompanyTransfer,
+    // Re-issue: links this payment back to a bounced predecessor
+    ReplacesPaymentId,
   } = req.body;
 
   try {
@@ -586,6 +588,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Audit
+      .input("ReplacesPaymentId", sql.Int, ReplacesPaymentId ? parseInt(ReplacesPaymentId) : null)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -597,6 +600,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+          ReplacesPaymentId,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -607,6 +611,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+          @ReplacesPaymentId,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
