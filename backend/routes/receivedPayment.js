@@ -123,8 +123,14 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", requirePageRight("received-payment", "create"), async (req, res) => {
-  try {
+// ─── Internal creation function ──────────────────────────────────────────────
+// Extracted from POST / so other server-side callers (the Inter-Company
+// Stock Transfer orchestrator) can create a real, fully-validated Received
+// Payment in-process without duplicating this validation/numbering/insert
+// logic or making an HTTP self-call. Mechanical extraction — the POST route
+// below now just calls this and maps thrown errors to a response; behavior
+// is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
+async function createReceivedPaymentInternal(pool, payload, createdBy) {
     const {
       RPCompanyName,
       RPCompanyId,
@@ -152,10 +158,8 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       // ── Sale-Order workflow (Migration 111) ──
       SourceSaleInvoiceId,
       SourceSaleInvoiceDocNo,
-    } = req.body;
-
-    const createdBy = req.user?.name || req.user?.email || null;
-    const pool = getPool();
+    } = payload;
+    const body = { ...payload };
     let finalDocNo = null;
     if (RPDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
@@ -170,7 +174,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       RPRemarks?.includes("[SalePayment]") &&
       RPReceivedFrom?.startsWith("SO-")
     ) {
-      // &#9472;&#9472; Sale payment: check for duplicate, then generate SP-YYYYMMDD-NNN &#9472;&#9472;
+      // ── Sale payment: check for duplicate, then generate SP-YYYYMMDD-NNN ──
       const dupCheck = await pool
         .request()
         .input("saleOrderDocNo", sql.NVarChar(255), RPReceivedFrom).query(`
@@ -180,9 +184,11 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
             AND RPStatus NOT IN ('Rejected')
         `);
       if (Number(dupCheck.recordset[0].cnt) > 0) {
-        return res.status(409).json({
-          error: `A payment against sale order ${RPReceivedFrom} already exists. Only one active payment per sale order is allowed.`,
-        });
+        const err = new Error(
+          `A payment against sale order ${RPReceivedFrom} already exists. Only one active payment per sale order is allowed.`,
+        );
+        err.status = 409;
+        throw err;
       }
       const dateStr = (
         RPDocDate || new Date().toISOString().slice(0, 10)
@@ -203,10 +209,11 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       // 1. Mode must be Cash
       const effectiveMode = (RPMode || "").trim();
       if (effectiveMode !== "Cash") {
-        return res.status(400).json({
-          error:
-            "Sale Invoice payments must use Cash mode only. Other payment modes are disabled for this workflow.",
-        });
+        const err = new Error(
+          "Sale Invoice payments must use Cash mode only. Other payment modes are disabled for this workflow.",
+        );
+        err.status = 400;
+        throw err;
       }
 
       // 2. The deposit bank must be the Dummy Bank
@@ -216,10 +223,11 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
           "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
         );
       if (!dummyBank.recordset.length) {
-        return res.status(500).json({
-          error:
-            "Dummy Bank account not found. Please contact your administrator.",
-        });
+        const err = new Error(
+          "Dummy Bank account not found. Please contact your administrator.",
+        );
+        err.status = 500;
+        throw err;
       }
       const dummyBankId = dummyBank.recordset[0].LHeadId;
       const dummyBankName = dummyBank.recordset[0].LHeadName;
@@ -229,9 +237,11 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
         RPDepositBankId &&
         parseInt(RPDepositBankId, 10) !== dummyBankId
       ) {
-        return res.status(400).json({
-          error: `Sale Invoice payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
-        });
+        const err = new Error(
+          `Sale Invoice payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
+        );
+        err.status = 400;
+        throw err;
       }
 
       // 3. The invoice must exist and not be already Paid
@@ -242,17 +252,19 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
           "SELECT SaleInvoiceID, Amount, AmountReceived, PaymentStatus FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SIID AND IsDeleted = 0",
         );
       if (!siCheck.recordset.length) {
-        return res.status(404).json({ error: "Sale Invoice not found." });
+        const err = new Error("Sale Invoice not found.");
+        err.status = 404;
+        throw err;
       }
       if (siCheck.recordset[0].PaymentStatus === "Paid") {
-        return res.status(400).json({
-          error: "This Sale Invoice is already fully paid.",
-        });
+        const err = new Error("This Sale Invoice is already fully paid.");
+        err.status = 400;
+        throw err;
       }
 
       // Force-set deposit bank to Dummy Bank regardless of client payload
-      req.body.RPDepositBankId = dummyBankId;
-      req.body.RPDepositBankName = dummyBankName;
+      body.RPDepositBankId = dummyBankId;
+      body.RPDepositBankName = dummyBankName;
     }
 
     const req2 = pool
@@ -291,8 +303,8 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       .input(
         "RPDepositBankId",
         sql.Int,
-        req.body.RPDepositBankId
-          ? parseInt(req.body.RPDepositBankId, 10)
+        body.RPDepositBankId
+          ? parseInt(body.RPDepositBankId, 10)
           : RPDepositBankId
           ? parseInt(RPDepositBankId, 10)
           : null,
@@ -300,7 +312,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       .input(
         "RPDepositBankName",
         sql.NVarChar(255),
-        req.body.RPDepositBankName || RPDepositBankName || null,
+        body.RPDepositBankName || RPDepositBankName || null,
       )
       // ── Sale-Order workflow ──────────────────────────────────────────────────
       .input(
@@ -345,11 +357,19 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
       await recalcInvoicePaymentStatus(pool, parseInt(SourceSaleInvoiceId, 10));
     }
 
+    return row;
+}
+
+router.post("/", requirePageRight("received-payment", "create"), async (req, res) => {
+  try {
+    const createdBy = req.user?.name || req.user?.email || null;
+    const pool = getPool();
+    const row = await createReceivedPaymentInternal(pool, req.body, createdBy);
     await invalidateReceivedPaymentWorkflowCaches();
     res.status(201).json(row);
   } catch (err) {
     console.error("POST /received-payment error:", err);
-    res.status(500).json({ error: "Failed to create received payment" });
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Failed to create received payment" });
   }
 });
 
@@ -691,3 +711,4 @@ router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
 });
 
 module.exports = router;
+module.exports.createReceivedPaymentInternal = createReceivedPaymentInternal;
