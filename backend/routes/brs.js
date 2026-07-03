@@ -126,8 +126,9 @@ router.get("/", cache("brs", 60), async (req, res) => {
     if (companyName) conditions.push("u.CompanyName = @companyName");
     if (fromDate) conditions.push("u.PayDate    >= @fromDate");
     if (toDate) conditions.push("u.PayDate    <= @toDate");
-    if (status === "clear") conditions.push("u.IsMatched = 1");
-    if (status === "unclear") conditions.push("u.IsMatched = 0");
+    if (status === "clear")   conditions.push("u.IsMatched = 1");
+    if (status === "unclear") conditions.push("u.IsMatched = 0 AND u.IsBounced = 0");
+    if (status === "bounced") conditions.push("u.IsBounced = 1");
 
     const where = "WHERE " + conditions.join(" AND ");
 
@@ -168,7 +169,12 @@ router.get("/", cache("brs", 60), async (req, res) => {
           )                        AS TxnId,
           np.Status                AS PayStatus,
           np.PCreatedAt            AS CreatedAt,
-          COALESCE(brc.IsMatched, 0) AS IsMatched,
+          np.PChequeNo             AS ChequeNo,
+          COALESCE(brc.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc.IsBounced, 0)  AS IsBounced,
+          brc.BounceDate           AS BounceDate,
+          brc.BounceReason         AS BounceReason,
+          brc.BounceRemarks        AS BounceRemarks,
           brc.BRSID                AS BRSID
         FROM dbo.NewPayment np
         LEFT JOIN dbo.enterprise ent
@@ -211,7 +217,12 @@ router.get("/", cache("brs", 60), async (req, res) => {
           )                        AS TxnId,
           rp.RPStatus              AS PayStatus,
           rp.RPCreatedAt           AS CreatedAt,
-          COALESCE(brc2.IsMatched, 0) AS IsMatched,
+          rp.RPCheckNumber         AS ChequeNo,
+          COALESCE(brc2.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc2.IsBounced, 0)  AS IsBounced,
+          brc2.BounceDate          AS BounceDate,
+          brc2.BounceReason        AS BounceReason,
+          brc2.BounceRemarks       AS BounceRemarks,
           brc2.BRSID               AS BRSID
         FROM dbo.ReceivedPayment rp
         -- Join by ID first (reliable), then fall back to name match
@@ -243,15 +254,17 @@ router.get("/", cache("brs", 60), async (req, res) => {
     // ── Summary (totals for clear / unclear) ─────────────────────────────────
     const summarySql = `${baseCte}
       SELECT
-        SUM(CASE WHEN u.IsMatched = 1 THEN u.Amount ELSE 0 END) AS clearAmount,
-        SUM(CASE WHEN u.IsMatched = 0 THEN u.Amount ELSE 0 END) AS unclearAmount,
-        COUNT(CASE WHEN u.IsMatched = 1 THEN 1 END)             AS clearCount,
-        COUNT(CASE WHEN u.IsMatched = 0 THEN 1 END)             AS unclearCount
+        SUM(CASE WHEN u.IsMatched = 1 THEN u.Amount ELSE 0 END)  AS clearAmount,
+        SUM(CASE WHEN u.IsMatched = 0 THEN u.Amount ELSE 0 END)  AS unclearAmount,
+        SUM(CASE WHEN u.IsBounced = 1 THEN u.Amount ELSE 0 END)  AS bounceAmount,
+        COUNT(CASE WHEN u.IsMatched = 1 THEN 1 END)              AS clearCount,
+        COUNT(CASE WHEN u.IsMatched = 0 AND u.IsBounced = 0 THEN 1 END) AS unclearCount,
+        COUNT(CASE WHEN u.IsBounced = 1 THEN 1 END)              AS bounceCount
       FROM UnifiedPayments u
       ${where}
     `;
     const summaryResult = await bind(pool.request()).query(summarySql);
-    const { clearAmount, unclearAmount, clearCount, unclearCount } =
+    const { clearAmount, unclearAmount, bounceAmount, clearCount, unclearCount, bounceCount } =
       summaryResult.recordset[0];
 
     // ── Data ─────────────────────────────────────────────────────────────────
@@ -274,8 +287,13 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.Mode,
         u.DocNo,
         u.TxnId,
+        u.ChequeNo,
         u.PayStatus,
         u.IsMatched,
+        u.IsBounced,
+        u.BounceDate,
+        u.BounceReason,
+        u.BounceRemarks,
         u.CreatedAt
       FROM UnifiedPayments u
       ${where}
@@ -291,10 +309,12 @@ router.get("/", cache("brs", 60), async (req, res) => {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
-      clearAmount: clearAmount || 0,
+      clearAmount:   clearAmount   || 0,
       unclearAmount: unclearAmount || 0,
-      clearCount: clearCount || 0,
-      unclearCount: unclearCount || 0,
+      bounceAmount:  bounceAmount  || 0,
+      clearCount:    clearCount    || 0,
+      unclearCount:  unclearCount  || 0,
+      bounceCount:   bounceCount   || 0,
     });
   } catch (err) {
     console.error("BRS list error:", err);
@@ -364,6 +384,85 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
   } catch (err) {
     console.error("BRS unclear error:", err);
     res.status(500).json({ error: "Failed to mark as unclear" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /brs/:sourceType/:sourceId/bounce   — mark a payment as bounced/dishonoured
+// PUT /brs/:sourceType/:sourceId/unbound  — clear the bounce flag
+// ─────────────────────────────────────────────────────────────────────────────
+router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
+  const { sourceType, sourceId } = req.params;
+  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
+    return res.status(400).json({ error: "Invalid sourceType" });
+
+  const { bounceDate, bounceReason, bounceRemarks } = req.body;
+  if (!bounceDate || !bounceReason)
+    return res.status(400).json({ error: "bounceDate and bounceReason are required" });
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("SourceType",    sql.NVarChar(20),  sourceType)
+      .input("SourceID",      sql.Int,            parseInt(sourceId))
+      .input("BounceDate",    sql.Date,           bounceDate)
+      .input("BounceReason",  sql.NVarChar(200),  bounceReason)
+      .input("BounceRemarks", sql.NVarChar(500),  bounceRemarks || null)
+      .query(`
+        IF EXISTS (
+          SELECT 1 FROM BankReconciliation
+          WHERE SourceType = @SourceType AND SourceID = @SourceID
+        )
+          UPDATE BankReconciliation
+          SET IsBounced     = 1,
+              IsMatched     = 0,
+              BounceDate    = @BounceDate,
+              BounceReason  = @BounceReason,
+              BounceRemarks = @BounceRemarks,
+              UpdatedAt     = GETDATE()
+          WHERE SourceType = @SourceType AND SourceID = @SourceID
+        ELSE
+          INSERT INTO BankReconciliation
+            (SourceType, SourceID, IsMatched, IsBounced, BounceDate, BounceReason, BounceRemarks, CreatedAt)
+          VALUES
+            (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
+      `);
+
+    await bumpCacheVersion("brs");
+    res.json({ message: "Marked as bounced" });
+  } catch (err) {
+    console.error("BRS bounce error:", err);
+    res.status(500).json({ error: "Failed to mark as bounced" });
+  }
+});
+
+router.put("/:sourceType/:sourceId/unbound", async (req, res) => {
+  const { sourceType, sourceId } = req.params;
+  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
+    return res.status(400).json({ error: "Invalid sourceType" });
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("SourceType", sql.NVarChar(20), sourceType)
+      .input("SourceID",   sql.Int,          parseInt(sourceId))
+      .query(`
+        UPDATE BankReconciliation
+        SET IsBounced     = 0,
+            BounceDate    = NULL,
+            BounceReason  = NULL,
+            BounceRemarks = NULL,
+            UpdatedAt     = GETDATE()
+        WHERE SourceType = @SourceType AND SourceID = @SourceID
+      `);
+
+    await bumpCacheVersion("brs");
+    res.json({ message: "Bounce cleared" });
+  } catch (err) {
+    console.error("BRS unbound error:", err);
+    res.status(500).json({ error: "Failed to clear bounce" });
   }
 });
 
