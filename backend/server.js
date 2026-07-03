@@ -360,6 +360,7 @@ async function createApp() {
   app.get("/", (req, res) => res.send("CivilierERP API running"));
   app.use("/health", require("./routes/health"));
   app.use("/api/users", require("./routes/users"));
+  app.use("/api/public-stats", require("./routes/publicStats"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {
