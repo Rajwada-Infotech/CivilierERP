@@ -790,22 +790,22 @@ export default function Brs() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="border-b border-border bg-muted/10">
-                  <th className="px-4 py-2.5 text-center w-10">
+                  <th className="px-3 py-3 text-center w-10 shrink-0">
                     <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
                   </th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Type</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company / Party</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell">Bank</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Date</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Amount</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Mode</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell">Doc / Txn ID</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">BRS</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Action</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Type</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company / Party</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell whitespace-nowrap">Bank</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell whitespace-nowrap">Date</th>
+                  <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Amount</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell whitespace-nowrap">Mode / Cheque</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell whitespace-nowrap">Doc / Txn ID</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Pay Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">BRS Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Action</th>
                 </tr>
               </thead>
 
@@ -846,7 +846,7 @@ export default function Brs() {
                       }`}
                     >
                       {/* Passbook tick — disabled for bounced */}
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-4 text-center align-middle">
                         <PassbookCheck
                           checked={cleared && !bounced}
                           loading={toggling}
@@ -855,68 +855,68 @@ export default function Brs() {
                       </td>
 
                       {/* Type */}
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-4 align-middle">
                         <TypePill type={entry.SourceType} />
                       </td>
 
                       {/* Company / Party */}
-                      <td className="px-4 py-3">
-                        <p className="text-xs font-medium text-foreground leading-snug">
+                      <td className="px-3 py-4 align-middle max-w-[160px]">
+                        <p className="text-xs font-medium text-foreground leading-snug truncate">
                           {entry.CompanyName || "—"}
                         </p>
                         {entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                             {entry.PaymentName}
                           </p>
                         )}
                       </td>
 
                       {/* Bank */}
-                      <td className="px-4 py-3 hidden md:table-cell">
+                      <td className="px-3 py-4 hidden md:table-cell align-middle">
                         <div className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
                             <Landmark size={10} className="text-blue-500" />
                           </div>
-                          <span className="text-xs text-foreground truncate max-w-[120px]">
+                          <span className="text-xs text-foreground truncate max-w-[130px]">
                             {entry.BankName || "—"}
                           </span>
                         </div>
                       </td>
 
                       {/* Date */}
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-4 hidden lg:table-cell align-middle whitespace-nowrap">
+                        <span className="text-xs text-muted-foreground tabular-nums">
                           {fmt(entry.PayDate)}
                         </span>
                       </td>
 
                       {/* Amount */}
-                      <td className="px-4 py-3 text-right">
-                        <span className={`text-xs font-mono font-semibold whitespace-nowrap ${bounced ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
+                      <td className="px-3 py-4 text-right align-middle whitespace-nowrap">
+                        <span className={`text-xs font-mono font-semibold ${bounced ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
                       </td>
 
-                      {/* Mode */}
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        <div className="space-y-0.5">
-                          <span className="text-xs text-muted-foreground capitalize">{entry.Mode || "—"}</span>
-                          {entry.ChequeNo && (
-                            <p className="font-mono text-[10px] text-muted-foreground/70">#{entry.ChequeNo}</p>
-                          )}
-                        </div>
+                      {/* Mode / Cheque */}
+                      <td className="px-3 py-4 hidden sm:table-cell align-middle">
+                        <span className="text-xs text-foreground capitalize">{entry.Mode || "—"}</span>
+                        {entry.ChequeNo && (
+                          <p className="font-mono text-[10px] text-muted-foreground/70 mt-0.5 whitespace-nowrap">
+                            # {entry.ChequeNo}
+                          </p>
+                        )}
                       </td>
 
                       {/* Doc / Txn ID */}
-                      <td className="px-4 py-3 hidden xl:table-cell">
-                        <div className="space-y-0.5">
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        <div className="space-y-1">
                           {entry.DocNo && (
-                            <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit">
+                            <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit whitespace-nowrap">
                               {entry.DocNo}
                             </span>
                           )}
                           {entry.TxnId && (
-                            <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                            <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
                               <Hash size={9} />
                               {entry.TxnId}
                             </span>
@@ -928,38 +928,38 @@ export default function Brs() {
                       </td>
 
                       {/* Pay Status */}
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-4 align-middle whitespace-nowrap">
                         <PayStatusBadge status={entry.PayStatus} />
                       </td>
 
                       {/* BRS Status */}
-                      <td className="px-4 py-3">
-                        <div className="space-y-1">
+                      <td className="px-3 py-4 align-middle">
+                        <div className="flex flex-col items-start gap-1.5">
                           <ClearBadge cleared={cleared} bounced={bounced} />
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
                       </td>
 
                       {/* Actions */}
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-4 align-middle whitespace-nowrap">
                         {bounced ? (
                           <button
                             onClick={() => handleUnbound(entry)}
                             disabled={unbounding}
                             title="Remove bounce flag — returns to Unclear"
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 whitespace-nowrap"
                           >
-                            {unbounding ? <RotateCw size={9} className="animate-spin" /> : <X size={9} />}
+                            {unbounding ? <RotateCw size={10} className="animate-spin" /> : <X size={10} />}
                             Clear Bounce
                           </button>
                         ) : (
                           <button
                             onClick={() => setBounceEntry(entry)}
                             title="Mark this payment as bounced / dishonoured"
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md border border-red-200 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
                           >
-                            <Ban size={9} />
-                            Bounce
+                            <Ban size={10} />
+                            Mark Bounced
                           </button>
                         )}
                       </td>
