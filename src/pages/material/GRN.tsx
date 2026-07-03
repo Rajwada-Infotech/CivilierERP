@@ -1564,7 +1564,7 @@ export default function GRN() {
                   sub="Narrow the list, then select a PO"
                 />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                   {/* Company */}
                   <div>
                     <FieldLabel>Company</FieldLabel>
