@@ -936,7 +936,12 @@ async function createGRNInternal(pool, payload, userEmail) {
       await syncPOItemReceivedQty(pool, sql, poId);
     }
 
-    return { grnId, grnNo: finalDocNo, docNo: finalDocNo };
+    // PascalCase matching the actual column name, consistent with every
+    // other internal creation function this session (PurchaseOrderID,
+    // SaleOrderID, SaleInvoiceID, etc.) — callers besides this route's own
+    // POST / handler (e.g. the Inter-Company Stock Transfer orchestrator)
+    // rely on this exact shape.
+    return { GRNID: grnId, DocNo: finalDocNo };
   } catch (err) {
     await transaction.rollback().catch(() => {});
     throw err;
@@ -947,7 +952,8 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
   try {
     const userEmail = req.user?.email || req.user?.name || null;
     const pool = getPool();
-    const { grnId, grnNo, docNo } = await createGRNInternal(pool, req.body, userEmail);
+    const { GRNID: grnId, DocNo: docNo } = await createGRNInternal(pool, req.body, userEmail);
+    const grnNo = docNo;
 
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
