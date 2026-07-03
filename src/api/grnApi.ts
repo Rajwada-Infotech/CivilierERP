@@ -352,10 +352,12 @@ export const getUoms = async (): Promise<UOM[]> => {
     : [];
 };
 
-export const getProjects = async (): Promise<
+export const getProjects = async (companyId?: string | number | null): Promise<
   { id: number; name: string; short_name: string | null; enterprise_id: number | null }[]
 > => {
-  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  const params = new URLSearchParams({ business_type: "P" });
+  if (companyId) params.set("enterprise_id", String(companyId));
+  const res = await fetchWithAuth(`/api/enterprises/options?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data = await res.json().catch(() => ({}));
   return Array.isArray(data)

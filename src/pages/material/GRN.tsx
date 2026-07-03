@@ -930,22 +930,15 @@ export default function GRN() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.projectId, godowns]);
 
-  const { data: projectsData = [] } = useQuery({
-    queryKey: ["grn-projects"],
-    queryFn: getProjects,
+  const { data: filteredProjects = [] } = useQuery({
+    queryKey: ["grn-projects", formData.companyId],
+    queryFn: () => getProjects(formData.companyId || null),
   });
 
   const { data: companiesData = [] } = useQuery({
     queryKey: ["grn-companies"],
     queryFn: getCompanies,
   });
-
-  const filteredProjects = useMemo(() => {
-    if (!formData.companyId) return projectsData as any[];
-    return (projectsData as any[]).filter(
-      (p: any) => String(p.enterprise_id) === formData.companyId,
-    );
-  }, [projectsData, formData.companyId]);
 
   const pos = useMemo(
     () =>
@@ -1565,42 +1558,6 @@ export default function GRN() {
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                  {/* Company */}
-                  <div>
-                    <FieldLabel>Company</FieldLabel>
-                    <div className="relative">
-                      <select
-                        value={formData.companyId}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            companyId: e.target.value,
-                            projectId: "",
-                            poId: "",
-                            poNumber: "",
-                            supplierId: "",
-                            supplierName: "",
-                            items: [createEmptyItem()],
-                            parentDocNo: "",
-                            rootExBDocNo: "",
-                          }))
-                        }
-                        className={inpSel}
-                      >
-                        <option value="">All Companies</option>
-                        {(companiesData as any[]).map((c: any) => (
-                          <option key={c.id} value={String(c.id)}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={12}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
-                  </div>
-
                   {/* Fin Year */}
                   <div>
                     <FieldLabel>Financial Year</FieldLabel>
@@ -1637,6 +1594,42 @@ export default function GRN() {
                               {fy.year}
                             </option>
                           ))}
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Company */}
+                  <div>
+                    <FieldLabel>Company</FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={formData.companyId}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            companyId: e.target.value,
+                            projectId: "",
+                            poId: "",
+                            poNumber: "",
+                            supplierId: "",
+                            supplierName: "",
+                            items: [createEmptyItem()],
+                            parentDocNo: "",
+                            rootExBDocNo: "",
+                          }))
+                        }
+                        className={inpSel}
+                      >
+                        <option value="">All Companies</option>
+                        {(companiesData as any[]).map((c: any) => (
+                          <option key={c.id} value={String(c.id)}>
+                            {c.name}
+                          </option>
+                        ))}
                       </select>
                       <ChevronDown
                         size={12}
@@ -1772,7 +1765,7 @@ export default function GRN() {
                       <InfoPill
                         label="Project"
                         value={
-                          (projectsData as any[]).find(
+                          (filteredProjects as any[]).find(
                             (p: any) => String(p.id) === formData.projectId,
                           )?.name || ""
                         }
