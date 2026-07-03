@@ -1,5 +1,6 @@
 // src/pages/admin/masters/ProjectMaster.tsx
 import React, { useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -293,8 +294,8 @@ function ProjectViewModal({
       ],
     });
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -404,7 +405,8 @@ function ProjectViewModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1370,8 +1372,8 @@ export default function ProjectMaster() {
         )}
 
         {/* Delete Confirmation */}
-        {deleteConfirm !== null && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        {deleteConfirm !== null && createPortal(
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -1401,7 +1403,8 @@ export default function ProjectMaster() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </AdminShell>
     </>

@@ -194,7 +194,7 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       style={{ width: pctOf(header.column.columnDef.size) }}
-                      className={`px-4 py-3 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${header.column.id === "actions" ? "text-right" : "text-left"} ${
+                      className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${header.column.id === "actions" ? "text-right" : "text-left"} ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""
@@ -236,7 +236,7 @@ export function DataTable<TData extends RowData>({
               Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i} className="border-b border-border">
                   {columns.map((_, j) => (
-                    <td key={j} className="px-4 py-3">
+                    <td key={j} className="px-5 py-4">
                       <div className="h-4 bg-muted rounded animate-pulse" />
                     </td>
                   ))}
@@ -264,7 +264,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-4 py-3 text-foreground text-sm"
+                      className="px-5 py-4 text-foreground text-sm align-middle"
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
