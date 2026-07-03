@@ -1077,10 +1077,7 @@ export default function GRN() {
 
   const handleDeleteGrnLocal = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${id}/can-delete`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${id}/can-delete`);
       const data = await res.json();
       if (!data.deletable) {
         setDeleteBlockInfo(data);
@@ -1336,10 +1333,7 @@ export default function GRN() {
   // ── View / Edit ───────────────────────────────────────────────────────────────
   onView = async (grn: any) => {
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${grn.GRNID}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${grn.GRNID}`);
       if (!res.ok) throw new Error("Failed to fetch GRN details");
       setViewingGrn(await res.json());
     } catch (err) {
@@ -1362,10 +1356,7 @@ export default function GRN() {
   onEdit = async (grn: any) => {
     let fullGrn = grn;
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${grn.GRNID}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${grn.GRNID}`);
       if (res.ok) fullGrn = await res.json();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
