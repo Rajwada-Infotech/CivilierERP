@@ -555,6 +555,53 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * Journal Voucher approved.
+ *
+ * JV lines already ARE the legs (LHeadId + DebitAmount/CreditAmount) — no
+ * derivation needed, unlike GRN/ExpenseBooking/Payment which compute their
+ * legs from a document's amount fields. Just map each line straight onto
+ * postVoucher()'s leg shape and post once.
+ */
+async function postJournalVoucherApproval(pool, jvId, userEmail) {
+  if (await hasPosting(pool, "JournalVoucher", jvId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const hdrResult = await pool.request().input("JVID", sql.Int, jvId).query(`
+    SELECT JVID, JVNo, JVDate, CompanyId, ProjectId FROM dbo.JournalVoucher WHERE JVID = @JVID
+  `);
+  const jv = hdrResult.recordset[0];
+  if (!jv) return { posted: false, reason: `JournalVoucher ${jvId} not found` };
+
+  const linesResult = await pool
+    .request()
+    .input("JVID", sql.Int, jvId)
+    .query(
+      `SELECT LHeadId, DebitAmount, CreditAmount, Narration FROM dbo.JournalVoucherLines WHERE JVID = @JVID ORDER BY SortOrder, LineID`,
+    );
+  const lines = linesResult.recordset;
+  if (lines.length < 2)
+    return { posted: false, reason: `JournalVoucher ${jvId} has fewer than 2 lines` };
+
+  const docNo = jv.JVNo || `JV-${jvId}`;
+  await postVoucher(pool, {
+    voucherNo: docNo,
+    voucherDate: jv.JVDate,
+    sourceType: "JournalVoucher",
+    sourceId: jvId,
+    companyId: jv.CompanyId ?? null,
+    projectId: jv.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: lines.map((l) => ({
+      lHeadId: l.LHeadId,
+      debit: Number(l.DebitAmount) || 0,
+      credit: Number(l.CreditAmount) || 0,
+      narration: l.Narration || `${docNo} — journal voucher`,
+    })),
+  });
+  return { posted: true };
+}
+
 module.exports = {
   GL_ACCOUNTS,
   getGLHeadId,
@@ -565,4 +612,5 @@ module.exports = {
   postExpenseBookingApproval,
   postPaymentApproval,
   postReceivedPaymentApproval,
+  postJournalVoucherApproval,
 };
