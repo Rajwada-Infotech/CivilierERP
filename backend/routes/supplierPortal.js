@@ -105,9 +105,16 @@ router.get("/quotations/:id", async (req, res) => {
     if (!tagCheck.recordset.length)
       return res.status(403).json({ error: "You are not tagged on this quotation." });
 
+    // CompanyName/ProjectName were missing here (unlike the sibling GET
+    // /quotations list endpoint above, which already joins these) — the
+    // detail page's company/project row silently never rendered because
+    // these came back undefined. Same JOIN pattern as GET /quotations.
     const header = await pool.request().input("id", sql.Int, id).query(`
-      SELECT q.QuotationId, q.DocNo, q.Status, q.DocDate, q.DueDate, q.Remarks
+      SELECT q.QuotationId, q.DocNo, q.Status, q.DocDate, q.DueDate, q.Remarks,
+             ec.name AS CompanyName, ep.name AS ProjectName
       FROM dbo.Quotations q
+      LEFT JOIN dbo.enterprise ec ON ec.id = q.CompanyId
+      LEFT JOIN dbo.enterprise ep ON ep.id = q.ProjectId
       WHERE q.QuotationId = @id
     `);
     if (!header.recordset.length) return res.status(404).json({ error: "Quotation not found" });
