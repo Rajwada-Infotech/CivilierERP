@@ -529,6 +529,7 @@ export default function CompanyMaster() {
   const rights = usePageRights("company-master");
   const qc = useQueryClient();
   const [form, setForm] = useState<Company>(empty);
+  const [gstError, setGstError] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [viewTarget, setViewTarget] = useState<any | null>(null);
@@ -596,15 +597,18 @@ export default function CompanyMaster() {
     mutationFn: async () => {
       if (form.gstType === "Registered") {
         if (!form.gstNumber.trim()) {
+          setGstError("GST Number is required for registered companies");
           throw new Error("GST Number is required for registered companies");
         }
+        if (!GSTIN_REGEX.test(form.gstNumber.trim().toUpperCase())) {
+          setGstError("Enter a valid 15-character GSTIN (e.g. 27AAAAA0000A1Z5)");
+          throw new Error("Enter a valid GSTIN");
+        }
+        setGstError("");
         if (!form.gstDate) {
           throw new Error(
             "GST Registration Date is required for registered companies",
           );
-        }
-        if (!GSTIN_REGEX.test(form.gstNumber.trim().toUpperCase())) {
-          throw new Error("Enter a valid GSTIN");
         }
       }
 
@@ -669,6 +673,7 @@ export default function CompanyMaster() {
     setForm({ ...empty });
     setEditId(null);
     setLogoPreview("");
+    setGstError("");
     setShowForm(true);
     setActiveTab("general");
   };
@@ -677,6 +682,7 @@ export default function CompanyMaster() {
     setForm(f);
     setLogoPreview(f.logoUrl || "");
     setEditId(row.Id);
+    setGstError("");
     setShowForm(true);
     setActiveTab("general");
   };
@@ -717,6 +723,7 @@ export default function CompanyMaster() {
   };
 
   const setGstStatus = (value: string) => {
+    setGstError("");
     setForm((c) => ({
       ...c,
       gstType: value,
@@ -775,14 +782,19 @@ export default function CompanyMaster() {
             <input
               type={type}
               value={form[key] as string}
-              onChange={(e) =>
-                setForm((c) => ({ ...c, [key]: e.target.value }))
-              }
+              onChange={(e) => {
+                if (key === "gstNumber") setGstError("");
+                setForm((c) => ({ ...c, [key]: e.target.value }));
+              }}
               placeholder={ph || label}
               disabled={options?.disabled}
               required={options?.required}
               title={options?.title}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+              className={`w-full px-3 py-2 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed ${
+                key === "gstNumber" && gstError
+                  ? "border-red-400 focus:ring-red-400/30"
+                  : "border-border focus:ring-primary/30"
+              }`}
             />
             {options?.disabled && options?.title && (
               <p className="mt-1 text-[11px] text-muted-foreground">
@@ -1096,12 +1108,19 @@ export default function CompanyMaster() {
                       />
                     </div>
                   </div>
-                  {fi("GST Number", "gstNumber", "text", "Enter GSTIN", {
-                    disabled: form.gstType !== "Registered",
-                    title: "Available only for registered companies",
-                    required: form.gstType === "Registered",
-                    showAsterisk: true,
-                  })}
+                  <div>
+                    {fi("GST Number", "gstNumber", "text", "Enter GSTIN (e.g. 27AAAAA0000A1Z5)", {
+                      disabled: form.gstType !== "Registered",
+                      title: "Available only for registered companies",
+                      required: form.gstType === "Registered",
+                      showAsterisk: form.gstType === "Registered",
+                    })}
+                    {gstError && (
+                      <p className="mt-1 text-[11px] text-red-500 flex items-center gap-1">
+                        <span>⚠</span> {gstError}
+                      </p>
+                    )}
+                  </div>
                   {fi(
                     "GST Registration Date",
                     "gstDate",

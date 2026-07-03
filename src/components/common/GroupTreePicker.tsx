@@ -242,7 +242,7 @@ export function GroupTreePicker({
         <div
           ref={panelRef}
           style={panelStyle}
-          className={`flex flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 origin-top ${
+          className={`relative flex flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 origin-top ${
             closing ? "opacity-0 scale-y-95" : "opacity-100 scale-y-100 animate-in fade-in-0 zoom-in-95"
           }`}
         >
@@ -264,7 +264,10 @@ export function GroupTreePicker({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto py-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          {/* bottom fade hint */}
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent z-10" />
+
+          <div className="flex-1 overflow-y-auto scroll-smooth py-1 [scrollbar-width:thin] [scrollbar-color:theme(colors.border)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/0 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-border/60 [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb]:duration-300">
             <div
               className={`flex items-center gap-2 px-3 py-1.5 mx-1 rounded text-xs cursor-pointer transition-colors mb-0.5 ${
                 value === "" ? "bg-primary/15 text-primary font-semibold" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
