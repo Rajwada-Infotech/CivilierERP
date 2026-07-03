@@ -44,7 +44,7 @@ const ALLOWED_ORIGINS =
 const isDev = process.env.NODE_ENV !== "production";
 
 function isOriginAllowed(origin) {
-  if (!origin) return true; // same-origin / curl / mobile apps with no Origin
+  if (!origin) return true;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (isDev && PRIVATE_IP_RE.test(origin)) return true;
   return false;
