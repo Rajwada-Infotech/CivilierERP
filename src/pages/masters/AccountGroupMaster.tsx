@@ -502,7 +502,7 @@ function GroupTreePicker({
                 </div>
 
                 {/* Tree nodes */}
-                <div className="flex-1 overflow-y-auto py-2">
+                <div className="flex-1 overflow-y-auto py-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                   {/* Top-level option */}
                   <div
                     className={`flex items-center gap-2 px-4 py-1.5 mx-2 rounded-md text-xs cursor-pointer transition-colors mb-1 ${
@@ -575,7 +575,7 @@ function GroupTreePicker({
               {/* ── Detail pane ── */}
               <div className="w-64 shrink-0 flex flex-col bg-muted/5">
                 {previewGroup ? (
-                  <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                  <div className="flex-1 overflow-y-auto p-5 space-y-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     {/* Group identity */}
                     <div>
                       <div className="flex items-center gap-2 mb-3">
