@@ -74,55 +74,54 @@ async function safeLoadRoutes(app, routes, options = {}) {
  */
 function printRoutesSummary(results, logger = console) {
   const { loaded, skipped, failed } = results;
-  const total  = loaded.length + skipped.length + failed.length;
-  const allOk  = failed.length === 0 && skipped.length === 0;
+  const total   = loaded.length + skipped.length + failed.length;
+  const allOk   = failed.length === 0 && skipped.length === 0;
   const hasFail = failed.length > 0;
 
-  const title   = "  Routes  /  Load Summary";
-  const fields  = [
-    ["OK   :", String(loaded.length)],
-    ["WARN :", String(skipped.length)],
-    ["FAIL :", String(failed.length)],
-    ["TOTAL:", String(total)],
+  // dot-leader row: "LABEL ........ VALUE"
+  const W = 42;
+  const leader = (label, value) => {
+    const val   = String(value);
+    const dots  = ".".repeat(Math.max(3, W - label.length - val.length - 2));
+    return `  ${label} ${dots} ${val}`;
+  };
+
+  const bar    = "#".repeat(W + 4);
+  const spacer = `#${" ".repeat(W + 2)}#`;
+  const mid    = "#" + "-".repeat(W + 2) + "#";
+  const wrap   = (s) => `#  ${s.padEnd(W)}#`;
+
+  const lines  = [
+    bar,
+    spacer,
+    wrap(`  CivilierERP  >>  Route Loader`),
+    spacer,
+    mid,
+    spacer,
+    wrap(leader("OK",    loaded.length)),
+    wrap(leader("WARN",  skipped.length)),
+    wrap(leader("FAIL",  failed.length)),
+    wrap(leader("TOTAL", total)),
+    spacer,
   ];
 
-  const extras = [];
   if (hasFail) {
-    extras.push(["", ""], ["FAILED ROUTES", ""]);
-    failed.forEach(({ label, error }) => extras.push([`  ${label}`, error]));
+    lines.push(mid, wrap("  FAILED ROUTES"));
+    failed.forEach(({ label, error }) =>
+      lines.push(wrap(`    ${label}  ->  ${error}`))
+    );
+    lines.push(spacer);
   }
+
   if (skipped.length > 0) {
-    extras.push(["", ""], ["SKIPPED ROUTES", ""]);
-    skipped.forEach(({ label, reason }) => extras.push([`  ${label}`, reason]));
+    lines.push(mid, wrap("  SKIPPED ROUTES"));
+    skipped.forEach(({ label, reason }) =>
+      lines.push(wrap(`    ${label}  ->  ${reason}`))
+    );
+    lines.push(spacer);
   }
 
-  const allRows = [...fields, ...extras];
-  const innerW  = Math.max(
-    title.length,
-    ...allRows.map(([l, v]) => `  ${l}  ${v}`.length),
-  ) + 4;
-
-  const row   = (s) => `|  ${s.padEnd(innerW - 2)}|`;
-  const rule  = `+${"-".repeat(innerW)}+`;
-  const thick = `+${"=".repeat(innerW)}+`;
-
-  const lines = [
-    thick,
-    row(title),
-    rule,
-    row(""),
-    ...fields.map(([l, v]) => row(`${l}  ${v}`)),
-    ...(extras.length
-      ? [
-          rule,
-          ...extras.map(([l, v]) =>
-            l === "" ? row("") : row(`${l}${v ? `  ${v}` : ""}`),
-          ),
-        ]
-      : []),
-    row(""),
-    thick,
-  ];
+  lines.push(bar);
 
   const status = allOk ? "info" : hasFail ? "error" : "warn";
   logger[status](`\n${lines.join("\n")}\n`);
