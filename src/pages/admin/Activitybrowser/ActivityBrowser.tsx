@@ -6,8 +6,6 @@ import type { ActivityActionType } from "@/api/userActivityApi";
 import type { SessionEvent } from "@/api/userActivityApi";
 import type { GroupedSession } from "@/contexts/ActivityBrowserContext";
 import {
-  ROLE_COLORS,
-  ACTION_COLORS,
   PRESETS,
   YEARS,
   MONTHS,
@@ -17,26 +15,19 @@ import { parseDeviceInfo } from "@/utils/deviceFingerprint";
 import {
   Search,
   Shield,
-  Wifi,
   Monitor,
   Fingerprint,
   LogIn,
   LogOut,
   Timer,
   ChevronDown,
-  ChevronRight,
   RefreshCw,
   Trash2,
   Activity,
   AlertTriangle,
   Globe,
-  Cpu,
-  Calendar,
-  Clock,
-  User,
   Filter,
   X,
-  Eye,
   Database,
   Zap,
   Circle,
@@ -186,33 +177,6 @@ const StatCard: React.FC<{
   </div>
 );
 
-const DeviceInfoRow: React.FC<{ session: GroupedSession }> = ({ session }) => {
-  const { os, browser, isMobile } = parseUA(session.deviceInfo);
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 text-xs">
-        <Globe size={11} className="shrink-0 text-muted-foreground" />
-        <span className="font-mono text-foreground/80">
-          {session.ipAddress || "—"}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-xs">
-        <Monitor size={11} className="shrink-0 text-muted-foreground" />
-        <span className="text-muted-foreground">
-          {browser} · {os} · {isMobile ? "Mobile" : "Desktop"}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-xs">
-        <Fingerprint size={11} className="shrink-0 text-muted-foreground" />
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {session.deviceFingerprint !== "Unknown"
-            ? session.deviceFingerprint.slice(0, 20) + "…"
-            : "unknown"}
-        </span>
-      </div>
-    </div>
-  );
-};
 
 // ─── Session Card ─────────────────────────────────────────────────────────
 
@@ -231,7 +195,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
   );
   const multipleIps = allIps.size > 1;
 
-  const { os, browser, isMobile } = parseUA(session.deviceInfo);
+  const { os, browser } = parseUA(session.deviceInfo);
   const ini = initials(session.userName);
 
   return (

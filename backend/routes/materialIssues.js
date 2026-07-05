@@ -381,9 +381,6 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       items = [],
       ParentDocNo = null,
       RootExBDocNo = null,
-      ReferenceType = null,
-      ReferenceId = null,
-      ReferenceDocNo = null,
       IssuedTo = null,
       CostCenter = null,
       Purpose = null,
@@ -663,65 +660,74 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       ? parseInt(GodownId, 10)
       : await resolveMainGodownId(pool);
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .input("CompanyId", sql.Int, CompanyId)
-      .input("ProjectId", sql.Int, ProjectId)
-      .input("FinYearId", sql.Int, FinYearId || null)
-      .input("Date", sql.Date, IssueDate)
-      .input("Reason", sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("GodownId", sql.Int, resolvedGodownId)
-      .input("IssuedTo", sql.NVarChar(200), IssuedTo || null)
-      .input("CostCenter", sql.NVarChar(200), CostCenter || null)
-      .input("Purpose", sql.NVarChar(500), Purpose || null).query(`
-        UPDATE dbo.MaterialIssues
-        SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
-            Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
-            GodownId=@GodownId,
-            IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose
-        WHERE IssueId=@Id
-      `);
-
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.MaterialIssueItems WHERE IssueId = @Id");
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@Id");
-
-    for (const it of items) {
-      const qty = Number(it.Quantity);
-      const itemId = String(it.ItemId);
-      const uomCode = it.UOMCode || null;
-
-      await pool
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      await tx
         .request()
-        .input("IssueId", sql.Int, id)
-        .input("ItemId", sql.NVarChar(100), itemId)
-        .input("UOMCode", sql.NVarChar(20), uomCode)
-        .input("Quantity", sql.Decimal(18, 2), qty)
-        .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
-          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
-          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+        .input("Id", sql.Int, id)
+        .input("CompanyId", sql.Int, CompanyId)
+        .input("ProjectId", sql.Int, ProjectId)
+        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("Date", sql.Date, IssueDate)
+        .input("Reason", sql.NVarChar(sql.MAX), Reason)
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("GodownId", sql.Int, resolvedGodownId)
+        .input("IssuedTo", sql.NVarChar(200), IssuedTo || null)
+        .input("CostCenter", sql.NVarChar(200), CostCenter || null)
+        .input("Purpose", sql.NVarChar(500), Purpose || null).query(`
+          UPDATE dbo.MaterialIssues
+          SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
+              Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
+              GodownId=@GodownId,
+              IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose
+          WHERE IssueId=@Id
         `);
 
-      await pool
+      await tx
         .request()
-        .input("ItemID", sql.NVarChar(50), itemId)
-        .input("Qty", sql.Decimal(18, 2), qty)
-        .input("UOM", sql.NVarChar(20), uomCode)
-        .input("Type", sql.NVarChar(10), "OUT")
-        .input("RefType", sql.NVarChar(20), "ISS")
-        .input("RefID", sql.Int, id)
-        .input("DocNo", sql.NVarChar(100), docNo)
-        .input("GodownID", sql.Int, resolvedGodownId).query(`
-          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
-        `);
+        .input("Id", sql.Int, id)
+        .query("DELETE FROM dbo.MaterialIssueItems WHERE IssueId = @Id");
+      await tx
+        .request()
+        .input("Id", sql.Int, id)
+        .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@Id");
+
+      for (const it of items) {
+        const qty = Number(it.Quantity);
+        const itemId = String(it.ItemId);
+        const uomCode = it.UOMCode || null;
+
+        await tx
+          .request()
+          .input("IssueId", sql.Int, id)
+          .input("ItemId", sql.NVarChar(100), itemId)
+          .input("UOMCode", sql.NVarChar(20), uomCode)
+          .input("Quantity", sql.Decimal(18, 2), qty)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
+            INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
+            VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+          `);
+
+        await tx
+          .request()
+          .input("ItemID", sql.NVarChar(50), itemId)
+          .input("Qty", sql.Decimal(18, 2), qty)
+          .input("UOM", sql.NVarChar(20), uomCode)
+          .input("Type", sql.NVarChar(10), "OUT")
+          .input("RefType", sql.NVarChar(20), "ISS")
+          .input("RefID", sql.Int, id)
+          .input("DocNo", sql.NVarChar(100), docNo)
+          .input("GodownID", sql.Int, resolvedGodownId).query(`
+            INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+            VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
     }
 
     await bumpCacheVersion("material-issues");

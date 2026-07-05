@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
-  Search,
   Edit,
   Trash2,
   Eye,

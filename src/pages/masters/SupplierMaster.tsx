@@ -41,6 +41,7 @@ import {
   Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -407,10 +408,10 @@ const SupplierMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [sortField, setSortField] = useState<
+  const [sortField] = useState<
     "LHeadName" | "LHeadContactPerson" | "LHeadPhone"
   >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc] = useState(true);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -756,6 +757,7 @@ const SupplierMaster: React.FC = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
     if (!form.LHeadPan.trim()) e.LHeadPan = true;
+    if (!form.LBelongsTo) e.LBelongsTo = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     if (Object.keys(e).length) {
       setErrors(e);
@@ -1025,15 +1027,18 @@ const SupplierMaster: React.FC = () => {
                 {/* Account Group */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Account Group
+                    Account Group <span className="text-red-500">*</span>
                   </label>
-                  <TreeDropdown
-                    variant="tree"
+                  <GroupTreePicker
                     value={form.LBelongsTo}
-                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
-                    items={accountGroupTree}
+                    onChange={(v) => { setForm((p) => ({ ...p, LBelongsTo: v })); setErrors((p) => ({ ...p, LBelongsTo: false })); }}
+                    tree={accountGroupTree}
                     allGroups={accountGroups}
+                    error={errors.LBelongsTo}
                   />
+                  {errors.LBelongsTo && (
+                    <p className="text-xs text-red-500 mt-0.5">Account Group is required</p>
+                  )}
                 </div>
               </div>
             </div>

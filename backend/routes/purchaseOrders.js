@@ -348,17 +348,13 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     const insertReq = transaction
       .request()
       .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo)
-      .input("PODate", sql.Date, PODate || null)
+      .input("PODate", sql.Date, PODate)
       .input(
         "ExpectedDeliveryDate",
         sql.Date,
-        ExpectedDeliveryDate || PODate || null,
+        ExpectedDeliveryDate || PODate,
       )
-      .input(
-        "SupplierID",
-        sql.Int,
-        SupplierID ? parseInt(SupplierID, 10) : null,
-      )
+      .input("SupplierID", sql.Int, parseInt(SupplierID, 10))
       .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
       .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
@@ -886,17 +882,13 @@ router.put(
         .request()
         .input("PurchaseOrderID", sql.Int, id)
         .input("PurchaseOrderNo", sql.NVarChar(100), PurchaseOrderNo || null)
-        .input("PODate", sql.Date, PODate || null)
+        .input("PODate", sql.Date, PODate)
         .input(
           "ExpectedDeliveryDate",
           sql.Date,
-          ExpectedDeliveryDate || PODate || null,
+          ExpectedDeliveryDate || PODate,
         )
-        .input(
-          "SupplierID",
-          sql.Int,
-          SupplierID ? parseInt(SupplierID, 10) : null,
-        )
+        .input("SupplierID", sql.Int, parseInt(SupplierID, 10))
         .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
         .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
         .input(

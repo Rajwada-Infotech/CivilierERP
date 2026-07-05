@@ -107,7 +107,7 @@ export function LogoFull({ className }: { className?: string }) {
     appLabel === "…" || dbLabel === "…" ? "…" : `db. ${dbLabel}`,
   ];
 
-  const { display, activeIdx } = useMatrixCycle(targets);
+  const { display } = useMatrixCycle(targets);
 
   // Tooltip shows both
   const tooltip =

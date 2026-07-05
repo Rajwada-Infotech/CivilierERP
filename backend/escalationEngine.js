@@ -342,13 +342,7 @@ async function runEscalation() {
     ]);
 
     const elapsed = Date.now() - start;
-    console.log(
-      `[EscalationEngine] Done in ${elapsed}ms — ` +
-        `LegalMilestones: ${lm} steps blocked, ` +
-        `AgreementWorkflows: ${aw} steps blocked, ` +
-        `SalesDeeds: ${sd} flagged, ` +
-        `Bookings: ${bk} flagged`,
-    );
+    console.log(`[EscalationEngine] Done in ${elapsed}ms`);
   } catch (err) {
     console.error("[EscalationEngine] Error:", err.message);
     // Re-throw so callers (the manual POST /api/followup-escalation/run

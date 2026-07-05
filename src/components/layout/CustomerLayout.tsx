@@ -10,7 +10,6 @@ import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 export function CustomerLayout({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   const { handleLogout, overlay } = useGracefulLogout();
-  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-background">

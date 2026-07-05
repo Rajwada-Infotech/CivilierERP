@@ -439,7 +439,7 @@ function TaskRow({
 
 export default function PendingTasksPage() {
   const queryClient = useQueryClient();
-  const { currentUser, allUsers } = useAuth();
+  const { allUsers } = useAuth();
   const rights = usePageRights("followup-tasks");
 
   const [search, setSearch] = useState("");

@@ -828,12 +828,10 @@ const Widgets = () => {
   const {
     catalog,
     loading: catalogLoading,
-    error: catalogError,
   } = useWidgetCatalog();
   const {
     allowedSet,
     loading: rightsLoading,
-    error: rightsError,
   } = useAllowedWidgets();
 
   // allowedSet null = still loading or rights failed → show all catalog widgets as fallback

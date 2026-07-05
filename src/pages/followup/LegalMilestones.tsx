@@ -39,7 +39,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -70,12 +69,6 @@ const STEP_STATUS_OPTIONS = [
   "Waived",
 ];
 
-const OVERALL_STATUS_OPTIONS = [
-  "In Progress",
-  "Completed",
-  "On Hold",
-  "Cancelled",
-];
 
 const STEP_STATUS_COLOR: Record<string, string> = {
   "Pending":     "bg-slate-500/10 text-slate-600 border-slate-400/20",

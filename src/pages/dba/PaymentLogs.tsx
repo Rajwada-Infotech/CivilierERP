@@ -32,7 +32,6 @@ import {
 import {
   Receipt,
   Plus,
-  TrendingUp,
   CheckCircle2,
   XCircle,
   Clock,
@@ -43,10 +42,8 @@ import {
   Building2,
   CreditCard,
   IndianRupee,
-  AlertTriangle,
   QrCode,
   RefreshCw,
-  Filter,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────

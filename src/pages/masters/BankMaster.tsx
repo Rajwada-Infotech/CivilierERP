@@ -31,6 +31,7 @@ import {
   Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -209,9 +210,6 @@ const BANK_TYPES = [
 // ─── Shared input class (ContractorMaster style) ─────────────────────────────
 const inputCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-const selectCls =
-  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-
 // ─── Bank Type Badges ───────────────────────────────────────────────────────
 const bankTypeBadge: Record<string, string> = {
   Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",
@@ -1116,13 +1114,12 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <TreeDropdown
-                    variant="tree"
+                  <GroupTreePicker
                     value={form.accountGroupId}
                     onChange={(v) =>
                       setValue("accountGroupId", v, { shouldValidate: true })
                     }
-                    items={accountGroupTree}
+                    tree={accountGroupTree}
                     allGroups={accountGroups}
                   />
                 </div>

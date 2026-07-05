@@ -43,9 +43,14 @@ async function authFetch(url: string, method: string, body?: object) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   let data: any = {};
-  try { data = await res.json(); } catch { /* non-JSON body (e.g. 429 plain text) */ }
+  try {
+    data = await res.json();
+  } catch {
+    /* non-JSON body (e.g. 429 plain text) */
+  }
   if (!res.ok) {
-    if (res.status === 429) throw new Error("Server is busy — please try again in a moment.");
+    if (res.status === 429)
+      throw new Error("Server is busy — please try again in a moment.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
   return data;
@@ -82,14 +87,31 @@ export function ApprovalActions({
     setLoading(action);
     try {
       const body = action === "reject" ? { note: rejectNote } : undefined;
-      await authFetch(`${endpoint}/${recordId}/${action}`, "PUT", body);
-      toast.success(
-        action === "submit"
-          ? "Submitted for approval"
-          : action === "approve"
-            ? "Record approved"
-            : "Record rejected",
+      const data = await authFetch(
+        `${endpoint}/${recordId}/${action}`,
+        "PUT",
+        body,
       );
+      if (
+        action === "approve" &&
+        data?.newStatus &&
+        data.newStatus !== "Approved"
+      ) {
+        // Multi-level workflow: this was only one level of several — the record
+        // is still Pending overall, so don't tell the user it's fully approved.
+        toast.success(
+          data.message ||
+            `Level ${data.level} of ${data.totalLevels} approved — awaiting further approval`,
+        );
+      } else {
+        toast.success(
+          action === "submit"
+            ? "Submitted for approval"
+            : action === "approve"
+              ? "Record approved"
+              : "Record rejected",
+        );
+      }
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");

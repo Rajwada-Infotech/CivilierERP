@@ -45,11 +45,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import {
   Plus,
-  Edit,
   Trash2,
   ArrowLeft,
   Receipt,
-  Building2,
   CalendarDays,
   FileText,
   BadgePercent,
@@ -59,9 +57,7 @@ import {
   Clock,
   AlertCircle,
   TrendingUp,
-  FolderKanban,
   ShoppingCart,
-  HardHat,
   Hammer,
   Search,
   X,
@@ -77,7 +73,6 @@ import {
   Package,
   AlertTriangle,
   Save,
-  RefreshCw,
   Check,
   RotateCcw,
   Download,
@@ -86,7 +81,6 @@ import {
 import { toast } from "sonner";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { StatusBadge } from "@/components/StatusBadge";
 import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
@@ -1556,7 +1550,7 @@ export default function MaterialExpenseBooking() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
-  const [totalBookedAmount, setTotalBookedAmount] = useState(0);
+  const [, setTotalBookedAmount] = useState(0);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -1599,9 +1593,9 @@ export default function MaterialExpenseBooking() {
     [],
   );
   const [supplierHeads, setSupplierHeads] = useState<
-    { id: number; label: string }[]
+    { id: number; label: string; paymentTerms: string | null }[]
   >([]);
-  const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
+  const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -1796,6 +1790,7 @@ export default function MaterialExpenseBooking() {
         const heads = (Array.isArray(list) ? list : []).map((h) => ({
           id: h.LHeadId,
           label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setSupplierHeads(heads);
       })
@@ -1980,241 +1975,6 @@ export default function MaterialExpenseBooking() {
   const openNew = () => {
     resetForm();
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
-    _mastersCache.grn = null;
-    fetchMasters();
-    setView("form");
-  };
-
-  const openEdit = (rec: ExpenseRecord) => {
-    resetForm();
-    if (!rec.id) {
-      toast.error("Cannot edit this booking because its record id is missing.");
-      return;
-    }
-    setEditingId(rec.id);
-    const { id, ...rest } = rec;
-    setForm(rest);
-    setApprovalTrail(undefined);
-    setLiveEmiSchedule(null);
-
-    if (rec.eSourceType && rec.eSourceId) {
-      const kind = rec.eSourceType;
-      const sourceId = rec.eSourceId;
-      const docNo = rec.bookingReference;
-
-      if (kind === "GRN") {
-        const stub: SelectedDoc = {
-          kind: "GRN",
-          docNo,
-          sourceId,
-          grnItems: [],
-        };
-        setSelectedDoc(stub);
-        setGrnItemsLoading(true);
-        apiFetch(`/api/grns/${sourceId}`)
-          .then((r: any) => {
-            const items = parseGRNItemsFromRaw(r.GRNItems);
-            const rawDocNo: string = r.GRNNo || r.DocNo || docNo;
-            const canonical = rawDocNo.startsWith("GRN-")
-              ? rawDocNo
-              : `GRN-${rawDocNo}`;
-            const parsedParentGST: GSTConfig | null = (() => {
-              if (!r.ParentGST) return null;
-              if (typeof r.ParentGST === "object")
-                return r.ParentGST as GSTConfig;
-              try {
-                return JSON.parse(r.ParentGST) as GSTConfig;
-              } catch (err) {
-                toast.error(
-                  err instanceof Error ? err.message : "Something went wrong",
-                );
-                return null;
-              }
-            })();
-            setSelectedDoc({
-              kind: "GRN",
-              docNo: canonical,
-              sourceId,
-              vendorLabel: r.SupplierName,
-              status: r.Status,
-              date: r.GRNDate?.slice(0, 10),
-              grnItems: items,
-              amount: Math.round((parseFloat(r.TotalAmount) || 0) * 100) / 100,
-              gst: parsedParentGST,
-            });
-            setForm((prev) => ({
-              ...prev,
-              supplier: r.SupplierName ?? prev.supplier,
-              projectSite: r.ProjectId ? String(r.ProjectId) : prev.projectSite,
-            }));
-            // Fetch GST breakdown so the form's bd uses exact per-item totals,
-            // ensuring Net Payable = Gross Amount for existing GRN-linked records.
-            apiFetch(`/api/grns/${sourceId}/gst-breakdown`)
-              .then((bd: any) => {
-                setGstBreakdown(bd);
-              })
-              .catch(() => {
-                /* non-fatal */
-              });
-          })
-          .catch((err) => {
-            toast.error(
-              err instanceof Error ? err.message : "Something went wrong",
-            );
-          })
-          .finally(() => setGrnItemsLoading(false));
-      } else if (kind === "PO") {
-        const tryBuildPO = (list: POItem[]) => {
-          const po = list.find((p) => p.PurchaseOrderID === sourceId);
-          if (po) {
-            setSelectedDoc({
-              kind: "PO",
-              docNo: po.DocNo || po.PurchaseOrderNo,
-              sourceId,
-              vendorLabel: po.SupplierName,
-              companyId: po.CompanyId,
-              projectId: po.ProjectId,
-              amount: po.TotalAmount,
-              status: po.Status,
-              date: po.PODate,
-              gst: po.GST ?? null,
-            });
-            setForm((prev) => ({
-              ...prev,
-              supplier: po.SupplierName ?? prev.supplier,
-              projectSite: po.ProjectId
-                ? String(po.ProjectId)
-                : prev.projectSite,
-              costCenter:
-                prev.costCenter || resolveCostCenterForProject(po.ProjectId),
-            }));
-          }
-        };
-        if (_mastersCache.po) {
-          tryBuildPO(_mastersCache.po);
-        } else {
-          apiFetch("/api/purchase-orders?limit=500")
-            .then((r: any) => {
-              const list: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              _mastersCache.po = list;
-              tryBuildPO(list);
-            })
-            .catch(() => {});
-        }
-      } else if (kind === "WORK_DONE") {
-        const tryBuildWorkDone = (list: WorkDoneItem[]) => {
-          const wd = list.find((w) => w.ID === sourceId);
-          if (wd) {
-            setSelectedDoc({
-              kind: "WORK_DONE",
-              docNo: wd.DocNo || `WD-${wd.ID}`,
-              sourceId,
-              vendorLabel: wd.ContractorName,
-              companyId: wd.CompanyId,
-              projectId: wd.ProjectId,
-              amount: wd.CertifiedAmount,
-              status: wd.Status,
-              date: wd.DocDate,
-              gst: wd.GST ?? null,
-            });
-            setForm((prev) => ({
-              ...prev,
-              supplier: wd.ContractorName ?? prev.supplier,
-              projectSite: wd.ProjectId
-                ? String(wd.ProjectId)
-                : prev.projectSite,
-              costCenter:
-                prev.costCenter || resolveCostCenterForProject(wd.ProjectId),
-            }));
-          }
-        };
-        if (_mastersCache.workDone) {
-          tryBuildWorkDone(_mastersCache.workDone);
-        } else {
-          apiFetch("/api/engineering/work-done?status=Approved&limit=500")
-            .then((r: any) => {
-              const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              const list = all.filter(
-                (wd) => (wd.Status ?? "").toLowerCase() === "approved",
-              );
-              _mastersCache.workDone = list;
-              tryBuildWorkDone(list);
-            })
-            .catch(() => {});
-        }
-      } else if (kind === "WO_PO") {
-        const tryBuildWOPO = (list: POItem[]) => {
-          const po = list.find((p) => p.PurchaseOrderID === sourceId);
-          if (po) {
-            setSelectedDoc({
-              kind: "WO_PO",
-              docNo: po.DocNo || po.PurchaseOrderNo,
-              sourceId,
-              vendorLabel: po.SupplierName,
-              companyId: po.CompanyId,
-              projectId: po.ProjectId,
-              amount: po.TotalAmount,
-              status: po.Status,
-              date: po.PODate,
-              gst: po.GST ?? null,
-            });
-            setForm((prev) => ({
-              ...prev,
-              supplier: po.SupplierName ?? prev.supplier,
-              projectSite: po.ProjectId
-                ? String(po.ProjectId)
-                : prev.projectSite,
-              costCenter:
-                prev.costCenter || resolveCostCenterForProject(po.ProjectId),
-            }));
-          }
-        };
-        if (_mastersCache.woPO) {
-          tryBuildWOPO(_mastersCache.woPO);
-        } else {
-          apiFetch("/api/purchase-orders?limit=500")
-            .then((r: any) => {
-              const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              const list = all.filter(
-                (p) =>
-                  p.SourceWOId != null ||
-                  p.SourceWDId != null ||
-                  p.POType === "WO_PO",
-              );
-              _mastersCache.woPO = list;
-              tryBuildWOPO(list);
-            })
-            .catch(() => {});
-        }
-      } else if (kind === "TOD") {
-        setSelectedDoc({ kind: "TOD", docNo, sourceId });
-      }
-    } else {
-      setSelectedDoc(null);
-    }
-
-    if (rec.emi?.enabled) {
-      setLoadingEmi(true);
-      apiFetch(`${API}/${rec.id}/emi-schedule`)
-        .then((rows: any[]) => {
-          setLiveEmiSchedule(
-            rows.map((r) => ({
-              installmentNo: r.InstallmentNo ?? r.installmentNo,
-              dueDate: r.DueDate
-                ? String(r.DueDate).slice(0, 10)
-                : (r.dueDate ?? ""),
-              amount: parseFloat(r.Amount ?? r.amount) || 0,
-              status: (r.Status ?? r.status ?? "Pending") as "Pending" | "Paid",
-              refNumber: r.RefNumber ?? r.refNumber ?? "",
-            })),
-          );
-        })
-        .catch(() => setLiveEmiSchedule(null))
-        .finally(() => setLoadingEmi(false));
-    }
-    apiFetch(`${API}/${rec.id}/approval-trail`)
-      .then(setApprovalTrail)
-      .catch(() => setApprovalTrail(undefined));
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
@@ -2573,8 +2333,6 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
   const hasParentGST = isPOorWO;
-  const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
-
   const editingIdNum = editingId ? parseInt(editingId, 10) : null;
   const bookedPOIds = new Set<number>();
   const bookedWorkDoneIds = new Set<number>();
@@ -2799,7 +2557,29 @@ export default function MaterialExpenseBooking() {
                         <Input value={form.supplier} readOnly placeholder="Auto-filled from linked order" className="pl-8 bg-muted/30 cursor-not-allowed" />
                       </div>
                     ) : (
-                      <Select value={form.supplier || "__none__"} onValueChange={(val) => set("supplier", val === "__none__" ? "" : val)}>
+                      <Select value={form.supplier || "__none__"} onValueChange={(val) => {
+                        const name = val === "__none__" ? "" : val;
+                        set("supplier", name);
+                        if (!name) return;
+                        const head = supplierHeads.find((s) => s.label === name);
+                        if (head?.paymentTerms) {
+                          const termStr = head.paymentTerms.trim().toLowerCase();
+                          const match = paymentTermOptions.find(
+                            (t) => t.TermName.trim().toLowerCase() === termStr,
+                          );
+                          if (match) {
+                            set("paymentTermId", match.Id);
+                            if (form.bookingDate && match.CreditDays != null) {
+                              const base = new Date(form.bookingDate);
+                              base.setDate(base.getDate() + match.CreditDays);
+                              set("dueDate", base.toISOString().split("T")[0]);
+                            }
+                          }
+                        }
+                        if (!form.vendorInvoiceDate) {
+                          set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
+                        }
+                      }}>
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue placeholder="— None —" />
                         </SelectTrigger>

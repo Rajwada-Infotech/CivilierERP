@@ -1,7 +1,5 @@
 import { useMemo, useState } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
-import { useNavigate } from "react-router-dom";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -434,7 +432,6 @@ function Combobox({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function SalesDeedPage() {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const rights = usePageRights("followup-sales-deed");
 

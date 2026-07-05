@@ -15,17 +15,12 @@ import {
   ChevronDown,
   X,
   Check,
-  Layers,
   ShieldCheck,
-  Info,
   Loader2,
   ArrowDown,
   Users,
-  GitMerge,
   GitBranch,
   CheckCircle2,
-  ToggleLeft,
-  ToggleRight,
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";

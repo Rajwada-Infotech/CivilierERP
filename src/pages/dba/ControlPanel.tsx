@@ -242,8 +242,6 @@ export default function ControlPanel() {
       expires.setMonth(expires.getMonth() + parseInt(grantForm.durationMonths));
     }
 
-    const days = Math.floor((expires.getTime() - now.getTime()) / 86400000);
-
     patchTenant.mutate(
       {
         tenant_id: grantForm.tenantId,

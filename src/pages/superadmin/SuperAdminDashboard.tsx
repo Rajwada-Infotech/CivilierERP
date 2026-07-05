@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SuperAdminShell } from "@/components/superadmin/SuperAdminShell";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +57,6 @@ import {
   Trash2,
   Unlock,
   Users,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSystemMetrics, type SystemMetrics } from "@/api/metricsApi";
