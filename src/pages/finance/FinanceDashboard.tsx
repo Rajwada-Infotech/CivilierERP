@@ -118,25 +118,6 @@ const StatCardSkeleton = () => (
   </div>
 );
 
-// ─── Mini info pill ───────────────────────────────────────────────────────────
-const Pill = ({
-  icon: Icon,
-  label,
-  value,
-  color = "text-muted-foreground",
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string | number;
-  color?: string;
-}) => (
-  <div className="flex items-center gap-1.5">
-    <Icon size={13} className={color} />
-    <span className="text-xs text-muted-foreground">{label}:</span>
-    <span className={`text-xs font-medium ${color}`}>{value}</span>
-  </div>
-);
-
 // ─── Safe defaults (prevent crashes if API returns old / partial shape) ────────
 const EMPTY_DATA: FinanceDashboardData = {
   paymentsMade: {
@@ -185,7 +166,6 @@ function normalise(raw: any): FinanceDashboardData {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 const FinanceDashboard = () => {
-  const rights = usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -194,7 +174,6 @@ const FinanceDashboard = () => {
     data: rawData,
     isLoading,
     isError,
-    error,
     refetch,
     isFetching,
   } = useQuery<FinanceDashboardData>({
@@ -210,56 +189,6 @@ const FinanceDashboard = () => {
   });
 
   const data = rawData ? normalise(rawData) : undefined;
-
-  // ── Stat card definitions ──────────────────────────────────────────────────
-  const primaryStats = data
-    ? [
-        {
-          label: "Payments Made Today",
-          value: data.paymentsMade.todayCount.toString(),
-          sub: `${fmt(data.paymentsMade.todayAmount)} paid today · ${data.paymentsMade.totalCount} total`,
-          icon: Receipt,
-          trend: "up" as const,
-          accent: "border-l-rose-500",
-          iconBg: "bg-rose-500/10",
-          iconColor: "text-rose-600",
-          onClick: () => navigate("/payments"),
-        },
-        {
-          label: "Received Payments Today",
-          value: data.receivedPayments.todayCount.toString(),
-          sub: `${fmt(data.receivedPayments.todayAmount)} received today · ${data.receivedPayments.totalCount} total`,
-          icon: BadgeDollarSign,
-          trend: "up" as const,
-          accent: "border-l-emerald-500",
-          iconBg: "bg-emerald-500/10",
-          iconColor: "text-emerald-600",
-          onClick: () => navigate("/received-payments"),
-        },
-        {
-          label: "Cheque Lots",
-          value: data.cheques.totalCount.toString(),
-          sub: `${data.cheques.clearedCount} cleared · ${data.cheques.pendingCount} active`,
-          icon: BookOpen,
-          trend: "neutral" as const,
-          accent: "border-l-amber-500",
-          iconBg: "bg-amber-500/10",
-          iconColor: "text-amber-600",
-          onClick: () => navigate("/masters/cheque"),
-        },
-        {
-          label: "Active Cards",
-          value: data.cards.activeCount.toString(),
-          sub: `${data.cards.inactiveCount} inactive · ${data.cards.totalCount} total`,
-          icon: CreditCard,
-          trend: "neutral" as const,
-          accent: "border-l-violet-500",
-          iconBg: "bg-violet-500/10",
-          iconColor: "text-violet-600",
-          onClick: () => navigate("/masters/card"),
-        },
-      ]
-    : [];
 
   const tableGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
