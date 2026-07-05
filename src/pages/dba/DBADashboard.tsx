@@ -483,7 +483,7 @@ export default function DBADashboard() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
-                          <p className={`text-sm font-semibold truncate mt-0.5 ${r.mono ? "font-mono" : ""}`}>{String(r.value)}</p>
+                          <p className="text-sm font-heading font-semibold truncate mt-0.5">{String(r.value)}</p>
                         </div>
                       </div>
                     ))}
@@ -500,7 +500,7 @@ export default function DBADashboard() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
-                          <p className={`text-sm font-semibold truncate mt-0.5 ${r.mono ? "font-mono" : ""}`}>{String(r.value)}</p>
+                          <p className="text-sm font-heading font-semibold truncate mt-0.5">{String(r.value)}</p>
                         </div>
                       </div>
                     ))}
