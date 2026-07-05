@@ -19,8 +19,15 @@ async function isTokenBlacklisted(token) {
   try {
     const val = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
     return val === "1";
-  } catch {
-    return true; // fail-closed: if Redis is down, deny
+  } catch (err) {
+    // Fail-open: a Redis outage must not silently block all socket connections.
+    // Log the problem so ops can investigate, but allow the connection through
+    // since the JWT signature is still verified above.
+    logger.warn(
+      { event: "REDIS_BLACKLIST_CHECK_FAILED", err: err?.message },
+      "Redis unavailable for blacklist check — allowing socket connection",
+    );
+    return false;
   }
 }
 
