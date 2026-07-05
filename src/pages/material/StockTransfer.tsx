@@ -800,8 +800,14 @@ function ICTPreviewModal({
 
             <div className="px-5 pt-3">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
-                <CheckCircle2 size={11} /> {detail.Status} — every step (Sale Invoice, GRN, Expense Booking,
-                Payment) auto-generated via the Dummy Bank, no manual action required.
+                <CheckCircle2 size={11} />
+                {detail.Status === "Completed"
+                  ? `${detail.Status} — every step (Sale Invoice, GRN, Expense Booking, Payment) auto-generated via the Dummy Bank, no manual action required.`
+                  : detail.Status === "Pending"
+                    ? "Pending super_admin approval — the full document chain generates automatically the moment it's approved."
+                    : detail.Status === "Rejected"
+                      ? "Rejected — no documents were generated."
+                      : detail.Status}
               </span>
             </div>
 
@@ -1063,9 +1069,19 @@ function TransferHistory() {
                           {fmtNum(t.TotalAmount)}
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
-                            <CheckCircle2 size={10} /> {t.Status} (auto)
-                          </span>
+                          {t.Status === "Completed" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
+                              <CheckCircle2 size={10} /> Completed (auto)
+                            </span>
+                          ) : t.Status === "Pending" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/30">
+                              Pending approval
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-400/30">
+                              {t.Status}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
@@ -1282,7 +1298,7 @@ export default function StockTransfer() {
     mutationFn: createInterCompanyTransfer,
     onSuccess: (res) => {
       setSuccessMsg(
-        `Inter-company transfer ${res.DocNo} completed — Sale Invoice #${res.links.SaleInvoiceID}, GRN #${res.links.GRNID}, Payment #${res.links.NewPaymentID}.`,
+        `Inter-company transfer ${res.DocNo} submitted for super_admin approval — the full document chain will be generated automatically once approved.`,
       );
       setErrorMsg("");
       setFromGodownId(null);
@@ -1470,6 +1486,7 @@ export default function StockTransfer() {
                   onClick={() => {
                     setTransferMode("inter");
                     setToGodownId(null);
+                    setViaBank(true);
                   }}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     transferMode === "inter"

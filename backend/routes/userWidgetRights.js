@@ -1,14 +1,23 @@
 /**
  * routes/userWidgetRights.js
  *
- * Manages per-user widget visibility stored in dbo.UserWidgetRights.
- * Completely separate from userRights.js (page/action permissions).
+ * Manages widget visibility stored in dbo.UserWidgetRights (per-user) and
+ * dbo.RoleWidgetRights (role baseline). Completely separate from
+ * userRights.js (page/action permissions).
+ *
+ * Resolution order for "what can this user see": a per-user row, if one
+ * exists, is the definitive answer for that user — it fully overrides the
+ * role. If no per-user row exists, the role's row (if any) is used. If
+ * neither exists, everything active in WidgetCatalog is shown (the
+ * original all-open default, unchanged for anyone never configured).
  *
  * Routes:
- *   GET  /api/user-widget-rights/my           — logged-in user fetches own widgets
- *   GET  /api/user-widget-rights/users        — admin: list of non-admin users
- *   GET  /api/user-widget-rights/:userId      — admin: get a user's widget rights
- *   PUT  /api/user-widget-rights/:userId      — admin: save a user's widget rights
+ *   GET  /api/user-widget-rights/my              — logged-in user fetches own widgets
+ *   GET  /api/user-widget-rights/users           — admin: list of non-admin users
+ *   GET  /api/user-widget-rights/:userId         — admin: get a user's effective widget rights
+ *   PUT  /api/user-widget-rights/:userId         — admin: save a user's widget rights
+ *   GET  /api/user-widget-rights/role/:roleId    — admin: get a role's baseline widget rights
+ *   PUT  /api/user-widget-rights/role/:roleId    — admin: save a role's baseline widget rights
  */
 
 const express = require("express");
@@ -32,6 +41,41 @@ async function getActiveWidgetKeys(pool) {
   return result.recordset.map((row) => row.WidgetKey);
 }
 
+async function getRoleWidgetsJson(pool, roleId) {
+  if (!roleId) return null;
+  const result = await pool
+    .request()
+    .input("RoleId", sql.Int, roleId)
+    .query(`SELECT WidgetsJson FROM dbo.RoleWidgetRights WHERE RoleId = @RoleId AND IsActive = 1`);
+  return result.recordset[0]?.WidgetsJson ?? null;
+}
+
+// Resolution order: per-user row > role row > all active widgets.
+async function resolveEffectiveWidgets(pool, userId, roleId, allWidgets) {
+  const userResult = await pool
+    .request()
+    .input("UserId", sql.Int, userId)
+    .query(`SELECT WidgetsJson FROM dbo.UserWidgetRights WHERE UserId = @UserId AND IsActive = 1`);
+
+  const userJson = userResult.recordset[0]?.WidgetsJson;
+  if (userJson) {
+    try {
+      const parsed = JSON.parse(userJson);
+      if (Array.isArray(parsed)) return parsed.filter((w) => allWidgets.includes(w));
+    } catch {}
+  }
+
+  const roleJson = await getRoleWidgetsJson(pool, roleId);
+  if (roleJson) {
+    try {
+      const parsed = JSON.parse(roleJson);
+      if (Array.isArray(parsed)) return parsed.filter((w) => allWidgets.includes(w));
+    } catch {}
+  }
+
+  return allWidgets;
+}
+
 // ── GET /my — any authenticated user fetches their own allowed widgets ────────
 router.get("/my", authMiddleware, async (req, res) => {
   try {
@@ -40,25 +84,7 @@ router.get("/my", authMiddleware, async (req, res) => {
 
     const pool = getPool();
     const allWidgets = await getActiveWidgetKeys(pool);
-    const result = await pool
-      .request()
-      .input("UserId", sql.Int, parseInt(userId))
-      .query(
-        `SELECT WidgetsJson FROM dbo.UserWidgetRights
-         WHERE UserId = @UserId AND IsActive = 1`
-      );
-
-    const row = result.recordset[0];
-
-    let allowedWidgets = allWidgets; // default: all enabled
-    if (row?.WidgetsJson) {
-      try {
-        const parsed = JSON.parse(row.WidgetsJson);
-        if (Array.isArray(parsed)) {
-          allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
-        }
-      } catch {}
-    }
+    const allowedWidgets = await resolveEffectiveWidgets(pool, parseInt(userId), req.user?.roleId, allWidgets);
 
     return res.json({ allowedWidgets, allWidgets });
   } catch (err) {
@@ -87,7 +113,74 @@ router.get("/users", authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-// ── GET /:userId — admin: get a specific user's widget rights ─────────────────
+// ── GET /role/:roleId — admin: get a role's baseline widget rights ────────────
+// Must be registered before "/:userId" below — otherwise Express would
+// match "/role" as a userId value and this route would never be reached.
+router.get("/role/:roleId", authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const roleId = parseInt(req.params.roleId);
+    if (!roleId || isNaN(roleId)) {
+      return res.status(400).json({ error: "Invalid roleId" });
+    }
+
+    const pool = getPool();
+    const allWidgets = await getActiveWidgetKeys(pool);
+    const roleJson = await getRoleWidgetsJson(pool, roleId);
+
+    let allowedWidgets = allWidgets; // default: all if role has no row yet
+    if (roleJson) {
+      try {
+        const parsed = JSON.parse(roleJson);
+        if (Array.isArray(parsed)) allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
+      } catch {}
+    }
+
+    return res.json({ allowedWidgets, allWidgets });
+  } catch (err) {
+    console.error("[UserWidgetRights] GET /role/:roleId error:", err.message);
+    return res.status(500).json({ error: "Failed to fetch role widget rights" });
+  }
+});
+
+// ── PUT /role/:roleId — admin: save a role's baseline widget rights ───────────
+router.put("/role/:roleId", authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const roleId = parseInt(req.params.roleId);
+    if (!roleId || isNaN(roleId)) {
+      return res.status(400).json({ error: "Invalid roleId" });
+    }
+
+    const { allowedWidgets } = req.body;
+    if (!Array.isArray(allowedWidgets)) {
+      return res.status(400).json({ error: "allowedWidgets must be an array" });
+    }
+
+    const pool = getPool();
+    const allWidgets = await getActiveWidgetKeys(pool);
+    const valid = allowedWidgets.filter((w) => allWidgets.includes(w));
+    const jsonStr = JSON.stringify(valid);
+
+    await pool
+      .request()
+      .input("RoleId", sql.Int, roleId)
+      .input("WidgetsJson", sql.NVarChar(sql.MAX), jsonStr).query(`
+        MERGE dbo.RoleWidgetRights AS target
+        USING (SELECT @RoleId AS RoleId) AS source ON target.RoleId = source.RoleId
+        WHEN MATCHED THEN
+          UPDATE SET WidgetsJson = @WidgetsJson, UpdatedAt = GETDATE(), IsActive = 1
+        WHEN NOT MATCHED THEN
+          INSERT (RoleId, WidgetsJson, IsActive, CreatedAt, UpdatedAt)
+          VALUES (@RoleId, @WidgetsJson, 1, GETDATE(), GETDATE());
+      `);
+
+    return res.json({ success: true, allowedWidgets: valid });
+  } catch (err) {
+    console.error("[UserWidgetRights] PUT /role/:roleId error:", err.message);
+    return res.status(500).json({ error: "Failed to save role widget rights" });
+  }
+});
+
+// ── GET /:userId — admin: get a specific user's effective widget rights ───────
 router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
@@ -97,25 +190,13 @@ router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
 
     const pool = getPool();
     const allWidgets = await getActiveWidgetKeys(pool);
-    const result = await pool
+    const roleRow = await pool
       .request()
       .input("UserId", sql.Int, userId)
-      .query(
-        `SELECT WidgetsJson FROM dbo.UserWidgetRights
-         WHERE UserId = @UserId AND IsActive = 1`
-      );
+      .query(`SELECT RoleId FROM dbo.users WHERE id = @UserId`);
+    const roleId = roleRow.recordset[0]?.RoleId ?? null;
 
-    const row = result.recordset[0];
-
-    let allowedWidgets = allWidgets; // default: all if no record exists
-    if (row?.WidgetsJson) {
-      try {
-        const parsed = JSON.parse(row.WidgetsJson);
-        if (Array.isArray(parsed)) {
-          allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
-        }
-      } catch {}
-    }
+    const allowedWidgets = await resolveEffectiveWidgets(pool, userId, roleId, allWidgets);
 
     return res.json({ allowedWidgets, allWidgets });
   } catch (err) {

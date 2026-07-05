@@ -4,15 +4,21 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "ict-validation-test-secret";
 /**
  * Inter-Company Stock Transfer: orchestration route validation + atomicity.
  *
- * The route (backend/routes/interCompanyTransfer.js) drives Sale Order ->
- * Sale Invoice -> Received Payment on the sender side and Purchase Order ->
- * GRN -> Expense Booking -> Payment on the receiver side, all via the
- * internal creation functions extracted from each of those routes this
- * session. Here every internal function and service dependency is mocked
- * so these tests exercise only the orchestrator's OWN logic: the
- * same-company rejection, ledger-head/godown/dummy-bank lookups, per-item
- * pricing via getLastPurchaseRate, the multi-level approve() loop, and the
- * final InterCompanyTransfer header+items transaction.
+ * The route (backend/routes/interCompanyTransfer.js) is a two-phase flow:
+ *   POST /            validates everything and records a Draft -> Pending
+ *                      request — NO documents are generated yet.
+ *   PUT /:id/approve   only once a super_admin approves does the full chain
+ *                      fire: Sale Order -> Sale Invoice -> Received Payment
+ *                      on the sender side, Purchase Order -> GRN -> Expense
+ *                      Booking -> Payment on the receiver side, all via the
+ *                      internal creation functions extracted from each of
+ *                      those routes this session.
+ *
+ * Every internal function and service dependency is mocked so these tests
+ * exercise only the orchestrator's OWN logic: the same-company rejection,
+ * ledger-head/godown/dummy-bank lookups, per-item pricing via
+ * getLastPurchaseRate, the multi-level approve() loop for child docs, and
+ * the header+items transaction.
  */
 
 const jwt = require("jsonwebtoken");
@@ -110,6 +116,8 @@ let ledgerAvailable;
 let godownsAvailable;
 let dummyBankAvailable;
 let txSpy;
+let storedIctRow;
+let storedIctItems;
 
 function makeFakePool() {
   const plainRequest = () => {
@@ -138,6 +146,15 @@ function makeFakePool() {
         }
         if (/INSERT INTO dbo\.NewPayment/i.test(text)) {
           return { recordset: [{ PPaymentID: 701 }], rowsAffected: [1] };
+        }
+        if (/SELECT \* FROM dbo\.InterCompanyTransfer WHERE ICTId/i.test(text)) {
+          return { recordset: storedIctRow ? [storedIctRow] : [] };
+        }
+        if (/FROM dbo\.InterCompanyTransferItems/i.test(text)) {
+          return { recordset: storedIctItems || [] };
+        }
+        if (/UPDATE dbo\.InterCompanyTransfer/i.test(text)) {
+          return { recordset: [], rowsAffected: [1] };
         }
         return { recordset: [] };
       },
@@ -208,6 +225,17 @@ beforeEach(() => {
   godownsAvailable = true;
   dummyBankAvailable = true;
   mockFakePool = makeFakePool();
+  storedIctRow = {
+    ICTId: 999,
+    SenderProjectId: 3,
+    ReceiverProjectId: 7,
+    TotalAmount: 3000,
+    Remarks: null,
+    Status: "Pending",
+  };
+  storedIctItems = [
+    { ItemId: "ITEM-1", ItemName: "Test Item", UOMCode: "NOS", Quantity: 5, Rate: 600, Amount: 3000, SourceDocNo: "GRN-2026-00004" },
+  ];
   mockTransition.mockImplementation(async (module, id, targetStatus) => {
     if (targetStatus === "Approved") return { newStatus: "Approved", level: 1, totalLevels: 1 };
     return { newStatus: "Pending" };
@@ -292,8 +320,8 @@ describe("Inter-Company Transfer: validation", () => {
   });
 });
 
-describe("Inter-Company Transfer: happy path", () => {
-  test("orchestrates every leg and returns linked document IDs", async () => {
+describe("Inter-Company Transfer: submission (POST /) only records a Pending request", () => {
+  test("validates and records the request WITHOUT generating any documents yet", async () => {
     const { createApp } = require("../server");
     const app = await createApp();
     const res = await request(app)
@@ -302,6 +330,32 @@ describe("Inter-Company Transfer: happy path", () => {
       .send(validPayload());
 
     expect(res.status).toBe(201);
+    expect(res.body.Status).toBe("Pending");
+    expect(res.body.ICTId).toBe(999);
+    // The core "no manual work" spec only kicks in AFTER approval — until
+    // then, none of the downstream documents should exist yet.
+    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
+    expect(mockCreateSaleInvoice).not.toHaveBeenCalled();
+    expect(mockCreatePurchaseOrder).not.toHaveBeenCalled();
+    expect(mockCreateGRN).not.toHaveBeenCalled();
+    expect(mockCreateExpenseBooking).not.toHaveBeenCalled();
+    // Auto-submits Draft -> Pending, same convention as journal-voucher.js.
+    expect(mockTransition).toHaveBeenCalledWith(
+      "inter-company-transfer", 999, "Pending", expect.any(String), expect.any(String),
+    );
+  });
+});
+
+describe("Inter-Company Transfer: approval fires the full auto-generated chain", () => {
+  test("PUT /:id/approve orchestrates every leg and returns linked document IDs", async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    const res = await request(app)
+      .put("/api/inter-company-transfer/999/approve")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({});
+
+    expect(res.status).toBe(200);
     expect(mockCreateSaleOrder).toHaveBeenCalledTimes(1);
     expect(mockCreateSaleInvoice).toHaveBeenCalledTimes(1);
     expect(mockCreateReceivedPayment).toHaveBeenCalledTimes(1);
@@ -317,7 +371,27 @@ describe("Inter-Company Transfer: happy path", () => {
     });
   });
 
-  test("approve() loops until fully approved for multi-level workflows", async () => {
+  test("does not run the chain when a multi-level workflow leaves the header still Pending", async () => {
+    mockTransition.mockImplementation(async (module) => {
+      if (module === "inter-company-transfer") {
+        return { newStatus: "Pending", level: 1, totalLevels: 2, remainingLevels: 1 };
+      }
+      return { newStatus: "Approved", level: 1, totalLevels: 1 };
+    });
+
+    const { createApp } = require("../server");
+    const app = await createApp();
+    const res = await request(app)
+      .put("/api/inter-company-transfer/999/approve")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/approval level recorded/i);
+    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
+  });
+
+  test("approve() loops until fully approved for multi-level child-document workflows", async () => {
     let poCallCount = 0;
     mockTransition.mockImplementation(async (module, id, targetStatus) => {
       if (module === "purchase-orders" && targetStatus === "Approved") {
@@ -332,11 +406,11 @@ describe("Inter-Company Transfer: happy path", () => {
     const { createApp } = require("../server");
     const app = await createApp();
     const res = await request(app)
-      .post("/api/inter-company-transfer")
+      .put("/api/inter-company-transfer/999/approve")
       .set("Authorization", `Bearer ${superAdminToken()}`)
-      .send(validPayload());
+      .send({});
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(200);
     expect(poCallCount).toBe(3);
   });
 });

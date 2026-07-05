@@ -9,6 +9,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
@@ -569,7 +570,8 @@ router.post("/work-done", requirePageRight("engineering-work-order", "create"), 
 
 router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   try {
-    await guardEdit("work-done", req.params.id);
+    const allowPostApproval = await resolveAllowPostApproval(req, "engineering-work-order");
+    await guardEdit("work-done", req.params.id, { allowPostApproval });
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }

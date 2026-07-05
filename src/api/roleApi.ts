@@ -1,4 +1,5 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import type { PagePermission } from "@/contexts/types";
 
 // Types
 export interface RoleRecord {
@@ -73,6 +74,35 @@ export const deleteRole = async (id: number): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`/api/roles/${id}`, { method: "DELETE" });
   if (!res.ok) {
     throw new Error("Failed to delete role");
+  }
+  return res.json().catch(() => ({}));
+};
+
+// Role-wise page permissions — the baseline every user with this role
+// inherits, merged live with any of their own per-user overrides
+// (see backend getEffectivePagePermissions). Editing this affects every
+// user holding the role immediately, not just future assignments.
+export const getRolePermissions = async (
+  roleId: number,
+): Promise<PagePermission[]> => {
+  const res = await fetchWithAuth(`/api/roles/${roleId}/rights`);
+  if (!res.ok) throw new Error("Failed to fetch role permissions");
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray(data) ? data : [];
+};
+
+export const saveRolePermissions = async (
+  roleId: number,
+  permissions: PagePermission[],
+): Promise<{ success: boolean; message: string }> => {
+  const res = await fetchWithAuth(`/api/roles/${roleId}/rights`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pagePermissions: permissions }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to save role permissions");
   }
   return res.json().catch(() => ({}));
 };
