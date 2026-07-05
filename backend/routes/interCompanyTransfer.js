@@ -369,7 +369,42 @@ async function priceItems(pool, senderProjectId, senderProjectName, items) {
 // steps, matching the original "no manual work after approval" spec.
 async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
   const { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank, pricedItems, totalAmount, transferDate } = ctx;
-  const { finYear = null, referenceNumber = null, remarks = null } = opts;
+  const { finYear = null, referenceNumber = null, remarks = null, docNo = null } = opts;
+
+  // The GRN on the receiving side automatically credits the destination
+  // godown's StockLedger — but nothing on the sending side ever debited the
+  // sender's godown, so the same stock silently duplicated across both
+  // projects on every inter-company transfer. Deduct it here, mirroring
+  // stockTransfers.js's own OUT-entry shape, and fail before creating any
+  // documents if the sender doesn't actually have enough stock.
+  for (const item of pricedItems) {
+    const avail = await pool.request()
+      .input("itemId", sql.NVarChar(100), String(item.itemId))
+      .input("godownId", sql.Int, senderGodown.GodownID).query(`
+        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+        FROM dbo.StockLedger
+        WHERE ItemID = @itemId AND GodownID = @godownId
+      `);
+    const available = Number(avail.recordset[0].Available || 0);
+    if (available < item.qty) {
+      const err = new Error(
+        `Insufficient stock for item ${item.itemName || item.itemId} in sender project ${sender.ProjectName}: available=${available}, requested=${item.qty}.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+  for (const item of pricedItems) {
+    await pool.request()
+      .input("ItemID", sql.NVarChar(50), String(item.itemId))
+      .input("Qty", sql.Decimal(18, 2), item.qty)
+      .input("UOM", sql.NVarChar(20), item.uom || null)
+      .input("GodownID", sql.Int, senderGodown.GodownID)
+      .input("DocNo", sql.NVarChar(100), docNo).query(`
+        INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
+        VALUES (@ItemID,@Qty,@UOM,'OUT','ICT',0,@GodownID,@DocNo,GETDATE())
+      `);
+  }
 
   const soDocTypeId = await resolveDocType(pool, ["SO"], "Sale Order");
   const poDocTypeId = await resolveDocType(pool, ["DPO", "PO"], "Purchase Order");
@@ -691,6 +726,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers"
     const links = await executeTransferChain(pool, ctx, createdBy, {
       remarks: ictRow.Remarks,
       userId: req.user?.userId || null,
+      docNo: ictRow.DocNo,
     });
 
     await pool.request()
