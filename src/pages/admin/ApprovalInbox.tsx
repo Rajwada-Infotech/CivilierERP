@@ -182,7 +182,7 @@ const fetchInbox = async (): Promise<InboxItem[]> => {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? "Failed to fetch approval inbox");
   }
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 const fmtDate = (d: string | null) => {
@@ -253,6 +253,8 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
   "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
   "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
+  "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
+  "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
 };
 
 const ModuleTab: React.FC<{
