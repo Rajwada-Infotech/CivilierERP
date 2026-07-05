@@ -42,10 +42,24 @@ const {
 // ─── Banner ──────────────────────────────────────────────────────────────────
 function printBanner(port) {
   if (!isDev) return;
-  const line = "-".repeat(42);
-  process.stdout.write(
-    `\n${line}\n  CivilierERP API\n  http://localhost:${port}\n${line}\n\n`,
-  );
+  const env  = process.env.NODE_ENV || "development";
+  const node = process.version;
+  const time = new Date().toLocaleTimeString();
+  const rows = [
+    `  CivilierERP API`,
+    ``,
+    `  🌐  http://localhost:${port}`,
+    `  ⚙️   env  : ${env}`,
+    `  🟢  node : ${node}`,
+    `  🕐  time : ${time}`,
+  ];
+  const width = rows.reduce((max, r) => Math.max(max, r.replace(/\s/g, " ").length), 0) + 2;
+  const top  = `╔${"═".repeat(width)}╗`;
+  const bot  = `╚${"═".repeat(width)}╝`;
+  const mid  = rows.map((r) => `║${r.padEnd(width)}║`);
+  const sep  = `╠${"═".repeat(width)}╣`;
+  const out  = [top, mid[0], sep, ...mid.slice(1), bot].join("\n");
+  process.stdout.write(`\n${out}\n\n`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
