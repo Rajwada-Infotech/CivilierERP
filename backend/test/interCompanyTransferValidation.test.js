@@ -118,6 +118,8 @@ let dummyBankAvailable;
 let txSpy;
 let storedIctRow;
 let storedIctItems;
+let senderStockAvailable;
+let stockLedgerInserts;
 
 function makeFakePool() {
   const plainRequest = () => {
@@ -154,6 +156,13 @@ function makeFakePool() {
           return { recordset: storedIctItems || [] };
         }
         if (/UPDATE dbo\.InterCompanyTransfer/i.test(text)) {
+          return { recordset: [], rowsAffected: [1] };
+        }
+        if (/SELECT ISNULL\(SUM.*FROM dbo\.StockLedger/is.test(text)) {
+          return { recordset: [{ Available: senderStockAvailable }] };
+        }
+        if (/INSERT INTO dbo\.StockLedger/i.test(text)) {
+          stockLedgerInserts.push({ text, params: { ...req.params } });
           return { recordset: [], rowsAffected: [1] };
         }
         return { recordset: [] };
@@ -224,6 +233,8 @@ beforeEach(() => {
   ledgerAvailable = true;
   godownsAvailable = true;
   dummyBankAvailable = true;
+  senderStockAvailable = 1000;
+  stockLedgerInserts = [];
   mockFakePool = makeFakePool();
   storedIctRow = {
     ICTId: 999,
@@ -369,6 +380,41 @@ describe("Inter-Company Transfer: approval fires the full auto-generated chain",
       PurchaseOrderID: 401,
       GRNID: 501,
     });
+  });
+
+  test("deducts the sender's godown stock via a StockLedger OUT entry", async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    const res = await request(app)
+      .put("/api/inter-company-transfer/999/approve")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    // Previously nothing ever debited the sender's stock, so it silently
+    // duplicated across both projects on every transfer — this is the fix.
+    expect(stockLedgerInserts.length).toBe(1);
+    expect(stockLedgerInserts[0].text).toMatch(/'OUT','ICT'/);
+    expect(stockLedgerInserts[0].params.ItemID).toBe("ITEM-1");
+    expect(stockLedgerInserts[0].params.Qty).toBe(5);
+    expect(stockLedgerInserts[0].params.GodownID).toBe(55);
+  });
+
+  test("rejects approval when the sender's godown does not have enough stock", async () => {
+    senderStockAvailable = 0; // requested qty (5) > available (0)
+    const { createApp } = require("../server");
+    const app = await createApp();
+    const res = await request(app)
+      .put("/api/inter-company-transfer/999/approve")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/insufficient stock/i);
+    // No documents should have been created — the stock check runs before
+    // any of the chain fires.
+    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
+    expect(mockCreateGRN).not.toHaveBeenCalled();
   });
 
   test("does not run the chain when a multi-level workflow leaves the header still Pending", async () => {
