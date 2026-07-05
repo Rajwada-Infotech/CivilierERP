@@ -839,21 +839,29 @@ function ICTPreviewModal({
               </div>
             </div>
 
-            <div className="px-5 pb-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-1.5">
-                Auto-generated documents
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {DOC_LINKS.filter((d) => d.id).map((d) => (
-                  <span
-                    key={d.label}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
-                  >
-                    <FileText size={9} /> {d.label} #{d.id}
-                  </span>
-                ))}
+            {DOC_LINKS.filter((d) => d.id).length > 0 ? (
+              <div className="px-5 pb-4">
+                <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                  Auto-generated documents
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {DOC_LINKS.filter((d) => d.id).map((d) => (
+                    <span
+                      key={d.label}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
+                    >
+                      <FileText size={9} /> {d.label} #{d.id}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : detail.Status !== "Completed" && (
+              <div className="px-5 pb-4">
+                <p className="text-xs text-muted-foreground/70 italic">
+                  Documents (Sale Invoice, GRN, Payment, etc.) will appear here once the transfer completes.
+                </p>
+              </div>
+            )}
           </>
         )}
 
