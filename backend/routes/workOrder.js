@@ -461,11 +461,11 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
 
     const result = await transaction
       .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar(100), finalDocNo || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
+      .input("CompanyId", sql.Int, CompanyId)
+      .input("ProjectId", sql.Int, ProjectId)
+      .input("DocumentNumber", sql.NVarChar(100), finalDocNo)
+      .input("DocumentDate", sql.Date, DocumentDate)
+      .input("ContractorId", sql.Int, ContractorId)
       .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
@@ -475,7 +475,7 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
         TermsAndConditions || null,
       )
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime, new Date())
       .input("GST", sql.NVarChar(sql.MAX), gstJson)
@@ -490,7 +490,7 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
       `);
     const newId = result.recordset[0].Id;
 
-    if (DocTypeId && finalDocNo) {
+    if (DocTypeId) {
       await backPatchRecordId(pool, sql, finalDocNo, "WorkOrderHeader", newId);
     }
 
@@ -590,11 +590,11 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
     const result = await pool
       .request()
       .input("Id", sql.Int, id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar(100), DocumentNumber || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
+      .input("CompanyId", sql.Int, CompanyId)
+      .input("ProjectId", sql.Int, ProjectId)
+      .input("DocumentNumber", sql.NVarChar(100), DocumentNumber)
+      .input("DocumentDate", sql.Date, DocumentDate)
+      .input("ContractorId", sql.Int, ContractorId)
       .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
