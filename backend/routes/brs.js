@@ -119,7 +119,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
 
     // ── WHERE clause for the unified UNION CTE ───────────────────────────────
     // companyName is passed as the enterprise name string for reliable matching
-    const { bankId, companyName, fromDate, toDate, status } = req.query;
+    const { bankId, companyName, fromDate, toDate, status, hideDummyBank } = req.query;
 
     const conditions = ["1=1"];
     if (bankId) conditions.push("u.BankID      = @bankId");
@@ -129,6 +129,9 @@ router.get("/", cache("brs", 60), async (req, res) => {
     if (status === "clear")   conditions.push("u.IsMatched = 1");
     if (status === "unclear") conditions.push("u.IsMatched = 0 AND u.IsBounced = 0");
     if (status === "bounced") conditions.push("u.IsBounced = 1");
+    if (hideDummyBank === "true") conditions.push(
+      "NOT EXISTS (SELECT 1 FROM dbo.AccountHeadMaster _ahm WHERE _ahm.LHeadId = u.BankID AND _ahm.LHeadCode = 'DUMMY-BANK')"
+    );
 
     const where = "WHERE " + conditions.join(" AND ");
 
