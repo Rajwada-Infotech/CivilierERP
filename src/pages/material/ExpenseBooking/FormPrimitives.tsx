@@ -165,7 +165,7 @@ export function PriceBreakdownPanel({
 
   const hasPreGst = preGstTerms.length > 0;
   const hasPostGst = postGstTerms.length > 0;
-  const hasAnyTerms = hasDiscount && (hasPreGst || hasPostGst);
+
 
   // Calculate running base for per-term amount display
   let runningBase = bd.basicAmount;

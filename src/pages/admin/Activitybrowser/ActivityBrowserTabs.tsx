@@ -4,8 +4,6 @@ import {
   Activity,
   LogIn,
   LogOut,
-  Calendar,
-  Clock,
   Monitor,
   Fingerprint,
   Timer,

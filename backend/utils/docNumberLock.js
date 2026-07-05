@@ -171,7 +171,6 @@ async function getMaxSerial_NewProject({
   // New-project format: "{ProjectCode}-{ModuleCode}/{Serial}/{FinYear}"
   // Serial is the segment between the last "/" before the finYear and the finYear itself.
   // LIKE pattern: "GC-WO/%/26-27"
-  const like = `%-${docNoPrefix.split("-").slice(1).join("-")}/%/${finYear}`;
   // Safer: use the full DocNoPrefix as the prefix for the LIKE
   const likeFull = `${docNoPrefix}/%/${finYear}`;
   const tblRes = await pool
