@@ -188,21 +188,6 @@ function avatarColor(name: string | null | undefined) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-function relativeTime(isoStr: string) {
-  if (!isoStr) return "";
-  const diff = Date.now() - new Date(isoStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(isoStr).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-  });
-}
 
 function fmtDate(str: string) {
   if (!str) return "";

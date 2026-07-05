@@ -15,9 +15,7 @@ import {
 } from "@/components/ui/table";
 import {
   ChartContainer,
-  ChartTooltip,
   ChartTooltipContent,
-  ChartLegend,
   ChartLegendContent,
 } from "@/components/ui/chart";
 import {

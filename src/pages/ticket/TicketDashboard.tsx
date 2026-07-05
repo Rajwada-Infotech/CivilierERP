@@ -16,8 +16,6 @@ import {
 } from "@/components/dashboard/GlassShell";
 import {
   AlertCircle,
-  ArrowDownRight,
-  ArrowUpRight,
   BarChart3,
   CheckCircle2,
   ClipboardList,
@@ -30,7 +28,6 @@ import {
   ShieldAlert,
   Tag,
   User,
-  XCircle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

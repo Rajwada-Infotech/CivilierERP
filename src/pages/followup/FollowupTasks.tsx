@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -424,9 +423,8 @@ function PriorityBreakdown({ tasks }: { tasks: FollowupTask[] }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FollowupTasks() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { currentUser, allUsers } = useAuth();
+  const { allUsers } = useAuth();
   const rights = usePageRights("followup-tasks");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [form, setForm] = useState<TaskFormState>(EMPTY_FORM);

@@ -141,26 +141,6 @@ function moduleColorVars(id: string): React.CSSProperties {
   } as React.CSSProperties;
 }
 
-const MODULE_STYLES: Record<
-  string,
-  {
-    activeClass: string;
-    activeStyle: React.CSSProperties;
-  }
-> = Object.fromEntries(
-  Object.keys(MODULE_COLORS).map((id) => [
-    id,
-    {
-      activeClass: "border backdrop-blur-md",
-      activeStyle: {
-        background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
-        borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
-        boxShadow:
-          "0 2px 16px 0 hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18), inset 0 1px 0 hsl(0 0% 100% / 0.08)",
-      } as React.CSSProperties,
-    },
-  ]),
-);
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
 type SetupItem = {
@@ -826,7 +806,6 @@ export const TopNavbar = () => {
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
-  const isDbaPage = isDba && location.pathname.startsWith("/dba");
 
   const activeGlowRgb =
     MODULE_GLOW_RGB[isAdminPage ? "admin" : (activeModule ?? "finance")] ??
