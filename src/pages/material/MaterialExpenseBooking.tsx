@@ -1599,7 +1599,7 @@ export default function MaterialExpenseBooking() {
     [],
   );
   const [supplierHeads, setSupplierHeads] = useState<
-    { id: number; label: string }[]
+    { id: number; label: string; paymentTerms: string | null }[]
   >([]);
   const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
@@ -1796,6 +1796,7 @@ export default function MaterialExpenseBooking() {
         const heads = (Array.isArray(list) ? list : []).map((h) => ({
           id: h.LHeadId,
           label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setSupplierHeads(heads);
       })
@@ -2799,7 +2800,29 @@ export default function MaterialExpenseBooking() {
                         <Input value={form.supplier} readOnly placeholder="Auto-filled from linked order" className="pl-8 bg-muted/30 cursor-not-allowed" />
                       </div>
                     ) : (
-                      <Select value={form.supplier || "__none__"} onValueChange={(val) => set("supplier", val === "__none__" ? "" : val)}>
+                      <Select value={form.supplier || "__none__"} onValueChange={(val) => {
+                        const name = val === "__none__" ? "" : val;
+                        set("supplier", name);
+                        if (!name) return;
+                        const head = supplierHeads.find((s) => s.label === name);
+                        if (head?.paymentTerms) {
+                          const termStr = head.paymentTerms.trim().toLowerCase();
+                          const match = paymentTermOptions.find(
+                            (t) => t.TermName.trim().toLowerCase() === termStr,
+                          );
+                          if (match) {
+                            set("paymentTermId", match.Id);
+                            if (form.bookingDate && match.CreditDays != null) {
+                              const base = new Date(form.bookingDate);
+                              base.setDate(base.getDate() + match.CreditDays);
+                              set("dueDate", base.toISOString().split("T")[0]);
+                            }
+                          }
+                        }
+                        if (!form.vendorInvoiceDate) {
+                          set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
+                        }
+                      }}>
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue placeholder="— None —" />
                         </SelectTrigger>
