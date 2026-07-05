@@ -21,7 +21,6 @@ import {
   TrendingUp,
   TrendingDown,
   Boxes,
-  FolderKanban,
 } from "lucide-react";
 import {
   getGodowns,

@@ -268,8 +268,6 @@ async function buildGrnGstData(pool, grnId) {
     const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
     const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
     const splitGstAmount = roundMoney(cgstAmount + sgstAmount + igstAmount);
-    const netAmount = roundMoney(inclusiveAmount);
-
     return {
       lineNo: index + 1,
       itemId: itemId || null,

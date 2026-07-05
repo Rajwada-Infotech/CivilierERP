@@ -7,7 +7,6 @@ import {
   Search,
   X,
   FileText,
-  Building2,
   User,
   CalendarDays,
   IndianRupee,
@@ -22,7 +21,6 @@ import {
   ChevronLeft,
   ChevronRight,
   StickyNote,
-  Home,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";

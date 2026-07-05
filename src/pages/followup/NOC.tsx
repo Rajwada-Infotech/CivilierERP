@@ -6,23 +6,16 @@ import {
   Search,
   X,
   ShieldCheck,
-  Building2,
-  CalendarDays,
-  IndianRupee,
   ChevronDown,
   Pencil,
   Trash2,
   CheckCircle2,
   Clock,
-  AlertCircle,
   Ban,
   Send,
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
-  StickyNote,
-  Home,
-  FileCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
