@@ -21,7 +21,6 @@ import {
   Search,
   BookOpen,
   ChevronDown,
-  ChevronsUpDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -341,14 +340,6 @@ const ExpensesMaster: React.FC = () => {
       updateMut.mutate({ id: editingId, data: form });
     } else {
       createMut.mutate(form);
-    }
-  };
-
-  const toggleSort = (field: typeof sortField) => {
-    if (sortField === field) setSortAsc((a) => !a);
-    else {
-      setSortField(field);
-      setSortAsc(true);
     }
   };
 
