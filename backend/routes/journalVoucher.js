@@ -12,6 +12,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -229,7 +230,8 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     try {
-      await guardEdit("journal-voucher", id);
+      const allowPostApproval = await resolveAllowPostApproval(req, "journal-voucher");
+      await guardEdit("journal-voucher", id, { allowPostApproval });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }

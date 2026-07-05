@@ -7,6 +7,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -2515,7 +2516,8 @@ router.put(
       return res.status(400).json({ error: "Invalid record id" });
 
     try {
-      await guardEdit("expense-booking", req.params.id);
+      const allowPostApproval = await resolveAllowPostApproval(req, "expense-booking");
+      await guardEdit("expense-booking", req.params.id, { allowPostApproval });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }

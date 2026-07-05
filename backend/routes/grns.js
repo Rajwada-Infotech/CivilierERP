@@ -2,6 +2,7 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -992,7 +993,8 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
 // PUT - Update GRN
 router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodySchema), async (req, res) => {
   try {
-    await guardEdit("goods-receipt", req.params.id);
+    const allowPostApproval = await resolveAllowPostApproval(req, "grn-master");
+    await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
