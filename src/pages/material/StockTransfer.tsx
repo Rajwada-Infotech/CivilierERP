@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -477,8 +478,8 @@ function MakeGRNModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
@@ -616,7 +617,8 @@ function MakeGRNModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -629,8 +631,8 @@ function TransferPreviewModal({
   linkedGRNs: TransferGRNSummary[];
   onClose: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
@@ -728,7 +730,8 @@ function TransferPreviewModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -756,8 +759,8 @@ function ICTPreviewModal({
       ]
     : [];
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
@@ -839,21 +842,29 @@ function ICTPreviewModal({
               </div>
             </div>
 
-            <div className="px-5 pb-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-1.5">
-                Auto-generated documents
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {DOC_LINKS.filter((d) => d.id).map((d) => (
-                  <span
-                    key={d.label}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
-                  >
-                    <FileText size={9} /> {d.label} #{d.id}
-                  </span>
-                ))}
+            {DOC_LINKS.filter((d) => d.id).length > 0 ? (
+              <div className="px-5 pb-4">
+                <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                  Auto-generated documents
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {DOC_LINKS.filter((d) => d.id).map((d) => (
+                    <span
+                      key={d.label}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
+                    >
+                      <FileText size={9} /> {d.label} #{d.id}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : detail.Status !== "Completed" && (
+              <div className="px-5 pb-4">
+                <p className="text-xs text-muted-foreground/70 italic">
+                  Documents (Sale Invoice, GRN, Payment, etc.) will appear here once the transfer completes.
+                </p>
+              </div>
+            )}
           </>
         )}
 
@@ -866,7 +877,8 @@ function ICTPreviewModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1073,12 +1085,20 @@ function TransferHistory() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
                               <CheckCircle2 size={10} /> Completed (auto)
                             </span>
+                          ) : t.Status === "Approved" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                              <CheckCircle2 size={10} /> Approved
+                            </span>
                           ) : t.Status === "Pending" ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/30">
                               Pending approval
                             </span>
+                          ) : t.Status === "Rejected" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
+                              Rejected
+                            </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
                               {t.Status}
                             </span>
                           )}
@@ -1542,10 +1562,11 @@ export default function StockTransfer() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-3">
+                {/* From Company */}
                 <FilterSelect
                   icon={Building2}
-                  label="Company"
+                  label={transferMode === "inter" ? "From Company" : "Company"}
                   value={filterCompanyId}
                   onChange={(v) => {
                     setFilterCompanyId(v);
@@ -1558,6 +1579,8 @@ export default function StockTransfer() {
                   placeholder="All companies"
                   color="emerald"
                 />
+
+                {/* Project */}
                 <FilterSelect
                   icon={FolderKanban}
                   label="Project"
@@ -1569,23 +1592,11 @@ export default function StockTransfer() {
                     setItems([emptyItem()]);
                   }}
                   options={projectSelectOptions}
-                  placeholder={
-                    filterCompanyId ? "All projects in company" : "All projects"
-                  }
+                  placeholder={filterCompanyId ? "All projects in company" : "All projects"}
                   color="violet"
                 />
-                <GodownSelect
-                  label="From"
-                  value={fromGodownId}
-                  onChange={(v) => {
-                    setFromGodownId(v);
-                    setItems([emptyItem()]);
-                  }}
-                  godowns={companyGodowns}
-                  exclude={toGodownId}
-                  variant="from"
-                  placeholder="Select source godown…"
-                />
+
+                {/* To Company (inter-company only) */}
                 {transferMode === "inter" && (
                   <FilterSelect
                     icon={Building2}
@@ -1597,15 +1608,31 @@ export default function StockTransfer() {
                     color="emerald"
                   />
                 )}
-                <GodownSelect
-                  label="To"
-                  value={toGodownId}
-                  onChange={setToGodownId}
-                  godowns={toCompanyGodowns}
-                  exclude={transferMode === "intra" ? fromGodownId : undefined}
-                  variant="to"
-                  placeholder="Select destination godown…"
-                />
+
+                {/* From Godown | To Godown */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <GodownSelect
+                    label="From Godown"
+                    value={fromGodownId}
+                    onChange={(v) => {
+                      setFromGodownId(v);
+                      setItems([emptyItem()]);
+                    }}
+                    godowns={companyGodowns}
+                    exclude={toGodownId}
+                    variant="from"
+                    placeholder="Select source godown…"
+                  />
+                  <GodownSelect
+                    label="To Godown"
+                    value={toGodownId}
+                    onChange={setToGodownId}
+                    godowns={toCompanyGodowns}
+                    exclude={transferMode === "intra" ? fromGodownId : undefined}
+                    variant="to"
+                    placeholder="Select destination godown…"
+                  />
+                </div>
               </div>
 
               {(filterCompanyId || filterProjectId) && (

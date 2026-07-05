@@ -177,11 +177,53 @@ function initSocket(httpServer) {
       }
     });
 
+    // ── DBA session tracking ─────────────────────────────────────────────────
+    // DBA / super_admin users can join a shared room to see who else is active
+    // and get a live feed of executed queries across all DBA sessions.
+    const isDba = ["dba", "super_admin"].includes(
+      normalizeRole(socket.data.user?.role)
+    );
+
+    if (isDba) {
+      socket.on("dba:join", () => {
+        socket.join("dba-sessions");
+        // Tell every other DBA that this user joined
+        socket.to("dba-sessions").emit("dba:session-update", {
+          type: "join",
+          socketId: socket.id,
+          userId,
+          name: socket.data.user?.name ?? socket.data.user?.username ?? "DBA",
+          joinedAt: new Date().toISOString(),
+        });
+      });
+
+      // Client emits this after a query completes so all DBA sessions see it
+      socket.on("dba:query", (payload) => {
+        socket.to("dba-sessions").emit("dba:query-log", {
+          socketId: socket.id,
+          userId,
+          name: socket.data.user?.name ?? socket.data.user?.username ?? "DBA",
+          query: String(payload?.query ?? "").slice(0, 500),
+          rowCount: payload?.rowCount ?? 0,
+          duration: payload?.duration ?? 0,
+          status: payload?.status ?? "success",
+          at: new Date().toISOString(),
+        });
+      });
+    }
+
     socket.on("disconnect", (reason) => {
       logger.info(
         { event: "SOCKET_DISCONNECT", socketId: socket.id, userId, reason },
         "Socket disconnected"
       );
+      if (isDba) {
+        socket.to("dba-sessions").emit("dba:session-update", {
+          type: "leave",
+          socketId: socket.id,
+          userId,
+        });
+      }
     });
   });
 

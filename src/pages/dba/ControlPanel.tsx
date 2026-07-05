@@ -341,157 +341,141 @@ export default function ControlPanel() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          {
-            label: "Total Tenants",
-            value: stats.total,
-            icon: Building2,
-            color: "text-blue-500",
-          },
-          {
-            label: "Active",
-            value: stats.active,
-            icon: CheckCircle2,
-            color: "text-green-500",
-          },
-          {
-            label: "Expiring Soon",
-            value: stats.expiringSoon,
-            icon: AlertTriangle,
-            color: "text-orange-500",
-          },
-          {
-            label: "Expired",
-            value: stats.expired,
-            icon: XCircle,
-            color: "text-red-500",
-          },
-          {
-            label: "Total Revenue",
-            value: `₹${(stats.totalRevenue / 1000).toFixed(0)}K`,
-            icon: Key,
-            color: "text-violet-500",
-          },
+          { label: "Total Tenants",  value: stats.total,   icon: Building2,    border: "border-l-blue-500",   iconBg: "bg-blue-500/10",   iconColor: "text-blue-500"   },
+          { label: "Active",         value: stats.active,  icon: CheckCircle2, border: "border-l-green-500",  iconBg: "bg-green-500/10",  iconColor: "text-green-500"  },
+          { label: "Expiring Soon",  value: stats.expiringSoon, icon: AlertTriangle, border: "border-l-orange-500", iconBg: "bg-orange-500/10", iconColor: "text-orange-500" },
+          { label: "Expired",        value: stats.expired, icon: XCircle,      border: "border-l-red-500",    iconBg: "bg-red-500/10",    iconColor: "text-red-500"    },
+          { label: "Total Revenue",  value: `₹${(stats.totalRevenue / 1000).toFixed(0)}K`, icon: Key, border: "border-l-violet-500", iconBg: "bg-violet-500/10", iconColor: "text-violet-500" },
         ].map((s, i) => (
-          <Card key={i} className="border">
-            <CardContent className="p-3 flex items-center gap-3">
-              <s.icon size={18} className={s.color} />
+          <Card key={i} className={`border-l-2 ${s.border}`}>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${s.iconBg} shrink-0`}>
+                <s.icon size={15} className={s.iconColor} />
+              </div>
               <div>
-                <div className="text-lg font-bold leading-none">{s.value}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">
-                  {s.label}
-                </div>
+                <div className="text-xl font-bold font-heading leading-none">{s.value}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">{s.label}</div>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Filter */}
-      <div className="flex gap-2 flex-wrap">
-        {["all", "active", "suspended", "expired"].map((f) => (
-          <Button
-            key={f}
-            size="sm"
-            variant={filterStatus === f ? "default" : "outline"}
-            className="text-xs h-7 capitalize"
-            onClick={() => setFilterStatus(f)}
-          >
-            {f}
-          </Button>
-        ))}
-      </div>
-
-      {/* Access Table */}
+      {/* Filter + table */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Database size={14} className="text-emerald-500" /> Tenant Access
-            Registry
-          </CardTitle>
+        <CardHeader className="pb-0 border-b border-border">
+          <div className="flex items-center justify-between gap-3 pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <div className="p-1.5 rounded-md bg-emerald-500/10">
+                <Database size={13} className="text-emerald-500" />
+              </div>
+              Tenant Access Registry
+              {filtered.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
+                  {filtered.length}
+                </span>
+              )}
+            </CardTitle>
+
+            {/* Filter pills */}
+            <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg border border-border">
+              {[
+                { key: "all",       label: "All",       dot: "" },
+                { key: "active",    label: "Active",    dot: "bg-green-500" },
+                { key: "suspended", label: "Suspended", dot: "bg-orange-500" },
+                { key: "expired",   label: "Expired",   dot: "bg-red-500" },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setFilterStatus(f.key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
+                    filterStatus === f.key
+                      ? "bg-background text-foreground shadow-sm border border-border"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </CardHeader>
+
         <CardContent className="p-0">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <ShieldCheck size={28} className="text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">No tenants found</p>
+              <p className="text-xs text-muted-foreground/60">Grant access to add your first tenant</p>
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="text-xs">
-                  <TableHead>Tenant</TableHead>
-                  <TableHead>Database</TableHead>
-                  <TableHead>Plan</TableHead>
-                  <TableHead>Access Level</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Days Left</TableHead>
-                  <TableHead>Storage</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <TableHead className="text-[11px] font-semibold pl-4">Tenant</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Database</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Plan</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Access</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Expires</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Days Left</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Storage</TableHead>
+                  <TableHead className="text-[11px] font-semibold">Status</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold pr-4">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((acc) => {
-                  const SC =
-                    statusConfig[acc.status as keyof typeof statusConfig];
+                  const SC = statusConfig[acc.status as keyof typeof statusConfig];
                   const PL = PLAN_CONFIG[acc.plan];
                   const AL = ACCESS_LEVEL_CONFIG[acc.access_level];
                   const storagePercent = Math.round(
-                    (parseFloat(acc.storage_used) /
-                      parseFloat(acc.storage_limit)) *
-                      100,
+                    (parseFloat(acc.storage_used) / parseFloat(acc.storage_limit)) * 100,
                   );
 
                   return (
-                    <TableRow key={acc.tenant_id} className="text-xs">
-                      <TableCell>
-                        <div className="font-medium text-[11px]">
-                          {acc.name}
-                        </div>
-                        <div className="text-muted-foreground font-mono text-[10px]">
-                          {acc.tenant_id}
-                        </div>
+                    <TableRow key={acc.tenant_id} className="group text-xs hover:bg-muted/20 transition-colors">
+                      <TableCell className="pl-4 py-3">
+                        <div className="font-heading font-semibold text-[12px]">{acc.name}</div>
+                        <div className="text-muted-foreground font-mono text-[10px] mt-0.5">{acc.tenant_id}</div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-[10px] text-primary">
-                          {acc.db_name}
-                        </div>
-                        <div className="text-muted-foreground text-[10px]">
-                          {acc.server}
+                        <div className="font-mono text-[11px] font-semibold text-primary">{acc.db_name}</div>
+                        <div className="text-muted-foreground text-[10px] mt-0.5">{acc.server}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <PL.icon size={11} className={PL.color.split(" ")[1]} />
+                          <Badge className={`text-[10px] ${PL.color}`}>{PL.label}</Badge>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${PL.color}`}>
-                          {PL.label}
-                        </Badge>
+                        <Badge className={`text-[10px] ${AL.color}`}>{AL.label}</Badge>
                       </TableCell>
-                      <TableCell>
-                        <Badge className={`text-[10px] ${AL.color}`}>
-                          {AL.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      <TableCell className="font-mono text-[11px] text-muted-foreground">
                         {acc.expires_on}
                       </TableCell>
                       <TableCell>
-                        <span
-                          className={`font-bold text-[11px] ${getDaysColor(acc.days_remaining)}`}
-                        >
+                        <span className={`font-bold text-[11px] ${getDaysColor(acc.days_remaining)}`}>
                           {acc.days_remaining < 0
                             ? `${Math.abs(acc.days_remaining)}d overdue`
                             : `${acc.days_remaining}d`}
                         </span>
                         {acc.days_remaining > 0 && (
-                          <div className="w-16 h-1 bg-muted rounded-full mt-1">
+                          <div className="w-16 h-1 bg-muted rounded-full mt-1.5">
                             <div
                               className={`h-1 rounded-full ${acc.days_remaining > 60 ? "bg-green-500" : acc.days_remaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
-                              style={{
-                                width: `${Math.min((acc.days_remaining / 365) * 100, 100)}%`,
-                              }}
+                              style={{ width: `${Math.min((acc.days_remaining / 365) * 100, 100)}%` }}
                             />
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="text-[10px]">
+                        <div className="text-[11px] text-muted-foreground">
                           {acc.storage_used} / {acc.storage_limit}
                         </div>
-                        <div className="w-16 h-1 bg-muted rounded-full mt-1">
+                        <div className="w-16 h-1 bg-muted rounded-full mt-1.5">
                           <div
                             className={`h-1 rounded-full ${storagePercent > 80 ? "bg-red-500" : storagePercent > 60 ? "bg-yellow-500" : "bg-emerald-500"}`}
                             style={{ width: `${storagePercent}%` }}
@@ -500,46 +484,29 @@ export default function ControlPanel() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
-                          <Badge className={`text-[10px] ${SC.color}`}>
-                            {acc.status}
-                          </Badge>
+                          <Badge className={`text-[10px] w-fit ${SC.color}`}>{acc.status}</Badge>
                           {acc.is_trial && (
-                            <Badge className="text-[9px] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">
-                              Trial
-                            </Badge>
+                            <Badge className="text-[9px] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">Trial</Badge>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            onClick={() => {
-                              setSelectedAccess(acc);
-                              setDetailOpen(true);
-                            }}
-                          >
-                            <Eye size={11} />
+                      <TableCell className="text-right pr-4">
+                        <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-lg"
+                            onClick={() => { setSelectedAccess(acc); setDetailOpen(true); }}>
+                            <Eye size={12} />
                           </Button>
                           {acc.status === "active" ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-orange-500 hover:text-orange-600"
-                              onClick={() => setRevokeTarget(acc)}
-                            >
-                              <Lock size={11} />
+                            <Button variant="ghost" size="sm"
+                              className="h-7 w-7 p-0 rounded-lg text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
+                              onClick={() => setRevokeTarget(acc)}>
+                              <Lock size={12} />
                             </Button>
                           ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-green-500 hover:text-green-600"
-                              onClick={() => handleReactivate(acc)}
-                            >
-                              <Unlock size={11} />
+                            <Button variant="ghost" size="sm"
+                              className="h-7 w-7 p-0 rounded-lg text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                              onClick={() => handleReactivate(acc)}>
+                              <Unlock size={12} />
                             </Button>
                           )}
                         </div>
@@ -550,6 +517,7 @@ export default function ControlPanel() {
               </TableBody>
             </Table>
           </div>
+          )}
         </CardContent>
       </Card>
       </DbaShell>
@@ -690,231 +658,205 @@ export default function ControlPanel() {
 
       {/* Grant Access Dialog */}
       <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
-              <Plus size={14} className="text-emerald-500" /> Grant DB Access
+              <div className="p-1.5 rounded-md bg-emerald-500/10">
+                <ShieldCheck size={13} className="text-emerald-500" />
+              </div>
+              Grant DB Access
             </DialogTitle>
+            <p className="text-xs text-muted-foreground">
+              Configure database access for a tenant. Paid fields appear after you pick a plan.
+            </p>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Tenant *</Label>
+          <div className="space-y-4 py-1">
+            {/* Step 1 — Tenant */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">1</span>
+                <Label className="text-xs font-semibold">Select Tenant</Label>
+              </div>
               <Select
                 value={grantForm.tenantId}
-                onValueChange={(v) =>
-                  setGrantForm((f) => ({ ...f, tenantId: v }))
-                }
+                onValueChange={(v) => setGrantForm((f) => ({ ...f, tenantId: v }))}
               >
-                <SelectTrigger className="text-xs h-8">
-                  <SelectValue placeholder="Select tenant..." />
+                <SelectTrigger className="text-xs h-9">
+                  <SelectValue placeholder="Search or pick a tenant..." />
                 </SelectTrigger>
-                <SelectContent>
-                  {accesses.map((t) => (
-                    <SelectItem
-                      key={t.tenant_id}
-                      value={t.tenant_id}
-                      className="text-xs"
-                    >
-                      {t.name}
+                <SelectContent position="popper" className="z-[9999]">
+                  {accesses.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-muted-foreground">No tenants found</div>
+                  ) : accesses.map((t) => (
+                    <SelectItem key={t.tenant_id} value={t.tenant_id} className="text-xs">
+                      <span className="font-medium">{t.name}</span>
+                      <span className="text-muted-foreground ml-2 font-mono text-[10px]">{t.tenant_id}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Plan *</Label>
-                <Select
-                  value={grantForm.plan}
-                  onValueChange={(v) =>
-                    setGrantForm((f) => ({ ...f, plan: v as any }))
-                  }
-                >
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="starter" className="text-xs">
-                      Starter — ₹9,000/qtr
-                    </SelectItem>
-                    <SelectItem value="growth" className="text-xs">
-                      Growth — ₹18,000/qtr
-                    </SelectItem>
-                    <SelectItem value="enterprise" className="text-xs">
-                      Enterprise — ₹84,000/yr
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* Step 2 — Plan cards */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">2</span>
+                <Label className="text-xs font-semibold">Choose Plan</Label>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Access Level *</Label>
-                <Select
-                  value={grantForm.accessLevel}
-                  onValueChange={(v) =>
-                    setGrantForm((f) => ({ ...f, accessLevel: v as any }))
-                  }
-                >
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="read" className="text-xs">
-                      Read Only
-                    </SelectItem>
-                    <SelectItem value="read_write" className="text-xs">
-                      Read / Write
-                    </SelectItem>
-                    <SelectItem value="full" className="text-xs">
-                      Full Access
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-3 gap-2">
+                {(["starter", "growth", "enterprise"] as const).map((plan) => {
+                  const cfg = PLAN_CONFIG[plan];
+                  const active = grantForm.plan === plan;
+                  return (
+                    <button
+                      key={plan}
+                      type="button"
+                      onClick={() => setGrantForm((f) => ({ ...f, plan }))}
+                      className={`rounded-lg border-2 p-2.5 text-left transition-all ${
+                        active
+                          ? "border-emerald-500 bg-emerald-500/5"
+                          : "border-border bg-muted/20 hover:border-muted-foreground/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <cfg.icon size={11} className={active ? "text-emerald-500" : "text-muted-foreground"} />
+                        <span className={`text-[11px] font-semibold ${active ? "text-emerald-600" : "text-foreground"}`}>{cfg.label}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{cfg.price}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Trial Period Toggle - Up to 60 days */}
-            <div
-              className={`rounded-lg border-2 p-3 transition-all ${grantForm.isTrial ? "border-violet-400/60 bg-violet-500/5" : "border-border bg-muted/20"}`}
-            >
+            {/* Step 3 — Access Level buttons */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">3</span>
+                <Label className="text-xs font-semibold">Access Level</Label>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(["read", "read_write", "full"] as const).map((level) => {
+                  const cfg = ACCESS_LEVEL_CONFIG[level];
+                  const active = grantForm.accessLevel === level;
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setGrantForm((f) => ({ ...f, accessLevel: level }))}
+                      className={`rounded-lg border-2 p-2.5 text-left transition-all ${
+                        active
+                          ? "border-blue-500 bg-blue-500/5"
+                          : "border-border bg-muted/20 hover:border-muted-foreground/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <cfg.icon size={11} className={active ? "text-blue-500" : "text-muted-foreground"} />
+                        <span className={`text-[11px] font-semibold ${active ? "text-blue-600" : "text-foreground"}`}>{cfg.label}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        {level === "read" && "View data only"}
+                        {level === "read_write" && "Read & modify data"}
+                        {level === "full" && "Complete control"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Trial toggle */}
+            <div className={`rounded-lg border-2 p-3 transition-all ${grantForm.isTrial ? "border-violet-400/60 bg-violet-500/5" : "border-border bg-muted/20"}`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Timer
-                    size={14}
-                    className={
-                      grantForm.isTrial
-                        ? "text-violet-500"
-                        : "text-muted-foreground"
-                    }
-                  />
+                  <Timer size={14} className={grantForm.isTrial ? "text-violet-500" : "text-muted-foreground"} />
                   <div>
-                    <p
-                      className={`text-xs font-semibold ${grantForm.isTrial ? "text-violet-600" : "text-foreground"}`}
-                    >
+                    <p className={`text-xs font-semibold ${grantForm.isTrial ? "text-violet-600" : "text-foreground"}`}>
                       Trial Period Access
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      Free limited access — Read Only, max 3 users, 1 GB storage
-                    </p>
+                    <p className="text-[10px] text-muted-foreground">Free • Read Only • max 3 users • 1 GB storage</p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() =>
-                    setGrantForm((f) => ({
-                      ...f,
-                      isTrial: !f.isTrial,
-                      paidAmount: !f.isTrial ? "" : f.paidAmount,
-                    }))
-                  }
+                  onClick={() => setGrantForm((f) => ({ ...f, isTrial: !f.isTrial, paidAmount: !f.isTrial ? "" : f.paidAmount }))}
                   className={`relative w-9 h-5 rounded-full transition-colors focus:outline-none ${grantForm.isTrial ? "bg-violet-500" : "bg-muted"}`}
                 >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${grantForm.isTrial ? "translate-x-4" : "translate-x-0"}`}
-                  />
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${grantForm.isTrial ? "translate-x-4" : "translate-x-0"}`} />
                 </button>
               </div>
 
               {grantForm.isTrial && (
                 <div className="mt-3 space-y-1">
-                  <Label className="text-xs">
-                    Trial Duration (up to 60 days)
-                  </Label>
-                  <Select
-                    value={grantForm.trialDays}
-                    onValueChange={(v) =>
-                      setGrantForm((f) => ({ ...f, trialDays: v }))
-                    }
-                  >
-                    <SelectTrigger className="text-xs h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="7" className="text-xs">
-                        7 Days
-                      </SelectItem>
-                      <SelectItem value="14" className="text-xs">
-                        14 Days
-                      </SelectItem>
-                      <SelectItem value="30" className="text-xs">
-                        30 Days
-                      </SelectItem>
-                      <SelectItem value="45" className="text-xs">
-                        45 Days
-                      </SelectItem>
-                      <SelectItem value="60" className="text-xs">
-                        60 Days
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs">Trial Duration</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {["7", "14", "30", "45", "60"].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setGrantForm((f) => ({ ...f, trialDays: d }))}
+                        className={`px-3 py-1 rounded-md text-xs border transition-all ${
+                          grantForm.trialDays === d
+                            ? "border-violet-500 bg-violet-500/10 text-violet-600 font-semibold"
+                            : "border-border text-muted-foreground hover:border-muted-foreground/50"
+                        }`}
+                      >
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
                   <p className="text-[10px] text-violet-500 mt-1 flex items-center gap-1">
-                    <Timer size={9} /> Maximum trial period is 60 days • No
-                    payment required
+                    <Timer size={9} /> Max 60 days • No payment required
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Paid fields — hidden during trial */}
+            {/* Duration + amount — hidden during trial */}
             {!grantForm.isTrial && (
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Duration (months) *</Label>
-                  <Select
-                    value={grantForm.durationMonths}
-                    onValueChange={(v) =>
-                      setGrantForm((f) => ({ ...f, durationMonths: v }))
-                    }
-                  >
-                    <SelectTrigger className="text-xs h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1" className="text-xs">
-                        1 Month
-                      </SelectItem>
-                      <SelectItem value="3" className="text-xs">
-                        3 Months
-                      </SelectItem>
-                      <SelectItem value="6" className="text-xs">
-                        6 Months
-                      </SelectItem>
-                      <SelectItem value="12" className="text-xs">
-                        12 Months
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Duration</Label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[["1", "1 mo"], ["3", "3 mo"], ["6", "6 mo"], ["12", "1 yr"]].map(([val, lbl]) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setGrantForm((f) => ({ ...f, durationMonths: val }))}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition-all ${
+                          grantForm.durationMonths === val
+                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 font-semibold"
+                            : "border-border text-muted-foreground hover:border-muted-foreground/50"
+                        }`}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Amount Paid (₹) *</Label>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Amount Paid (₹) *</Label>
                   <Input
-                    className="text-xs h-8"
-                    placeholder="e.g. 18000"
+                    className="text-xs h-9"
+                    placeholder={`e.g. ${PLAN_CONFIG[grantForm.plan]?.price.replace(/[^0-9]/g, "")}`}
                     value={grantForm.paidAmount}
-                    onChange={(e) =>
-                      setGrantForm((f) => ({
-                        ...f,
-                        paidAmount: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => setGrantForm((f) => ({ ...f, paidAmount: e.target.value }))}
                   />
                 </div>
               </div>
             )}
 
+            {/* Features preview */}
             {grantForm.plan && (
-              <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
+              <div className="bg-muted/40 rounded-lg p-3 space-y-1.5 border border-border">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                  Included Features
+                  Included with {PLAN_CONFIG[grantForm.plan].label}
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {FEATURES_BY_PLAN[grantForm.plan].map((f, i) => (
-                    <span
-                      key={i}
-                      className="bg-background border rounded px-1.5 py-0.5 text-[10px]"
-                    >
-                      {f}
+                    <span key={i} className="flex items-center gap-1 bg-background border rounded-full px-2 py-0.5 text-[10px]">
+                      <CheckCircle2 size={9} className="text-emerald-500" /> {f}
                     </span>
                   ))}
                 </div>
@@ -923,19 +865,10 @@ export default function ControlPanel() {
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={() => setGrantOpen(false)}
-            >
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => setGrantOpen(false)}>
               Cancel
             </Button>
-            <Button
-              size="sm"
-              className="text-xs bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleGrant}
-            >
+            <Button size="sm" className="text-xs bg-emerald-600 hover:bg-emerald-700" onClick={handleGrant}>
               Grant Access
             </Button>
           </DialogFooter>
