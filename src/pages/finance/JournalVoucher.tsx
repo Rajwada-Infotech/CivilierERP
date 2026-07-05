@@ -117,7 +117,7 @@ export default function JournalVoucher() {
   const [companyId, setCompanyId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
 
-  const [actingId, setActingId] = useState<number | null>(null);
+  const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -178,7 +178,7 @@ export default function JournalVoucher() {
   };
 
   const handleApprove = async (id: number) => {
-    setActingId(id);
+    setActing({ id, action: "approve" });
     try {
       await approveJournalVoucher(id);
       toast.success("Journal Voucher approved and posted to GL");
@@ -186,12 +186,12 @@ export default function JournalVoucher() {
     } catch (err: any) {
       toast.error(err?.message || "Approval failed");
     } finally {
-      setActingId(null);
+      setActing(null);
     }
   };
 
   const handleReject = async (id: number) => {
-    setActingId(id);
+    setActing({ id, action: "reject" });
     try {
       await rejectJournalVoucher(id);
       toast.success("Journal Voucher rejected");
@@ -199,7 +199,7 @@ export default function JournalVoucher() {
     } catch (err: any) {
       toast.error(err?.message || "Rejection failed");
     } finally {
-      setActingId(null);
+      setActing(null);
     }
   };
 
@@ -398,24 +398,28 @@ export default function JournalVoucher() {
                       {v.Status === "Pending" && rights.canEdit && (
                         <div className="flex justify-end gap-1">
                           <button
-                            disabled={actingId === v.JVID}
+                            disabled={acting?.id === v.JVID}
                             onClick={() => handleApprove(v.JVID)}
                             title="Approve"
                             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
                           >
-                            {actingId === v.JVID ? (
+                            {acting?.id === v.JVID && acting.action === "approve" ? (
                               <Loader2 size={13} className="animate-spin" />
                             ) : (
                               <Check size={13} />
                             )}
                           </button>
                           <button
-                            disabled={actingId === v.JVID}
+                            disabled={acting?.id === v.JVID}
                             onClick={() => handleReject(v.JVID)}
                             title="Reject"
                             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
                           >
-                            <X size={13} />
+                            {acting?.id === v.JVID && acting.action === "reject" ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <X size={13} />
+                            )}
                           </button>
                         </div>
                       )}
@@ -540,7 +544,10 @@ export default function JournalVoucher() {
                           type="number"
                           placeholder="0.00"
                           value={line.DebitAmount || ""}
-                          onChange={(e) => updateLine(idx, { DebitAmount: parseFloat(e.target.value) || 0, CreditAmount: 0 })}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value) || 0;
+                            updateLine(idx, v !== 0 ? { DebitAmount: v, CreditAmount: 0 } : { DebitAmount: v });
+                          }}
                           className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
                         />
                       </td>
@@ -549,7 +556,10 @@ export default function JournalVoucher() {
                           type="number"
                           placeholder="0.00"
                           value={line.CreditAmount || ""}
-                          onChange={(e) => updateLine(idx, { CreditAmount: parseFloat(e.target.value) || 0, DebitAmount: 0 })}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value) || 0;
+                            updateLine(idx, v !== 0 ? { CreditAmount: v, DebitAmount: 0 } : { CreditAmount: v });
+                          }}
                           className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
                         />
                       </td>
