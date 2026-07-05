@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell, MaterialGlassCard, MaterialSection } from "@/components/material/MaterialShell";
+import { MaterialShell, MaterialGlassCard } from "@/components/material/MaterialShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Textarea } from "@/components/ui/textarea";

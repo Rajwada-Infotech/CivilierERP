@@ -438,7 +438,6 @@ const DebitNoteMaster: React.FC = () => {
   const { finYears } = useFinYear();
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
   const [selectedFinYear, setSelectedFinYear] = useState<string | null>(null);
   const [autoFillPatch, setAutoFillPatch] = useState<Record<
     string,

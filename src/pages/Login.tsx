@@ -261,8 +261,6 @@ function FloatingCard({ children, className, delay = 0, style }: { children: Rea
 
 function HeroCards({ stats }: { stats: PublicStats | null }) {
   const pct = stats?.workOrderCompletionPct ?? 0;
-  const pendingWO = stats ? stats.workOrders - Math.round(stats.workOrders * pct / 100) : null;
-
   return (
     <div className="relative w-full h-full">
       <FloatingCard delay={0.3} className="top-[8%] left-[5%] w-56 p-4" style={{ zIndex: 2 }}>

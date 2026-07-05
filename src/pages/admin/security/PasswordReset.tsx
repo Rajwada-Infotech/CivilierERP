@@ -19,7 +19,6 @@ import {
   Lock,
   CheckCircle2,
   AlertCircle,
-  ChevronDown,
 } from "lucide-react";
 import {
   Dialog,

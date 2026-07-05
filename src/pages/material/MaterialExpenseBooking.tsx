@@ -45,11 +45,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import {
   Plus,
-  Edit,
   Trash2,
   ArrowLeft,
   Receipt,
-  Building2,
   CalendarDays,
   FileText,
   BadgePercent,
@@ -59,9 +57,7 @@ import {
   Clock,
   AlertCircle,
   TrendingUp,
-  FolderKanban,
   ShoppingCart,
-  HardHat,
   Hammer,
   Search,
   X,
@@ -77,7 +73,6 @@ import {
   Package,
   AlertTriangle,
   Save,
-  RefreshCw,
   Check,
   RotateCcw,
   Download,
@@ -86,7 +81,6 @@ import {
 import { toast } from "sonner";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { StatusBadge } from "@/components/StatusBadge";
 import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
@@ -1556,7 +1550,7 @@ export default function MaterialExpenseBooking() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
-  const [totalBookedAmount, setTotalBookedAmount] = useState(0);
+  const [, setTotalBookedAmount] = useState(0);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -1601,7 +1595,7 @@ export default function MaterialExpenseBooking() {
   const [supplierHeads, setSupplierHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
-  const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
+  const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);

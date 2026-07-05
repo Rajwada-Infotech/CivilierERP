@@ -26,8 +26,6 @@ import {
   Plus,
   Package,
   Building2,
-  FolderOpen,
-  Tag,
   Printer,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -125,7 +123,6 @@ const defaultHeader: FormHeader = {
 
 export default function Quotation() {
   const rights = usePageRights("quotation");
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
