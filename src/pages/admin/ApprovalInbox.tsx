@@ -159,7 +159,7 @@ const MODULE_CONFIG: Record<
   "journal-voucher": {
     icon: Receipt,
     color: "text-amber-600 bg-amber-600/10",
-    navPath: "/finance/journal-voucher",
+    navPath: "/journal-voucher",
     apiEndpoint: "/api/journal-voucher",
     label: "Journal Vouchers",
   },

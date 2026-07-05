@@ -33,12 +33,26 @@ export interface JournalVoucherSummary {
   Narration: string | null;
   CompanyId: number | null;
   ProjectId: number | null;
+  CompanyName?: string | null;
+  ProjectName?: string | null;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
   CreatedBy: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;
 }
+
+export interface JournalVoucherLedgerOption {
+  id: number;
+  label: string;
+  code: string | null;
+  type: "GL" | "C" | "S" | "B" | string;
+}
+
+export const getJournalVoucherLedgerOptions = async (): Promise<JournalVoucherLedgerOption[]> => {
+  const res = await fetchWithAuth(`${BASE}/ledger-options`);
+  return handleResponse<JournalVoucherLedgerOption[]>(res);
+};
 
 export interface JournalVoucherDetail extends JournalVoucherSummary {
   lines: JournalVoucherLine[];
