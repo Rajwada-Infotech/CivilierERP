@@ -23,11 +23,13 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check,
 } from "lucide-react";
 import {
   getJournalVouchers,
   createJournalVoucher,
+  approveJournalVoucher,
+  rejectJournalVoucher,
   type JournalVoucherSummary,
   type JournalVoucherLine,
 } from "@/api/journalVoucherApi";
@@ -61,6 +63,24 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean }) {
+  if (status !== "Approved") {
+    return <span className="text-muted-foreground text-xs">--</span>;
+  }
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+        postedToGL
+          ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
+          : "bg-rose-500/10 text-rose-600 border-rose-400/20",
+      )}
+    >
+      {postedToGL ? "Posted" : "Not posted"}
+    </span>
+  );
+}
+
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -78,6 +98,8 @@ export default function JournalVoucher() {
   const [jvDate, setJvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState("");
   const [lines, setLines] = useState<JournalVoucherLineUI[]>([emptyLine(), emptyLine()]);
+
+  const [actingId, setActingId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -113,6 +135,32 @@ export default function JournalVoucher() {
     setJvDate(new Date().toISOString().slice(0, 10));
     setNarration("");
     setLines([emptyLine(), emptyLine()]);
+  };
+
+  const handleApprove = async (id: number) => {
+    setActingId(id);
+    try {
+      await approveJournalVoucher(id);
+      toast.success("Journal Voucher approved and posted to GL");
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Approval failed");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    setActingId(id);
+    try {
+      await rejectJournalVoucher(id);
+      toast.success("Journal Voucher rejected");
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Rejection failed");
+    } finally {
+      setActingId(null);
+    }
   };
 
   const submit = async () => {
@@ -229,19 +277,21 @@ export default function JournalVoucher() {
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Narration</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">GL</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-16 text-center">
+                  <td colSpan={7} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading vouchers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-20 text-center">
+                  <td colSpan={7} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Scale size={36} className="opacity-20" />
                       <p className="text-sm font-medium">
@@ -280,6 +330,35 @@ export default function JournalVoucher() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={v.Status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {v.Status === "Pending" && rights.canEdit && (
+                        <div className="flex justify-end gap-1">
+                          <button
+                            disabled={actingId === v.JVID}
+                            onClick={() => handleApprove(v.JVID)}
+                            title="Approve"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                          >
+                            {actingId === v.JVID ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Check size={13} />
+                            )}
+                          </button>
+                          <button
+                            disabled={actingId === v.JVID}
+                            onClick={() => handleReject(v.JVID)}
+                            title="Reject"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))

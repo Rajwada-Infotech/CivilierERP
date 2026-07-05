@@ -156,6 +156,20 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
   },
+  "journal-voucher": {
+    icon: Receipt,
+    color: "text-amber-600 bg-amber-600/10",
+    navPath: "/finance/journal-voucher",
+    apiEndpoint: "/api/journal-voucher",
+    label: "Journal Vouchers",
+  },
+  "inter-company-transfer": {
+    icon: ArrowLeftRight,
+    color: "text-fuchsia-600 bg-fuchsia-600/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/inter-company-transfer",
+    label: "Inter-Company Transfers",
+  },
 };
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
@@ -237,6 +251,8 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   boq: { icon: "text-indigo-500", active: "bg-indigo-500 border-indigo-500" },
   "material-requests": { icon: "text-orange-500", active: "bg-orange-500 border-orange-500" },
   "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
+  "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
+  "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
 };
 
 const ModuleTab: React.FC<{
