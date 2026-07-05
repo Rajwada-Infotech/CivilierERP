@@ -74,44 +74,58 @@ async function safeLoadRoutes(app, routes, options = {}) {
  */
 function printRoutesSummary(results, logger = console) {
   const { loaded, skipped, failed } = results;
-  const total = loaded.length + skipped.length + failed.length;
+  const total  = loaded.length + skipped.length + failed.length;
+  const allOk  = failed.length === 0 && skipped.length === 0;
+  const hasFail = failed.length > 0;
 
-  const allOk   = failed.length === 0 && skipped.length === 0;
-  const hasFail  = failed.length > 0;
-
-  const rows = [
-    `  Route Loading Summary`,
-    ``,
-    `  ✓  Loaded : ${loaded.length}`,
-    `  ⚠  Warn   : ${skipped.length}`,
-    `  ✗  Failed : ${failed.length}`,
-    `  ─  Total  : ${total}`,
+  const title   = "  Routes  /  Load Summary";
+  const fields  = [
+    ["OK   :", String(loaded.length)],
+    ["WARN :", String(skipped.length)],
+    ["FAIL :", String(failed.length)],
+    ["TOTAL:", String(total)],
   ];
 
+  const extras = [];
   if (hasFail) {
-    rows.push(``, `  Failed routes:`);
-    failed.forEach(({ label, error }) => rows.push(`    • ${label}: ${error}`));
+    extras.push(["", ""], ["FAILED ROUTES", ""]);
+    failed.forEach(({ label, error }) => extras.push([`  ${label}`, error]));
   }
-
   if (skipped.length > 0) {
-    rows.push(``, `  Skipped routes:`);
-    skipped.forEach(({ label, reason }) => rows.push(`    • ${label}: ${reason}`));
+    extras.push(["", ""], ["SKIPPED ROUTES", ""]);
+    skipped.forEach(({ label, reason }) => extras.push([`  ${label}`, reason]));
   }
 
-  const width  = rows.reduce((m, r) => Math.max(m, r.length), 0) + 2;
-  const top    = `╔${"═".repeat(width)}╗`;
-  const bot    = `╚${"═".repeat(width)}╝`;
-  const sep    = `╠${"═".repeat(width)}╣`;
-  const box    = [
-    top,
-    `║${rows[0].padEnd(width)}║`,
-    sep,
-    ...rows.slice(1).map((r) => `║${r.padEnd(width)}║`),
-    bot,
-  ].join("\n");
+  const allRows = [...fields, ...extras];
+  const innerW  = Math.max(
+    title.length,
+    ...allRows.map(([l, v]) => `  ${l}  ${v}`.length),
+  ) + 4;
+
+  const row   = (s) => `|  ${s.padEnd(innerW - 2)}|`;
+  const rule  = `+${"-".repeat(innerW)}+`;
+  const thick = `+${"=".repeat(innerW)}+`;
+
+  const lines = [
+    thick,
+    row(title),
+    rule,
+    row(""),
+    ...fields.map(([l, v]) => row(`${l}  ${v}`)),
+    ...(extras.length
+      ? [
+          rule,
+          ...extras.map(([l, v]) =>
+            l === "" ? row("") : row(`${l}${v ? `  ${v}` : ""}`),
+          ),
+        ]
+      : []),
+    row(""),
+    thick,
+  ];
 
   const status = allOk ? "info" : hasFail ? "error" : "warn";
-  logger[status](`\n${box}\n`);
+  logger[status](`\n${lines.join("\n")}\n`);
 }
 
 module.exports = { safeLoadRoutes, printRoutesSummary };
