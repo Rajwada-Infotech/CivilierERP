@@ -431,10 +431,11 @@ export default function Brs() {
     setLoading(true);
     try {
       const params: Record<string, unknown> = { page, limit: PAGE_SIZE };
-      if (bankId)       params.bankId = Number(bankId);
-      if (fromDate)     params.fromDate = fromDate;
-      if (toDate)       params.toDate = toDate;
-      if (statusFilter) params.status = statusFilter;
+      if (bankId)        params.bankId = Number(bankId);
+      if (fromDate)      params.fromDate = fromDate;
+      if (toDate)        params.toDate = toDate;
+      if (statusFilter)  params.status = statusFilter;
+      if (hideDummyBank) params.hideDummyBank = "true";
 
       const r = await getBRS(params as Parameters<typeof getBRS>[0]);
       const d = r.data;
@@ -453,7 +454,7 @@ export default function Brs() {
     } finally {
       setLoading(false);
     }
-  }, [page, bankId, fromDate, toDate, statusFilter]);
+  }, [page, bankId, fromDate, toDate, statusFilter, hideDummyBank]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -520,10 +521,7 @@ export default function Brs() {
 
   // ── Client-side search ────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = entries;
-    if (hideDummyBank)
-      result = result.filter((e) => (e.BankName ?? "").toLowerCase() !== "dummy bank");
-    if (!search.trim()) return result;
+    if (!search.trim()) return entries;
     const q = search.toLowerCase();
     return result.filter(
       (e) =>
@@ -536,7 +534,7 @@ export default function Brs() {
         (e.Mode ?? "").toLowerCase().includes(q) ||
         (e.BounceReason ?? "").toLowerCase().includes(q),
     );
-  }, [entries, search, hideDummyBank]);
+  }, [entries, search]);
 
   const exportData = useMemo(() => filtered as unknown as Record<string, unknown>[], [filtered]);
 
@@ -753,15 +751,11 @@ export default function Brs() {
             {/* Dummy Bank toggle */}
             <button
               onClick={() => setHideDummyBank((v) => !v)}
-              title={hideDummyBank ? "Dummy Bank transactions are hidden — click to show" : "Click to hide Dummy Bank (inter-company) transactions"}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium border transition-all ${
-                hideDummyBank
-                  ? "bg-muted text-muted-foreground border-border"
-                  : "bg-orange-500/10 text-orange-600 border-orange-400/30"
-              }`}
+              title={hideDummyBank ? "Dummy Bank hidden — click to show" : "Click to hide Dummy Bank transactions"}
+              className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] text-muted-foreground border border-border hover:border-muted-foreground/40 transition-all"
             >
-              <span className={`w-6 h-3.5 rounded-full relative transition-colors ${hideDummyBank ? "bg-muted-foreground/30" : "bg-orange-400"}`}>
-                <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-transform duration-200 ${hideDummyBank ? "left-0.5" : "left-[13px]"}`} />
+              <span className={`w-5 h-3 rounded-full relative shrink-0 transition-colors duration-200 ${!hideDummyBank ? "bg-orange-400" : "bg-muted-foreground/25"}`}>
+                <span className={`absolute top-0.5 w-2 h-2 rounded-full bg-white shadow transition-transform duration-200 ${!hideDummyBank ? "translate-x-2.5" : "translate-x-0.5"}`} />
               </span>
               Dummy Bank
             </button>
