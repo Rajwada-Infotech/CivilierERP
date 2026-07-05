@@ -265,89 +265,113 @@ router.get("/summary", authenticateToken, async (req, res) => {
   }
 });
 
-router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const createdBy = userEmail(req);
-    const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
-    const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
-    const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
-    const items = asItems(req.body.Items || req.body.TransferItems);
+// Re-resolves every entity needed to run the document chain, either from a
+// fresh POST body (creation time) or from a stored ICT header + items row
+// (approval time) — same shape either way so executeTransferChain() never
+// needs to know which caller it came from.
+async function resolveTransferContext(pool, { senderProjectId, receiverProjectId, items }) {
+  const sender = await getProject(pool, senderProjectId);
+  const receiver = await getProject(pool, receiverProjectId);
+  if (!sender || !receiver) {
+    const err = new Error("Sender or receiver project not found.");
+    err.status = 404;
+    throw err;
+  }
+  if (!sender.CompanyId || !receiver.CompanyId) {
+    const err = new Error("Both projects must be linked to a company.");
+    err.status = 400;
+    throw err;
+  }
+  if (sender.CompanyId === receiver.CompanyId) {
+    const err = new Error("Use normal Stock Transfer for same-company project moves.");
+    err.status = 400;
+    throw err;
+  }
 
-    if (!senderProjectId || !receiverProjectId) {
-      return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
-    }
-    if (senderProjectId === receiverProjectId) {
-      return res.status(400).json({ error: "Sender and receiver projects must differ." });
-    }
-    if (!items.length) {
-      return res.status(400).json({ error: "At least one transfer item is required." });
-    }
+  const receiverCustomer = await getProjectLedger(pool, receiverProjectId, "C");
+  const senderSupplier = await getProjectLedger(pool, senderProjectId, "S");
+  if (!receiverCustomer || !senderSupplier) {
+    const err = new Error(
+      "Auto-created customer/supplier ledger heads are missing. Re-save the projects or create PRJ-{id}-CUST and PRJ-{id}-SUPP approved heads.",
+    );
+    err.status = 400;
+    throw err;
+  }
 
-    const sender = await getProject(pool, senderProjectId);
-    const receiver = await getProject(pool, receiverProjectId);
-    if (!sender || !receiver) return res.status(404).json({ error: "Sender or receiver project not found." });
-    if (!sender.CompanyId || !receiver.CompanyId) return res.status(400).json({ error: "Both projects must be linked to a company." });
-    if (sender.CompanyId === receiver.CompanyId) {
-      return res.status(400).json({ error: "Use normal Stock Transfer for same-company project moves." });
+  const senderGodown = await getProjectGodown(pool, senderProjectId);
+  const receiverGodown = await getProjectGodown(pool, receiverProjectId);
+  if (!senderGodown || !receiverGodown) {
+    const err = new Error("Both projects must have active project godowns.");
+    err.status = 400;
+    throw err;
+  }
+
+  const dummyBank = await getDummyBank(pool);
+  if (!dummyBank) {
+    const err = new Error("Dummy Bank account not found.");
+    err.status = 500;
+    throw err;
+  }
+
+  return { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank };
+}
+
+async function priceItems(pool, senderProjectId, senderProjectName, items) {
+  const pricedItems = [];
+  for (const [idx, item] of items.entries()) {
+    const itemId = item.itemId || item.ItemId || item.ItemID;
+    const qty = Number(item.qty ?? item.Quantity ?? item.quantity);
+    if (!itemId || !(qty > 0)) {
+      const err = new Error(`Invalid item at line ${idx + 1}.`);
+      err.status = 400;
+      throw err;
     }
-
-    const receiverCustomer = await getProjectLedger(pool, receiverProjectId, "C");
-    const senderSupplier = await getProjectLedger(pool, senderProjectId, "S");
-    if (!receiverCustomer || !senderSupplier) {
-      return res.status(400).json({
-        error: "Auto-created customer/supplier ledger heads are missing. Re-save the projects or create PRJ-{id}-CUST and PRJ-{id}-SUPP approved heads.",
-      });
+    const rateInfo = await getLastPurchaseRate(pool, senderProjectId, itemId);
+    if (!rateInfo) {
+      const err = new Error(
+        `No last purchase rate found for item ${item.itemName || itemId} in sender project ${senderProjectName}.`,
+      );
+      err.status = 400;
+      throw err;
     }
+    const rate = Number(rateInfo.rate);
+    pricedItems.push({
+      itemId: String(itemId),
+      itemName: item.itemName || item.ItemName || null,
+      itemCode: item.itemCode || item.ItemCode || null,
+      description: item.description || item.itemName || item.ItemName || null,
+      quantity: qty,
+      qty,
+      unit: item.uom || item.Unit || item.unit || "NOS",
+      uom: item.uom || item.Unit || item.unit || "NOS",
+      rate,
+      amount: Math.round(qty * rate * 100) / 100,
+      tax: Number(item.tax || item.TaxPct || 0),
+      sourceDocNo: rateInfo.sourceDocNo || null,
+    });
+  }
+  return pricedItems;
+}
 
-    const senderGodown = await getProjectGodown(pool, senderProjectId);
-    const receiverGodown = await getProjectGodown(pool, receiverProjectId);
-    if (!senderGodown || !receiverGodown) {
-      return res.status(400).json({ error: "Both projects must have active project godowns." });
-    }
+// Runs the full commercial-paper chain (SO -> SI -> Payment -> PO -> GRN ->
+// Expense Booking -> Payment) for an already-Approved ICT header. Only
+// called from PUT /:id/approve, once a super_admin has approved the
+// request — everything from here on is 100% automatic, no further manual
+// steps, matching the original "no manual work after approval" spec.
+async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
+  const { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank, pricedItems, totalAmount, transferDate } = ctx;
+  const { finYear = null, referenceNumber = null, remarks = null } = opts;
 
-    const dummyBank = await getDummyBank(pool);
-    if (!dummyBank) return res.status(500).json({ error: "Dummy Bank account not found." });
+  const soDocTypeId = await resolveDocType(pool, ["SO"], "Sale Order");
+  const poDocTypeId = await resolveDocType(pool, ["DPO", "PO"], "Purchase Order");
+  const ebDocTypeId = await resolveDocType(pool, ["INV-GRN", "ExB-GRN"], "Expense Booking");
+  if (!soDocTypeId || !poDocTypeId || !ebDocTypeId) {
+    const err = new Error("Required document types for SO/PO/Expense Booking are missing.");
+    err.status = 500;
+    throw err;
+  }
 
-    const pricedItems = [];
-    for (const [idx, item] of items.entries()) {
-      const itemId = item.itemId || item.ItemId || item.ItemID;
-      const qty = Number(item.qty ?? item.Quantity ?? item.quantity);
-      if (!itemId || !(qty > 0)) {
-        return res.status(400).json({ error: `Invalid item at line ${idx + 1}.` });
-      }
-      const rateInfo = await getLastPurchaseRate(pool, senderProjectId, itemId);
-      if (!rateInfo) {
-        return res.status(400).json({
-          error: `No last purchase rate found for item ${item.itemName || itemId} in sender project ${sender.ProjectName}.`,
-        });
-      }
-      const rate = Number(rateInfo.rate);
-      pricedItems.push({
-        itemId: String(itemId),
-        itemName: item.itemName || item.ItemName || null,
-        itemCode: item.itemCode || item.ItemCode || null,
-        description: item.description || item.itemName || item.ItemName || null,
-        quantity: qty,
-        qty,
-        unit: item.uom || item.Unit || item.unit || "NOS",
-        uom: item.uom || item.Unit || item.unit || "NOS",
-        rate,
-        amount: Math.round(qty * rate * 100) / 100,
-        tax: Number(item.tax || item.TaxPct || 0),
-        sourceDocNo: rateInfo.sourceDocNo || null,
-      });
-    }
-
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
-    const soDocTypeId = await resolveDocType(pool, ["SO"], "Sale Order");
-    const poDocTypeId = await resolveDocType(pool, ["DPO", "PO"], "Purchase Order");
-    const ebDocTypeId = await resolveDocType(pool, ["INV-GRN", "ExB-GRN"], "Expense Booking");
-    if (!soDocTypeId || !poDocTypeId || !ebDocTypeId) {
-      return res.status(500).json({ error: "Required document types for SO/PO/Expense Booking are missing." });
-    }
-
-    const so = await createSaleOrderInternal(pool, {
+  const so = await createSaleOrderInternal(pool, {
       SODate: transferDate,
       CustomerID: receiverCustomer.LHeadId,
       CompanyId: sender.CompanyId,
@@ -358,12 +382,12 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       Unit: pricedItems[0]?.unit || "NOS",
       Rate: pricedItems[0]?.rate || 0,
       TotalAmount: totalAmount,
-      ReferenceNumber: req.body.ReferenceNumber || null,
+      ReferenceNumber: referenceNumber,
       PaymentTerms: "System generated inter-company stock transfer",
       Status: "Open",
-      Remarks: req.body.Remarks || `Inter-company stock transfer to ${receiver.ProjectName}`,
+      Remarks: remarks || `Inter-company stock transfer to ${receiver.ProjectName}`,
       DocTypeId: soDocTypeId,
-      finYear: req.body.finYear || req.body.FinYear || null,
+      finYear,
       SOItems: pricedItems,
     }, createdBy);
 
@@ -372,7 +396,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       InvoiceDate: transferDate,
       Amount: totalAmount,
       Remarks: `Auto-generated for inter-company transfer ${so.SaleOrderNo}`,
-      RPFinYear: req.body.finYear || req.body.FinYear || null,
+      RPFinYear: finYear,
     }, createdBy, createdBy);
 
     const rp = await createReceivedPaymentInternal(pool, {
@@ -409,7 +433,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       Status: "Draft",
       Remarks: `Auto PO for ${si.SaleInvoiceNo}`,
       DocTypeId: poDocTypeId,
-      finYear: req.body.finYear || req.body.FinYear || null,
+      finYear,
       POItems: pricedItems,
       POType: "InterCompanyTransfer",
       SourceSaleOrderId: so.SaleOrderID,
@@ -436,7 +460,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       grnItems,
       status: "Draft",
       remarks: `Auto GRN for inter-company transfer ${si.SaleInvoiceNo}`,
-      finYear: req.body.finYear || req.body.FinYear || null,
+      finYear,
       parentDocNo: po.PurchaseOrderNo,
       godownId: receiverGodown.GodownID,
       projectId: receiver.ProjectId,
@@ -452,10 +476,10 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       ENetAmount: totalAmount,
       ECompanyId: receiver.CompanyId,
       EDocTypeId: ebDocTypeId,
-      EFinYear: req.body.finYear || req.body.FinYear || null,
+      EFinYear: finYear,
       ESourceId: grn.GRNID,
       ERemarks: `Auto expense booking for inter-company transfer ${si.SaleInvoiceNo}`,
-    }, createdBy, req.user?.userId || null);
+    }, createdBy, opts.userId || null);
     await approve("expense-booking", eb.id, createdBy, "System-approved inter-company transfer invoice");
 
     const payment = await createApprovedPayment(pool, {
@@ -471,10 +495,90 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       rootExBDocNo: eb.docNo,
     }, createdBy);
 
+  return {
+    SaleOrderID: so.SaleOrderID,
+    SaleInvoiceID: si.SaleInvoiceID,
+    ReceivedPaymentID: rp.RPPaymentID,
+    PurchaseOrderID: po.PurchaseOrderID,
+    GRNID: grn.GRNID,
+    ExpenseBookingID: eb.id,
+    NewPaymentID: payment.PPaymentID,
+  };
+}
+
+// Loads an ICT header + its stored items back into the same context shape
+// resolveTransferContext()/priceItems() produce at creation time, so
+// executeTransferChain() can run identically whether called fresh or from
+// a later approval action.
+async function loadStoredTransferContext(pool, ictRow) {
+  const ctx = await resolveTransferContext(pool, {
+    senderProjectId: ictRow.SenderProjectId,
+    receiverProjectId: ictRow.ReceiverProjectId,
+  });
+
+  const itemRows = await pool.request().input("id", sql.Int, ictRow.ICTId).query(`
+    SELECT ItemId, ItemName, UOMCode, Quantity, Rate, Amount, SourceDocNo
+    FROM dbo.InterCompanyTransferItems
+    WHERE ICTId = @id
+    ORDER BY SortOrder, ICTItemId
+  `);
+  const pricedItems = itemRows.recordset.map((row) => ({
+    itemId: row.ItemId,
+    itemName: row.ItemName,
+    itemCode: null,
+    description: row.ItemName,
+    quantity: Number(row.Quantity),
+    qty: Number(row.Quantity),
+    unit: row.UOMCode || "NOS",
+    uom: row.UOMCode || "NOS",
+    rate: Number(row.Rate),
+    amount: Number(row.Amount),
+    tax: 0,
+    sourceDocNo: row.SourceDocNo,
+  }));
+
+  return {
+    ...ctx,
+    pricedItems,
+    totalAmount: Number(ictRow.TotalAmount),
+    transferDate: ictRow.TransferDate,
+  };
+}
+
+router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const createdBy = userEmail(req);
+    const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
+    const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
+    const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    const items = asItems(req.body.Items || req.body.TransferItems);
+    const finYear = req.body.finYear || req.body.FinYear || null;
+    const remarks = req.body.Remarks || null;
+
+    if (!senderProjectId || !receiverProjectId) {
+      return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
+    }
+    if (senderProjectId === receiverProjectId) {
+      return res.status(400).json({ error: "Sender and receiver projects must differ." });
+    }
+    if (!items.length) {
+      return res.status(400).json({ error: "At least one transfer item is required." });
+    }
+
+    const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId, items });
+    const pricedItems = await priceItems(pool, senderProjectId, ctx.sender.ProjectName, items);
+    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+
+    // Only validate + record the request here — no documents are generated
+    // yet. The full auto-chain (SO -> ... -> Payment) only fires once a
+    // super_admin approves this request via PUT /:id/approve, matching the
+    // same Draft -> Pending -> Approved gate every other module already
+    // uses ("as we usually do approve").
     const ictDocTypeId = await resolveDocTypeId(pool, sql, "ICT");
     const ictDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId: ictDocTypeId,
-      finYear: req.body.finYear || req.body.FinYear || null,
+      finYear,
       tableName: "InterCompanyTransfer",
       docNoColumn: "DocNo",
       issuedBy: createdBy,
@@ -487,30 +591,21 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       const header = await tx.request()
         .input("DocNo", sql.NVarChar(100), ictDocNo)
         .input("TransferDate", sql.Date, transferDate)
-        .input("SenderProjectId", sql.Int, sender.ProjectId)
-        .input("SenderCompanyId", sql.Int, sender.CompanyId)
-        .input("ReceiverProjectId", sql.Int, receiver.ProjectId)
-        .input("ReceiverCompanyId", sql.Int, receiver.CompanyId)
+        .input("SenderProjectId", sql.Int, ctx.sender.ProjectId)
+        .input("SenderCompanyId", sql.Int, ctx.sender.CompanyId)
+        .input("ReceiverProjectId", sql.Int, ctx.receiver.ProjectId)
+        .input("ReceiverCompanyId", sql.Int, ctx.receiver.CompanyId)
         .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
-        .input("Remarks", sql.NVarChar(500), req.body.Remarks || null)
-        .input("SaleOrderId", sql.Int, so.SaleOrderID)
-        .input("SaleInvoiceId", sql.Int, si.SaleInvoiceID)
-        .input("ReceivedPaymentId", sql.Int, rp.RPPaymentID)
-        .input("PurchaseOrderId", sql.Int, po.PurchaseOrderID)
-        .input("GRNId", sql.Int, grn.GRNID)
-        .input("ExpenseBookingId", sql.Int, eb.id)
-        .input("NewPaymentId", sql.Int, payment.PPaymentID)
+        .input("Remarks", sql.NVarChar(500), remarks)
         .input("DocTypeId", sql.Int, ictDocTypeId)
         .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
           INSERT INTO dbo.InterCompanyTransfer
             (DocNo, TransferDate, SenderProjectId, SenderCompanyId, ReceiverProjectId, ReceiverCompanyId,
-             Status, TotalAmount, Remarks, SaleOrderId, SaleInvoiceId, ReceivedPaymentId,
-             PurchaseOrderId, GRNId, ExpenseBookingId, NewPaymentId, DocTypeId, CreatedBy)
+             Status, TotalAmount, Remarks, DocTypeId, CreatedBy)
           OUTPUT INSERTED.ICTId
           VALUES
             (@DocNo, @TransferDate, @SenderProjectId, @SenderCompanyId, @ReceiverProjectId, @ReceiverCompanyId,
-             'Completed', @TotalAmount, @Remarks, @SaleOrderId, @SaleInvoiceId, @ReceivedPaymentId,
-             @PurchaseOrderId, @GRNId, @ExpenseBookingId, @NewPaymentId, @DocTypeId, @CreatedBy)
+             'Draft', @TotalAmount, @Remarks, @DocTypeId, @CreatedBy)
         `);
       ictId = header.recordset[0].ICTId;
 
@@ -539,6 +634,72 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     }
     await backPatchRecordId(pool, sql, ictDocNo, "InterCompanyTransfer", ictId);
 
+    // Auto-submit Draft -> Pending immediately, matching journal-voucher.js
+    // and grns.js's convention — no separate manual "Submit" step.
+    try {
+      await transition("inter-company-transfer", ictId, "Pending", createdBy, req.user?.role);
+    } catch (submitErr) {
+      console.warn("ICT auto-submit failed (non-fatal):", submitErr.message);
+    }
+
+    await bumpCacheVersion("stock-transfers");
+
+    res.status(201).json({
+      ICTId: ictId,
+      DocNo: ictDocNo,
+      TotalAmount: totalAmount,
+      Status: "Pending",
+      message: "Submitted for super_admin approval — the full document chain will be generated automatically once approved.",
+    });
+  } catch (err) {
+    console.error("[inter-company-transfer] POST /:", err);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved (super_admin only); fires the
+// entire auto-generated document chain the moment full approval lands ──────
+router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const createdBy = userEmail(req);
+
+    const headerRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT * FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+    const ictRow = headerRes.recordset[0];
+    if (!ictRow) return res.status(404).json({ error: "Not found" });
+
+    const result = await transition("inter-company-transfer", id, "Approved", createdBy, req.user?.role, req.body?.note);
+
+    if (result.newStatus !== "Approved") {
+      // Multi-level workflow, more approvals still required — no chain yet.
+      return res.json({ message: "Approval level recorded", ...result });
+    }
+
+    const ctx = await loadStoredTransferContext(pool, ictRow);
+    const links = await executeTransferChain(pool, ctx, createdBy, {
+      remarks: ictRow.Remarks,
+      userId: req.user?.userId || null,
+    });
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("SaleOrderId", sql.Int, links.SaleOrderID)
+      .input("SaleInvoiceId", sql.Int, links.SaleInvoiceID)
+      .input("ReceivedPaymentId", sql.Int, links.ReceivedPaymentID)
+      .input("PurchaseOrderId", sql.Int, links.PurchaseOrderID)
+      .input("GRNId", sql.Int, links.GRNID)
+      .input("ExpenseBookingId", sql.Int, links.ExpenseBookingID)
+      .input("NewPaymentId", sql.Int, links.NewPaymentID).query(`
+        UPDATE dbo.InterCompanyTransfer
+        SET Status = 'Completed', SaleOrderId = @SaleOrderId, SaleInvoiceId = @SaleInvoiceId,
+            ReceivedPaymentId = @ReceivedPaymentId, PurchaseOrderId = @PurchaseOrderId,
+            GRNId = @GRNId, ExpenseBookingId = @ExpenseBookingId, NewPaymentId = @NewPaymentId
+        WHERE ICTId = @id
+      `);
+
     await Promise.all([
       bumpCacheVersion("stock-transfers"),
       bumpCacheVersion("inventory-master"),
@@ -547,23 +708,24 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       bumpCacheVersion("received-payment"),
     ]);
 
-    res.status(201).json({
-      ICTId: ictId,
-      DocNo: ictDocNo,
-      TotalAmount: totalAmount,
-      links: {
-        SaleOrderID: so.SaleOrderID,
-        SaleInvoiceID: si.SaleInvoiceID,
-        ReceivedPaymentID: rp.RPPaymentID,
-        PurchaseOrderID: po.PurchaseOrderID,
-        GRNID: grn.GRNID,
-        ExpenseBookingID: eb.id,
-        NewPaymentID: payment.PPaymentID,
-      },
-    });
+    res.json({ message: "Approved — transfer executed", ICTId: id, links });
   } catch (err) {
-    console.error("[inter-company-transfer] POST /:", err);
+    console.error("[inter-company-transfer] PUT /:id/approve:", err);
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected; no documents are ever generated ───
+router.put("/:id/reject", authenticateToken, requirePageRight("stock-transfers", "edit"), async (req, res) => {
+  try {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note);
+    await bumpCacheVersion("stock-transfers");
+    res.json({ message: "Rejected", ...result });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 
