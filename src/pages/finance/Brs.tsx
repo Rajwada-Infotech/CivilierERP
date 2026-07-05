@@ -748,15 +748,15 @@ export default function Brs() {
               </button>
             )}
 
-            {/* Dummy Bank toggle */}
+            {/* Dummy Bank filter pill */}
             <button
               onClick={() => setHideDummyBank((v) => !v)}
-              title={hideDummyBank ? "Dummy Bank hidden — click to show" : "Click to hide Dummy Bank transactions"}
-              className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] text-muted-foreground border border-border hover:border-muted-foreground/40 transition-all"
+              className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
+                !hideDummyBank
+                  ? "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30 font-semibold"
+                  : "bg-transparent text-muted-foreground border-border hover:bg-muted"
+              }`}
             >
-              <span className={`w-5 h-3 rounded-full relative shrink-0 transition-colors duration-200 ${!hideDummyBank ? "bg-orange-400" : "bg-muted-foreground/25"}`}>
-                <span className={`absolute top-0.5 w-2 h-2 rounded-full bg-white shadow transition-transform duration-200 ${!hideDummyBank ? "translate-x-2.5" : "translate-x-0.5"}`} />
-              </span>
               Dummy Bank
             </button>
 
