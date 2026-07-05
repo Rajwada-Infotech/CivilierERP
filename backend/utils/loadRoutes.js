@@ -79,7 +79,7 @@ function printRoutesSummary(results, logger = console) {
   const lines = [
     "",
     "+----------+----------+--------------------+",
-    `| ${"ROUTES LOADED  (" + total + " total)".padEnd(39)} |`,
+    `| ${"ROUTES LOADED  (" + total + " total)".padEnd(40)} |`,
     "+----------+----------+--------------------+",
     `|  [OK]    |  [WARN]  |  [FAIL]            |`,
     `|  ${String(loaded.length).padEnd(7)} |  ${String(skipped.length).padEnd(7)} |  ${String(failed.length).padEnd(18)}|`,
