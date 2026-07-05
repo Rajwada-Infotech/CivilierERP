@@ -78,8 +78,8 @@ function printRoutesSummary(results, logger = console) {
 
   const lines = [
     "",
-    "+-----------------------------------------+",
-    `|        ROUTES LOADED  (${String(total).padStart(2)} total)          |`,
+    "+----------+----------+--------------------+",
+    `| ${"ROUTES LOADED  (" + total + " total)".padEnd(39)} |`,
     "+----------+----------+--------------------+",
     `|  [OK]    |  [WARN]  |  [FAIL]            |`,
     `|  ${String(loaded.length).padEnd(7)} |  ${String(skipped.length).padEnd(7)} |  ${String(failed.length).padEnd(18)}|`,
