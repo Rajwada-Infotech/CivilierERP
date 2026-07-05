@@ -765,7 +765,7 @@ export default function DBADashboard() {
                 value={queryText}
                 onChange={(e) => setQueryText(e.target.value)}
                 onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); runQuery(); } }}
-                className="font-mono text-xs min-h-[140px] resize-none rounded-none border-0 border-b border-border focus-visible:ring-0 bg-[#1e1e2e] text-[#cdd6f4] placeholder:text-[#585b70] px-4 py-3"
+                className="font-mono text-xs min-h-[140px] resize-none rounded-none border-0 border-b border-border focus-visible:ring-0 bg-background text-foreground placeholder:text-muted-foreground px-4 py-3"
                 placeholder="SELECT TOP 100 * FROM dbo.users WHERE discontinue = 0"
               />
               {/* Danger warning */}
