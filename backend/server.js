@@ -45,21 +45,37 @@ function printBanner(port) {
   const env  = process.env.NODE_ENV || "development";
   const node = process.version;
   const time = new Date().toLocaleTimeString();
-  const rows = [
-    `  CivilierERP API`,
-    ``,
-    `  🌐  http://localhost:${port}`,
-    `  ⚙️   env  : ${env}`,
-    `  🟢  node : ${node}`,
-    `  🕐  time : ${time}`,
+
+  const pad = (label, value, w) => {
+    const entry = `  ${label}  ${value}`;
+    return entry.padEnd(w);
+  };
+
+  const title  = "  CivilierERP  /  API Server";
+  const fields = [
+    ["URL  :", `http://localhost:${port}`],
+    ["ENV  :", env],
+    ["NODE :", node],
+    ["TIME :", time],
   ];
-  const width = rows.reduce((max, r) => Math.max(max, r.replace(/\s/g, " ").length), 0) + 2;
-  const top  = `╔${"═".repeat(width)}╗`;
-  const bot  = `╚${"═".repeat(width)}╝`;
-  const mid  = rows.map((r) => `║${r.padEnd(width)}║`);
-  const sep  = `╠${"═".repeat(width)}╣`;
-  const out  = [top, mid[0], sep, ...mid.slice(1), bot].join("\n");
-  process.stdout.write(`\n${out}\n\n`);
+
+  const innerW = Math.max(title.length, ...fields.map(([l, v]) => `  ${l}  ${v}`.length)) + 4;
+
+  const row  = (s) => `|  ${s.padEnd(innerW - 2)}|`;
+  const rule = `+${"-".repeat(innerW)}+`;
+  const thick = `+${"=".repeat(innerW)}+`;
+
+  const lines = [
+    thick,
+    row(title),
+    rule,
+    row(""),
+    ...fields.map(([label, value]) => row(`${label}  ${value}`)),
+    row(""),
+    thick,
+  ];
+
+  process.stdout.write(`\n${lines.join("\n")}\n\n`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
