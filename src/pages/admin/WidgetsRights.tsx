@@ -18,6 +18,7 @@ import {
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { getWidgetCatalog, type WidgetCatalogItem } from "@/api/widgetsApi";
+import { getRolesList } from "@/api/roleApi";
 
 // ── Widget definitions — must match Widgets.tsx widgetItems exactly ───────────
 const widgetIcons: Record<string, React.ElementType> = {
@@ -74,8 +75,28 @@ async function saveUserWidgets(userId: number, allowedWidgets: string[]): Promis
   if (!res.ok) throw new Error("Failed to save widget rights");
 }
 
+async function fetchRoleWidgets(roleId: number): Promise<string[]> {
+  const res = await fetch(`/api/user-widget-rights/role/${roleId}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch role widget rights");
+  const data = await res.json().catch(() => ({}));
+  return data.allowedWidgets ?? [];
+}
+
+async function saveRoleWidgets(roleId: number, allowedWidgets: string[]): Promise<void> {
+  const res = await fetch(`/api/user-widget-rights/role/${roleId}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ allowedWidgets }),
+  });
+  if (!res.ok) throw new Error("Failed to save role widget rights");
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function WidgetsRights() {
+  // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
+  type Subject = "user" | "role";
+  const [subject, setSubject] = useState<Subject>("user");
+
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -83,6 +104,12 @@ export default function WidgetsRights() {
   const [selectedUser, setSelectedUser] = useState<UserEntry | null>(null);
   const [userSearch, setUserSearch] = useState("");
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+
+  const [roles, setRoles] = useState<{ RId: number; RName: string }[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
+  const [roleSearch, setRoleSearch] = useState("");
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
   const [widgetCatalog, setWidgetCatalog] = useState<WidgetCatalogItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -95,12 +122,31 @@ export default function WidgetsRights() {
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
+  const selectedRole = roles.find((r) => r.RId === selectedRoleId);
+  const hasSubjectSelected = subject === "user" ? !!selectedUser : !!selectedRole;
+
+  const switchSubject = useCallback((next: Subject) => {
+    setSubject(next);
+    setSelectedUser(null);
+    setSelectedRoleId(null);
+    setAllowedWidgets(new Set());
+    setSaveStatus("idle");
+  }, []);
+
   // Load users on mount
   useEffect(() => {
     fetchUsers()
       .then(setUsers)
       .catch(e => setUsersError(e.message))
       .finally(() => setUsersLoading(false));
+  }, []);
+
+  // Load roles on mount
+  useEffect(() => {
+    getRolesList()
+      .then(setRoles)
+      .catch(() => {})
+      .finally(() => setRolesLoading(false));
   }, []);
 
   useEffect(() => {
@@ -110,16 +156,27 @@ export default function WidgetsRights() {
       .finally(() => setCatalogLoading(false));
   }, []);
 
-  // Load widgets when user selected
+  // Load widgets when a user is selected (user mode)
   useEffect(() => {
-    if (!selectedUser) return;
+    if (subject !== "user" || !selectedUser) return;
     setWidgetsLoading(true);
     setSaveStatus("idle");
     fetchUserWidgets(selectedUser.id)
       .then(widgets => setAllowedWidgets(new Set(widgets)))
       .catch(() => setAllowedWidgets(new Set()))
       .finally(() => setWidgetsLoading(false));
-  }, [selectedUser]);
+  }, [subject, selectedUser]);
+
+  // Load widgets when a role is selected (role mode)
+  useEffect(() => {
+    if (subject !== "role" || !selectedRoleId) return;
+    setWidgetsLoading(true);
+    setSaveStatus("idle");
+    fetchRoleWidgets(selectedRoleId)
+      .then(widgets => setAllowedWidgets(new Set(widgets)))
+      .catch(() => setAllowedWidgets(new Set()))
+      .finally(() => setWidgetsLoading(false));
+  }, [subject, selectedRoleId]);
 
   const toggleWidget = useCallback((key: string) => {
     setAllowedWidgets(prev => {
@@ -140,10 +197,15 @@ export default function WidgetsRights() {
   };
 
   const handleSave = async () => {
-    if (!selectedUser) return;
     setSaveStatus("saving");
     try {
-      await saveUserWidgets(selectedUser.id, Array.from(allowedWidgets));
+      if (subject === "user") {
+        if (!selectedUser) return;
+        await saveUserWidgets(selectedUser.id, Array.from(allowedWidgets));
+      } else {
+        if (!selectedRoleId) return;
+        await saveRoleWidgets(selectedRoleId, Array.from(allowedWidgets));
+      }
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2500);
     } catch {
@@ -156,6 +218,10 @@ export default function WidgetsRights() {
   const filteredUsers = users.filter(u =>
     u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.email.toLowerCase().includes(userSearch.toLowerCase())
+  );
+
+  const filteredRoles = roles.filter((r) =>
+    r.RName.toLowerCase().includes(roleSearch.toLowerCase()),
   );
 
   // Filtered widgets for display
@@ -179,7 +245,7 @@ export default function WidgetsRights() {
         subtitle="Control which dashboard widgets each user can access. Changes take effect on next login."
         icon={Puzzle}
         action={
-          selectedUser && (
+          hasSubjectSelected && (
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
@@ -204,63 +270,141 @@ export default function WidgetsRights() {
           )
         }
       >
-        {/* User selector */}
+        {/* Subject selector */}
         <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Users size={16} className="text-primary" />
-            Select User
-          </div>
-
-          {usersError ? (
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle size={14} /> {usersError}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Users size={16} className="text-primary" />
+              {subject === "user" ? "Select User" : "Select Role"}
             </div>
-          ) : usersLoading ? (
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+              <button
+                onClick={() => switchSubject("role")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  subject === "role"
+                    ? "bg-card shadow text-foreground border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Role-wise
+              </button>
+              <button
+                onClick={() => switchSubject("user")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  subject === "user"
+                    ? "bg-card shadow text-foreground border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Custom User-wise
+              </button>
+            </div>
+          </div>
+          {subject === "role" && (
+            <p className="text-xs text-muted-foreground/70">
+              Sets the baseline every user with this role sees, effective immediately — a user's own overrides (Custom User-wise) fully replace this for them.
+            </p>
+          )}
+
+          {subject === "user" ? (
+            usersError ? (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle size={14} /> {usersError}
+              </div>
+            ) : usersLoading ? (
+              <div className="h-10 bg-muted/30 animate-pulse rounded-lg" />
+            ) : (
+              <div className="relative">
+                <button
+                  onClick={() => setUserDropdownOpen(o => !o)}
+                  className="w-full flex items-center justify-between gap-2 pl-3 pr-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm appearance-none"
+                >
+                  <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
+                    {selectedUser ? `${selectedUser.name} — ${selectedUser.email}` : "Choose a user to configure…"}
+                  </span>
+<ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {userDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="p-2 border-b border-border">
+                      <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          autoFocus
+                          value={userSearch}
+                          onChange={e => setUserSearch(e.target.value)}
+                          placeholder="Search users…"
+                          className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/30 rounded-lg outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto">
+                      {filteredUsers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">No users found</p>
+                      ) : (
+                        filteredUsers.map(u => (
+                          <button
+                            key={u.id}
+                            onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setUserSearch(""); }}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent/10 transition-colors text-left
+                              ${selectedUser?.id === u.id ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                          >
+                            <div>
+                              <p className="font-medium">{u.name}</p>
+                              <p className="text-xs text-muted-foreground">{u.email}</p>
+                            </div>
+                            <span className="text-xs text-muted-foreground capitalize bg-muted/40 px-2 py-0.5 rounded-full">
+                              {u.role}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          ) : rolesLoading ? (
             <div className="h-10 bg-muted/30 animate-pulse rounded-lg" />
           ) : (
             <div className="relative">
               <button
-                onClick={() => setUserDropdownOpen(o => !o)}
+                onClick={() => setRoleDropdownOpen(o => !o)}
                 className="w-full flex items-center justify-between gap-2 pl-3 pr-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm appearance-none"
               >
-                <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
-                  {selectedUser ? `${selectedUser.name} — ${selectedUser.email}` : "Choose a user to configure…"}
+                <span className={selectedRole ? "text-foreground font-medium" : "text-muted-foreground"}>
+                  {selectedRole ? selectedRole.RName : "Choose a role to configure…"}
                 </span>
-<ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
+                <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${roleDropdownOpen ? "rotate-180" : ""}`} />
               </button>
 
-              {userDropdownOpen && (
+              {roleDropdownOpen && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
                   <div className="p-2 border-b border-border">
                     <div className="relative">
                       <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <input
                         autoFocus
-                        value={userSearch}
-                        onChange={e => setUserSearch(e.target.value)}
-                        placeholder="Search users…"
+                        value={roleSearch}
+                        onChange={e => setRoleSearch(e.target.value)}
+                        placeholder="Search roles…"
                         className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/30 rounded-lg outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary"
                       />
                     </div>
                   </div>
                   <div className="max-h-56 overflow-y-auto">
-                    {filteredUsers.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">No users found</p>
+                    {filteredRoles.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No roles found</p>
                     ) : (
-                      filteredUsers.map(u => (
+                      filteredRoles.map(r => (
                         <button
-                          key={u.id}
-                          onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setUserSearch(""); }}
+                          key={r.RId}
+                          onClick={() => { setSelectedRoleId(r.RId); setRoleDropdownOpen(false); setRoleSearch(""); }}
                           className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent/10 transition-colors text-left
-                            ${selectedUser?.id === u.id ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                            ${selectedRoleId === r.RId ? "bg-primary/10 text-primary" : "text-foreground"}`}
                         >
-                          <div>
-                            <p className="font-medium">{u.name}</p>
-                            <p className="text-xs text-muted-foreground">{u.email}</p>
-                          </div>
-                          <span className="text-xs text-muted-foreground capitalize bg-muted/40 px-2 py-0.5 rounded-full">
-                            {u.role}
-                          </span>
+                          <p className="font-medium">{r.RName}</p>
                         </button>
                       ))
                     )}
@@ -270,17 +414,17 @@ export default function WidgetsRights() {
             </div>
           )}
 
-          {selectedUser && (
+          {hasSubjectSelected && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
               <span className="w-2 h-2 rounded-full bg-primary inline-block" />
-              Configuring <strong className="text-foreground">{selectedUser.name}</strong> —
+              Configuring <strong className="text-foreground">{subject === "user" ? selectedUser?.name : selectedRole?.RName}</strong> —
               <strong className="text-foreground">{enabledCount}</strong> of {widgetCatalog.length} widgets enabled
             </div>
           )}
         </div>
 
         {/* Widget configurator */}
-        {selectedUser && (
+        {hasSubjectSelected && (
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             {/* Toolbar */}
             <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
@@ -425,7 +569,9 @@ export default function WidgetsRights() {
             <div className="px-4 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 <span className="font-semibold text-foreground">{enabledCount}</span> widgets enabled for{" "}
-                <span className="font-semibold text-foreground">{selectedUser.name}</span>
+                <span className="font-semibold text-foreground">
+                  {subject === "user" ? selectedUser?.name : selectedRole?.RName}
+                </span>
               </p>
               <div className="flex gap-1">
                 {widgetCatalog.map(w => (
@@ -441,14 +587,18 @@ export default function WidgetsRights() {
         )}
 
         {/* Empty state */}
-        {!selectedUser && !usersLoading && (
+        {!hasSubjectSelected && !usersLoading && (
           <div className="border border-dashed border-border rounded-xl p-12 flex flex-col items-center justify-center gap-3 text-center">
             <div className="p-4 bg-muted/20 rounded-2xl">
               <Puzzle size={32} className="text-muted-foreground" />
             </div>
-            <p className="font-medium text-foreground">Select a user to configure their widgets</p>
+            <p className="font-medium text-foreground">
+              {subject === "user" ? "Select a user to configure their widgets" : "Select a role to configure its baseline widgets"}
+            </p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Choose a user from the dropdown above to enable or disable their access to individual dashboard widgets.
+              {subject === "user"
+                ? "Choose a user from the dropdown above to enable or disable their access to individual dashboard widgets."
+                : "Choose a role from the dropdown above to set the baseline widgets every user with that role sees."}
             </p>
           </div>
         )}

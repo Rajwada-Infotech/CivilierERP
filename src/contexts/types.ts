@@ -54,7 +54,8 @@ export type PageAction =
   | "preview"
   | "export"
   | "approve"
-  | "reject";
+  | "reject"
+  | "post-approval";
 
 export interface PagePermission {
   page: PageKey;

@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -866,7 +867,8 @@ router.put(
         return res.status(400).json({ error: "SupplierID is required." });
       }
 
-      await guardEdit("purchase-orders", id);
+      const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
+      await guardEdit("purchase-orders", id, { allowPostApproval });
 
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
