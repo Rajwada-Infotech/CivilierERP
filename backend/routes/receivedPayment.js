@@ -43,40 +43,6 @@ async function invalidateReceivedPaymentWorkflowCaches() {
   await Promise.all(MUTATION_CACHE_KEYS.map((key) => bumpCacheVersion(key)));
 }
 
-async function hasNewColumns(pool) {
-  // 1. In-process memo — fastest path for warm requests
-  if (_hasNewCols !== null) return _hasNewCols;
-
-  // 2. Redis — survives across cold starts within the same deployment
-  try {
-    const { redisGet, redisSet } = require("../redis");
-    const cached = await redisGet(HAS_NEW_COLS_REDIS_KEY);
-    if (cached !== null) {
-      _hasNewCols = cached === "1";
-      return _hasNewCols;
-    }
-  } catch {
-    // Redis unavailable — fall through to DB probe
-  }
-
-  // 3. DB probe — only on true first-ever cold start or after Redis flush
-  const r = await pool.request().query(`
-    SELECT COUNT(*) AS cnt FROM sys.columns
-    WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RPDocNo'
-  `);
-  _hasNewCols = r.recordset[0].cnt > 0;
-
-  // Store in Redis for 24 h
-  try {
-    const { redisSet } = require("../redis");
-    await redisSet(HAS_NEW_COLS_REDIS_KEY, _hasNewCols ? "1" : "0", 86400);
-  } catch {
-    // non-fatal
-  }
-
-  return _hasNewCols;
-}
-
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get("/", cache("received-payment", 300), async (req, res) => {
   try {
@@ -386,7 +352,6 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       RPProjectId,
       RPDocDate,
       RPFinYear,
-      RPDocTypeId,
       RPMode,
       RPAmount,
       RPBankName,

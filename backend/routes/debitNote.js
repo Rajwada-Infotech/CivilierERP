@@ -20,10 +20,6 @@ function toDecimal(val) {
   return Number.isFinite(n) ? n : null;
 }
 
-function toPositiveDecimal(val) {
-  const n = parseFloat(val);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 
 // ─── GET all debit notes ──────────────────────────────────────────────────────
 router.get("/", requirePageRight("debit-note", "view"), cache("debit-note", 120), async (req, res) => {

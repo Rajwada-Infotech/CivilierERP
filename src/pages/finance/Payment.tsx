@@ -785,181 +785,6 @@ function InputField({
 
 // ─── GRN badges for list view ─────────────────────────────────────────────────
 
-// ─── PartyFilterCombobox ──────────────────────────────────────────────────────
-
-function PartyFilterCombobox({
-  partyNames,
-  value,
-  onChange,
-  expenseOptions,
-}: {
-  partyNames: string[];
-  value: string;
-  onChange: (val: string) => void;
-  expenseOptions: ExpenseOption[];
-}) {
-  const [search, setSearch] = React.useState("");
-  const [tab, setTab] = React.useState<"suppliers" | "others">("suppliers");
-
-  const suppliers = partyNames.filter((n) =>
-    expenseOptions.some(
-      (o) => o.supplierName === n && o.supplierName !== o.partyName,
-    ),
-  );
-  const others = partyNames.filter((n) => !suppliers.includes(n));
-
-  const activeList = tab === "suppliers" ? suppliers : others;
-  const filtered = activeList.filter((n) =>
-    n.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const totalCount = expenseOptions.length;
-  const filteredCount = value
-    ? expenseOptions.filter((o) => o.supplierName === value).length
-    : totalCount;
-
-  // Switch tab if selected value belongs to the other group
-  React.useEffect(() => {
-    if (!value) return;
-    if (suppliers.includes(value) && tab !== "suppliers") setTab("suppliers");
-    if (others.includes(value) && tab !== "others") setTab("others");
-  }, [value, suppliers, others, tab]);
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2">
-        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-          Filter by Party
-        </label>
-        <span className="text-[10px] text-muted-foreground/60 font-heading normal-case tracking-normal">
-          — narrows the booking list below
-        </span>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        {/* Tab bar */}
-        <div className="flex border-b border-border">
-          <button
-            type="button"
-            onClick={() => setTab("suppliers")}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
-              tab === "suppliers"
-                ? "border-primary text-primary bg-primary/5"
-                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <Truck size={11} />
-            Suppliers
-            <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "suppliers" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
-            >
-              {suppliers.length}
-            </span>
-          </button>
-          <div className="w-px bg-border" />
-          <button
-            type="button"
-            onClick={() => setTab("others")}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
-              tab === "others"
-                ? "border-primary text-primary bg-primary/5"
-                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <FileText size={11} />
-            Others
-            <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "others" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
-            >
-              {others.length}
-            </span>
-          </button>
-        </div>
-
-        {/* Search */}
-        <div className="p-2 border-b border-border">
-          <div className="relative">
-            <Search
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              type="text"
-              placeholder={`Search ${tab}…`}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-7 pr-3 py-1.5 text-xs bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-        </div>
-
-        {/* List */}
-        <div className="max-h-48 overflow-y-auto divide-y divide-border/40">
-          {filtered.length === 0 && (
-            <div className="px-4 py-5 text-center text-xs text-muted-foreground">
-              No {tab} match "{search}"
-            </div>
-          )}
-
-          {filtered.map((name) => {
-            const count = expenseOptions.filter(
-              (o) => o.supplierName === name,
-            ).length;
-            const isSelected = value === name;
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => onChange(isSelected ? "" : name)}
-                className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40 ${isSelected ? "bg-primary/5" : ""}`}
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {isSelected ? (
-                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-primary flex items-center justify-center">
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
-                    </div>
-                  ) : (
-                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border border-border" />
-                  )}
-                  <span
-                    className={`text-xs truncate ${isSelected ? "font-semibold text-primary" : "text-foreground"}`}
-                  >
-                    {name}
-                  </span>
-                </div>
-                <span className="text-[10px] font-heading text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Active filter chip */}
-        {value && (
-          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border bg-primary/5">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <Truck size={11} className="text-primary shrink-0" />
-              <span className="text-xs font-medium text-primary truncate">
-                {value}
-              </span>
-              <span className="text-[10px] text-primary/60 font-heading shrink-0">
-                · {filteredCount} booking{filteredCount !== 1 ? "s" : ""}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onChange("")}
-              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 // ─── FilterBar ────────────────────────────────────────────────────────────────
 
 type BookingFilters = {
@@ -1228,9 +1053,7 @@ function ExpenseBookingPicker({
               </span>
             </span>
           ) : (
-            <span className="text-muted-foreground">
-              — Choose invoice —
-            </span>
+            <span className="text-muted-foreground">— Choose invoice —</span>
           )}
           <ChevronDown
             size={14}
@@ -2140,7 +1963,10 @@ const Payment: React.FC = () => {
       field("Purchase Order Ref.", docChain?.poNo || null),
       field("GRN Ref.", docChain?.grnNo || null),
       field("Material Request Ref.", docChain?.mrDocNo || null),
-      field("Expense Booking Ref.", docChain?.expenseDocNo || rec.expenseRef || null),
+      field(
+        "Expense Booking Ref.",
+        docChain?.expenseDocNo || rec.expenseRef || null,
+      ),
     ].join("");
 
     const paymentRows = [
@@ -2150,7 +1976,17 @@ const Payment: React.FC = () => {
       field("Date", rec.date || "—"),
       field("Mode", rec.mode || "—"),
       field("Bank Account", rec.bankName || null),
-      field("Reference / Txn ID", rec.chequeNo ? `Cheque #${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference || null),
+      field(
+        "Reference / Txn ID",
+        rec.chequeNo
+          ? `Cheque #${rec.chequeNo}`
+          : rec.neftNumber ||
+              rec.upiTransactionId ||
+              rec.rtgsReference ||
+              rec.impsReference ||
+              rec.cardReference ||
+              null,
+      ),
       field("Cheque Date", rec.chequeDate || null),
       field("Cheque Lot", rec.chequeLotNumber || null),
       field("Card Used", rec.cardDisplay || null),
@@ -2164,10 +2000,14 @@ const Payment: React.FC = () => {
     const cgstRate = rec.cgstRate ?? null;
     const sgstRate = rec.sgstRate ?? null;
     const igstRate = rec.igstRate ?? null;
-    const hasTaxDetails = baseAmount != null && (cgstRate || sgstRate || igstRate);
-    const cgstAmt = hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
-    const sgstAmt = hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
-    const igstAmt = hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
+    const hasTaxDetails =
+      baseAmount != null && (cgstRate || sgstRate || igstRate);
+    const cgstAmt =
+      hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
+    const sgstAmt =
+      hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
+    const igstAmt =
+      hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
 
     const taxRows = hasTaxDetails
       ? [
@@ -2308,7 +2148,7 @@ const Payment: React.FC = () => {
       totalInclGST: number;
     };
   } | null>(null);
-  const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
+  const [, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
     project: "",
@@ -2438,7 +2278,11 @@ const Payment: React.FC = () => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
-      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef + " ") || o.label.startsWith(rest.expenseRef + " —"))
+      ? expenseOptions.find(
+          (o) =>
+            o.label.startsWith(rest.expenseRef + " ") ||
+            o.label.startsWith(rest.expenseRef + " —"),
+        )
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
@@ -4567,7 +4411,10 @@ const Payment: React.FC = () => {
                       </div>
                       {rec.paidTo && (
                         <p className="text-xs text-muted-foreground truncate">
-                          Paid to <span className="text-foreground font-medium">{rec.paidTo}</span>
+                          Paid to{" "}
+                          <span className="text-foreground font-medium">
+                            {rec.paidTo}
+                          </span>
                         </p>
                       )}
                       {rec.docNo && (
@@ -4609,7 +4456,9 @@ const Payment: React.FC = () => {
                                 queryKey: ["payments"],
                                 exact: false,
                               });
-                              queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+                              queryClient.invalidateQueries({
+                                queryKey: ["expense-options-payment"],
+                              });
                               refetchPayments();
                               window.dispatchEvent(
                                 new CustomEvent("approval-action"),
@@ -4706,7 +4555,10 @@ const Payment: React.FC = () => {
                             </p>
                             {rec.paidTo && (
                               <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[180px]">
-                                Paid to <span className="text-foreground/80">{rec.paidTo}</span>
+                                Paid to{" "}
+                                <span className="text-foreground/80">
+                                  {rec.paidTo}
+                                </span>
                               </p>
                             )}
                             <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -4789,7 +4641,15 @@ const Payment: React.FC = () => {
                           </td>
                           {/* Status */}
                           <td className="px-4 py-2.5">
-                            <StatusBadge status={rec.status} />
+                            <div className="flex flex-col gap-1">
+                              <StatusBadge status={rec.status} />
+                              {rec.status === "Pending" && (
+                                <ApprovalStatusChain
+                                  table="NewPayment"
+                                  recordId={rec.id}
+                                />
+                              )}
+                            </div>
                           </td>
                           {/* Actions */}
                           <td className="px-4 py-2.5">
@@ -4972,7 +4832,11 @@ const Payment: React.FC = () => {
                       {viewingCompanyDetail.name || viewingRec.company}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      {[viewingCompanyDetail.address, viewingCompanyDetail.city, viewingCompanyDetail.state]
+                      {[
+                        viewingCompanyDetail.address,
+                        viewingCompanyDetail.city,
+                        viewingCompanyDetail.state,
+                      ]
                         .filter(Boolean)
                         .join(", ")}
                     </p>
@@ -4980,8 +4844,12 @@ const Payment: React.FC = () => {
                       {[
                         viewingCompanyDetail.phone_number,
                         viewingCompanyDetail.email,
-                        viewingCompanyDetail.gst_no ? `GSTIN: ${viewingCompanyDetail.gst_no}` : null,
-                        viewingCompanyDetail.pan_no ? `PAN: ${viewingCompanyDetail.pan_no}` : null,
+                        viewingCompanyDetail.gst_no
+                          ? `GSTIN: ${viewingCompanyDetail.gst_no}`
+                          : null,
+                        viewingCompanyDetail.pan_no
+                          ? `PAN: ${viewingCompanyDetail.pan_no}`
+                          : null,
                       ]
                         .filter(Boolean)
                         .join("  ·  ")}
@@ -4994,23 +4862,33 @@ const Payment: React.FC = () => {
               {viewingChain?.supplier && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-1.5">
                   <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                    <Building2 size={9} className="text-primary" /> Supplier / Vendor
+                    <Building2 size={9} className="text-primary" /> Supplier /
+                    Vendor
                   </p>
                   <p className="text-xs font-medium text-foreground">
                     {viewingChain.supplier.name}
                     {viewingChain.supplier.code ? (
-                      <span className="text-muted-foreground font-normal"> · {viewingChain.supplier.code}</span>
+                      <span className="text-muted-foreground font-normal">
+                        {" "}
+                        · {viewingChain.supplier.code}
+                      </span>
                     ) : null}
                   </p>
                   {viewingChain.supplier.address && (
-                    <p className="text-[10px] text-muted-foreground">{viewingChain.supplier.address}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {viewingChain.supplier.address}
+                    </p>
                   )}
                   <p className="text-[10px] text-muted-foreground">
                     {[
                       viewingChain.supplier.phone,
                       viewingChain.supplier.email,
-                      viewingChain.supplier.gst ? `GSTIN: ${viewingChain.supplier.gst}` : null,
-                      viewingChain.supplier.pan ? `PAN: ${viewingChain.supplier.pan}` : null,
+                      viewingChain.supplier.gst
+                        ? `GSTIN: ${viewingChain.supplier.gst}`
+                        : null,
+                      viewingChain.supplier.pan
+                        ? `PAN: ${viewingChain.supplier.pan}`
+                        : null,
                     ]
                       .filter(Boolean)
                       .join("  ·  ")}
@@ -5219,7 +5097,11 @@ const Payment: React.FC = () => {
               {rights.canPrint && (
                 <button
                   onClick={() =>
-                    handlePrintPayment(viewingRec, viewingCompanyDetail, viewingChain)
+                    handlePrintPayment(
+                      viewingRec,
+                      viewingCompanyDetail,
+                      viewingChain,
+                    )
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >

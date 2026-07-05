@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import * as spApi from "@/api/supplierPortalApi";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
-  Building2, Mail, Phone, MapPin, User, CreditCard,
+  Mail, Phone, MapPin, User, CreditCard,
   FileText, Globe, Hash, CheckCircle2, RefreshCw,
   Landmark, Tag,
 } from "lucide-react";

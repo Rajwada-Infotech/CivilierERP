@@ -137,7 +137,8 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
 
     expect(res.status).toBe(200);
     expect(insertedLedgerHeads.length).toBe(2);
-    expect(insertedLedgerHeads.some((q) => /@LHeadType.*'?C'?/.test(q) || true)).toBe(true);
+    expect(insertedLedgerHeads.some((q) => /@LHeadType.*'?C'?/.test(q))).toBe(true);
+    expect(insertedLedgerHeads.some((q) => /@LHeadType.*'?S'?/.test(q))).toBe(true);
   });
 
   test("skips ledger-head creation when the parent company has no GST status/number on file yet", async () => {

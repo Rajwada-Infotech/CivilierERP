@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -26,9 +27,6 @@ import {
   AlertCircle,
   Eye,
   XCircle,
-  Folder,
-  FolderOpen,
-  Layers,
   RotateCcw,
   ShieldCheck,
   Lock,
@@ -246,10 +244,10 @@ const GeneralLedgerMaster: React.FC = () => {
   const [filterGroup, setFilterGroup] = useState("");
   const [page, setPage] = useState(1);
   const limit = 10;
-  const [sortField, setSortField] = useState<
+  const [sortField] = useState<
     "LHeadName" | "LHeadCode" | "GroupName"
   >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc] = useState(true);
 
   useEffect(() => {
     setPage(1);
@@ -265,7 +263,6 @@ const GeneralLedgerMaster: React.FC = () => {
   const {
     data: ledgersData,
     isLoading: ledgersLoading,
-    isError: ledgersError,
   } = useQuery({
     queryKey: ["ledger-heads", page, limit, search, filterGroup],
     queryFn: () => getLedgers({ page, limit, search, groupId: filterGroup }),
@@ -442,15 +439,6 @@ const GeneralLedgerMaster: React.FC = () => {
       updateMut.mutate({ id: editingId, data: form });
     } else {
       createMut.mutate(form);
-    }
-  };
-
-  const toggleSort = (field: typeof sortField) => {
-    if (sortField === field) {
-      setSortAsc((a) => !a);
-    } else {
-      setSortField(field);
-      setSortAsc(true);
     }
   };
 
@@ -639,14 +627,13 @@ const GeneralLedgerMaster: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                    <TreeDropdown
-                      variant="tree"
+                    <GroupTreePicker
                       value={form.LBelongsTo}
                       onChange={(v) => {
                         setForm((p) => ({ ...p, LBelongsTo: v }));
                         setErrors((p) => ({ ...p, LBelongsTo: false }));
                       }}
-                      items={accountGroupTree}
+                      tree={accountGroupTree}
                       allGroups={accountGroups}
                       error={errors.LBelongsTo}
                     />

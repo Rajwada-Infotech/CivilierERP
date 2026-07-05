@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  Shield, Users, Check, X, Save, RotateCcw, Download, Upload, FileDown,
+  Users, Check, X, Save, RotateCcw, Download, Upload, FileDown,
 } from "lucide-react";
 
 // ── SA pages ─────────────────────────────────────────────────────────────────

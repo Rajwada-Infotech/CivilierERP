@@ -9,7 +9,6 @@ import {
   Calendar,
   CalendarRange,
   ChevronDown,
-  Filter,
   RefreshCw,
   X,
   TrendingUp,

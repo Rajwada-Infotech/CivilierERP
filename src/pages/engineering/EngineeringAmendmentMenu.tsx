@@ -48,7 +48,6 @@ import {
   CheckSquare,
   LayoutList,
   Search,
-  Eye,
   Send,
   ShieldCheck,
   XCircle,
@@ -1251,12 +1250,6 @@ export default function EngineeringAmendmentMenu() {
     };
     setEditing(null);
     setInitialForm(form);
-    setFormOpen(true);
-  };
-
-  const openEdit = (a: Amendment) => {
-    setEditing(a);
-    setInitialForm(toFormState(a));
     setFormOpen(true);
   };
 

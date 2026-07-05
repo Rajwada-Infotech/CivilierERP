@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -30,7 +31,6 @@ import {
   XCircle,
   AlertCircle,
 } from "lucide-react";
-import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -582,13 +582,12 @@ const AccountGroupMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Parent Group
                   </label>
-                  <TreeDropdown
-                    variant="tree"
-                    items={filteredTree}
+                  <GroupTreePicker
                     value={form.parentId}
                     onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
-                    invalidParents={invalidParents}
+                    tree={filteredTree}
                     allGroups={allGroups}
+                    invalidParents={invalidParents}
                   />
                   <p className="text-[11px] text-muted-foreground mt-1">
                     {selectedParentPath ? (

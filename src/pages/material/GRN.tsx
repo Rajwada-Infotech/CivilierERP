@@ -10,7 +10,6 @@ import {
   Truck,
   Package,
   Trash2,
-  Edit3,
   Save,
   X,
   Search,
@@ -25,18 +24,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Building2,
   ChevronDown,
   Hash,
   Filter,
-  Layers,
   AlertTriangle,
   Printer,
   CopyPlus,
   Warehouse,
   ArrowLeftRight,
   ArrowLeft,
-  RefreshCw,
   RotateCcw,
   BookOpen,
   Landmark,
@@ -106,14 +102,25 @@ interface PendingItem {
   rate: number;
   pendingAmount: number;
 }
+interface PartialGRN {
+  grnId: number;
+  grnNo: string;
+  grnDate: string;
+  status: string;
+  totalAmount: number;
+  itemCount: number;
+}
+
 interface PendingItemsData {
   grnId: number;
   grnNo: string;
   supplierName: string | null;
+  poId: number | null;
   poNo: string | null;
   pendingItems: PendingItem[];
   totalPendingAmount: number;
   hasPending: boolean;
+  partialGRNs: PartialGRN[];
 }
 
 function RemainingItemsPanel({
@@ -236,11 +243,37 @@ function RemainingItemsPanel({
           </tfoot>
         </table>
       </div>
+      {data.partialGRNs?.length > 0 && (
+        <div className="border-t border-amber-500/15">
+          <div className="px-4 py-2 bg-muted/20 flex items-center gap-2">
+            <FileText size={11} className="text-muted-foreground shrink-0" />
+            <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              Other GRN receipts for this PO
+            </span>
+          </div>
+          <div className="divide-y divide-border">
+            {data.partialGRNs.map((g) => (
+              <div key={g.grnId} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                <span className="font-mono font-semibold text-foreground">{g.grnNo}</span>
+                <span className="text-muted-foreground">{new Date(g.grnDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                  g.status === "Approved" ? "bg-emerald-500/10 text-emerald-600" :
+                  g.status === "Pending" ? "bg-amber-500/10 text-amber-600" :
+                  "bg-muted text-muted-foreground"
+                }`}>{g.status}</span>
+                <span className="ml-auto font-mono text-muted-foreground">
+                  ₹{g.totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-muted-foreground/60 text-[10px]">{g.itemCount} item{g.itemCount !== 1 ? "s" : ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5 flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
           These items have been received but not yet booked as expenses. Create
-          an Expense Booking from the Material → Expense Booking page to book
-          them.
+          an Expense Booking from the Finance → Invoice page to book them.
         </p>
         {onCreateNewGRN && data && (
           <button
@@ -316,38 +349,6 @@ const inp =
 
 const inpSel =
   "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
-
-// ─── GRN Chain Badge ──────────────────────────────────────────────────────────
-function GRNChainBadge({ grnId }: { grnId: number }) {
-  const [chain, setChain] = useState<{
-    expenseCount: number;
-    isPaid: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!grnId) return;
-    fetchWithAuth(
-      `/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
-    )
-      .then((r) => r.json().catch(() => ({})))
-      .then(setChain)
-      .catch(() => {});
-  }, [grnId]);
-
-  if (!chain || chain.expenseCount === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 whitespace-nowrap">
-        ✓ Exp. Booked
-      </span>
-      {chain.isPaid && (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
-          ✓ Paid
-        </span>
-      )}
-    </div>
-  );
-}
 
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
 interface LinkedBooking {
@@ -786,7 +787,9 @@ export default function GRN() {
   const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
     "details",
   );
-  const [systemLedgers, setSystemLedgers] = useState<{ id: number; label: string; code: string | null }[]>([]);
+  const [systemLedgers, setSystemLedgers] = useState<
+    { id: number; label: string; code: string | null }[]
+  >([]);
 
   // Fetch system-generated ledgers for GRN posting rows
   React.useEffect(() => {
@@ -802,8 +805,10 @@ export default function GRN() {
   const grnPendingLedger = systemLedgers.find((d) =>
     d.label.toLowerCase().includes("pending"),
   );
-  const grnProvisionalCreditLedger = systemLedgers.find((d) =>
-    d.label.toLowerCase().includes("provisional") && d.label.toLowerCase().includes("credit"),
+  const grnProvisionalCreditLedger = systemLedgers.find(
+    (d) =>
+      d.label.toLowerCase().includes("provisional") &&
+      d.label.toLowerCase().includes("credit"),
   );
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -888,10 +893,7 @@ export default function GRN() {
 
   // Derive the financial year string from a date string using Indian FY rule (Apr–Mar).
   // e.g. 2026-01-15 → "2025-2026",  2026-05-10 → "2026-2027"
-  const { data: uomsData = [] } = useQuery({
-    queryKey: ["uomMaster"],
-    queryFn: grnApi.getUoms,
-  });
+  useQuery({ queryKey: ["uomMaster"], queryFn: grnApi.getUoms });
 
   const { data: grnNumberPreview, isFetching: loadingPreview } = useQuery({
     queryKey: ["grns", "next-number", formData.parentDocNo],
@@ -944,11 +946,7 @@ export default function GRN() {
     () =>
       (posData as PurchaseOrder[])
         .filter((po) => {
-          if (
-            editingId &&
-            formData.poId &&
-            String(po.PurchaseOrderID) === formData.poId
-          )
+          if (formData.poId && String(po.PurchaseOrderID) === formData.poId)
             return true;
           // Only Approved POs (or already-partially-received ones) can be
           // used to raise a GRN. Draft / Pending / Rejected / Cancelled POs
@@ -989,7 +987,14 @@ export default function GRN() {
             label: `${docNo}${typeTag}`,
           };
         }),
-    [posData, selectedFinYear, formData.companyId, formData.projectId, formData.poId, editingId],
+    [
+      posData,
+      selectedFinYear,
+      formData.companyId,
+      formData.projectId,
+      formData.poId,
+      editingId,
+    ],
   );
 
   const filteredGrns = grns.filter((grn: any) => {
@@ -1069,10 +1074,7 @@ export default function GRN() {
 
   const handleDeleteGrnLocal = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${id}/can-delete`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${id}/can-delete`);
       const data = await res.json();
       if (!data.deletable) {
         setDeleteBlockInfo(data);
@@ -1114,10 +1116,7 @@ export default function GRN() {
     }
     setLoadingPO(true);
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/purchase-orders/${poId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/purchase-orders/${poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1174,15 +1173,7 @@ export default function GRN() {
     // Close the view modal first
     setViewingGrn(null);
 
-    // We need the PO details (supplierId, parentDocNo, projectId etc.)
-    // Fetch via the existing PO endpoint using the poNo to find the PO id.
-    // The pending payload has poNo (string) but we need the numeric POID —
-    // find it from the already-loaded POs list.
-    const matchedPO = (posData ?? []).find(
-      (po: PurchaseOrder) => po.PurchaseOrderNo === pending.poNo,
-    );
-
-    if (!matchedPO) {
+    if (!pending.poId) {
       // Fallback: open a blank form and toast a hint
       setFormData((prev) => ({
         ...buildEmptyForm(),
@@ -1199,11 +1190,7 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(
-        `/api/purchase-orders/${matchedPO.PurchaseOrderID}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const res = await fetchWithAuth(`/api/purchase-orders/${pending.poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1238,16 +1225,17 @@ export default function GRN() {
 
       setFormData({
         ...buildEmptyForm(),
-        poId: String(matchedPO.PurchaseOrderID),
+        poId: String(po.PurchaseOrderID ?? pending.poId),
         poNumber: po.PurchaseOrderNo ?? "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
+        companyId: po.CompanyId ? String(po.CompanyId) : "",
         projectId: po.ProjectId ? String(po.ProjectId) : "",
         items: lineItems.length ? lineItems : [createEmptyItem()],
         docTypeId: null,
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
         rootExBDocNo: po.RootExBDocNo || "",
-        finYear: activeFinYear || "",
+        finYear: po.FinYearName || activeFinYear || "",
         poTotalAmount: Number(po.TotalAmount ?? 0),
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
@@ -1343,10 +1331,7 @@ export default function GRN() {
   // ── View / Edit ───────────────────────────────────────────────────────────────
   onView = async (grn: any) => {
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${grn.GRNID}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${grn.GRNID}`);
       if (!res.ok) throw new Error("Failed to fetch GRN details");
       setViewingGrn(await res.json());
     } catch (err) {
@@ -1369,10 +1354,7 @@ export default function GRN() {
   onEdit = async (grn: any) => {
     let fullGrn = grn;
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/grns/${grn.GRNID}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/grns/${grn.GRNID}`);
       if (res.ok) fullGrn = await res.json();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -1454,8 +1436,12 @@ export default function GRN() {
   const handleDownloadTemplate = () => {
     exportToCsv([], GRN_TEMPLATE_COLUMNS, "grn-template");
   };
-  const handleImportClick = () => { importFileInputRef.current?.click(); };
-  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
@@ -1463,7 +1449,10 @@ export default function GRN() {
     try {
       const text = await file.text();
       const rows = parseCsv(text);
-      if (!rows.length) { toast.error("CSV is empty"); return; }
+      if (!rows.length) {
+        toast.error("CSV is empty");
+        return;
+      }
       toast.success(`${rows.length} rows read — full import coming soon`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
@@ -1483,7 +1472,13 @@ export default function GRN() {
         action={
           !showForm ? (
             <div className="flex items-center gap-2">
-              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleImportFileChange}
+                className="hidden"
+              />
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
@@ -1498,8 +1493,14 @@ export default function GRN() {
                 title="Import from CSV"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing..." : "Import CSV"}
+                </span>
               </button>
               {rights.canCreate && (
                 <button
@@ -2358,27 +2359,26 @@ export default function GRN() {
             </CardContent>
           </Card>
         )}
-
       </MaterialShell>
 
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {/*  VIEW MODAL                                                        */}
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {viewingGrn &&
-          (() => {
-            const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
-            const subtotal = items.reduce(
-              (s, i) => s + (Number(i.totalAmount) || 0),
-              0,
-            );
-            const gstTotal = items.reduce(
-              (s, i) => s + (Number(i.gstAmount) || 0),
-              0,
-            );
-            const subtotalInclGST = subtotal + gstTotal;
-            return (
-              <div className="grn-print-overlay fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-                <style>{`
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/*  VIEW MODAL                                                        */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {viewingGrn &&
+        (() => {
+          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
+          const subtotal = items.reduce(
+            (s, i) => s + (Number(i.totalAmount) || 0),
+            0,
+          );
+          const gstTotal = items.reduce(
+            (s, i) => s + (Number(i.gstAmount) || 0),
+            0,
+          );
+          const subtotalInclGST = subtotal + gstTotal;
+          return (
+            <div className="grn-print-overlay fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+              <style>{`
                   @media print {
                     body > * { display: none !important; }
                     /* The overlay itself is a body > * child — its own
@@ -2391,570 +2391,595 @@ export default function GRN() {
                     .grn-print-modal .sticky { position: static !important; }
                   }
                 `}</style>
-                <div className="grn-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
-                  {/* Modal header */}
-                  <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
-                    <div>
-                      <h2 className="font-heading font-bold text-base">
-                        {viewingGrn.GRNNo
-                          ? viewingGrn.GRNNo.startsWith("GRN-")
-                            ? viewingGrn.GRNNo
-                            : `GRN-${viewingGrn.GRNNo}`
-                          : "—"}
-                      </h2>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
-                        Goods Receipt Note
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {rights.canPrint && (
-                        <button
-                          onClick={() => window.print()}
-                          title="Print GRN"
-                          className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                        >
-                          <Printer size={18} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setViewingGrn(null);
-                          setViewModalTab("details");
-                        }}
-                        className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
+              <div className="grn-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+                {/* Modal header */}
+                <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+                  <div>
+                    <h2 className="font-heading font-bold text-base">
+                      {viewingGrn.GRNNo
+                        ? viewingGrn.GRNNo.startsWith("GRN-")
+                          ? viewingGrn.GRNNo
+                          : `GRN-${viewingGrn.GRNNo}`
+                        : "—"}
+                    </h2>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                      Goods Receipt Note
+                    </p>
                   </div>
-                  {/* ── Tab bar ─────────────────────────────────────────── */}
-                  <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card print:hidden">
-                    {(["details", "posting"] as const).map((tab) => (
+                  <div className="flex items-center gap-2">
+                    {rights.canPrint && (
                       <button
-                        key={tab}
-                        onClick={() => setViewModalTab(tab)}
-                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors capitalize
+                        onClick={() => window.print()}
+                        title="Print GRN"
+                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                      >
+                        <Printer size={18} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setViewingGrn(null);
+                        setViewModalTab("details");
+                      }}
+                      className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+                {/* ── Tab bar ─────────────────────────────────────────── */}
+                <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card print:hidden">
+                  {(["details", "posting"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setViewModalTab(tab)}
+                      className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors capitalize
                           ${
                             viewModalTab === tab
                               ? "border-primary text-primary bg-primary/5"
                               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
                           }`}
-                      >
-                        {tab === "details" ? (
-                          <FileText size={12} />
-                        ) : (
-                          <Landmark size={12} />
-                        )}
-                        {tab === "details" ? "Details" : "Posting"}
-                      </button>
-                    ))}
-                  </div>
-                  {/* ── Details tab ─────────────────────────────────────── */}
-                  {viewModalTab === "details" && (
-                    <div className="p-5 sm:p-6 space-y-6">
-                      {/* Meta grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {[
-                          {
-                            label: "Doc No",
-                            value: viewingGrn.DocNo || viewingGrn.GRNNo || "—",
-                            mono: true,
-                          },
-                          {
-                            label: "Date",
-                            value: viewingGrn.GRNDate
-                              ? new Date(viewingGrn.GRNDate).toLocaleDateString(
-                                  "en-IN",
-                                )
-                              : "—",
-                          },
-                          {
-                            label: "Supplier",
-                            value: viewingGrn.SupplierName || "—",
-                          },
-                          {
-                            label: "Purchase Order",
-                            value: viewingGrn.PONumber || "—",
-                          },
-                          {
-                            label: "Company",
-                            value: viewingGrn.CompanyName || "—",
-                          },
-                          {
-                            label: "Project",
-                            value: viewingGrn.ProjectName || "—",
-                          },
-                          ...(viewingGrn.SourceMRDocNo
-                            ? [
-                                {
-                                  label: "Source MR",
-                                  value: viewingGrn.SourceMRDocNo,
-                                  mono: true,
-                                  color:
-                                    "text-emerald-600 dark:text-emerald-400",
-                                },
-                              ]
-                            : []),
-                          ...(viewingGrn.SourceWODocNo
-                            ? [
-                                {
-                                  label: "Source WO",
-                                  value: viewingGrn.SourceWODocNo,
-                                  mono: true,
-                                  color: "text-orange-600 dark:text-orange-400",
-                                },
-                              ]
-                            : []),
-                          ...(viewingGrn.SourceWDDocNo
-                            ? [
-                                {
-                                  label: "Source WD",
-                                  value: viewingGrn.SourceWDDocNo,
-                                  mono: true,
-                                  color: "text-orange-600 dark:text-orange-400",
-                                },
-                              ]
-                            : []),
-                        ].map(({ label, value, mono, color }: any) => (
-                          <div
-                            key={label}
-                            className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                    >
+                      {tab === "details" ? (
+                        <FileText size={12} />
+                      ) : (
+                        <Landmark size={12} />
+                      )}
+                      {tab === "details" ? "Details" : "Posting"}
+                    </button>
+                  ))}
+                </div>
+                {/* ── Details tab ─────────────────────────────────────── */}
+                {viewModalTab === "details" && (
+                  <div className="p-5 sm:p-6 space-y-6">
+                    {/* Meta grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {[
+                        {
+                          label: "Doc No",
+                          value: viewingGrn.DocNo || viewingGrn.GRNNo || "—",
+                          mono: true,
+                        },
+                        {
+                          label: "Date",
+                          value: viewingGrn.GRNDate
+                            ? new Date(viewingGrn.GRNDate).toLocaleDateString(
+                                "en-IN",
+                              )
+                            : "—",
+                        },
+                        {
+                          label: "Supplier",
+                          value: viewingGrn.SupplierName || "—",
+                        },
+                        {
+                          label: "Purchase Order",
+                          value: viewingGrn.PONumber || "—",
+                        },
+                        {
+                          label: "Company",
+                          value: viewingGrn.CompanyName || "—",
+                        },
+                        {
+                          label: "Project",
+                          value: viewingGrn.ProjectName || "—",
+                        },
+                        ...(viewingGrn.SourceMRDocNo
+                          ? [
+                              {
+                                label: "Source MR",
+                                value: viewingGrn.SourceMRDocNo,
+                                mono: true,
+                                color: "text-emerald-600 dark:text-emerald-400",
+                              },
+                            ]
+                          : []),
+                        ...(viewingGrn.SourceWODocNo
+                          ? [
+                              {
+                                label: "Source WO",
+                                value: viewingGrn.SourceWODocNo,
+                                mono: true,
+                                color: "text-orange-600 dark:text-orange-400",
+                              },
+                            ]
+                          : []),
+                        ...(viewingGrn.SourceWDDocNo
+                          ? [
+                              {
+                                label: "Source WD",
+                                value: viewingGrn.SourceWDDocNo,
+                                mono: true,
+                                color: "text-orange-600 dark:text-orange-400",
+                              },
+                            ]
+                          : []),
+                      ].map(({ label, value, mono, color }: any) => (
+                        <div
+                          key={label}
+                          className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                        >
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                            {label}
+                          </p>
+                          <p
+                            className={`text-xs font-semibold ${mono ? "font-mono" : ""} ${color || "text-foreground"}`}
                           >
-                            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                              {label}
-                            </p>
-                            <p
-                              className={`text-xs font-semibold ${mono ? "font-mono" : ""} ${color || "text-foreground"}`}
+                            {value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <DocumentChainPanel docType="grn" id={viewingGrn.GRNID} />
+
+                    {/* Items */}
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                        Received Items
+                      </p>
+
+                      {/* Mobile */}
+                      <div className="md:hidden space-y-3">
+                        {items.length ? (
+                          items.map((item, i) => (
+                            <div
+                              key={i}
+                              className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
                             >
-                              {value}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-
-                      <DocumentChainPanel docType="grn" id={viewingGrn.GRNID} />
-
-                      {/* Items */}
-                      <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
-                          Received Items
-                        </p>
-
-                        {/* Mobile */}
-                        <div className="md:hidden space-y-3">
-                          {items.length ? (
-                            items.map((item, i) => (
-                              <div
-                                key={i}
-                                className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium text-sm">
-                                    {item.itemName || "—"}
-                                  </span>
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                                    {item.uom || "—"}
-                                  </span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-xs">
-                                  {[
-                                    ["Ordered", String(item.orderedQty), ""],
-                                    [
-                                      "Received",
-                                      String(item.receivedQty),
-                                      "font-semibold",
-                                    ],
-                                    [
-                                      "Pending Qty",
-                                      fmtQty(item.remainingQty),
-                                      item.remainingQty > 0
-                                        ? "text-amber-500 font-semibold"
-                                        : "text-green-500 font-semibold",
-                                    ],
-                                  ].map(([l, v, c]) => (
-                                    <div key={l}>
-                                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                        {l}
-                                      </p>
-                                      <p className={c}>{v}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
-                                  <div>
-                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                      Rate
-                                    </p>
-                                    <p>
-                                      {item.rate
-                                        ? `₹${fmt(Number(item.rate))}`
-                                        : "—"}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                      Qty Bill
-                                    </p>
-                                    <p>{item.quantity ?? "—"}</p>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                      Total
-                                    </p>
-                                    <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                                      {item.totalAmount
-                                        ? `₹${fmt(Number(item.totalAmount))}`
-                                        : "—"}
-                                    </p>
-                                  </div>
-                                </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-sm">
+                                  {item.itemName || "—"}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                  {item.uom || "—"}
+                                </span>
                               </div>
-                            ))
-                          ) : (
-                            <p className="text-center text-muted-foreground text-sm py-6">
-                              No items
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Desktop */}
-                        <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
-                          <table className="w-full text-sm min-w-[680px]">
-                            <thead>
-                              <tr className="bg-muted/50 border-b border-border">
+                              <div className="grid grid-cols-3 gap-2 text-xs">
                                 {[
-                                  "Item",
-                                  "UOM",
-                                  "Ordered",
-                                  "Received",
-                                  "Pending Qty",
-                                  "Rate (₹)",
-                                  "Qty",
-                                  "Total (₹)",
-                                ].map((h) => (
-                                  <th
-                                    key={h}
-                                    className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" ? "text-left" : "text-right"}`}
-                                  >
-                                    {h}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/60">
-                              {items.length ? (
-                                items.map((item, i) => (
-                                  <tr
-                                    key={i}
-                                    className="hover:bg-muted/20 transition-colors"
-                                  >
-                                    <td className="px-3 py-2.5 font-medium text-xs">
-                                      {item.itemName || "—"}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                                      {item.uom || "—"}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                      {item.orderedQty}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right text-xs font-semibold">
-                                      {item.receivedQty}
-                                    </td>
-                                    <td
-                                      className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
-                                    >
-                                      {fmtQty(item.remainingQty)}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                      {item.rate
-                                        ? `₹${fmt(Number(item.rate))}`
-                                        : "—"}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                      {item.quantity ?? "—"}
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                      {item.totalAmount
-                                        ? `₹${fmt(Number(item.totalAmount))}`
-                                        : "—"}
-                                    </td>
-                                  </tr>
-                                ))
-                              ) : (
-                                <tr>
-                                  <td
-                                    colSpan={8}
-                                    className="px-4 py-6 text-center text-muted-foreground text-sm"
-                                  >
-                                    No items
-                                  </td>
-                                </tr>
-                              )}
-                            </tbody>
-                            {subtotalInclGST > 0 && (
-                              <tfoot>
-                                <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                                  <td
-                                    colSpan={7}
-                                    className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                  >
-                                    GRN Total (received)
-                                  </td>
-                                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                                    ₹{fmt(subtotalInclGST)}
-                                  </td>
-                                </tr>
-                                {Number(viewingGrn.POTotalAmount) > 0 &&
-                                  (() => {
-                                    const poTotal = Number(
-                                      viewingGrn.POTotalAmount,
-                                    );
-                                    const diff = poTotal - subtotalInclGST;
-                                    return (
-                                      <>
-                                        <tr className="bg-muted/30 border-t border-border/50">
-                                          <td
-                                            colSpan={7}
-                                            className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                          >
-                                            PO Value (incl. GST)
-                                          </td>
-                                          <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
-                                            ₹{fmt(poTotal)}
-                                          </td>
-                                        </tr>
-                                        <tr
-                                          className={
-                                            diff > 0.005
-                                              ? "bg-amber-500/10 border-t border-amber-500/20"
-                                              : "bg-green-500/10 border-t border-green-500/20"
-                                          }
-                                        >
-                                          <td
-                                            colSpan={7}
-                                            className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                          >
-                                            Balance on PO
-                                          </td>
-                                          <td
-                                            className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
-                                          >
-                                            {diff > 0.005
-                                              ? `₹${fmt(diff)}`
-                                              : "Fully received"}
-                                          </td>
-                                        </tr>
-                                      </>
-                                    );
-                                  })()}
-                              </tfoot>
-                            )}
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* GST Breakdown */}
-                      {(() => {
-                        if (subtotal <= 0 || gstTotal <= 0) return null;
-
-                        // Group by gstPct so lines with same rate are merged
-                        const rateMap = new Map<number, number>();
-                        items.forEach((i) => {
-                          const pct = Number(i.gstPct || 0);
-                          const amt = Number(i.gstAmount || 0);
-                          if (pct > 0 && amt > 0)
-                            rateMap.set(pct, (rateMap.get(pct) ?? 0) + amt);
-                        });
-
-                        if (rateMap.size === 0) return null;
-
-                        return (
-                          <div>
-                            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
-                              GST Breakdown
-                            </p>
-                            <div className="border border-border rounded-xl overflow-hidden text-sm">
-                              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
-                                <span className="text-xs text-muted-foreground">
-                                  Subtotal (before GST)
-                                </span>
-                                <span className="font-medium">
-                                  ₹{fmt(subtotal)}
-                                </span>
-                              </div>
-                              {Array.from(rateMap.entries()).map(
-                                ([rate, amount], idx) => (
-                                  <div
-                                    key={idx}
-                                    className="flex items-center justify-between px-4 py-2.5 border-b border-border"
-                                  >
-                                    <span className="text-xs text-muted-foreground">
-                                      GST{" "}
-                                      <span className="font-mono text-[10px] bg-muted px-1 rounded">
-                                        {rate}%
-                                      </span>
-                                    </span>
-                                    <span className="font-medium text-amber-600 dark:text-amber-400">
-                                      +₹{fmt(amount)}
-                                    </span>
+                                  ["Ordered", String(item.orderedQty), ""],
+                                  [
+                                    "Received",
+                                    String(item.receivedQty),
+                                    "font-semibold",
+                                  ],
+                                  [
+                                    "Pending Qty",
+                                    fmtQty(item.remainingQty),
+                                    item.remainingQty > 0
+                                      ? "text-amber-500 font-semibold"
+                                      : "text-green-500 font-semibold",
+                                  ],
+                                ].map(([l, v, c]) => (
+                                  <div key={l}>
+                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                      {l}
+                                    </p>
+                                    <p className={c}>{v}</p>
                                   </div>
-                                ),
-                              )}
-                              <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                                <span className="text-xs font-semibold uppercase tracking-widest">
-                                  Grand Total (incl. GST)
-                                </span>
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                  ₹{fmt(subtotalInclGST)}
-                                </span>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
+                                <div>
+                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Rate
+                                  </p>
+                                  <p>
+                                    {item.rate
+                                      ? `₹${fmt(Number(item.rate))}`
+                                      : "—"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Qty Bill
+                                  </p>
+                                  <p>{item.quantity ?? "—"}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Total
+                                  </p>
+                                  <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                                    {item.totalAmount
+                                      ? `₹${fmt(Number(item.totalAmount))}`
+                                      : "—"}
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Linked Expense Bookings */}
-                      <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <Receipt
-                            size={10}
-                            className="text-emerald-600 dark:text-emerald-400"
-                          />{" "}
-                          Linked Expense Bookings
-                        </p>
-                        <LinkedExpenseBookings grnId={viewingGrn.GRNID} />
+                          ))
+                        ) : (
+                          <p className="text-center text-muted-foreground text-sm py-6">
+                            No items
+                          </p>
+                        )}
                       </div>
 
-                      {/* Remaining Items — not yet expense-booked */}
-                      <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <AlertTriangle size={10} className="text-amber-500" />{" "}
-                          Remaining Items
-                        </p>
-                        <RemainingItemsPanel
-                          grnId={viewingGrn.GRNID}
-                          onCreateNewGRN={handleCreateGRNFromRemaining}
-                        />
+                      {/* Desktop */}
+                      <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
+                        <table className="w-full text-sm min-w-[680px]">
+                          <thead>
+                            <tr className="bg-muted/50 border-b border-border">
+                              {[
+                                "Item",
+                                "UOM",
+                                "Ordered",
+                                "Received",
+                                "Pending Qty",
+                                "Rate (₹)",
+                                "Qty",
+                                "Total (₹)",
+                              ].map((h) => (
+                                <th
+                                  key={h}
+                                  className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" ? "text-left" : "text-right"}`}
+                                >
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {items.length ? (
+                              items.map((item, i) => (
+                                <tr
+                                  key={i}
+                                  className="hover:bg-muted/20 transition-colors"
+                                >
+                                  <td className="px-3 py-2.5 font-medium text-xs">
+                                    {item.itemName || "—"}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                                    {item.uom || "—"}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                    {item.orderedQty}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right text-xs font-semibold">
+                                    {item.receivedQty}
+                                  </td>
+                                  <td
+                                    className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                  >
+                                    {fmtQty(item.remainingQty)}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                    {item.rate
+                                      ? `₹${fmt(Number(item.rate))}`
+                                      : "—"}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                    {item.quantity ?? "—"}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                    {item.totalAmount
+                                      ? `₹${fmt(Number(item.totalAmount))}`
+                                      : "—"}
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={8}
+                                  className="px-4 py-6 text-center text-muted-foreground text-sm"
+                                >
+                                  No items
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                          {subtotalInclGST > 0 && (
+                            <tfoot>
+                              <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                                <td
+                                  colSpan={7}
+                                  className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                >
+                                  GRN Total (received)
+                                </td>
+                                <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                  ₹{fmt(subtotalInclGST)}
+                                </td>
+                              </tr>
+                              {Number(viewingGrn.POTotalAmount) > 0 &&
+                                (() => {
+                                  const poTotal = Number(
+                                    viewingGrn.POTotalAmount,
+                                  );
+                                  const diff = poTotal - subtotalInclGST;
+                                  return (
+                                    <>
+                                      <tr className="bg-muted/30 border-t border-border/50">
+                                        <td
+                                          colSpan={7}
+                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                        >
+                                          PO Value (incl. GST)
+                                        </td>
+                                        <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                          ₹{fmt(poTotal)}
+                                        </td>
+                                      </tr>
+                                      <tr
+                                        className={
+                                          diff > 0.005
+                                            ? "bg-amber-500/10 border-t border-amber-500/20"
+                                            : "bg-green-500/10 border-t border-green-500/20"
+                                        }
+                                      >
+                                        <td
+                                          colSpan={7}
+                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                        >
+                                          Balance on PO
+                                        </td>
+                                        <td
+                                          className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                                        >
+                                          {diff > 0.005
+                                            ? `₹${fmt(diff)}`
+                                            : "Fully received"}
+                                        </td>
+                                      </tr>
+                                    </>
+                                  );
+                                })()}
+                            </tfoot>
+                          )}
+                        </table>
                       </div>
-
-                      {/* Remarks */}
-                      {viewingGrn.Remarks && (
-                        <div>
-                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
-                            Remarks
-                          </p>
-                          <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
-                            {viewingGrn.Remarks}
-                          </p>
-                        </div>
-                      )}
                     </div>
-                  )}{" "}
-                  {/* end details tab */}
-                  {/* ── Posting tab ─────────────────────────────────────── */}
-                  {viewModalTab === "posting" && (
-                    <div className="p-5 sm:p-6 space-y-4">
-                      {/* Header row */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <BookOpen size={14} className="text-primary" />
-                          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                            Journal Entry — GRN Posting
-                          </span>
+
+                    {/* GST Breakdown */}
+                    {(() => {
+                      if (subtotal <= 0 || gstTotal <= 0) return null;
+
+                      // Group by gstPct so lines with same rate are merged
+                      const rateMap = new Map<number, number>();
+                      items.forEach((i) => {
+                        const pct = Number(i.gstPct || 0);
+                        const amt = Number(i.gstAmount || 0);
+                        if (pct > 0 && amt > 0)
+                          rateMap.set(pct, (rateMap.get(pct) ?? 0) + amt);
+                      });
+
+                      if (rateMap.size === 0) return null;
+
+                      return (
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                            GST Breakdown
+                          </p>
+                          <div className="border border-border rounded-xl overflow-hidden text-sm">
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
+                              <span className="text-xs text-muted-foreground">
+                                Subtotal (before GST)
+                              </span>
+                              <span className="font-medium">
+                                ₹{fmt(subtotal)}
+                              </span>
+                            </div>
+                            {Array.from(rateMap.entries()).map(
+                              ([rate, amount], idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between px-4 py-2.5 border-b border-border"
+                                >
+                                  <span className="text-xs text-muted-foreground">
+                                    GST{" "}
+                                    <span className="font-mono text-[10px] bg-muted px-1 rounded">
+                                      {rate}%
+                                    </span>
+                                  </span>
+                                  <span className="font-medium text-amber-600 dark:text-amber-400">
+                                    +₹{fmt(amount)}
+                                  </span>
+                                </div>
+                              ),
+                            )}
+                            <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                              <span className="text-xs font-semibold uppercase tracking-widest">
+                                Grand Total (incl. GST)
+                              </span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                ₹{fmt(subtotalInclGST)}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
-                          Coming Soon
+                      );
+                    })()}
+
+                    {/* Linked Expense Bookings */}
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <Receipt
+                          size={10}
+                          className="text-emerald-600 dark:text-emerald-400"
+                        />{" "}
+                        Linked Expense Bookings
+                      </p>
+                      <LinkedExpenseBookings grnId={viewingGrn.GRNID} />
+                    </div>
+
+                    {/* Remaining Items — not yet expense-booked */}
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <AlertTriangle size={10} className="text-amber-500" />{" "}
+                        Remaining Items
+                      </p>
+                      <RemainingItemsPanel
+                        grnId={viewingGrn.GRNID}
+                        onCreateNewGRN={handleCreateGRNFromRemaining}
+                      />
+                    </div>
+
+                    {/* Remarks */}
+                    {viewingGrn.Remarks && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                          Remarks
+                        </p>
+                        <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                          {viewingGrn.Remarks}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}{" "}
+                {/* end details tab */}
+                {/* ── Posting tab ─────────────────────────────────────── */}
+                {viewModalTab === "posting" && (
+                  <div className="p-5 sm:p-6 space-y-4">
+                    {/* Header row */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen size={14} className="text-primary" />
+                        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                          Journal Entry — GRN Posting
                         </span>
                       </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
+                        Coming Soon
+                      </span>
+                    </div>
 
-                      {/* Debit / Credit stub table */}
-                      <div className="rounded-xl border border-border overflow-hidden">
-                        {/* Table header */}
-                        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
-                          <span>Account</span>
-                          <span className="text-center">Cost Centre</span>
-                          <span className="text-right">Debit (₹)</span>
-                          <span className="text-right">Credit (₹)</span>
-                        </div>
-
-                        {/* Posting rows — shows the real system-generated ledger once it exists, no dropdown */}
-                        {(
-                          [
-                            { key: "purchase", label: "Purchase A/c", side: "debit", ledger: grnPurchaseLedger },
-                            { key: "pgrn", label: "Provision for Pending GRN A/c", side: "credit", ledger: grnPendingLedger },
-                            { key: "provisionalCredit", label: "Provisional Credit Available", side: "debit", ledger: grnProvisionalCreditLedger },
-                          ] as { key: string; label: string; side: "debit" | "credit"; ledger: { id: number; label: string; code: string | null } | undefined }[]
-                        ).map((row) => (
-                          <div
-                            key={row.key}
-                            className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                  row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"
-                                }`}
-                              />
-                              {row.ledger ? (
-                                <span
-                                  className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
-                                  title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
-                                >
-                                  {row.ledger.label}
-                                  {row.ledger.code ? ` (${row.ledger.code})` : ""}
-                                </span>
-                              ) : (
-                                <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
-                                  {row.label} — not configured
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-muted-foreground text-center">—</span>
-                            <span className="text-xs text-right text-muted-foreground font-mono">
-                              {row.side === "debit" ? "—" : ""}
-                            </span>
-                            <span className="text-xs text-right text-muted-foreground font-mono">
-                              {row.side === "credit" ? "—" : ""}
-                            </span>
-                          </div>
-                        ))}
-
-                        {/* Totals footer */}
-                        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                          <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
-                            Total
-                          </span>
-                          <span />
-                          <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
-                            —
-                          </span>
-                          <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
-                            —
-                          </span>
-                        </div>
+                    {/* Debit / Credit stub table */}
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      {/* Table header */}
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                        <span>Account</span>
+                        <span className="text-center">Cost Centre</span>
+                        <span className="text-right">Debit (₹)</span>
+                        <span className="text-right">Credit (₹)</span>
                       </div>
 
-                      {/* Info note */}
-                      <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
-                        <AlertCircle
-                          size={13}
-                          className="text-muted-foreground mt-0.5 flex-shrink-0"
-                        />
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Posting entries will be auto-generated from GRN line
-                          items, GST rates, and the mapped chart of accounts
-                          once the accounting module is wired up. The debit /
-                          credit split shown above represents the expected
-                          journal structure.
-                        </p>
+                      {/* Posting rows — shows the real system-generated ledger once it exists, no dropdown */}
+                      {(
+                        [
+                          {
+                            key: "purchase",
+                            label: "Purchase A/c",
+                            side: "debit",
+                            ledger: grnPurchaseLedger,
+                          },
+                          {
+                            key: "pgrn",
+                            label: "Provision for Pending GRN A/c",
+                            side: "credit",
+                            ledger: grnPendingLedger,
+                          },
+                          {
+                            key: "provisionalCredit",
+                            label: "Provisional Credit Available",
+                            side: "debit",
+                            ledger: grnProvisionalCreditLedger,
+                          },
+                        ] as {
+                          key: string;
+                          label: string;
+                          side: "debit" | "credit";
+                          ledger:
+                            | { id: number; label: string; code: string | null }
+                            | undefined;
+                        }[]
+                      ).map((row) => (
+                        <div
+                          key={row.key}
+                          className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                row.side === "debit"
+                                  ? "bg-emerald-500"
+                                  : "bg-rose-500"
+                              }`}
+                            />
+                            {row.ledger ? (
+                              <span
+                                className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
+                                title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
+                              >
+                                {row.ledger.label}
+                                {row.ledger.code ? ` (${row.ledger.code})` : ""}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
+                                {row.label} — not configured
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground text-center">
+                            —
+                          </span>
+                          <span className="text-xs text-right text-muted-foreground font-mono">
+                            {row.side === "debit" ? "—" : ""}
+                          </span>
+                          <span className="text-xs text-right text-muted-foreground font-mono">
+                            {row.side === "credit" ? "—" : ""}
+                          </span>
+                        </div>
+                      ))}
+
+                      {/* Totals footer */}
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
+                          Total
+                        </span>
+                        <span />
+                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                          —
+                        </span>
+                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
+                          —
+                        </span>
                       </div>
                     </div>
-                  )}{" "}
-                  {/* end posting tab */}
-                </div>
+
+                    {/* Info note */}
+                    <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
+                      <AlertCircle
+                        size={13}
+                        className="text-muted-foreground mt-0.5 flex-shrink-0"
+                      />
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Posting entries will be auto-generated from GRN line
+                        items, GST rates, and the mapped chart of accounts once
+                        the accounting module is wired up. The debit / credit
+                        split shown above represents the expected journal
+                        structure.
+                      </p>
+                    </div>
+                  </div>
+                )}{" "}
+                {/* end posting tab */}
               </div>
-            );
-          })()}
+            </div>
+          );
+        })()}
 
       {/* GRN Delete Block Dialog */}
       <Dialog

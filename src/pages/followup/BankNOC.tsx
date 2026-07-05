@@ -34,19 +34,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -269,119 +258,6 @@ async function updateBankNOC(id: number, payload: Record<string, unknown>) {
   }
 }
 
-// ─── Combobox ─────────────────────────────────────────────────────────────────
-
-interface ComboItem {
-  value: string;
-  label: string;
-  sub?: string;
-}
-
-function Combobox({
-  value,
-  onChange,
-  items,
-  placeholder,
-  disabled,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  items: ComboItem[];
-  placeholder: string;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const selected = items.find((i) => i.value === value);
-  const filtered = useMemo(() => {
-    if (!q) return items;
-    const lq = q.toLowerCase();
-    return items.filter(
-      (i) =>
-        i.label.toLowerCase().includes(lq) ||
-        (i.sub ?? "").toLowerCase().includes(lq),
-    );
-  }, [items, q]);
-
-  return (
-    <div className="bnoc-combo">
-      <button
-        type="button"
-        className={`bnoc-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
-        onClick={() => {
-          if (!disabled) {
-            setOpen((v) => !v);
-            setQ("");
-          }
-        }}
-      >
-        <span className="bnoc-combo-left">
-          {selected ? (
-            <span className="bnoc-combo-val">{selected.label}</span>
-          ) : (
-            <span className="bnoc-combo-placeholder">{placeholder}</span>
-          )}
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {value && !disabled && (
-            <span
-              className="bnoc-combo-clear"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange("");
-                setOpen(false);
-              }}
-            >
-              <X size={12} />
-            </span>
-          )}
-          <ChevronDown
-            size={13}
-            className={`bnoc-combo-chevron${open ? " open" : ""}`}
-          />
-        </span>
-      </button>
-      {open && (
-        <div className="bnoc-combo-drop">
-          <div className="bnoc-combo-search-wrap">
-            <Search size={13} />
-            <input
-              className="bnoc-combo-search"
-              placeholder="Search…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="bnoc-combo-list">
-            {filtered.length === 0 ? (
-              <div className="bnoc-combo-empty">No results</div>
-            ) : (
-              filtered.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={`bnoc-combo-item${value === item.value ? " selected" : ""}`}
-                  onClick={() => {
-                    onChange(item.value);
-                    setOpen(false);
-                    setQ("");
-                  }}
-                >
-                  <span className="bnoc-combo-item-label">{item.label}</span>
-                  {item.sub && (
-                    <span className="bnoc-combo-item-sub">{item.sub}</span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function BankNOCPage() {
@@ -396,7 +272,7 @@ export function BankNOCPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<BankNOCFormState>(EMPTY_FORM);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   const {

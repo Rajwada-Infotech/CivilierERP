@@ -91,7 +91,6 @@ const MenuTypeMaster: React.FC = () => {
     resolver: zodResolver(menuTypeSchema),
     defaultValues: EMPTY_FORM,
   });
-  const form = watch();
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const {

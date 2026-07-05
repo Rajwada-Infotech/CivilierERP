@@ -36,22 +36,19 @@ import {
   UserCheck,
   RefreshCw,
   FileText,
-  AlertCircle,
   Key,
   Lock,
 } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function AdminControlPanel() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<"users" | "database" | "activity">(
     "users",
   );
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [, setSelectedUser] = useState<any>(null);
   const [addForm, setAddForm] = useState({
     name: "",
     email: "",
@@ -62,7 +59,7 @@ export default function AdminControlPanel() {
   const [dbSearch, setDbSearch] = useState("");
   const [activityPage, setActivityPage] = useState(1);
 
-  const { data: users = [], isLoading: usersLoading } = useQuery({
+  const { data: users = [] } = useQuery({
     queryKey: ["admin-users"],
     queryFn: getUsers,
   });

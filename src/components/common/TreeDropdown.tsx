@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronRight,
   ChevronDown,
@@ -168,21 +169,47 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  const recalcPosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const panelHeight = 280;
+    const above = spaceBelow < panelHeight && rect.top > panelHeight;
+    setPanelStyle({
+      position: "fixed",
+      top: above ? rect.top - panelHeight - 4 : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      zIndex: 9999,
+    });
+  }, []);
+
   useEffect(() => {
+    if (open) recalcPosition();
+  }, [open, recalcPosition]);
+
+  // Close on outside click or scroll
+  useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
+      const inTrigger = containerRef.current?.contains(e.target as Node);
+      const inPanel = panelRef.current?.contains(e.target as Node);
+      if (!inTrigger && !inPanel) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    window.addEventListener("scroll", () => setOpen(false), { passive: true, capture: true });
+    window.addEventListener("resize", recalcPosition);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", () => setOpen(false), true);
+      window.removeEventListener("resize", recalcPosition);
+    };
+  }, [open, recalcPosition]);
 
   const toggleNode = (id: string) =>
     setOpenNodes((prev) => {
@@ -211,6 +238,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     <div className="relative" ref={containerRef}>
       {/* ── Trigger button ── */}
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
@@ -266,9 +294,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
         />
       </button>
 
-      {/* ── Dropdown panel ── */}
-      {open && (
-        <div className={`absolute z-50 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden ${dropUp ? "bottom-full mb-1" : "mt-1"}`}>
+      {/* ── Dropdown panel (portal — escapes overflow:hidden parents) ── */}
+      {open && createPortal(
+        <div ref={panelRef} style={panelStyle} className="rounded-lg border border-border bg-card shadow-xl overflow-hidden">
           {variant === "tree" ? (
             /* ── Tree panel ── */
             <>
@@ -346,7 +374,8 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               ))}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

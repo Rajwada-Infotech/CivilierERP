@@ -1,5 +1,12 @@
 process.env.NODE_ENV = "test";
 
+// db.js calls loadEnv() at module-load time which requires real DB env vars.
+// This test uses a mock pool and never opens a real connection, so stub it out.
+jest.mock("../db", () => ({
+  sql: { Int: "Int", NVarChar: () => "NVarChar", Decimal: () => "Decimal" },
+  getPool: () => { throw new Error("getPool should not be called in this test"); },
+}));
+
 /**
  * lastPurchaseRate.getLastPurchaseRate(): resolves the SENDING project's own
  * cost basis for an item, checked GRN history first (most recent), then
