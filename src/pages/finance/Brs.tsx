@@ -949,17 +949,17 @@ export default function Brs() {
                             <CornerDownRight size={10} className="shrink-0" />
                             <span className="font-mono truncate">{entry.OriginalDocNo}</span>
                           </span>
-                        ) : (
-                          // Normal payment — can be marked bounced
+                        ) : entry.ChequeNo ? (
+                          // Cheque payment — can be marked bounced
                           <button
                             onClick={() => setBounceEntry(entry)}
-                            title="Mark this payment as bounced / dishonoured"
+                            title="Mark this cheque as bounced / dishonoured"
                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
                           >
                             <Ban size={10} />
                             Mark Bounced
                           </button>
-                        )}
+                        ) : null}
                       </td>
                     </tr>
                   );
