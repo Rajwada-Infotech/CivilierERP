@@ -1,7 +1,6 @@
 import React from "react";
 import { Calendar } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -44,7 +43,6 @@ const toPayload = (r: Record<string, unknown>) => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 const FinancialYearMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const { theme } = useTheme();
   const {
     data: dbData,
     isLoading,

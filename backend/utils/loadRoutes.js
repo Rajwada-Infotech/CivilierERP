@@ -27,7 +27,7 @@ async function safeLoadRoutes(app, routes, options = {}) {
   const results = { loaded: [], skipped: [], failed: [] };
 
   for (const { path: routePath, file } of routes) {
-    const label = routePath.replace("/api/", "");
+    const label = routePath.replace(/^\/api\//, "");
 
     try {
       // Support both .js and .ts extensions

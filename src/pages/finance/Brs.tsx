@@ -523,7 +523,7 @@ export default function Brs() {
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
     const q = search.toLowerCase();
-    return result.filter(
+    return entries.filter(
       (e) =>
         (e.CompanyName ?? "").toLowerCase().includes(q) ||
         (e.BankName ?? "").toLowerCase().includes(q) ||
