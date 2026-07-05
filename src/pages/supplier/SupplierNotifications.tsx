@@ -12,7 +12,7 @@ import {
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.38, delay, ease: [0.16, 1, 0.3, 1] },
+  transition: { duration: 0.38, delay, ease: [0.16, 1, 0.3, 1] as const },
 });
 
 const fmtDate = (d?: string | null) =>

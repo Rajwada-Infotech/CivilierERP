@@ -1408,6 +1408,7 @@ export default function GRN() {
       parentDocNo: fullGrn.ParentDocNo || "",
       rootExBDocNo: fullGrn.RootExBDocNo || "",
       finYear: fullGrn.FinYear || "",
+      companyId: String(fullGrn.CompanyId || ""),
       projectId: String(fullGrn.ProjectId || ""),
       godownId: fullGrn.GodownID ? String(fullGrn.GodownID) : "",
     });
