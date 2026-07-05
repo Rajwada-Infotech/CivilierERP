@@ -264,7 +264,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-5 py-4 text-foreground text-sm align-middle"
+                      className="px-5 py-4 text-foreground text-sm align-middle overflow-hidden"
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
