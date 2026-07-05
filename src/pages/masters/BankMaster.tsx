@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";

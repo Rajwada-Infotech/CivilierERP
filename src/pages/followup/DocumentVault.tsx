@@ -14,7 +14,6 @@ import {
   FolderOpen,
   Plus,
   RefreshCw,
-  Filter,
   Tag,
   StickyNote,
   ChevronDown,

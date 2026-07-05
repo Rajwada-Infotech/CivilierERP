@@ -1,24 +1,19 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus,
   RefreshCw,
   Search,
   X,
   Landmark,
   ChevronDown,
   Pencil,
-  Trash2,
   CheckCircle2,
   Clock,
-  AlertCircle,
   XCircle,
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
-  IndianRupee,
   FileCheck,
-  Banknote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";

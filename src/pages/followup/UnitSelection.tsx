@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2,
   CalendarDays,
   Edit2,
   Home,
-  IndianRupee,
-  Layers,
   MapPin,
   Plus,
   RefreshCw,

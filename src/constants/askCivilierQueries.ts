@@ -29,7 +29,6 @@ import {
   ClipboardList,
   Building2,
   Hammer,
-  CalendarCheck,
   Landmark,
   ClipboardCheck,
   ShieldCheck,
