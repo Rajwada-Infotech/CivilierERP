@@ -1989,16 +1989,6 @@ router.get("/by-transfer/:transferId", async (req, res) => {
 // the DB (not disk), uploaded while the form is still being filled out
 // (GRNID = NULL), then linked to the GRN once it's actually saved.
 
-function attachmentRowToDto(a) {
-  return {
-    id: a.AttachmentId,
-    filename: a.FileName,
-    mimeType: a.MimeType,
-    size: a.FileSize,
-    url: `/api/grns/attachment/${a.AttachmentId}`,
-  };
-}
-
 let _grnAttachTableExists = null;
 async function grnAttachTableExists(pool) {
   if (_grnAttachTableExists !== null) return _grnAttachTableExists;

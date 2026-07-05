@@ -3,7 +3,6 @@ import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
-import { useNavigate } from "react-router-dom";
 import { LogOut, User } from "lucide-react";
 import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 
