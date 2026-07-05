@@ -309,10 +309,10 @@ const AccountGroupMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedGroupId] = useState<string | null>(null);
   const [viewRecord, setViewRecord] = useState<AccountGroup | null>(null);
 
-  const { data: glAccounts, isLoading: glLoading } = useQuery({
+  useQuery({
     queryKey: ["account-head", "GL", selectedGroupId],
     queryFn: async () => {
       if (!selectedGroupId) return [];
@@ -325,11 +325,6 @@ const AccountGroupMaster: React.FC = () => {
     enabled: !!selectedGroupId,
     staleTime: 60_000,
   });
-
-  const selectedGroup = useMemo(
-    () => allGroups.find((g) => g._id === selectedGroupId) ?? null,
-    [allGroups, selectedGroupId],
-  );
 
   const toggleExpand = (id: string) =>
     setExpanded((prev) => {

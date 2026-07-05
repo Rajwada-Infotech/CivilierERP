@@ -6,7 +6,6 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  AlertCircle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,

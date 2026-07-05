@@ -303,7 +303,6 @@ function MessageContent({
 }) {
   const segments = useMemo(() => parseComment(comment), [comment]);
 
-  const hasOnlyAttachments = segments.every((s) => s.type === "attachment");
   const attachments = segments.filter((s): s is AttachmentSegment => s.type === "attachment");
   const texts = segments.filter((s): s is TextSegment => s.type === "text");
 

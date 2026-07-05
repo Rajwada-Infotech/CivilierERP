@@ -52,8 +52,12 @@ let ledgerAlreadyExists;
 
 function makeFakePool() {
   const makeRequest = () => {
+    const params = {};
     const req = {
-      input: () => req,
+      input: (name, _type, value) => {
+        params[name] = value;
+        return req;
+      },
       query: async (text) => {
         if (/INSERT INTO dbo\.enterprise/i.test(text)) {
           return { recordset: [], rowsAffected: [1] };
@@ -83,7 +87,7 @@ function makeFakePool() {
           return { recordset: ledgerAlreadyExists ? [{ LHeadId: 1 }] : [], rowsAffected: [0] };
         }
         if (/INSERT INTO dbo\.AccountHeadMaster/i.test(text)) {
-          insertedLedgerHeads.push(text);
+          insertedLedgerHeads.push({ sql: text, params: { ...params } });
           return { recordset: [], rowsAffected: [1] };
         }
         return { recordset: [], recordsets: [[]], rowsAffected: [0] };
@@ -130,8 +134,8 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
 
     expect(res.status).toBe(200);
     expect(insertedLedgerHeads.length).toBe(2);
-    expect(insertedLedgerHeads.some((q) => /@LHeadType.*'?C'?/.test(q))).toBe(true);
-    expect(insertedLedgerHeads.some((q) => /@LHeadType.*'?S'?/.test(q))).toBe(true);
+    expect(insertedLedgerHeads.some((entry) => entry.params.LHeadType === "C")).toBe(true);
+    expect(insertedLedgerHeads.some((entry) => entry.params.LHeadType === "S")).toBe(true);
   });
 
   test("skips ledger-head creation when the parent company has no GST on file", async () => {

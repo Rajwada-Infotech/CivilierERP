@@ -27,9 +27,6 @@ import {
   AlertCircle,
   Eye,
   XCircle,
-  Folder,
-  FolderOpen,
-  Layers,
   RotateCcw,
   ShieldCheck,
   Lock,
@@ -247,10 +244,10 @@ const GeneralLedgerMaster: React.FC = () => {
   const [filterGroup, setFilterGroup] = useState("");
   const [page, setPage] = useState(1);
   const limit = 10;
-  const [sortField, setSortField] = useState<
+  const [sortField] = useState<
     "LHeadName" | "LHeadCode" | "GroupName"
   >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc] = useState(true);
 
   useEffect(() => {
     setPage(1);
@@ -266,7 +263,6 @@ const GeneralLedgerMaster: React.FC = () => {
   const {
     data: ledgersData,
     isLoading: ledgersLoading,
-    isError: ledgersError,
   } = useQuery({
     queryKey: ["ledger-heads", page, limit, search, filterGroup],
     queryFn: () => getLedgers({ page, limit, search, groupId: filterGroup }),
@@ -443,15 +439,6 @@ const GeneralLedgerMaster: React.FC = () => {
       updateMut.mutate({ id: editingId, data: form });
     } else {
       createMut.mutate(form);
-    }
-  };
-
-  const toggleSort = (field: typeof sortField) => {
-    if (sortField === field) {
-      setSortAsc((a) => !a);
-    } else {
-      setSortField(field);
-      setSortAsc(true);
     }
   };
 

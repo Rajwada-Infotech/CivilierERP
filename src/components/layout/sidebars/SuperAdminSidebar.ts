@@ -1,4 +1,4 @@
-import { Crown, Building, ShieldTick, Global, Shield, Setting, TrendUp, DocumentText, Profile2User, Data } from "iconsax-react";
+import { Crown, Building, Global, Shield, Setting, TrendUp, Profile2User, Data } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const superAdminNavItems: NavItem[] = [

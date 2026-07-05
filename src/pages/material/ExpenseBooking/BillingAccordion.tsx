@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   Receipt,
-  X,
   ChevronDown,
   ChevronUp,
   Tag,

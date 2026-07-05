@@ -8,11 +8,9 @@ import {
   GlassShell,
   GlassCard,
   GlassSection,
-  GlassCardSkeleton,
 } from "@/components/dashboard/GlassShell";
 import {
   ArrowUpRight,
-  ArrowDownRight,
   RefreshCw,
   AlertCircle,
   CheckCircle2,
@@ -491,7 +489,7 @@ export default function FollowupDashboard() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: constructionRes, isLoading: constructionLoading } = useQuery({
+  const { data: constructionRes } = useQuery({
     queryKey: ["dashboard-construction"],
     queryFn: () =>
       fetchWithAuth("/api/followup-construction-updates?pageSize=500").then(

@@ -35,7 +35,6 @@ import {
   CalendarDays,
   Save,
   Banknote,
-  Trash2,
   Layers,
   ArrowUpRight,
   Percent,

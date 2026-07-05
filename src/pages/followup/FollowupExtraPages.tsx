@@ -1,17 +1,12 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   BadgeCheck,
-  BarChart3,
-  Bell,
-  CheckCircle2,
   FileText,
-  Home,
   IndianRupee,
   Plus,
-  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 

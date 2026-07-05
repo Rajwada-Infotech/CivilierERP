@@ -6,7 +6,6 @@ import React, {
   useEffect,
 } from "react";
 import { useLocation } from "react-router-dom";
-import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
 import type { Module } from "@/contexts/module.utils";
 
 // Module/MODULE_DASHBOARD_ROUTES now live in module.utils.ts and are NOT

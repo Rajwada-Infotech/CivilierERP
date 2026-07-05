@@ -84,8 +84,6 @@ const TdsMaster: React.FC = () => {
   const rights = usePageRights("tds-master");
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
-
   // CSV import state
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);

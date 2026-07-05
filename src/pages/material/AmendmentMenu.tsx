@@ -1530,11 +1530,6 @@ export default function AmendmentMenu() {
     setFormOpen(true);
   };
 
-  const openEdit = (a: Amendment) => {
-    setEditing(a);
-    setInitialForm(toFormState(a));
-    setFormOpen(true);
-  };
 
   const handleSave = (payload: AmendmentPayload) => {
     if (editing) {

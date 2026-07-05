@@ -1,4 +1,4 @@
-const { redisGetStrict, redisSet } = require("../redis");
+const { redisGetStrict } = require("../redis");
 const logger = require("../logger");
 
 const BLACKLIST_PREFIX = "blacklist:";

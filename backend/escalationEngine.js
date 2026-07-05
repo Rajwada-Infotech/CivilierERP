@@ -101,19 +101,6 @@ async function assertRequiredSchema() {
   );
 }
 
-/**
- * Build a SQL CASE expression that sets <step>Status = 'Blocked'
- * only when the step is overdue and not already terminal.
- */
-function buildCaseBlocks(steps, prefix = "") {
-  // Returns array of { setCols, whereParts } for each step
-  return steps.map((s) => ({
-    step: s,
-    dueCol: `${prefix}${s}Due`,
-    statusCol: `${prefix}${s}Status`,
-  }));
-}
-
 // ── Legal Milestones escalation ───────────────────────────────────────────────
 
 async function escalateLegalMilestones() {

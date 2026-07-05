@@ -151,7 +151,6 @@ function buildColumns(
 }
 
 export default function Transactions() {
-  const rights = usePageRights("transactions");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);

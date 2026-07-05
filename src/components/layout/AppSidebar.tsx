@@ -221,7 +221,7 @@ export const AppSidebar = () => {
   const { setCollapsed } = useSidebarState();
   const { badgeCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
-  const { version } = useAppVersion();
+  useAppVersion();
   const pendingApprovalCount = useApprovalCount();
 
   const { canAccessPage } = useAuth();

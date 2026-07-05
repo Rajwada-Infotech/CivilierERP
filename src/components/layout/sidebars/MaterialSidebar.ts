@@ -1,4 +1,4 @@
-import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, Edit2, DocumentText, TrendUp } from "iconsax-react";
+import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, Edit2, TrendUp } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [

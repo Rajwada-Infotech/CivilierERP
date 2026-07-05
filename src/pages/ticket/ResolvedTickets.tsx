@@ -2,7 +2,6 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { TicketShell } from "@/components/ticket/TicketShell";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -807,7 +806,6 @@ function TicketDetailView({
 type ResolutionTab = "Resolved" | "Closed";
 
 const ResolvedTickets: React.FC = () => {
-  const navigate = useNavigate();
   const { currentUser } = useAuth();
   const queryClient = useQueryClient();
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];

@@ -124,9 +124,6 @@ function dateText(value: unknown) {
     : date.toLocaleDateString("en-IN");
 }
 
-function optionName(options: Option[] = [], id: string) {
-  return options.find((option) => String(option.Id) === id)?.Name ?? "";
-}
 
 function applicantLabel(option: Option) {
   return `${option.ApplicantName ?? option.Name ?? "Applicant"}${option.ApplicantNo ? ` (${option.ApplicantNo})` : ""}`;

@@ -17,9 +17,6 @@ import {
   Trash2,
   X,
   Sparkles,
-  UserCheck,
-  TrendingUp,
-  AlertTriangle,
   MapPin,
   Users,
   ChevronDown,
@@ -831,67 +828,6 @@ function ApplicationDrawer({
   );
 }
 
-// ─── Bento Stat Card ──────────────────────────────────────────────────────────
-function BentoCard({
-  icon,
-  label,
-  value,
-  sub,
-  accentFrom,
-  accentTo,
-  iconColor,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-  sub?: string;
-  accentFrom: string;
-  accentTo: string;
-  iconColor: string;
-}) {
-  return (
-    <div className="relative rounded-2xl border border-border bg-card p-5 overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:border-border/80">
-      {/* Gradient mesh background */}
-      <div
-        className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${accentFrom} ${accentTo}`}
-        style={{ opacity: 0.04 }}
-      />
-      {/* Top-right glow orb */}
-      <div
-        className={`absolute -top-6 -right-6 w-20 h-20 rounded-full blur-2xl opacity-20 ${accentFrom.replace("from-", "bg-")}`}
-      />
-
-      <div className="relative flex items-start justify-between gap-3">
-        <div
-          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br ${accentFrom} ${accentTo} bg-opacity-10`}
-          style={{
-            background: "transparent",
-            border: "1px solid",
-            borderColor: `color-mix(in srgb, currentColor 15%, transparent)`,
-          }}
-        >
-          <span className={iconColor}>{icon}</span>
-        </div>
-        <ArrowUpRight
-          size={13}
-          className="text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors mt-0.5"
-        />
-      </div>
-
-      <div className="relative mt-4">
-        <p className="text-[26px] font-bold tracking-tight text-foreground leading-none font-heading">
-          {value}
-        </p>
-        {sub && (
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
-            {sub}
-          </p>
-        )}
-        <p className="text-[11px] text-muted-foreground mt-2">{label}</p>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ApplicationsPage() {
