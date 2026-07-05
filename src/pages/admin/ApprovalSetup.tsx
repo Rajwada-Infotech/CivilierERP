@@ -103,6 +103,18 @@ const MODULE_OPTIONS = [
     icon: "🛍️",
     desc: "Inter-company / inter-project item sales",
   },
+  {
+    id: "JournalVoucher",
+    label: "Journal Voucher",
+    icon: "📒",
+    desc: "Forceful account-head mismatch correction — approval is always restricted to super_admin regardless of who's assigned here",
+  },
+  {
+    id: "InterCompanyTransfer",
+    label: "Inter-Company Transfer",
+    icon: "🏭",
+    desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
+  },
 ] as const;
 
 type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -118,13 +130,14 @@ const MODULE_GROUPS = [
       "MaterialIssues",
       "Expenses",
       "StockTransfer",
+      "InterCompanyTransfer",
     ],
   },
   {
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment"],
+    modules: ["NewPayment", "JournalVoucher"],
   },
   {
     id: "engineering",
