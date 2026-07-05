@@ -273,20 +273,27 @@ export default function DBADashboard() {
         subtitle="Database access · Table browser · Query runner"
         icon={Database}
         action={
-          <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-xs px-3">
-            <Database size={10} className="mr-1" /> DBA
-          </Badge>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-green-600 bg-green-500/10 border border-green-500/20 rounded-full px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Connected
+            </span>
+            <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-xs px-3">
+              <Database size={10} className="mr-1" /> DBA
+            </Badge>
+          </div>
         }
       >
       {/* Stats strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {[
           {
             label: "Total Tables",
             value: healthLoading ? "…" : (health?.total_tables ?? "—"),
             icon: HardDrive,
             color: "text-blue-500",
-            bg: "bg-blue-500/10",
+            border: "border-l-blue-500",
+            bg: "bg-blue-500/8",
             clickable: false,
           },
           {
@@ -295,8 +302,9 @@ export default function DBADashboard() {
               ? "…"
               : (selectedDb ?? health?.database_name ?? "—"),
             icon: Database,
-            color: "text-green-500",
-            bg: "bg-green-500/10",
+            color: "text-emerald-500",
+            border: "border-l-emerald-500",
+            bg: "bg-emerald-500/8",
             clickable: true,
           },
           {
@@ -307,37 +315,37 @@ export default function DBADashboard() {
                 ? `${(health.total_size_mb / 1024).toFixed(1)} GB`
                 : "—",
             icon: Server,
-            color: "text-purple-500",
-            bg: "bg-purple-500/10",
+            color: "text-violet-500",
+            border: "border-l-violet-500",
+            bg: "bg-violet-500/8",
             clickable: false,
           },
           {
             label: "Queries Logged",
-            value: history.length || "—",
+            value: activeTab === "history" ? (history.length || 0) : "—",
             icon: Terminal,
             color: "text-orange-500",
-            bg: "bg-orange-500/10",
+            border: "border-l-orange-500",
+            bg: "bg-orange-500/8",
             clickable: false,
           },
         ].map((s) =>
           s.clickable ? (
             <div key={s.label} className="relative" ref={dbPopoverRef}>
               <Card
-                className="cursor-pointer hover:border-green-500/40 hover:shadow-md transition-all duration-150 select-none"
+                className={`cursor-pointer border-l-2 ${s.border} hover:shadow-md transition-all duration-150 select-none`}
                 onClick={() => setDbPopoverOpen((o) => !o)}
               >
                 <CardContent className="p-4 flex items-center gap-3">
                   <div className={`p-2 rounded-lg ${s.bg}`}>
-                    <s.icon size={18} className={s.color} />
+                    <s.icon size={16} className={s.color} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-2xl font-bold truncate max-w-[110px]">
-                      {s.value}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                    <p className="text-xl font-bold truncate leading-tight">{s.value}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{s.label}</p>
                   </div>
                   <ChevronDown
-                    size={14}
+                    size={13}
                     className={`text-muted-foreground transition-transform duration-200 flex-shrink-0 ${dbPopoverOpen ? "rotate-180" : ""}`}
                   />
                 </CardContent>
@@ -346,60 +354,35 @@ export default function DBADashboard() {
               {/* DB Switcher Dropdown */}
               {dbPopoverOpen && (
                 <>
-                  {/* Backdrop */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setDbPopoverOpen(false)}
-                  />
+                  <div className="fixed inset-0 z-40" onClick={() => setDbPopoverOpen(false)} />
                   <div className="absolute top-full mt-2 left-0 z-50 w-64 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
-                      <Database size={13} className="text-green-500" />
-                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+                    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border bg-muted/30">
+                      <Database size={12} className="text-emerald-500" />
+                      <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
                         Switch Database
                       </span>
                     </div>
                     <div className="p-1.5 max-h-60 overflow-y-auto">
                       {databases.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">
-                          Loading databases…
-                        </p>
+                        <p className="text-xs text-muted-foreground text-center py-4">Loading databases…</p>
                       ) : (
                         databases.map((db) => {
-                          const isActive =
-                            (selectedDb ?? health?.database_name) === db.name;
+                          const isActive = (selectedDb ?? health?.database_name) === db.name;
                           return (
                             <button
                               key={db.name}
                               onClick={() => {
                                 setSelectedDb(db.name);
                                 setDbPopoverOpen(false);
-                                toast.success(
-                                  `Switched to database: ${db.name}`,
-                                );
+                                toast.success(`Switched to database: ${db.name}`);
                               }}
-                              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-sm font-heading ${
-                                isActive
-                                  ? "bg-green-500/10 text-green-600"
-                                  : "hover:bg-muted text-foreground"
+                              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all duration-150 ${
+                                isActive ? "bg-emerald-500/10 text-emerald-600" : "hover:bg-muted text-foreground"
                               }`}
                             >
-                              <Database
-                                size={13}
-                                className={
-                                  isActive
-                                    ? "text-green-500"
-                                    : "text-muted-foreground"
-                                }
-                              />
-                              <span className="flex-1 truncate font-mono text-xs">
-                                {db.name}
-                              </span>
-                              {isActive && (
-                                <Check
-                                  size={12}
-                                  className="text-green-500 flex-shrink-0"
-                                />
-                              )}
+                              <Database size={12} className={isActive ? "text-emerald-500" : "text-muted-foreground"} />
+                              <span className="flex-1 truncate font-mono text-xs">{db.name}</span>
+                              {isActive && <Check size={11} className="text-emerald-500 flex-shrink-0" />}
                             </button>
                           );
                         })
@@ -411,9 +394,7 @@ export default function DBADashboard() {
                           onClick={() => {
                             setSelectedDb(null);
                             setDbPopoverOpen(false);
-                            toast.info(
-                              `Reverted to default: ${health?.database_name}`,
-                            );
+                            toast.info(`Reverted to default: ${health?.database_name}`);
                           }}
                           className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                         >
@@ -426,16 +407,14 @@ export default function DBADashboard() {
               )}
             </div>
           ) : (
-            <Card key={s.label}>
+            <Card key={s.label} className={`border-l-2 ${s.border}`}>
               <CardContent className="p-4 flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${s.bg}`}>
-                  <s.icon size={18} className={s.color} />
+                  <s.icon size={16} className={s.color} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold truncate max-w-[120px]">
-                    {s.value}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                  <p className="text-xl font-bold leading-tight">{s.value}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{s.label}</p>
                 </div>
               </CardContent>
             </Card>
@@ -444,18 +423,18 @@ export default function DBADashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b border-border">
+      <div className="flex items-center gap-1 mb-5 p-1 bg-muted/50 rounded-lg w-fit border border-border">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
               activeTab === tab.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-background text-foreground shadow-sm border border-border"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <tab.icon size={14} />
+            <tab.icon size={12} />
             {tab.label}
           </button>
         ))}
@@ -463,83 +442,88 @@ export default function DBADashboard() {
 
       {/* ── OVERVIEW ── */}
       {activeTab === "overview" && (
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Database size={16} className="text-primary" />
-                Database Health
-              </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1"
-                onClick={() => refetchHealth()}
-                disabled={healthLoading}
-              >
-                <RefreshCw
-                  size={12}
-                  className={healthLoading ? "animate-spin" : ""}
-                />{" "}
-                Refresh
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {healthLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2
-                  size={24}
-                  className="animate-spin text-muted-foreground"
-                />
-              </div>
-            ) : health ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {[
-                  {
-                    label: "Server Name",
-                    value: health.server_name,
-                    mono: true,
-                  },
-                  {
-                    label: "Database",
-                    value: health.database_name,
-                    mono: true,
-                  },
-                  { label: "Total Tables", value: health.total_tables },
-                  {
-                    label: "Total Size",
-                    value: `${health.total_size_mb?.toFixed(1)} MB`,
-                  },
-                  {
-                    label: "SQL Version",
-                    value:
-                      health.sql_version?.split("\n")[0] ?? health.sql_version,
-                    mono: true,
-                  },
-                ].map((r) => (
-                  <div
-                    key={r.label}
-                    className="flex flex-col gap-0.5 bg-muted/40 rounded-lg px-4 py-3"
-                  >
-                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
-                      {r.label}
-                    </span>
-                    <span
-                      className={`text-sm font-semibold truncate ${r.mono ? "font-mono" : ""}`}
-                    >
-                      {String(r.value)}
-                    </span>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <div className="p-1.5 rounded-md bg-primary/10">
+                    <Database size={13} className="text-primary" />
                   </div>
-                ))}
+                  Database Health
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={() => refetchHealth()}
+                  disabled={healthLoading}
+                >
+                  <RefreshCw size={11} className={healthLoading ? "animate-spin" : ""} />
+                  Refresh
+                </Button>
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                Failed to load health data
-              </p>
-            )}
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent>
+              {healthLoading ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 size={22} className="animate-spin text-muted-foreground" />
+                </div>
+              ) : health ? (
+                <div className="space-y-3">
+                  {/* Connection row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: "Server Name", value: health.server_name, mono: true, icon: Server, color: "text-blue-500", bg: "bg-blue-500/10" },
+                      { label: "Database", value: health.database_name, mono: true, icon: Database, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+                    ].map((r) => (
+                      <div key={r.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                        <div className={`p-1.5 rounded-md ${r.bg} shrink-0`}>
+                          <r.icon size={13} className={r.color} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
+                          <p className={`text-sm font-semibold truncate mt-0.5 ${r.mono ? "font-mono" : ""}`}>{String(r.value)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Metrics row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: "Total Tables", value: health.total_tables, mono: false, icon: HardDrive, color: "text-violet-500", bg: "bg-violet-500/10" },
+                      { label: "Total Size", value: `${health.total_size_mb?.toFixed(1)} MB`, mono: false, icon: Server, color: "text-orange-500", bg: "bg-orange-500/10" },
+                    ].map((r) => (
+                      <div key={r.label} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                        <div className={`p-1.5 rounded-md ${r.bg} shrink-0`}>
+                          <r.icon size={13} className={r.color} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
+                          <p className={`text-sm font-semibold truncate mt-0.5 ${r.mono ? "font-mono" : ""}`}>{String(r.value)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* SQL Version — full width */}
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    <div className="p-1.5 rounded-md bg-slate-500/10 shrink-0">
+                      <Terminal size={13} className="text-slate-500" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">SQL Version</p>
+                      <p className="text-xs font-mono font-semibold truncate mt-0.5">
+                        {health.sql_version?.split("\n")[0] ?? health.sql_version}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">Failed to load health data</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* ── TABLE BROWSER ── */}
