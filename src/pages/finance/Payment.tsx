@@ -2323,7 +2323,7 @@ const Payment: React.FC = () => {
       totalInclGST: number;
     };
   } | null>(null);
-  const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
+  const [, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
     project: "",

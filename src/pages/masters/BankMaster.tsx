@@ -210,9 +210,6 @@ const BANK_TYPES = [
 // ─── Shared input class (ContractorMaster style) ─────────────────────────────
 const inputCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-const selectCls =
-  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-
 // ─── Bank Type Badges ───────────────────────────────────────────────────────
 const bankTypeBadge: Record<string, string> = {
   Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",

@@ -47,13 +47,11 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
-  Hash,
   ShieldCheck,
   AlertTriangle,
   Ban,
   Info,
   ArrowRight,
-  ArrowLeft,
   CornerDownRight,
 } from "lucide-react";
 
