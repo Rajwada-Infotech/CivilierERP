@@ -300,4 +300,38 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
   }
 });
 
+// ── PUT /:id/approve — Pending → Approved (super_admin only) ────────────────
+router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher", "edit"), async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition("journal-voucher", id, "Approved", user, req.user?.role, req.body?.note);
+    await bumpCacheVersion("journal-voucher");
+    res.json({ message: "Journal Voucher approved", ...result });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected (super_admin only) ─────────────────
+router.put("/:id/reject", authenticateToken, requirePageRight("journal-voucher", "edit"), async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note);
+    await bumpCacheVersion("journal-voucher");
+    res.json({ message: "Journal Voucher rejected", ...result });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
 module.exports = router;

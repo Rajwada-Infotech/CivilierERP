@@ -69,6 +69,11 @@ const MODULE_MAP = {
     pk: "JVID",
     status: "Status",
   },
+  "inter-company-transfer": {
+    table: "dbo.InterCompanyTransfer",
+    pk: "ICTId",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {
@@ -81,9 +86,20 @@ const MODULE_DOC_LINKS = {
   "goods-receipt": "GRN",
   payments: "Payment",
   "journal-voucher": "Journal Voucher",
+  "inter-company-transfer": "Inter-Company Transfer",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
+
+// Modules where approve/reject is restricted to a tighter role set than the
+// system default (e.g. Journal Voucher forcefully corrects account-head
+// mismatches, and Inter-Company Transfer fires an entire auto-generated
+// document chain on approval — both are gated to super_admin only, unlike
+// every other module where admin/dba can also approve).
+const MODULE_APPROVER_ROLE_OVERRIDES = {
+  "journal-voucher": ["super_admin"],
+  "inter-company-transfer": ["super_admin"],
+};
 
 async function validateApprovalModuleMap(log = console) {
   const pool = getPool();
@@ -143,6 +159,7 @@ const WORKFLOW_ID_MAP = {
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
   "journal-voucher": "JournalVoucher",
+  "inter-company-transfer": "InterCompanyTransfer",
 };
 
 /**
@@ -360,9 +377,10 @@ async function transition(
   // ── Authorisation gate (cheap check before opening a transaction) ─────────
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
+  const allowedApproverRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] || APPROVER_ROLES;
   if (
     isApproveOrReject &&
-    !APPROVER_ROLES.includes((userRole || "").toLowerCase())
+    !allowedApproverRoles.includes((userRole || "").toLowerCase())
   ) {
     throw new Error("You are not authorized to approve or reject records.");
   }
