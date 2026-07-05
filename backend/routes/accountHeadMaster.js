@@ -586,7 +586,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     const request = pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .input("LHeadName", sql.NVarChar(200), LHeadName || null)
+      .input("LHeadName", sql.NVarChar(200), LHeadName)
       .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
