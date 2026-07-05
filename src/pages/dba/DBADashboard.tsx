@@ -68,6 +68,7 @@ interface DbHealth {
   sql_version: string;
   total_tables: number;
   total_size_mb: number;
+  total_queries: number;
 }
 
 interface QueryHistoryRow {
@@ -187,7 +188,6 @@ export default function DBADashboard() {
       if (!res.ok) throw new Error("Failed to fetch DB health");
       return res.json().catch(() => ({}));
     },
-    enabled: activeTab === "overview",
     staleTime: 30_000,
   });
 
@@ -410,7 +410,7 @@ export default function DBADashboard() {
           },
           {
             label: "Queries Logged",
-            value: activeTab === "history" ? (history.length || 0) : "—",
+            value: healthLoading ? "…" : (health?.total_queries ?? "—"),
             icon: Terminal,
             color: "text-orange-500",
             border: "border-l-orange-500",
