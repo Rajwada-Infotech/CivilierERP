@@ -9,15 +9,33 @@ const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
+let _acctHeadHasLGSTType = null;
+async function acctHeadHasLGSTType(pool) {
+  if (_acctHeadHasLGSTType === null) {
+    const r = await pool
+      .request()
+      .query(
+        "SELECT COUNT(1) AS cnt FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.AccountHeadMaster') AND name = N'LGSTType'",
+      );
+    _acctHeadHasLGSTType = r.recordset[0].cnt > 0;
+  }
+  return _acctHeadHasLGSTType;
+}
+
 // ── Auto-create Customer + Supplier ledger heads for a project ────────────────
 // Extracted so both POST / (new project) and PUT /:id (edit/re-save an
 // existing project) can ensure a project has its trading ledger heads before
 // it can participate in the Inter-Company Stock Transfer workflow. Projects
 // (business_type='P') carry no GST of their own in this schema — GST/PAN/TAN
-// live only on the parent Company row (see GET /company/:id below) — so a
-// project whose company has no gst_no on file is skipped with a warning
-// rather than fabricating compliance data. Idempotent: does nothing if the
-// PRJ-{id}-CUST/SUPP heads already exist.
+// live only on the parent Company row (see GET /company/:id below).
+//
+// A company can legitimately be GST-Unregistered (companyMaster.js's
+// gst_type='Unregistered', gst_no intentionally NULL) — that's a valid real
+// business state, not missing data, and such companies can still trade
+// (invoices just carry no GST line). Only skip ledger-head creation when
+// gst_type isn't explicitly 'Unregistered' AND gst_no is still empty, i.e.
+// the compliance fields genuinely haven't been filled in yet. Idempotent:
+// does nothing if the PRJ-{id}-CUST/SUPP heads already exist.
 async function ensureProjectLedgerHeads(pool, projectId, projectName, address, createdBy) {
   if (!projectId) return;
 
@@ -37,12 +55,20 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
   const companyRow = await pool
     .request()
     .input("id", sql.Int, resolvedCompanyId)
-    .query("SELECT gst_no, pan_no, name FROM dbo.enterprise WHERE id=@id AND business_type='C'");
+    .query("SELECT gst_no, gst_type, pan_no, name FROM dbo.enterprise WHERE id=@id AND business_type='C'");
   const company = companyRow.recordset[0];
 
-  if (!company?.gst_no) {
+  if (!company) {
     console.warn(
-      `[projectMaster] Skipped auto-creating trading ledger heads for project ${projectId}: parent company ${resolvedCompanyId} has no GST on file.`,
+      `[projectMaster] Skipped auto-creating trading ledger heads for project ${projectId}: parent company ${resolvedCompanyId} not found.`,
+    );
+    return;
+  }
+
+  const isUnregistered = company.gst_type === "Unregistered";
+  if (!company.gst_no && !isUnregistered) {
+    console.warn(
+      `[projectMaster] Skipped auto-creating trading ledger heads for project ${projectId}: parent company ${resolvedCompanyId} has no GST status/number on file yet.`,
     );
     return;
   }
@@ -58,12 +84,13 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
   if (existingLedger.recordset.length > 0) return;
 
   const ledgerName = `${projectName} (${company.name})`;
+  const hasLGSTType = await acctHeadHasLGSTType(pool);
 
   for (const [lHeadType, lHeadCode] of [
     ["C", custCode],
     ["S", suppCode],
   ]) {
-    await pool
+    const insertReq = pool
       .request()
       .input("LHeadName", sql.NVarChar(200), ledgerName)
       .input("LHeadCode", sql.NVarChar(20), lHeadCode)
@@ -71,22 +98,34 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
       .input("LHeadContactPerson", sql.VarChar(100), "N/A")
       .input("LHeadStatus", sql.Bit, 1)
       .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-      .input("LGST", sql.VarChar(20), company.gst_no)
+      .input("LGST", sql.VarChar(20), isUnregistered ? null : company.gst_no)
       .input("LCountry", sql.VarChar(50), "India")
       .input("LHeadPan", sql.NVarChar(50), company.pan_no || null)
       .input("LHeadType", sql.VarChar(50), lHeadType)
       .input("Status", sql.NVarChar(20), "Approved")
       .input("ApprovedBy", sql.NVarChar(100), createdBy)
-      .input("CreatedBy", sql.NVarChar(100), createdBy).query(`
-        INSERT INTO dbo.AccountHeadMaster
-          (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadStatus,
-           LHeadPaymentTerms, LGST, LCountry, LHeadPan, LHeadType, Status,
-           ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
-        VALUES
-          (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadStatus,
-           @LHeadPaymentTerms, @LGST, @LCountry, @LHeadPan, @LHeadType, @Status,
-           @ApprovedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
-      `);
+      .input("CreatedBy", sql.NVarChar(100), createdBy);
+
+    const cols = [
+      "LHeadName", "LHeadCode", "LHeadAddress", "LHeadContactPerson", "LHeadStatus",
+      "LHeadPaymentTerms", "LGST", "LCountry", "LHeadPan", "LHeadType", "Status",
+      "ApprovedBy", "ApprovedAt", "CreatedBy", "CreatedAt",
+    ];
+    const vals = [
+      "@LHeadName", "@LHeadCode", "@LHeadAddress", "@LHeadContactPerson", "@LHeadStatus",
+      "@LHeadPaymentTerms", "@LGST", "@LCountry", "@LHeadPan", "@LHeadType", "@Status",
+      "@ApprovedBy", "SYSDATETIME()", "@CreatedBy", "SYSDATETIME()",
+    ];
+    if (hasLGSTType) {
+      insertReq.input("LGSTType", sql.NVarChar(50), company.gst_type || (isUnregistered ? "Unregistered" : "Registered"));
+      cols.push("LGSTType");
+      vals.push("@LGSTType");
+    }
+
+    await insertReq.query(`
+      INSERT INTO dbo.AccountHeadMaster (${cols.join(", ")})
+      VALUES (${vals.join(", ")})
+    `);
   }
   await bumpCacheVersion("account-head-master");
 }
