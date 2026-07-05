@@ -21,7 +21,6 @@ import {
   Users,
   ChevronDown,
   SlidersHorizontal,
-  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";

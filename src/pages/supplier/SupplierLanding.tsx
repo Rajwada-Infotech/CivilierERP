@@ -2,7 +2,6 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/contexts/AuthContext";
 import * as spApi from "@/api/supplierPortalApi";
 import { toast } from "sonner";
 import {
@@ -94,7 +93,6 @@ function QuotationsSection({ quotations, loading }: {
   quotations: spApi.SupplierQuotationSummary[]; loading: boolean;
 }) {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
 
   const pending = quotations.filter((q) => q.MySubmissionStatus === "Pending");
   const submitted = quotations.filter((q) => q.MySubmissionStatus === "Submitted");
@@ -177,7 +175,6 @@ function PriceCatalogSection({ catalog, loading }: {
   catalog: spApi.SupplierCatalogItem[]; loading: boolean;
 }) {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [edits, setEdits] = useState<Record<string, string>>({});

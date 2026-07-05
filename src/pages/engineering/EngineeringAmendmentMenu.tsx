@@ -238,21 +238,6 @@ function toPayload(form: FormState): AmendmentPayload {
   };
 }
 
-function toFormState(a: Amendment): FormState {
-  return {
-    RefDocType: a.RefDocType ?? "",
-    RefDocId: a.RefDocId != null ? String(a.RefDocId) : "",
-    RefDocNo: a.RefDocNo ?? "",
-    ProjectName: a.ProjectName ?? "",
-    CompanyName: a.CompanyName ?? "",
-    Description: a.Description ?? "",
-    Reason: a.Reason ?? "",
-    AmendmentDate: a.AmendmentDate ?? "",
-    OriginalValue: a.OriginalValue != null ? String(a.OriginalValue) : "",
-    RevisedValue: a.RevisedValue != null ? String(a.RevisedValue) : "",
-  };
-}
-
 // ─── Normalise helpers ────────────────────────────────────────────────────────
 
 function normaliseWoRows(rows: any[]): DocRow[] {

@@ -1585,7 +1585,7 @@ export default function MaterialExpenseBooking() {
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
-  const [loadingEmi, setLoadingEmi] = useState(false);
+  const [loadingEmi, _setLoadingEmi] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
