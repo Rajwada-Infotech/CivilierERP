@@ -2,7 +2,6 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { TicketShell } from "@/components/ticket/TicketShell";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -525,13 +524,6 @@ function openAttachmentViewer(url: string, filename: string) {
   loadContent();
 }
 
-// ─── Attachment list ──────────────────────────────────────────────────────────
-
-function isImageUrl(url: string): boolean {
-  const clean = url.split("?")[0].toLowerCase();
-  return /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(clean);
-}
-
 // ─── DB-based attachment list component ──────────────────────────────────────
 // Uses /api/tickets/attachment/:id — no disk dependency, served directly from DB.
 
@@ -623,43 +615,6 @@ function parseAttachmentPath(raw: string): string[] {
 
   // Fallback: treat entire string as single URL
   return [trimmed];
-}
-
-function AttachmentList({ path: attachmentPath }: { path: string }) {
-  const urls = parseAttachmentPath(attachmentPath);
-
-  return (
-    <div className="flex flex-wrap gap-2 mt-1">
-      {urls.map((url, i) => {
-        const cleanUrl = url.split("?")[0].toLowerCase();
-        const isPdf = cleanUrl.endsWith(".pdf");
-        const filename = url.split("/").pop()?.split("?")[0] ?? `attachment-${i + 1}`;
-        if (isPdf) {
-          return (
-            <button
-              key={i}
-              onClick={() => openAttachmentViewer(url, filename)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
-            >
-              <Paperclip size={10} />{" "}
-              {filename.length > 20 ? `PDF ${i + 1}` : filename}
-            </button>
-          );
-        }
-        // For images AND unknown types, use AuthenticatedAttachmentImage
-        // (it will auto-detect non-image blobs and render as a link button instead)
-        return (
-          <AuthenticatedAttachmentImage
-            key={i}
-            url={url}
-            alt={`Attachment ${i + 1}`}
-            className="h-20 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-            onClick={() => openAttachmentViewer(url, filename)}
-          />
-        );
-      })}
-    </div>
-  );
 }
 
 // ─── Ticket List Card ─────────────────────────────────────────────────────────

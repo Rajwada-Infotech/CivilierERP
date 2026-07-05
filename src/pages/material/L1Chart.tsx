@@ -57,7 +57,6 @@ export default function L1Chart() {
     staleTime: 5 * 60_000,
   });
 
-  const selectedQuotation = comparableQuotations.find((q) => String(q.QuotationId) === quotationId);
 
   const priceMap = useMemo(() => {
     const m: Record<string, { Rate: number; SupplyDate: string | null; Quality: string | null }> = {};

@@ -20,7 +20,6 @@ import {
   FolderOpen,
   Hash,
   AlertTriangle,
-  TrendingDown,
   BarChart3,
   ShoppingCart,
   Package,

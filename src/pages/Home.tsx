@@ -601,40 +601,9 @@ function BgGrid() {
   );
 }
 
-// ─── Restricted tile (locked module placeholder) ──────────────────────────────
-function LockedCard({ title, delay = 0 }: { title: string; delay?: number }) {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-30px" });
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ y: 40, opacity: 0 }}
-      animate={inView ? { y: 0, opacity: 1 } : {}}
-      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="relative rounded-2xl border border-border/30 bg-muted/10 backdrop-blur-sm overflow-hidden opacity-40 cursor-not-allowed select-none"
-    >
-      <div className="h-[2px] w-full bg-border/30" />
-      <div className="px-5 pt-4 pb-5 flex flex-col gap-2">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-muted/40">
-            <ShieldCheck size={15} className="text-muted-foreground/40" />
-          </div>
-          <span className="font-heading font-bold text-sm text-muted-foreground/50 tracking-tight">
-            {title}
-          </span>
-        </div>
-        <p className="text-[10px] text-muted-foreground/30 font-medium">
-          Access restricted
-        </p>
-      </div>
-    </motion.div>
-  );
-}
-
 // ─── HomePage ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const { currentUser, canAccessPage } = useAuth();
-  const navigate = useNavigate();
 
   const role: UserRoleStr = currentUser?.role ?? "";
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";

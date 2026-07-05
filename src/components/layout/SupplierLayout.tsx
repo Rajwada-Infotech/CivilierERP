@@ -118,8 +118,6 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { theme } = useTheme();
   const isDark = theme !== "light";
-  const uid = currentUser?.id ?? "";
-
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
