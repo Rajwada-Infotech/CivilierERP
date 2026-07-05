@@ -37,6 +37,7 @@ export interface JournalVoucherSummary {
   CreatedBy: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
+  PostedToGL?: boolean;
 }
 
 export interface JournalVoucherDetail extends JournalVoucherSummary {
@@ -94,6 +95,24 @@ export const updateJournalVoucher = async (id: number, payload: JournalVoucherPa
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+};
+
+export const approveJournalVoucher = async (id: number, note?: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/approve`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  return handleResponse(res);
+};
+
+export const rejectJournalVoucher = async (id: number, note?: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/reject`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
   });
   return handleResponse(res);
 };
