@@ -1,4 +1,4 @@
-import { VideoPlay, Gallery, Profile2User, Hierarchy, Call, Location, Receipt21, Category2, Chart2, ArrowSwapHorizontal } from "iconsax-react";
+import { VideoPlay, Profile2User, Receipt21, Category2, Chart2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const salesAutomationNavItems: NavItem[] = [

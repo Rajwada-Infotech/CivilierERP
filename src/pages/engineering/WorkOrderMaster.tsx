@@ -2356,8 +2356,8 @@ const WorkOrdersList: React.FC<{
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [, setTotalPages] = useState(1);
+  const [, setTotal] = useState(0);
   const LIMIT = 10;
 
   const load = useCallback(async () => {
@@ -2939,8 +2939,6 @@ const WorkOrderEditPanel: React.FC<{
         });
 
         // Map server activities → local ActivityGroup[]
-        const uomArr = ensureArray<DropdownOption>(uomsRaw);
-
         const serverActs: WorkOrderActivityDetail[] =
           ensureArray<WorkOrderActivityDetail>(detail.activities);
         // Group by ActivityGroupName to reconstruct ActivityGroup[]
