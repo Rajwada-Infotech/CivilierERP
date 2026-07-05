@@ -83,6 +83,7 @@ router.get("/", authenticateToken, async (req, res) => {
 
     let query = `
       SELECT jv.JVID, jv.JVNo, jv.JVDate, jv.Narration, jv.CompanyId, jv.ProjectId,
+             co.name AS CompanyName, pr.name AS ProjectName,
              jv.Status, jv.CreatedBy, jv.CreatedAt,
              (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount,
              CASE WHEN EXISTS (
@@ -90,11 +91,34 @@ router.get("/", authenticateToken, async (req, res) => {
                WHERE gle.SourceType = 'JournalVoucher' AND gle.SourceId = jv.JVID AND gle.IsReversed = 0
              ) THEN 1 ELSE 0 END AS PostedToGL
       FROM dbo.JournalVoucher jv
+      LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
     `;
     if (conditions.length) query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY jv.JVDate DESC, jv.JVID DESC";
 
     const result = await request.query(query);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /ledger-options — every approved account head, any type ─────────────
+// A JV corrects account-head mismatches, which can involve Customer,
+// Supplier, and Bank heads just as often as pure GL heads — unlike
+// /api/general-ledger/options (used by Trial Balance etc.), which is
+// intentionally GL-only. Must be registered before "/:id" below, or Express
+// would treat "ledger-options" as an id.
+router.get("/ledger-options", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
+      FROM dbo.AccountHeadMaster
+      WHERE Status = 'Approved' AND ISNULL(LHeadStatus, 1) = 1
+      ORDER BY LHeadType, LHeadName
+    `);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -110,8 +134,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
 
     const header = await pool
       .request()
-      .input("id", sql.Int, id)
-      .query("SELECT * FROM dbo.JournalVoucher WHERE JVID = @id");
+      .input("id", sql.Int, id).query(`
+        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName
+        FROM dbo.JournalVoucher jv
+        LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
+        WHERE jv.JVID = @id
+      `);
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
 
     const lines = await pool

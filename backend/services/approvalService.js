@@ -399,7 +399,9 @@ async function transition(
     isApproveOrReject &&
     !allowedApproverRoles.includes((userRole || "").toLowerCase())
   ) {
-    throw new Error("You are not authorized to approve or reject records.");
+    const authErr = new Error("You are not authorized to approve or reject records.");
+    authErr.status = 403;
+    throw authErr;
   }
 
   // ── Status change + audit write happen atomically under a row lock ────────

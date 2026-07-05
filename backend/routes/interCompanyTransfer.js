@@ -362,6 +362,23 @@ async function priceItems(pool, senderProjectId, senderProjectName, items) {
   return pricedItems;
 }
 
+// Persists a single link column the moment its document is created, rather
+// than waiting until the entire chain finishes. If a later step in the
+// chain throws (a real incident that happened in production: GRN creation
+// failed on a code bug, leaving the ICT stuck "Approved" with every link
+// NULL and SO/SI/RP/PO already committed but untraceable from the header),
+// the header still shows exactly how far the chain got — turning a manual
+// forensic reconstruction into a simple "resume from here" story.
+async function persistLink(pool, ictId, column, value) {
+  if (!ictId || !value) return;
+  try {
+    await pool.request().input("id", sql.Int, ictId).input("v", sql.Int, value)
+      .query(`UPDATE dbo.InterCompanyTransfer SET ${column} = @v WHERE ICTId = @id`);
+  } catch (err) {
+    console.error(`[inter-company-transfer] failed to persist ${column}=${value} for ICT ${ictId} (non-fatal):`, err.message);
+  }
+}
+
 // Runs the full commercial-paper chain (SO -> SI -> Payment -> PO -> GRN ->
 // Expense Booking -> Payment) for an already-Approved ICT header. Only
 // called from PUT /:id/approve, once a super_admin has approved the
@@ -369,7 +386,42 @@ async function priceItems(pool, senderProjectId, senderProjectName, items) {
 // steps, matching the original "no manual work after approval" spec.
 async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
   const { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank, pricedItems, totalAmount, transferDate } = ctx;
-  const { finYear = null, referenceNumber = null, remarks = null } = opts;
+  const { finYear = null, referenceNumber = null, remarks = null, docNo = null, ictId = null } = opts;
+
+  // The GRN on the receiving side automatically credits the destination
+  // godown's StockLedger — but nothing on the sending side ever debited the
+  // sender's godown, so the same stock silently duplicated across both
+  // projects on every inter-company transfer. Deduct it here, mirroring
+  // stockTransfers.js's own OUT-entry shape, and fail before creating any
+  // documents if the sender doesn't actually have enough stock.
+  for (const item of pricedItems) {
+    const avail = await pool.request()
+      .input("itemId", sql.NVarChar(100), String(item.itemId))
+      .input("godownId", sql.Int, senderGodown.GodownID).query(`
+        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+        FROM dbo.StockLedger
+        WHERE ItemID = @itemId AND GodownID = @godownId
+      `);
+    const available = Number(avail.recordset[0].Available || 0);
+    if (available < item.qty) {
+      const err = new Error(
+        `Insufficient stock for item ${item.itemName || item.itemId} in sender project ${sender.ProjectName}: available=${available}, requested=${item.qty}.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+  for (const item of pricedItems) {
+    await pool.request()
+      .input("ItemID", sql.NVarChar(50), String(item.itemId))
+      .input("Qty", sql.Decimal(18, 2), item.qty)
+      .input("UOM", sql.NVarChar(20), item.uom || null)
+      .input("GodownID", sql.Int, senderGodown.GodownID)
+      .input("DocNo", sql.NVarChar(100), docNo).query(`
+        INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
+        VALUES (@ItemID,@Qty,@UOM,'OUT','ICT',0,@GodownID,@DocNo,GETDATE())
+      `);
+  }
 
   const soDocTypeId = await resolveDocType(pool, ["SO"], "Sale Order");
   const poDocTypeId = await resolveDocType(pool, ["DPO", "PO"], "Purchase Order");
@@ -399,6 +451,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
       finYear,
       SOItems: pricedItems,
     }, createdBy);
+    await persistLink(pool, ictId, "SaleOrderId", so.SaleOrderID);
 
     const si = await createSaleInvoiceInternal(pool, {
       SaleOrderID: so.SaleOrderID,
@@ -407,6 +460,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
       Remarks: `Auto-generated for inter-company transfer ${so.SaleOrderNo}`,
       RPFinYear: finYear,
     }, createdBy, createdBy);
+    await persistLink(pool, ictId, "SaleInvoiceId", si.SaleInvoiceID);
 
     const rp = await createReceivedPaymentInternal(pool, {
       RPCompanyName: sender.CompanyName,
@@ -426,6 +480,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
     }, createdBy);
     await pool.request().input("Id", sql.Int, rp.RPPaymentID).query("UPDATE dbo.ReceivedPayment SET RPStatus='Approved' WHERE RPPaymentID=@Id");
     await postReceivedPaymentApproval(pool, rp.RPPaymentID, createdBy);
+    await persistLink(pool, ictId, "ReceivedPaymentId", rp.RPPaymentID);
 
     const po = await createPurchaseOrderInternal(pool, {
       PODate: transferDate,
@@ -451,6 +506,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
       SourceSaleInvoiceDocNo: si.SaleInvoiceNo,
     }, createdBy);
     await approve("purchase-orders", po.PurchaseOrderID, createdBy, "System-approved inter-company transfer PO");
+    await persistLink(pool, ictId, "PurchaseOrderId", po.PurchaseOrderID);
 
     const grnItems = pricedItems.map((item) => ({
       itemId: item.itemId,
@@ -475,6 +531,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
       projectId: receiver.ProjectId,
     }, createdBy);
     await approve("grn", grn.GRNID, createdBy, "System-approved inter-company transfer GRN");
+    await persistLink(pool, ictId, "GRNId", grn.GRNID);
 
     const eb = await createExpenseBookingInternal(pool, {
       EName: senderSupplier.LHeadName,
@@ -490,6 +547,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
       ERemarks: `Auto expense booking for inter-company transfer ${si.SaleInvoiceNo}`,
     }, createdBy, opts.userId || null);
     await approve("expense-booking", eb.id, createdBy, "System-approved inter-company transfer invoice");
+    await persistLink(pool, ictId, "ExpenseBookingId", eb.id);
 
     const payment = await createApprovedPayment(pool, {
       PPaymentName: senderSupplier.LHeadName,
@@ -691,23 +749,15 @@ router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers"
     const links = await executeTransferChain(pool, ctx, createdBy, {
       remarks: ictRow.Remarks,
       userId: req.user?.userId || null,
+      docNo: ictRow.DocNo,
+      ictId: id,
     });
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("SaleOrderId", sql.Int, links.SaleOrderID)
-      .input("SaleInvoiceId", sql.Int, links.SaleInvoiceID)
-      .input("ReceivedPaymentId", sql.Int, links.ReceivedPaymentID)
-      .input("PurchaseOrderId", sql.Int, links.PurchaseOrderID)
-      .input("GRNId", sql.Int, links.GRNID)
-      .input("ExpenseBookingId", sql.Int, links.ExpenseBookingID)
-      .input("NewPaymentId", sql.Int, links.NewPaymentID).query(`
-        UPDATE dbo.InterCompanyTransfer
-        SET Status = 'Completed', SaleOrderId = @SaleOrderId, SaleInvoiceId = @SaleInvoiceId,
-            ReceivedPaymentId = @ReceivedPaymentId, PurchaseOrderId = @PurchaseOrderId,
-            GRNId = @GRNId, ExpenseBookingId = @ExpenseBookingId, NewPaymentId = @NewPaymentId
-        WHERE ICTId = @id
-      `);
+    // Every link was already persisted incrementally inside
+    // executeTransferChain as each document was created — this just flips
+    // the header to its final state once the whole chain succeeds.
+    await pool.request().input("id", sql.Int, id).input("NewPaymentId", sql.Int, links.NewPaymentID)
+      .query("UPDATE dbo.InterCompanyTransfer SET Status = 'Completed', NewPaymentId = @NewPaymentId WHERE ICTId = @id");
 
     await Promise.all([
       bumpCacheVersion("stock-transfers"),
