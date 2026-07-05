@@ -50,7 +50,7 @@ const LHEAD_TYPE_LABEL: Record<string, string> = {
 
 type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
 const emptyLine = (): JournalVoucherLineUI => ({
-  _id: crypto.randomUUID(),
+  _id: (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)),
   LHeadId: null,
   DebitAmount: 0,
   CreditAmount: 0,
