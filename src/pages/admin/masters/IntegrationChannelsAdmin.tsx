@@ -218,8 +218,7 @@ export default function IntegrationChannelsAdmin() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <AdminShell
+    <AdminShell
         title="Integration Channels"
         subtitle="Manage the channels available in the Communicator"
         icon={Plug}
@@ -449,6 +448,5 @@ export default function IntegrationChannelsAdmin() {
         </AlertDialogContent>
       </AlertDialog>
       </AdminShell>
-    </div>
   );
 }
