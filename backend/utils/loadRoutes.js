@@ -70,35 +70,48 @@ async function safeLoadRoutes(app, routes, options = {}) {
 }
 
 /**
- * Prints a clean summary table after route loading.
+ * Prints a boxed summary after route loading.
  */
 function printRoutesSummary(results, logger = console) {
   const { loaded, skipped, failed } = results;
   const total = loaded.length + skipped.length + failed.length;
 
-  const lines = [
-    "",
-    `✓ ${total} routes loaded  ·  OK ${loaded.length}  ·  WARN ${skipped.length}  ·  FAIL ${failed.length}`,
+  const allOk   = failed.length === 0 && skipped.length === 0;
+  const hasFail  = failed.length > 0;
+
+  const rows = [
+    `  Route Loading Summary`,
+    ``,
+    `  ✓  Loaded : ${loaded.length}`,
+    `  ⚠  Warn   : ${skipped.length}`,
+    `  ✗  Failed : ${failed.length}`,
+    `  ─  Total  : ${total}`,
   ];
 
-  if (failed.length > 0) {
-    lines.push("");
-    lines.push("  Failed routes:");
-    failed.forEach(({ label, error }) =>
-      lines.push(`    [FAIL] ${label}: ${error}`)
-    );
+  if (hasFail) {
+    rows.push(``, `  Failed routes:`);
+    failed.forEach(({ label, error }) => rows.push(`    • ${label}: ${error}`));
   }
 
   if (skipped.length > 0) {
-    lines.push("");
-    lines.push("  Skipped routes:");
-    skipped.forEach(({ label, reason }) =>
-      lines.push(`    [WARN] ${label}: ${reason}`)
-    );
+    rows.push(``, `  Skipped routes:`);
+    skipped.forEach(({ label, reason }) => rows.push(`    • ${label}: ${reason}`));
   }
 
-  lines.push("");
-  lines.forEach((l) => logger.info(l));
+  const width  = rows.reduce((m, r) => Math.max(m, r.length), 0) + 2;
+  const top    = `╔${"═".repeat(width)}╗`;
+  const bot    = `╚${"═".repeat(width)}╝`;
+  const sep    = `╠${"═".repeat(width)}╣`;
+  const box    = [
+    top,
+    `║${rows[0].padEnd(width)}║`,
+    sep,
+    ...rows.slice(1).map((r) => `║${r.padEnd(width)}║`),
+    bot,
+  ].join("\n");
+
+  const status = allOk ? "info" : hasFail ? "error" : "warn";
+  logger[status](`\n${box}\n`);
 }
 
 module.exports = { safeLoadRoutes, printRoutesSummary };
