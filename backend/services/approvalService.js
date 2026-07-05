@@ -278,15 +278,24 @@ async function getApprovedLevelCount(tableName, recordId, executor = null) {
 
 /**
  * Guard: prevent editing records that are Pending or fully Approved.
+ *
+ * @param {string} module
+ * @param {number} id
+ * @param {{ allowPostApproval?: boolean }} [opts] - When true, the Approved
+ *   block is skipped (caller has verified a "post-approval" right for this
+ *   page — see userHasEffectivePageRight in middleware/permissions.js). The
+ *   Pending block always applies regardless — a document mid-approval must
+ *   still be rejected first, that's a workflow decision, not a raw edit
+ *   permission.
  */
-async function guardEdit(module, id) {
+async function guardEdit(module, id, { allowPostApproval = false } = {}) {
   const status = await getRecordStatus(module, parseInt(id, 10));
   if (status === "Pending") {
     throw new Error(
       "Cannot edit a record that is pending approval. Reject it first.",
     );
   }
-  if (status === "Approved") {
+  if (status === "Approved" && !allowPostApproval) {
     throw new Error("Cannot edit an approved record.");
   }
 }

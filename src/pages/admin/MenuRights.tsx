@@ -24,10 +24,22 @@ import {
   saveUserPermissions,
   PagePermission,
 } from "@/api/userApi";
+import {
+  getRolesList,
+  getRolePermissions,
+  saveRolePermissions,
+} from "@/api/roleApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
-type PageAction = "view" | "create" | "edit" | "delete" | "print" | "export";
+type PageAction =
+  | "view"
+  | "create"
+  | "edit"
+  | "delete"
+  | "print"
+  | "export"
+  | "post-approval";
 
 interface PageDef {
   key: string;
@@ -45,6 +57,7 @@ const ALL_ACTIONS: { key: PageAction; label: string }[] = [
   { key: "delete", label: "Delete" },
   { key: "print", label: "Print" },
   { key: "export", label: "Export" },
+  { key: "post-approval", label: "Post-Approval" },
 ];
 
 // ─── MODULE COLORS ────────────────────────────────────────────────────────────
@@ -165,12 +178,23 @@ export default function MenuRights() {
       .finally(() => setLoadingDefs(false));
   }, []);
 
+  // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
+  type Subject = "user" | "role";
+  const [subject, setSubject] = useState<Subject>("user");
+
   const [users, setUsers] = useState<
     { id: number; name: string; role: string }[]
   >([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+
+  const [roles, setRoles] = useState<{ RId: number; RName: string }[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [roleSearch, setRoleSearch] = useState("");
+  const [loadingRoles, setLoadingRoles] = useState(true);
+
   const [pageSearch, setPageSearch] = useState("");
   const [moduleFilter, setModuleFilter] = useState<string>("All");
   const [permissions, setPermissions] = useState<PagePermission[]>([]);
@@ -187,14 +211,30 @@ export default function MenuRights() {
       .finally(() => setLoadingUsers(false));
   }, []);
 
-  const selectedUser = users.find((u) => u.id === selectedUserId);
-
-  // Load permissions when user selected
+  // Load roles
   useEffect(() => {
-    if (!selectedUserId) {
-      setPermissions([]);
-      return;
-    }
+    getRolesList()
+      .then(setRoles)
+      .catch(() => toast.error("Failed to load roles"))
+      .finally(() => setLoadingRoles(false));
+  }, []);
+
+  const selectedUser = users.find((u) => u.id === selectedUserId);
+  const selectedRole = roles.find((r) => r.RId === selectedRoleId);
+
+  // Switching subject mode clears the other mode's selection so state can't
+  // leak between "editing Sourav" and "editing Account's Head".
+  const switchSubject = useCallback((next: Subject) => {
+    setSubject(next);
+    setSelectedUserId(null);
+    setSelectedRoleId(null);
+    setPermissions([]);
+    setDirty(false);
+  }, []);
+
+  // Load permissions when a user is selected (user mode)
+  useEffect(() => {
+    if (subject !== "user" || !selectedUserId) return;
     setLoadingPerms(true);
     setDirty(false);
     getUserPermissions(selectedUserId)
@@ -204,9 +244,24 @@ export default function MenuRights() {
         setPermissions([]);
       })
       .finally(() => setLoadingPerms(false));
-  }, [selectedUserId]);
+  }, [subject, selectedUserId]);
+
+  // Load permissions when a role is selected (role mode)
+  useEffect(() => {
+    if (subject !== "role" || !selectedRoleId) return;
+    setLoadingPerms(true);
+    setDirty(false);
+    getRolePermissions(selectedRoleId)
+      .then(setPermissions)
+      .catch(() => {
+        toast.error("Failed to load role permissions");
+        setPermissions([]);
+      })
+      .finally(() => setLoadingPerms(false));
+  }, [subject, selectedRoleId]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const roleDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -217,10 +272,18 @@ export default function MenuRights() {
         setDropdownOpen(false);
         setUserSearch("");
       }
+      if (
+        roleDropdownRef.current &&
+        !roleDropdownRef.current.contains(e.target as Node)
+      ) {
+        setRoleDropdownOpen(false);
+        setRoleSearch("");
+      }
     };
-    if (dropdownOpen) document.addEventListener("mousedown", handler);
+    if (dropdownOpen || roleDropdownOpen)
+      document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [dropdownOpen]);
+  }, [dropdownOpen, roleDropdownOpen]);
 
   // ── Filtering ──────────────────────────────────────────────────────────────
   const modules = useMemo(
@@ -256,6 +319,14 @@ export default function MenuRights() {
         u.name.toLowerCase().includes(userSearch.toLowerCase()),
       ),
     [users, userSearch],
+  );
+
+  const filteredRoles = useMemo(
+    () =>
+      roles.filter((r) =>
+        r.RName.toLowerCase().includes(roleSearch.toLowerCase()),
+      ),
+    [roles, roleSearch],
   );
 
   // ── Permission helpers ─────────────────────────────────────────────────────
@@ -359,18 +430,36 @@ export default function MenuRights() {
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    if (!selectedUserId) return;
+    if (subject === "user") {
+      if (!selectedUserId) return;
+      setSaving(true);
+      try {
+        await saveUserPermissions(selectedUserId, permissions);
+        toast.success("Permissions saved successfully");
+        setDirty(false);
+      } catch {
+        toast.error("Failed to save permissions");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (!selectedRoleId) return;
     setSaving(true);
     try {
-      await saveUserPermissions(selectedUserId, permissions);
-      toast.success("Permissions saved successfully");
+      await saveRolePermissions(selectedRoleId, permissions);
+      toast.success(
+        "Role permissions saved — every user with this role gets these rights immediately",
+      );
       setDirty(false);
     } catch {
-      toast.error("Failed to save permissions");
+      toast.error("Failed to save role permissions");
     } finally {
       setSaving(false);
     }
-  }, [selectedUserId, permissions]);
+  }, [subject, selectedUserId, selectedRoleId, permissions]);
+
+  const hasSubjectSelected = subject === "user" ? !!selectedUser : !!selectedRole;
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(
@@ -392,7 +481,7 @@ export default function MenuRights() {
         subtitle="Configure per-user page and action permissions"
         icon={ShieldCheck}
         action={
-          selectedUser && (
+          hasSubjectSelected && (
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">
                 Quick presets:
@@ -410,100 +499,206 @@ export default function MenuRights() {
           )
         }
       >
-        {/* ── User Selector Card ───────────────────────────────────────────── */}
+        {/* ── Subject Selector Card ────────────────────────────────────────── */}
         <div
           className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 relative"
           style={{ zIndex: 40 }}
         >
-          <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-            <Users className="w-3.5 h-3.5" /> Select User
-          </label>
-
-          <div className="relative w-full max-w-sm" ref={dropdownRef}>
-            {/* Trigger button */}
-            <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
-            >
-              <span
-                className={
-                  selectedUser
-                    ? "text-foreground font-medium"
-                    : "text-muted-foreground"
-                }
+          <div className="flex items-center justify-between mb-3">
+            <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
+              <Users className="w-3.5 h-3.5" />
+              {subject === "user" ? "Select User" : "Select Role"}
+            </label>
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+              <button
+                onClick={() => switchSubject("role")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  subject === "role"
+                    ? "bg-card shadow text-foreground border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                {loadingUsers
-                  ? "Loading users…"
-                  : selectedUser
-                    ? selectedUser.name
-                    : "Choose a user…"}
-              </span>
-              <div className="flex items-center gap-2">
-                {selectedUser && (
-                  <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {selectedUser.role}
-                  </span>
-                )}
+                Role-wise
+              </button>
+              <button
+                onClick={() => switchSubject("user")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  subject === "user"
+                    ? "bg-card shadow text-foreground border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Custom User-wise
+              </button>
+            </div>
+          </div>
+          {subject === "role" && (
+            <p className="text-xs text-muted-foreground/70 mb-3">
+              Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) can only add on top of this.
+            </p>
+          )}
+
+          {subject === "user" ? (
+            <div className="relative w-full max-w-sm" ref={dropdownRef}>
+              {/* Trigger button */}
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
+              >
+                <span
+                  className={
+                    selectedUser
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {loadingUsers
+                    ? "Loading users…"
+                    : selectedUser
+                      ? selectedUser.name
+                      : "Choose a user…"}
+                </span>
+                <div className="flex items-center gap-2">
+                  {selectedUser && (
+                    <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      {selectedUser.role}
+                    </span>
+                  )}
+                  <ChevronDown
+                    size={15}
+                    className={`text-muted-foreground transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+                  />
+                </div>
+              </button>
+
+              {/* Dropdown panel */}
+              {dropdownOpen && (
+                <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+                  <div className="p-2.5 border-b border-border bg-muted/40">
+                    <div className="relative">
+                      <Search
+                        size={13}
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <input
+                        autoFocus
+                        placeholder="Search user…"
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                  <ul className="max-h-60 overflow-auto py-1">
+                    {filteredUsers.length === 0 ? (
+                      <li className="px-4 py-3 text-sm text-muted-foreground text-center">
+                        No users found
+                      </li>
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <li key={u.id}>
+                          <button
+                            onClick={() => {
+                              setSelectedUserId(u.id);
+                              setDropdownOpen(false);
+                              setUserSearch("");
+                            }}
+                            className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
+                          >
+                            <div>
+                              <div className="text-sm font-medium text-foreground">
+                                {u.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground capitalize">
+                                {u.role.replace(/_/g, " ")}
+                              </div>
+                            </div>
+                            {selectedUserId === u.id && (
+                              <Check size={14} className="text-primary" />
+                            )}
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="relative w-full max-w-sm" ref={roleDropdownRef}>
+              {/* Trigger button */}
+              <button
+                onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
+              >
+                <span
+                  className={
+                    selectedRole
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {loadingRoles
+                    ? "Loading roles…"
+                    : selectedRole
+                      ? selectedRole.RName
+                      : "Choose a role…"}
+                </span>
                 <ChevronDown
                   size={15}
-                  className={`text-muted-foreground transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+                  className={`text-muted-foreground transition-transform duration-200 ${roleDropdownOpen ? "rotate-180" : ""}`}
                 />
-              </div>
-            </button>
+              </button>
 
-            {/* Dropdown panel */}
-            {dropdownOpen && (
-              <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                <div className="p-2.5 border-b border-border bg-muted/40">
-                  <div className="relative">
-                    <Search
-                      size={13}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    />
-                    <input
-                      autoFocus
-                      placeholder="Search user…"
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
+              {/* Dropdown panel */}
+              {roleDropdownOpen && (
+                <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+                  <div className="p-2.5 border-b border-border bg-muted/40">
+                    <div className="relative">
+                      <Search
+                        size={13}
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <input
+                        autoFocus
+                        placeholder="Search role…"
+                        value={roleSearch}
+                        onChange={(e) => setRoleSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
                   </div>
-                </div>
-                <ul className="max-h-60 overflow-auto py-1">
-                  {filteredUsers.length === 0 ? (
-                    <li className="px-4 py-3 text-sm text-muted-foreground text-center">
-                      No users found
-                    </li>
-                  ) : (
-                    filteredUsers.map((u) => (
-                      <li key={u.id}>
-                        <button
-                          onClick={() => {
-                            setSelectedUserId(u.id);
-                            setDropdownOpen(false);
-                            setUserSearch("");
-                          }}
-                          className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
-                        >
-                          <div>
-                            <div className="text-sm font-medium text-foreground">
-                              {u.name}
-                            </div>
-                            <div className="text-xs text-muted-foreground capitalize">
-                              {u.role.replace(/_/g, " ")}
-                            </div>
-                          </div>
-                          {selectedUserId === u.id && (
-                            <Check size={14} className="text-primary" />
-                          )}
-                        </button>
+                  <ul className="max-h-60 overflow-auto py-1">
+                    {filteredRoles.length === 0 ? (
+                      <li className="px-4 py-3 text-sm text-muted-foreground text-center">
+                        No roles found
                       </li>
-                    ))
-                  )}
-                </ul>
-              </div>
-            )}
-          </div>
+                    ) : (
+                      filteredRoles.map((r) => (
+                        <li key={r.RId}>
+                          <button
+                            onClick={() => {
+                              setSelectedRoleId(r.RId);
+                              setRoleDropdownOpen(false);
+                              setRoleSearch("");
+                            }}
+                            className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
+                          >
+                            <div className="text-sm font-medium text-foreground">
+                              {r.RName}
+                            </div>
+                            {selectedRoleId === r.RId && (
+                              <Check size={14} className="text-primary" />
+                            )}
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Loading page definitions */}
@@ -515,11 +710,13 @@ export default function MenuRights() {
         )}
 
         {/* Main panel */}
-        {!selectedUser ? (
+        {!hasSubjectSelected ? (
           <div className="flex flex-col items-center justify-center h-56 rounded-xl border border-dashed border-border bg-card/40 text-muted-foreground">
             <ShieldCheck className="w-12 h-12 opacity-20 mb-3" />
             <p className="text-sm font-heading">
-              Select a user to manage permissions
+              {subject === "user"
+                ? "Select a user to manage permissions"
+                : "Select a role to manage its baseline permissions"}
             </p>
           </div>
         ) : loadingPerms ? (
@@ -531,14 +728,16 @@ export default function MenuRights() {
             {/* Toolbar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-card/60">
               <div className="flex items-center gap-3 flex-wrap">
-                {/* User badge */}
+                {/* Subject badge */}
                 <div className="flex items-center gap-2">
                   <ShieldCheck size={14} className="text-primary" />
                   <span className="text-sm font-heading font-semibold text-foreground">
-                    {selectedUser.name}
+                    {subject === "user" ? selectedUser?.name : selectedRole?.RName}
                   </span>
                   <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground capitalize">
-                    {selectedUser.role.replace(/_/g, " ")}
+                    {subject === "user"
+                      ? selectedUser?.role.replace(/_/g, " ")
+                      : "role baseline"}
                   </span>
                 </div>
                 {/* Stats */}
