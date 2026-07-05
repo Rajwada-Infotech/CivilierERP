@@ -1229,10 +1229,10 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
-  let bookingAmount = EAmount;
-  let bookingNetAmount = ENetAmount;
-  let bookingCgstRate = ECgstRate;
-  let bookingSgstRate = ESgstRate;
+  let bookingAmount;
+  let bookingNetAmount;
+  let bookingCgstRate;
+  let bookingSgstRate;
 
   try {
     await transaction.begin();
@@ -1643,10 +1643,10 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
-  let bookingAmount = EAmount;
-  let bookingNetAmount = ENetAmount;
-  let bookingCgstRate = ECgstRate;
-  let bookingSgstRate = ESgstRate;
+  let bookingAmount;
+  let bookingNetAmount;
+  let bookingCgstRate;
+  let bookingSgstRate;
 
   try {
     await transaction.begin();
