@@ -86,10 +86,10 @@ function printRoutesSummary(results, logger = console) {
     return `  ${label} ${dots} ${val}`;
   };
 
-  const bar    = "#".repeat(W + 4);
-  const spacer = `#${" ".repeat(W + 2)}#`;
-  const mid    = "#" + "-".repeat(W + 2) + "#";
-  const wrap   = (s) => `#  ${s.padEnd(W)}#`;
+  const bar    = `+${"-".repeat(W + 2)}+`;
+  const spacer = `|${" ".repeat(W + 2)}|`;
+  const mid    = `+${"-".repeat(W + 2)}+`;
+  const wrap   = (s) => `|  ${s.padEnd(W)}|`;
 
   const lines  = [
     bar,

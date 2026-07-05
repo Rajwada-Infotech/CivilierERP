@@ -47,17 +47,17 @@ function printBanner(port) {
   const time = new Date().toLocaleTimeString();
 
   const W      = 42;
-  const bar    = "#".repeat(W + 4);
-  const spacer = `#${" ".repeat(W + 2)}#`;
-  const mid    = "#" + "-".repeat(W + 2) + "#";
-  const wrap   = (s) => `#  ${s.padEnd(W)}#`;
+  const top    = `+${"-".repeat(W + 2)}+`;
+  const spacer = `|${" ".repeat(W + 2)}|`;
+  const mid    = `+${"-".repeat(W + 2)}+`;
+  const wrap   = (s) => `|  ${s.padEnd(W)}|`;
   const leader = (label, value) => {
     const dots = ".".repeat(Math.max(3, W - label.length - value.length - 2));
     return `  ${label} ${dots} ${value}`;
   };
 
   const lines = [
-    bar,
+    top,
     spacer,
     wrap(`  CivilierERP  >>  API Server`),
     spacer,
@@ -68,7 +68,7 @@ function printBanner(port) {
     wrap(leader("NODE", node)),
     wrap(leader("TIME", time)),
     spacer,
-    bar,
+    top,
   ];
 
   process.stdout.write(`\n${lines.join("\n")}\n\n`);
