@@ -173,7 +173,7 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
     expect(res.status).toBe(200);
     expect(insertedLedgerHeads.length).toBe(2);
     // LGST must be null (not fabricated), LGSTType must record 'Unregistered'.
-    expect(insertedLedgerHeads.every((q) => /@LGSTType/.test(q))).toBe(true);
+    expect(insertedLedgerHeads.every((q) => /@LGSTType/.test(q.sql))).toBe(true);
   });
 
   test("skips ledger-head creation entirely when the project has no company_id", async () => {
