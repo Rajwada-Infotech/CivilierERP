@@ -251,14 +251,23 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get("/summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    // Default to Completed only — a Pending/Rejected request never actually
+    // moved stock or money, so counting it here would overstate real
+    // inter-company transfer volume. Pass ?status= to see other statuses.
+    const status = req.query.status || "Completed";
+    const request = pool.request();
+    let query = `
       SELECT YEAR(TransferDate) AS Year,
              COUNT(*) AS TransferCount,
              SUM(TotalAmount) AS TotalAmount
       FROM dbo.InterCompanyTransfer
-      GROUP BY YEAR(TransferDate)
-      ORDER BY Year DESC
-    `);
+    `;
+    if (status !== "all") {
+      request.input("status", sql.NVarChar(20), status);
+      query += " WHERE Status = @status";
+    }
+    query += " GROUP BY YEAR(TransferDate) ORDER BY Year DESC";
+    const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
