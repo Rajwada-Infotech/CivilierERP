@@ -17,28 +17,16 @@ import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Calendar,
-  Download,
-  FileText,
   RefreshCw,
   ChevronDown,
-  ChevronRight,
-  Building2,
   HardHat,
-  Wrench,
   ClipboardList,
-  IndianRupee,
-  Hash,
   AlertCircle,
-  CheckCircle2,
-  Clock,
   Layers,
   Hammer,
-  ArrowUpRight,
-  Filter,
   Printer,
   FileSpreadsheet,
   TrendingUp,
-  Package,
   Activity,
 } from "lucide-react";
 

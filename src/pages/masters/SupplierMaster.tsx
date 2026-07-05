@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -408,10 +408,10 @@ const SupplierMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [sortField, setSortField] = useState<
+  const [sortField] = useState<
     "LHeadName" | "LHeadContactPerson" | "LHeadPhone"
   >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc] = useState(true);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {

@@ -19,8 +19,6 @@ import {
   X,
   ClipboardList,
   Edit3,
-  Building2,
-  FolderOpen,
   Hash,
   AlertTriangle,
   CheckCircle2,
@@ -49,7 +47,6 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { toShortFinYear } from "@/utils/finYear";
-import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -159,21 +156,6 @@ const Field = ({
   </div>
 );
 
-const DetailRow = ({
-  label,
-  value,
-}: {
-  label: string;
-  value?: React.ReactNode;
-}) => (
-  <div>
-    <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">
-      {label}
-    </p>
-    <div className="font-medium text-foreground">{value ?? "—"}</div>
-  </div>
-);
-
 const fmtDate = (d?: string | null) =>
   d
     ? new Date(d).toLocaleDateString("en-IN", {
@@ -187,7 +169,6 @@ const fmtDate = (d?: string | null) =>
 
 export default function MaterialRequest() {
   const rights = usePageRights("material-request");
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -443,16 +424,6 @@ export default function MaterialRequest() {
     },
     onError: (err: any) =>
       toast.error(err.message || "Failed to delete request"),
-  });
-
-  const submitMutation = useMutation({
-    mutationFn: mrApi.submitMaterialRequest,
-    onSuccess: () => {
-      toast.success("Submitted for approval");
-      invalidate();
-      goToList();
-    },
-    onError: (err: any) => toast.error(err.message || "Failed to submit"),
   });
 
   const isSaving = createMutation.isPending || updateMutation.isPending;

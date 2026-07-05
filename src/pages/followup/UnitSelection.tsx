@@ -1,13 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2,
   CalendarDays,
   Edit2,
   Home,
-  IndianRupee,
-  Layers,
   MapPin,
   Plus,
   RefreshCw,
@@ -17,12 +13,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FollowupShell } from "@/components/followup/FollowupShell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -687,9 +681,7 @@ function FormDialog({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function UnitSelectionPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { currentUser } = useAuth();
   const rights = usePageRights("followup-unit-selections");
 
   const [search, setSearch] = useState("");

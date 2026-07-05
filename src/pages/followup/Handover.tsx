@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -462,7 +461,6 @@ function ChecklistToggle({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function HandoverPage() {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const rights = usePageRights("followup-handover");
 

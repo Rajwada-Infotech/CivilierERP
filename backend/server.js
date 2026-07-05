@@ -24,7 +24,7 @@ const {
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
 const { initSocket } = require("./socket");
-const { ALLOWED_ORIGINS, isOriginAllowed } = require("./config/origins");
+const { isOriginAllowed } = require("./config/origins");
 const { validateApprovalModuleMap } = require("./services/approvalService");
 
 const {

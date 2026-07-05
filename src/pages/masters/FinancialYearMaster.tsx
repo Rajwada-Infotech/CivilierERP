@@ -45,8 +45,6 @@ const toPayload = (r: Record<string, unknown>) => ({
 const FinancialYearMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
-
   const {
     data: dbData,
     isLoading,

@@ -6,7 +6,6 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
@@ -21,11 +20,7 @@ import {
   Hammer,
   Plus,
   RefreshCw,
-  FileText,
   PenSquare,
-  CheckCircle2,
-  Clock,
-  IndianRupee,
   Building2,
   Layers,
   Calendar,

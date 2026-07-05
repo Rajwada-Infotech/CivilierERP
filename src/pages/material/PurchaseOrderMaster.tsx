@@ -7,7 +7,6 @@ import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -45,7 +44,6 @@ import {
 } from "@/api/purchaseOrdersApi";
 import {
   type MRPOPrefill,
-  getMRPOPrefillByDocNo,
   getMRPOPrefill,
   getApprovedMRList,
 } from "@/api/materialRequestApi";
@@ -65,7 +63,6 @@ import {
   Hash,
   FileText,
   Eye,
-  PenSquare,
   ArrowLeft,
   Search,
   RefreshCw,
@@ -76,7 +73,6 @@ import {
   Check,
   ShoppingCart,
   Boxes,
-  Filter,
   User,
   ClipboardList,
   X,
@@ -306,10 +302,6 @@ const FieldLabel: React.FC<{
   </label>
 );
 
-const SelectSkeleton = () => (
-  <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
-);
-
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
 const getStatusConfig = (status: string) => {
@@ -400,9 +392,8 @@ const PurchaseOrderMaster: React.FC = () => {
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
   const poDocTypeIdRef = useRef<number | null>(null);
   const [poDocNo, setPoDocNo] = useState("");
-  const [, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
   const [, setPoFormPatchKey] = useState(0);
-  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
+  const [, setDocRefreshTrigger] = useState(0);
 
   // ── PO doc types (for the plain Document Type & Number select) ───────────
   const [poDocTypes, setPoDocTypes] = useState<DocType[]>([]);
@@ -469,7 +460,6 @@ const PurchaseOrderMaster: React.FC = () => {
     }[];
   } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);

@@ -29,7 +29,6 @@ import {
   Wrench,
   LineChart,
   ShoppingCart,
-  Receipt,
   Megaphone,
   Pickaxe,
 } from "lucide-react";
@@ -54,135 +53,6 @@ function isPrivileged(role: UserRoleStr) {
   return ["super_admin", "admin", "dba"].includes(role);
 }
 
-// Module-level access matrix (mirrors engineerModules in TopNavbar)
-function getAccessibleModules(role: UserRoleStr) {
-  if (isPrivileged(role)) {
-    return {
-      finance: true,
-      material: true,
-      engineering: true,
-      followup: true,
-      ticket: true,
-      approvals: true,
-      admin: true,
-      dba: role === "dba",
-      sales: true,
-      salesAutomation: true,
-    };
-  }
-  if (role === "marketing_head") {
-    return {
-      finance: false,
-      material: false,
-      engineering: false,
-      followup: false,
-      ticket: false,
-      approvals: false,
-      admin: false,
-      dba: false,
-      sales: true,
-      salesAutomation: true,
-    };
-  }
-  if (role === "engineer") {
-    return {
-      finance: false,
-      material: false, // engineers don't get material in TopNavbar
-      engineering: true,
-      followup: true,
-      ticket: true,
-      approvals: false, // approval inbox is admin-gated
-      admin: false,
-      dba: false,
-      sales: false,
-      salesAutomation: false,
-    };
-  }
-  // Fallback — should not be reached for "user" role (handled by deriveUserModuleAccess at call site)
-  return {
-    finance: false,
-    material: false,
-    engineering: false,
-    followup: false,
-    ticket: true,
-    approvals: false,
-    admin: false,
-    dba: false,
-    sales: false,
-    salesAutomation: false,
-  };
-}
-
-// For "user" role, derive module access from pagePermissions.
-// A module is visible if the user has view access to at least one of its pages.
-function deriveUserModuleAccess(
-  pagePermissions: { page: string; actions: string[] }[],
-) {
-  const pages = new Set(
-    pagePermissions
-      .filter((p) => p.actions.includes("view"))
-      .map((p) => p.page),
-  );
-
-  const hasAny = (...keys: string[]) => keys.some((k) => pages.has(k));
-
-  return {
-    finance: hasAny(
-      "finance-dashboard",
-      "new-payment",
-      "received-payment",
-      "brs",
-      "transactions",
-    ),
-    material: hasAny(
-      "material-dashboard",
-      "material-request",
-      "purchase-orders",
-      "vehicle-in-out",
-      "grn-master",
-      "material-issues",
-      "expense-booking",
-      "stock-ledger",
-      "stock-transfers",
-      "debit-note",
-      "amendments",
-    ),
-    engineering: hasAny(
-      "engineering-dashboard",
-      "boq",
-      "engineering-work-order",
-      "work-done",
-      "dpr",
-    ),
-    followup: hasAny(
-      "followup-dashboard",
-      "followup-applications",
-      "followup-applicants",
-      "followup-bookings",
-      "followup-unit-selections",
-      "followup-welcome-calls",
-      "followup-agreements",
-      "followup-legal-milestones",
-      "followup-document-vault",
-      "followup-communicator",
-      "followup-demands",
-      "followup-payments",
-      "followup-construction-updates",
-      "followup-noc",
-      "followup-sales-deed",
-      "followup-pre-possession",
-      "followup-possession-notice",
-      "followup-handover",
-      "followup-tasks",
-      "followup-reminders",
-    ),
-    sales: hasAny("sale-order", "sale-invoice", "sales-payment"),
-    ticket: true, // ticket module is open to all non-customer roles
-    approvals: false,
-    admin: false,
-    dba: false,
-  };
-}
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
 function AnimatedCounter({
@@ -601,40 +471,9 @@ function BgGrid() {
   );
 }
 
-// ─── Restricted tile (locked module placeholder) ──────────────────────────────
-function LockedCard({ title, delay = 0 }: { title: string; delay?: number }) {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-30px" });
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ y: 40, opacity: 0 }}
-      animate={inView ? { y: 0, opacity: 1 } : {}}
-      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="relative rounded-2xl border border-border/30 bg-muted/10 backdrop-blur-sm overflow-hidden opacity-40 cursor-not-allowed select-none"
-    >
-      <div className="h-[2px] w-full bg-border/30" />
-      <div className="px-5 pt-4 pb-5 flex flex-col gap-2">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-muted/40">
-            <ShieldCheck size={15} className="text-muted-foreground/40" />
-          </div>
-          <span className="font-heading font-bold text-sm text-muted-foreground/50 tracking-tight">
-            {title}
-          </span>
-        </div>
-        <p className="text-[10px] text-muted-foreground/30 font-medium">
-          Access restricted
-        </p>
-      </div>
-    </motion.div>
-  );
-}
-
 // ─── HomePage ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const { currentUser, canAccessPage } = useAuth();
-  const navigate = useNavigate();
 
   const role: UserRoleStr = currentUser?.role ?? "";
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";

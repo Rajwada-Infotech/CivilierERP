@@ -377,7 +377,6 @@ export default function AskCivilierAI() {
             // Decide whether to open panel above or below, left or right of orb
             const spaceAbove = orbPos.y;
             const spaceLeft = orbPos.x;
-            const panelW = Math.min(window.innerWidth * 0.9, 360);
             const panelH = 420; // approximate max panel height
             const above = spaceAbove > panelH + 12;
             const alignRight = spaceLeft + ORB_SIZE / 2 > window.innerWidth / 2;

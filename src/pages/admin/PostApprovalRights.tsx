@@ -25,7 +25,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -460,17 +459,6 @@ export default function PostApprovalRights() {
     setShowPanel(true);
   }, []);
 
-  const openEdit = useCallback((user: AppUser) => {
-    setSelectedUser(user);
-    setPending(
-      (user.pagePermissions ?? []).map((p) => ({
-        page: p.page,
-        actions: [...p.actions],
-      })),
-    );
-    setShowPanel(true);
-  }, []);
-
   const closePanel = useCallback(() => {
     setShowPanel(false);
     setSelectedUser(null);
@@ -490,18 +478,6 @@ export default function PostApprovalRights() {
       setSaving(false);
     }
   }, [selectedUser, pendingPermissions, updateUserPagePermissions, closePanel]);
-
-  const handleToggle = useCallback(
-    async (userId: string) => {
-      try {
-        await toggleUserStatus(userId);
-        toast.success("User status updated");
-      } catch {
-        toast.error("Failed to update status");
-      }
-    },
-    [toggleUserStatus],
-  );
 
   const handleDelete = useCallback(async () => {
     if (!deletingUserId) return;

@@ -12,7 +12,6 @@ const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Bookings";
 
 const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
-const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
 
 router.use(authMiddleware);
 

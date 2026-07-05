@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -8,7 +7,6 @@ import {
   Search,
   X,
   FileText,
-  Building2,
   User,
   CalendarDays,
   IndianRupee,
@@ -23,10 +21,8 @@ import {
   ChevronLeft,
   ChevronRight,
   StickyNote,
-  Home,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -413,9 +409,7 @@ function Combobox({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function AgreementsPage() {
-  const navigate = useNavigate();
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
   const rights = usePageRights("followup-agreements");
 
   const [search, setSearch] = useState("");

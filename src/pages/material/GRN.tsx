@@ -10,7 +10,6 @@ import {
   Truck,
   Package,
   Trash2,
-  Edit3,
   Save,
   X,
   Search,
@@ -25,18 +24,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Building2,
   ChevronDown,
   Hash,
   Filter,
-  Layers,
   AlertTriangle,
   Printer,
   CopyPlus,
   Warehouse,
   ArrowLeftRight,
   ArrowLeft,
-  RefreshCw,
   RotateCcw,
   BookOpen,
   Landmark,
@@ -353,38 +349,6 @@ const inp =
 
 const inpSel =
   "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
-
-// ─── GRN Chain Badge ──────────────────────────────────────────────────────────
-function GRNChainBadge({ grnId }: { grnId: number }) {
-  const [chain, setChain] = useState<{
-    expenseCount: number;
-    isPaid: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!grnId) return;
-    fetchWithAuth(
-      `/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
-    )
-      .then((r) => r.json().catch(() => ({})))
-      .then(setChain)
-      .catch(() => {});
-  }, [grnId]);
-
-  if (!chain || chain.expenseCount === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 whitespace-nowrap">
-        ✓ Exp. Booked
-      </span>
-      {chain.isPaid && (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
-          ✓ Paid
-        </span>
-      )}
-    </div>
-  );
-}
 
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
 interface LinkedBooking {
@@ -929,10 +893,7 @@ export default function GRN() {
 
   // Derive the financial year string from a date string using Indian FY rule (Apr–Mar).
   // e.g. 2026-01-15 → "2025-2026",  2026-05-10 → "2026-2027"
-  const { data: uomsData = [] } = useQuery({
-    queryKey: ["uomMaster"],
-    queryFn: grnApi.getUoms,
-  });
+  useQuery({ queryKey: ["uomMaster"], queryFn: grnApi.getUoms });
 
   const { data: grnNumberPreview, isFetching: loadingPreview } = useQuery({
     queryKey: ["grns", "next-number", formData.parentDocNo],

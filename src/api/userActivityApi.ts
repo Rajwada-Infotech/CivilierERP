@@ -181,7 +181,6 @@ export const deleteActivityHistory = async (): Promise<{ message: string }> => {
 
 import {
   connectSocket,
-  getSocket,
   disconnectSocket as _disconnectSocket,
 } from "@/lib/socket";
 
