@@ -46,33 +46,29 @@ function printBanner(port) {
   const node = process.version;
   const time = new Date().toLocaleTimeString();
 
-  const pad = (label, value, w) => {
-    const entry = `  ${label}  ${value}`;
-    return entry.padEnd(w);
+  const W      = 42;
+  const bar    = "#".repeat(W + 4);
+  const spacer = `#${" ".repeat(W + 2)}#`;
+  const mid    = "#" + "-".repeat(W + 2) + "#";
+  const wrap   = (s) => `#  ${s.padEnd(W)}#`;
+  const leader = (label, value) => {
+    const dots = ".".repeat(Math.max(3, W - label.length - value.length - 2));
+    return `  ${label} ${dots} ${value}`;
   };
 
-  const title  = "  CivilierERP  /  API Server";
-  const fields = [
-    ["URL  :", `http://localhost:${port}`],
-    ["ENV  :", env],
-    ["NODE :", node],
-    ["TIME :", time],
-  ];
-
-  const innerW = Math.max(title.length, ...fields.map(([l, v]) => `  ${l}  ${v}`.length)) + 4;
-
-  const row  = (s) => `|  ${s.padEnd(innerW - 2)}|`;
-  const rule = `+${"-".repeat(innerW)}+`;
-  const thick = `+${"=".repeat(innerW)}+`;
-
   const lines = [
-    thick,
-    row(title),
-    rule,
-    row(""),
-    ...fields.map(([label, value]) => row(`${label}  ${value}`)),
-    row(""),
-    thick,
+    bar,
+    spacer,
+    wrap(`  CivilierERP  >>  API Server`),
+    spacer,
+    mid,
+    spacer,
+    wrap(leader("URL",  `http://localhost:${port}`)),
+    wrap(leader("ENV",  env)),
+    wrap(leader("NODE", node)),
+    wrap(leader("TIME", time)),
+    spacer,
+    bar,
   ];
 
   process.stdout.write(`\n${lines.join("\n")}\n\n`);
