@@ -56,7 +56,6 @@ const fmtDate = (d: string) =>
     year: "numeric",
   });
 
-const today = new Date().toISOString().slice(0, 10);
 
 interface TItem {
   itemId: string;
@@ -99,10 +98,10 @@ function FilterSelect({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   placeholder: string;
-  color: "blue" | "violet";
+  color: "emerald" | "violet";
 }) {
   const c =
-    color === "blue"
+    color === "emerald"
       ? {
           border: "border-emerald-400/40 focus:border-emerald-500/60",
           bg: "bg-emerald-500/[0.05]",
@@ -900,11 +899,15 @@ function TransferHistory() {
   const [grnMap, setGrnMap] = useState<Record<number, TransferGRNSummary[]>>(
     {},
   );
+  const grnFetchInFlightRef = useRef<Set<number>>(new Set());
 
   // After data loads, fetch GRN status for each transfer in background
   useEffect(() => {
     if (!transfers.length) return;
     transfers.forEach((t) => {
+      if (grnFetchInFlightRef.current.has(t.TransferID)) return;
+      if (grnMap[t.TransferID]) return;
+      grnFetchInFlightRef.current.add(t.TransferID);
       getGRNsByTransfer(t.TransferID)
         .then((grns) => {
           if (grns.length) {
@@ -913,9 +916,12 @@ function TransferHistory() {
         })
         .catch(() => {
           /* non-fatal */
+        })
+        .finally(() => {
+          grnFetchInFlightRef.current.delete(t.TransferID);
         });
     });
-  }, [transfers]);
+  }, [transfers, grnMap]);
 
   const handleGRNSuccess = (grnNo: string) => {
     setSuccessGrnNo(grnNo);
@@ -1158,6 +1164,7 @@ function TransferHistory() {
 export default function StockTransfer() {
   const rights = usePageRights("stock-transfers");
   const qc = useQueryClient();
+  const today = new Date().toISOString().slice(0, 10);
 
   const [activeTab, setActiveTab] = useState<"transfer" | "history">(
     "transfer",
@@ -1534,7 +1541,7 @@ export default function StockTransfer() {
                   }}
                   options={companyOptions}
                   placeholder="All companies"
-                  color="blue"
+                  color="emerald"
                 />
                 <FilterSelect
                   icon={FolderKanban}
@@ -1572,7 +1579,7 @@ export default function StockTransfer() {
                     onChange={(v) => { setToCompanyId(v); setToGodownId(null); }}
                     options={companyOptions.filter((o) => o.value !== filterCompanyId)}
                     placeholder="Select destination company"
-                    color="blue"
+                    color="emerald"
                   />
                 )}
                 <GodownSelect

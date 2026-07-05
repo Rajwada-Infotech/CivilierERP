@@ -35,7 +35,9 @@ import { getLedgerOptions, type LedgerOption } from "@/api/generalLedgerApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 
-const emptyLine = (): JournalVoucherLine => ({
+type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
+const emptyLine = (): JournalVoucherLineUI => ({
+  _id: crypto.randomUUID(),
   LHeadId: null,
   DebitAmount: 0,
   CreditAmount: 0,
@@ -75,7 +77,7 @@ export default function JournalVoucher() {
   const [saving, setSaving] = useState(false);
   const [jvDate, setJvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState("");
-  const [lines, setLines] = useState<JournalVoucherLine[]>([emptyLine(), emptyLine()]);
+  const [lines, setLines] = useState<JournalVoucherLineUI[]>([emptyLine(), emptyLine()]);
 
   const load = async () => {
     setLoading(true);
@@ -338,7 +340,7 @@ export default function JournalVoucher() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {lines.map((line, idx) => (
-                    <tr key={idx} className="group hover:bg-muted/20">
+                    <tr key={line._id} className="group hover:bg-muted/20">
                       <td className="px-3 py-2">
                         <Select
                           value={line.LHeadId ? String(line.LHeadId) : ""}
