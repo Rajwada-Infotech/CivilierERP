@@ -190,7 +190,7 @@ async function getRolePagePermissions(roleId) {
   if (!roleId) return [];
   const pool = getPool();
   const result = await pool.request().input("RoleId", sql.Int, roleId).query(`
-      SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport
+      SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval
       FROM dbo.RoleRights
       WHERE RoleId = @RoleId
     `);
@@ -204,6 +204,7 @@ async function getRolePagePermissions(roleId) {
     if (row.CanDelete) actions.push("delete");
     if (row.CanPrint) actions.push("print");
     if (row.CanExport) actions.push("export");
+    if (row.CanPostApproval) actions.push("post-approval");
     if (actions.length === 0) continue;
 
     for (const page of getCandidatePageKeys(row.Module, row.SubModule)) {
@@ -243,6 +244,27 @@ async function getEffectivePagePermissions(userId, roleId) {
     userPermissionCache.get(userId),
   ]);
   return mergePagePermissions(rolePerms, userPerms);
+}
+
+/**
+ * Effective (role + per-user merged) check for a single page/action pair —
+ * used by guardEdit()'s "post-approval" bypass so routes can ask "can this
+ * user edit an already-Approved record on this page?" without duplicating
+ * getEffectivePagePermissions' merge-and-scan logic at every call site.
+ */
+async function userHasEffectivePageRight(userId, roleId, pageKey, action) {
+  if (!userId || !pageKey) return false;
+  const effective = await getEffectivePagePermissions(userId, roleId);
+  const targetPage = String(pageKey).toLowerCase();
+  const targetAction = String(action).toLowerCase();
+  return effective.some((right) => {
+    const page = String(right?.page || "").toLowerCase();
+    if (page !== targetPage) return false;
+    const actions = Array.isArray(right?.actions)
+      ? right.actions.map((item) => String(item).toLowerCase())
+      : [];
+    return actions.includes(targetAction);
+  });
 }
 
 async function userHasPermission(userId, module, subModule, action) {
@@ -321,10 +343,27 @@ const checkPermission = (module, subModule, action = "CanView") => {
   };
 };
 
+/**
+ * Convenience wrapper for the 7 guardEdit()-gated routes: "can this request's
+ * user edit an already-Approved record on pageKey?" SUPERUSER_ROLES always
+ * can (consistent with them bypassing requirePageRight entirely); everyone
+ * else needs the "post-approval" action granted via Menu Rights / Post
+ * Approval Rights (role baseline merged with their own overrides).
+ */
+async function resolveAllowPostApproval(req, pageKey) {
+  const role = (req.user?.role || "").toLowerCase();
+  if (SUPERUSER_ROLES.has(role)) return true;
+  const userId = req.user?.userId ?? req.user?.id;
+  return userHasEffectivePageRight(userId, req.user?.roleId, pageKey, "post-approval");
+}
+
 module.exports = {
   checkPermission,
   permissionCache,
   userPermissionCache,
   getEffectivePagePermissions,
   userHasPermissionByPage,
+  userHasEffectivePageRight,
+  resolveAllowPostApproval,
+  SUPERUSER_ROLES,
 };

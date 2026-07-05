@@ -7,6 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
+const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
@@ -477,7 +478,8 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    await guardEdit("boq", id);
+    const allowPostApproval = await resolveAllowPostApproval(req, "boq");
+    await guardEdit("boq", id, { allowPostApproval });
 
     const pool = getPool();
     const uomMap = await buildUomMap(pool);

@@ -36,15 +36,8 @@ export interface InterCompanyTransferResult {
   ICTId: number;
   DocNo: string;
   TotalAmount: number;
-  links: {
-    SaleOrderID: number;
-    SaleInvoiceID: number;
-    ReceivedPaymentID: number;
-    PurchaseOrderID: number;
-    GRNID: number;
-    ExpenseBookingID: number;
-    NewPaymentID: number;
-  };
+  Status: "Pending";
+  message: string;
 }
 
 export const createInterCompanyTransfer = async (

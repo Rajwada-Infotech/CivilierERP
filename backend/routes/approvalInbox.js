@@ -427,6 +427,56 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "journal-voucher") {
+      queries.push(`
+        SELECT
+          'journal-voucher'                     AS Module,
+          'Journal Voucher'                     AS ModuleLabel,
+          CAST(jv.JVID AS NVARCHAR)             AS RecordId,
+          ISNULL(jv.JVNo, CONCAT('JV#', CAST(jv.JVID AS NVARCHAR))) AS Reference,
+          jv.JVDate                             AS RecordDate,
+          jv.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          CAST(NULL AS NVARCHAR)                AS SupplierName,
+          (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS Amount,
+          ${NULL_EXTRA}
+          CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(jv.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
+        FROM dbo.JournalVoucher jv
+        WHERE jv.Status = 'Pending'
+      `);
+    }
+
+    if (!module || module === "inter-company-transfer") {
+      queries.push(`
+        SELECT
+          'inter-company-transfer'              AS Module,
+          'Inter-Company Transfer'              AS ModuleLabel,
+          CAST(ict.ICTId AS NVARCHAR)           AS RecordId,
+          ISNULL(ict.DocNo, CONCAT('ICT#', CAST(ict.ICTId AS NVARCHAR))) AS Reference,
+          ict.TransferDate                      AS RecordDate,
+          ict.Status,
+          sp.name                               AS ContractorName,
+          rp.name                                AS SupplierName,
+          ict.TotalAmount                       AS Amount,
+          ${NULL_EXTRA}
+          CAST(ict.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(ict.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ict.CreatedAt                          AS LastModified
+        FROM dbo.InterCompanyTransfer ict
+        LEFT JOIN dbo.enterprise sp ON sp.id = ict.SenderProjectId
+        LEFT JOIN dbo.enterprise rp ON rp.id = ict.ReceiverProjectId
+        WHERE ict.Status = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -463,7 +513,9 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

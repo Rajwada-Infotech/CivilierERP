@@ -48,6 +48,7 @@ jest.mock("../redis", () => ({
 
 let insertedLedgerHeads;
 let companyHasGst;
+let companyGstType; // "Registered" | "Unregistered" | null (data not filled in yet)
 let ledgerAlreadyExists;
 
 function makeFakePool() {
@@ -77,11 +78,16 @@ function makeFakePool() {
         if (/INSERT INTO dbo\.Godowns/i.test(text)) {
           return { recordset: [], rowsAffected: [1] };
         }
-        if (/SELECT gst_no, pan_no, name FROM dbo\.enterprise WHERE id=@id AND business_type='C'/i.test(text)) {
+        if (/SELECT gst_no, gst_type, pan_no, name FROM dbo\.enterprise WHERE id=@id AND business_type='C'/i.test(text)) {
           return {
-            recordset: companyHasGst ? [{ gst_no: "29ABCDE1234F1Z5", pan_no: "ABCDE1234F", name: "Test Co" }] : [{}],
+            recordset: companyHasGst
+              ? [{ gst_no: "29ABCDE1234F1Z5", gst_type: companyGstType ?? "Registered", pan_no: "ABCDE1234F", name: "Test Co" }]
+              : [{ gst_no: null, gst_type: companyGstType ?? null, pan_no: null, name: "Test Co" }],
             rowsAffected: [1],
           };
+        }
+        if (/SELECT COUNT\(1\) AS cnt FROM sys\.columns WHERE object_id = OBJECT_ID\(N'dbo\.AccountHeadMaster'\) AND name = N'LGSTType'/i.test(text)) {
+          return { recordset: [{ cnt: 1 }], rowsAffected: [1] };
         }
         if (/SELECT TOP 1 LHeadId FROM dbo\.AccountHeadMaster WHERE LHeadCode IN/i.test(text)) {
           return { recordset: ledgerAlreadyExists ? [{ LHeadId: 1 }] : [], rowsAffected: [0] };
@@ -119,6 +125,7 @@ beforeEach(() => {
   mockFakePool = makeFakePool();
   insertedLedgerHeads = [];
   companyHasGst = true;
+  companyGstType = null;
   ledgerAlreadyExists = false;
 });
 
@@ -138,7 +145,7 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
     expect(insertedLedgerHeads.some((entry) => entry.params.LHeadType === "S")).toBe(true);
   });
 
-  test("skips ledger-head creation when the parent company has no GST on file", async () => {
+  test("skips ledger-head creation when the parent company has no GST status/number on file yet", async () => {
     companyHasGst = false;
     const { createApp } = require("../server");
     const app = await createApp();
@@ -150,6 +157,23 @@ describe("Project Master: auto-creates trading ledger heads on project creation"
 
     expect(res.status).toBe(200);
     expect(insertedLedgerHeads.length).toBe(0);
+  });
+
+  test("still creates ledger heads when the parent company is explicitly GST-Unregistered (a valid business state, not missing data)", async () => {
+    companyHasGst = false;
+    companyGstType = "Unregistered";
+    const { createApp } = require("../server");
+    const app = await createApp();
+
+    const res = await request(app)
+      .post("/api/project-master")
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .send({ name: "Test Project Unregistered Co", companyId: 5 });
+
+    expect(res.status).toBe(200);
+    expect(insertedLedgerHeads.length).toBe(2);
+    // LGST must be null (not fabricated), LGSTType must record 'Unregistered'.
+    expect(insertedLedgerHeads.every((q) => /@LGSTType/.test(q))).toBe(true);
   });
 
   test("skips ledger-head creation entirely when the project has no company_id", async () => {
