@@ -711,7 +711,6 @@ router.get("/:id", async (req, res) => {
 // POST - Create GRN + Stock Ledger Entries
 async function createGRNInternal(pool, body, userEmail) {
     const {
-      grnNo,
       grnDate,
       supplierId,
       poId,
@@ -719,7 +718,6 @@ async function createGRNInternal(pool, body, userEmail) {
       status,
       remarks,
       docTypeId: clientDocTypeId,
-      docNo,
       finYear,
       parentDocNo = null,
       rootExBDocNo = null,
@@ -2021,17 +2019,6 @@ async function linkGRNAttachments(pool, grnId, attachmentIds) {
         WHERE AttachmentId = @AttachmentId AND GRNID IS NULL
       `);
   }
-}
-
-async function getGRNAttachmentsFor(pool, grnId) {
-  if (!(await grnAttachTableExists(pool))) return [];
-  const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
-      SELECT AttachmentId, FileName, MimeType, FileSize
-      FROM dbo.GRNAttachments
-      WHERE GRNID = @GRNID
-      ORDER BY UploadedAt ASC
-    `);
-  return result.recordset.map(attachmentRowToDto);
 }
 
 function parseIdList(raw) {

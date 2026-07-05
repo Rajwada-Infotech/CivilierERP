@@ -357,10 +357,10 @@ const ContractorMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [sortField, setSortField] = useState<
+  const [sortField] = useState<
     "LHeadName" | "LHeadContactPerson" | "LHeadPhone"
   >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc] = useState(true);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
