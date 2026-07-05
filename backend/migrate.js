@@ -15,7 +15,7 @@
 require("./config/env").loadEnv(); // loads backend/.env via dotenv
 const path  = require("path");
 const fs    = require("fs");
-const { Umzug, memoryStorage } = require("umzug");
+const { Umzug } = require("umzug");
 const sql   = require("mssql");
 const logger = require("./logger");
 
