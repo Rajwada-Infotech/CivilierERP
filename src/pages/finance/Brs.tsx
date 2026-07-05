@@ -396,6 +396,7 @@ export default function Brs() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "clear" | "unclear" | "bounced">("");
+  const [hideDummyBank, setHideDummyBank] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
@@ -430,10 +431,11 @@ export default function Brs() {
     setLoading(true);
     try {
       const params: Record<string, unknown> = { page, limit: PAGE_SIZE };
-      if (bankId)       params.bankId = Number(bankId);
-      if (fromDate)     params.fromDate = fromDate;
-      if (toDate)       params.toDate = toDate;
-      if (statusFilter) params.status = statusFilter;
+      if (bankId)        params.bankId = Number(bankId);
+      if (fromDate)      params.fromDate = fromDate;
+      if (toDate)        params.toDate = toDate;
+      if (statusFilter)  params.status = statusFilter;
+      if (hideDummyBank) params.hideDummyBank = "true";
 
       const r = await getBRS(params as Parameters<typeof getBRS>[0]);
       const d = r.data;
@@ -452,7 +454,7 @@ export default function Brs() {
     } finally {
       setLoading(false);
     }
-  }, [page, bankId, fromDate, toDate, statusFilter]);
+  }, [page, bankId, fromDate, toDate, statusFilter, hideDummyBank]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -521,7 +523,7 @@ export default function Brs() {
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
     const q = search.toLowerCase();
-    return entries.filter(
+    return result.filter(
       (e) =>
         (e.CompanyName ?? "").toLowerCase().includes(q) ||
         (e.BankName ?? "").toLowerCase().includes(q) ||
@@ -746,6 +748,18 @@ export default function Brs() {
               </button>
             )}
 
+            {/* Dummy Bank filter pill */}
+            <button
+              onClick={() => setHideDummyBank((v) => !v)}
+              className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
+                !hideDummyBank
+                  ? "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30 font-semibold"
+                  : "bg-transparent text-muted-foreground border-border hover:bg-muted"
+              }`}
+            >
+              Dummy Bank
+            </button>
+
             {/* Status filter pills */}
             <div className="flex flex-wrap gap-1.5 sm:ml-auto">
               {(["", "clear", "unclear", "bounced"] as const).map((s) => {
@@ -949,17 +963,17 @@ export default function Brs() {
                             <CornerDownRight size={10} className="shrink-0" />
                             <span className="font-mono truncate">{entry.OriginalDocNo}</span>
                           </span>
-                        ) : (
-                          // Normal payment — can be marked bounced
+                        ) : entry.ChequeNo ? (
+                          // Cheque payment — can be marked bounced
                           <button
                             onClick={() => setBounceEntry(entry)}
-                            title="Mark this payment as bounced / dishonoured"
+                            title="Mark this cheque as bounced / dishonoured"
                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
                           >
                             <Ban size={10} />
                             Mark Bounced
                           </button>
-                        )}
+                        ) : null}
                       </td>
                     </tr>
                   );

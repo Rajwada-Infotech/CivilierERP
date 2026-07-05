@@ -198,90 +198,96 @@ const MetricsDashboard = () => {
 
       <AdminShell
         title="Live Metrics Dashboard"
-        subtitle={'Enter your backend URL and Bearer token to connect. "Start live" polls every 10 seconds.'}
+        subtitle="Watch server health, request rates and cache performance in real time."
         icon={TrendingUp}
       >
         {/* ── Connect Panel ────────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
-            <TrendingUp size={14} className="text-primary" />
-            <span className="text-sm font-heading font-semibold text-foreground">
-              Connection
-            </span>
+          <div className="flex items-center justify-between gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={14} className="text-primary" />
+              <span className="text-sm font-heading font-semibold text-foreground">Connect to Backend</span>
+            </div>
+            {live && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[11px] font-medium animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live — refreshing every 10s
+              </span>
+            )}
           </div>
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <Label
-                  htmlFor="baseURL"
-                  className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
-                >
-                  Base URL
+                <Label htmlFor="baseURL" className="text-xs font-semibold">
+                  Server URL
                 </Label>
                 <Input
                   id="baseURL"
                   value={baseURL}
                   onChange={(e) => setBaseURL(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && fetchData(false)}
                   placeholder="http://localhost:5000"
-                  className="font-body"
+                  className="font-mono text-sm"
                 />
+                <p className="text-[11px] text-muted-foreground">The address your backend is running on</p>
               </div>
               <div className="space-y-1.5 md:col-span-2">
-                <Label
-                  htmlFor="token"
-                  className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
-                >
-                  Bearer Token <span className="text-muted-foreground/50">(optional)</span>
+                <Label htmlFor="token" className="text-xs font-semibold flex items-center gap-2">
+                  Auth Token
+                  <span className="font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded text-[10px]">optional</span>
                 </Label>
                 <Input
                   id="token"
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder="Bearer your-token-here"
-                  className="font-body"
+                  placeholder="Paste your bearer token here (from your login session)"
+                  className="text-sm"
                 />
+                <p className="text-[11px] text-muted-foreground">Found in browser dev tools → Network → any request → Authorization header. Leave blank if your backend is open.</p>
               </div>
             </div>
-            <div className="flex gap-3 pt-2">
+
+            <div className="flex items-center gap-3 pt-1 flex-wrap">
               <Button
                 onClick={() => fetchData(false)}
                 disabled={loading}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                className="gradient-accent gap-2 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               >
-                {loading ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : null}
-                {loading ? "Connecting..." : "Connect"}
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                {loading ? "Connecting…" : metrics ? "Refresh Now" : "Connect"}
               </Button>
-              <Button
-                variant={live ? "destructive" : "outline"}
-                onClick={toggleLive}
-                disabled={!metrics || loading}
-                className="gap-1.5 shrink-0 font-semibold text-sm px-5 py-2 h-auto"
-              >
-                {live ? (
-                  <StopCircle size={14} />
-                ) : (
-                  <Play size={14} />
-                )}
-                {live ? "Stop Live" : "Start Live"}
-              </Button>
-              {import.meta.env.DEV && (
+
+              {metrics && (
                 <Button
-                  variant="outline"
-                  onClick={() => fetchData(true)}
+                  variant={live ? "destructive" : "outline"}
+                  onClick={toggleLive}
                   disabled={loading}
-                  className="gap-1.5 shrink-0 font-semibold text-sm px-5 py-2 h-auto"
+                  className="gap-2 shrink-0 font-semibold text-sm px-5 py-2 h-auto"
                 >
-                  Demo
+                  {live ? <StopCircle size={14} /> : <Play size={14} />}
+                  {live ? "Stop Auto-Refresh" : "Start Auto-Refresh (10s)"}
                 </Button>
               )}
+
+              <Button
+                variant="outline"
+                onClick={() => fetchData(true)}
+                disabled={loading}
+                className="gap-2 shrink-0 text-sm px-5 py-2 h-auto text-muted-foreground"
+              >
+                Try Demo Data
+              </Button>
             </div>
+
             {error && (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                <AlertTriangle className="h-4 w-4 mr-2 inline" />
-                {error}
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-start gap-3">
+                <AlertTriangle size={15} className="text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive">Connection failed</p>
+                  <p className="text-xs text-destructive/80 mt-0.5">{error}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Check that the server URL is correct and the backend is running.</p>
+                </div>
               </div>
             )}
           </div>
@@ -491,24 +497,47 @@ const MetricsDashboard = () => {
         )}
 
         {!metrics && !loading && (
-          <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
-            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
-              <TrendingUp size={24} className="text-muted-foreground/40" />
-            </div>
-            <p className="text-sm font-heading font-semibold text-muted-foreground">
-              Ready to monitor
-            </p>
-            <p className="text-xs font-body text-muted-foreground/60 mt-1">
-              Connect to your backend and watch your metrics live
-            </p>
-            {import.meta.env.DEV && (
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            <div className="flex flex-col items-center justify-center py-14 px-6 gap-6">
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <TrendingUp size={24} className="text-primary/50" />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-sm font-heading font-semibold">No data yet</p>
+                <p className="text-xs text-muted-foreground">Once connected you'll see RPM, cache hit rate, memory usage and active users here.</p>
+              </div>
+
+              {/* Quick-start steps */}
+              <div className="w-full max-w-sm space-y-2">
+                {[
+                  { step: "1", text: "Enter your server URL above", sub: "e.g. http://localhost:5000" },
+                  { step: "2", text: "Add your auth token (if needed)", sub: "From browser dev tools → Network → Authorization" },
+                  { step: "3", text: 'Click "Connect"', sub: "Or press Enter in the URL field" },
+                ].map(({ step, text, sub }) => (
+                  <div key={step} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border">
+                    <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">{step}</span>
+                    <div>
+                      <p className="text-xs font-semibold">{text}</p>
+                      <p className="text-[11px] text-muted-foreground">{sub}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="h-px w-16 bg-border" />
+                <span className="text-xs text-muted-foreground">or</span>
+                <div className="h-px w-16 bg-border" />
+              </div>
+
               <Button
                 onClick={() => fetchData(true)}
-                className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto mt-6"
+                variant="outline"
+                className="gap-2 text-sm px-6 py-2 h-auto"
               >
-                Try Demo Mode
+                <Play size={13} /> Try with Demo Data
               </Button>
-            )}
+            </div>
           </div>
         )}
       </AdminShell>
