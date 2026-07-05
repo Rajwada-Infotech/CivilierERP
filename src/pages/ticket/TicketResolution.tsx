@@ -399,6 +399,63 @@ function StatPill({
   );
 }
 
+// ─── Recently Resolved Panel ──────────────────────────────────────────────────
+
+function RecentlyResolvedPanel() {
+  const { data: resolved = [], isLoading } = useQuery<Ticket[]>({
+    queryKey: ["admin-resolution-recent"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/tickets?limit=100");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const all = unwrapTicketList<Ticket>(await res.json().catch(() => ({}))).data;
+      return all
+        .filter((t) => t.status === "Resolved" || t.status === "Closed")
+        .sort(
+          (a, b) =>
+            new Date(b.updated_at ?? b.created_at).getTime() -
+            new Date(a.updated_at ?? a.created_at).getTime(),
+        )
+        .slice(0, 8);
+    },
+    staleTime: 30_000,
+  });
+
+  if (isLoading) return null;
+  if (resolved.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <CheckCircle2 size={13} className="text-emerald-600" />
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Recently Resolved
+        </h3>
+      </div>
+      <div className="divide-y divide-border">
+        {resolved.map((t) => (
+          <div key={t.id} className="py-2.5 first:pt-0 last:pb-0">
+            <div className="flex items-start gap-2">
+              <div className={cn("w-1.5 h-1.5 rounded-full shrink-0 mt-1", priorityCfg[t.priority]?.dot ?? "bg-muted")} />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-foreground truncate leading-snug">{t.subject}</p>
+                <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                  {t.customer_name}
+                  {t.assigned_to && <span className="text-muted-foreground/50"> · {t.assigned_to}</span>}
+                </p>
+                <p className="text-[10px] text-muted-foreground/50 mt-0.5">{fmtDate(t.updated_at ?? t.created_at)}</p>
+              </div>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/10 text-emerald-600 border-emerald-400/20 shrink-0">
+                <CheckCircle2 size={8} />
+                {t.status === "Closed" ? "Closed" : "Done"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const PRIORITIES: Priority[] = ["Urgent", "High", "Medium", "Low"];
@@ -521,172 +578,176 @@ export default function TicketResolution() {
           </button>
         }
       >
-      <div className="max-w-3xl mx-auto space-y-5">
-
-        {/* ── Stat pills ── */}
-        {!isLoading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatPill
-              icon={Clock}
-              label="Pending"
-              value={pendingCount}
-              color="text-amber-600"
-              bg="bg-amber-500/5"
-            />
-            <StatPill
-              icon={RefreshCw}
-              label="Resolving"
-              value={inProgressCount}
-              color="text-blue-600"
-              bg="bg-blue-500/5"
-            />
-            <StatPill
-              icon={ShieldAlert}
-              label="Urgent"
-              value={urgentCount}
-              color="text-red-600"
-              bg="bg-red-500/5"
-            />
-            <StatPill
-              icon={Flame}
-              label="High"
-              value={highCount}
-              color="text-orange-600"
-              bg="bg-orange-500/5"
-            />
-          </div>
-        )}
-
-        {/* ── Error ── */}
-        {isError && (
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
-            <AlertCircle size={14} /> Failed to load tickets. Try refreshing.
-          </div>
-        )}
-
-        {/* ── Filters ── */}
-        <div className="space-y-2">
-          {/* Search */}
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by subject, customer, or issue…"
-              className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-
-          {/* Filter chips */}
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground font-medium">
-                Status:
-              </span>
-              {(["All", "Pending", "InProgress"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatus(s)}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
-                    statusFilter === s
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {s === "InProgress" ? "Resolving" : s}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground font-medium">
-                Priority:
-              </span>
-              {(["All", ...PRIORITIES] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPriority(p as Priority | "All")}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
-                    priorityFilter === p
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* ── Full-width stat pills ── */}
+      {!isLoading && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <StatPill icon={Clock} label="Pending" value={pendingCount} color="text-amber-600" bg="bg-amber-500/5" />
+          <StatPill icon={RefreshCw} label="Resolving" value={inProgressCount} color="text-blue-600" bg="bg-blue-500/5" />
+          <StatPill icon={ShieldAlert} label="Urgent" value={urgentCount} color="text-red-600" bg="bg-red-500/5" />
+          <StatPill icon={Flame} label="High" value={highCount} color="text-orange-600" bg="bg-orange-500/5" />
         </div>
+      )}
 
-        {/* ── Ticket list ── */}
-        {isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-border bg-card overflow-hidden animate-pulse"
-              >
-                <div className="flex">
-                  <div className="w-1 bg-muted" />
-                  <div className="flex-1 px-4 py-4 space-y-2">
-                    <div className="h-4 bg-muted rounded w-2/3" />
-                    <div className="h-3 bg-muted rounded w-1/3" />
-                    <div className="h-3 bg-muted rounded w-full" />
+      {isError && (
+        <div className="mb-5 px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+          <AlertCircle size={14} /> Failed to load tickets. Try refreshing.
+        </div>
+      )}
+
+      {/* ── Two-column layout ── */}
+      <div className="flex gap-5 items-start">
+
+        {/* LEFT — main ticket list */}
+        <div className="flex-1 min-w-0 space-y-4">
+
+          {/* ── Filters ── */}
+          <div className="space-y-2">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by subject, customer, or issue…"
+                className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              />
+              {search && (
+                <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground font-medium">Status:</span>
+                {(["All", "Pending", "InProgress"] as const).map((s) => (
+                  <button key={s} onClick={() => setStatus(s)}
+                    className={cn("px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
+                      statusFilter === s ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted")}>
+                    {s === "InProgress" ? "Resolving" : s}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground font-medium">Priority:</span>
+                {(["All", ...PRIORITIES] as const).map((p) => (
+                  <button key={p} onClick={() => setPriority(p as Priority | "All")}
+                    className={cn("px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
+                      priorityFilter === p ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted")}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Ticket list ── */}
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
+                  <div className="flex">
+                    <div className="w-1 bg-muted" />
+                    <div className="flex-1 px-4 py-4 space-y-2">
+                      <div className="h-4 bg-muted rounded w-2/3" />
+                      <div className="h-3 bg-muted rounded w-1/3" />
+                      <div className="h-3 bg-muted rounded w-full" />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : tickets.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card py-20 flex flex-col items-center gap-3 text-muted-foreground">
-            <CheckCircle2 size={36} className="opacity-20" />
-            <p className="text-sm font-medium">
-              {isFiltered
-                ? "No tickets match your filters"
-                : "All caught up — no unresolved tickets!"}
+              ))}
+            </div>
+          ) : tickets.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
+              <CheckCircle2 size={36} className="opacity-20" />
+              <p className="text-sm font-medium">
+                {isFiltered ? "No tickets match your filters" : "All caught up — no unresolved tickets!"}
+              </p>
+              {isFiltered && (
+                <button onClick={() => { setSearch(""); setPriority("All"); setStatus("All"); }}
+                  className="text-xs text-primary hover:underline">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {tickets.map((t) => (
+                <TicketRow key={t.id} ticket={t} onResolve={setResolveTarget} />
+              ))}
+            </div>
+          )}
+
+          {!isLoading && tickets.length > 0 && isFiltered && (
+            <p className="text-xs text-muted-foreground text-center">
+              Showing {tickets.length} of {allTickets.length} unresolved tickets
             </p>
-            {isFiltered && (
-              <button
-                onClick={() => {
-                  setSearch("");
-                  setPriority("All");
-                  setStatus("All");
-                }}
-                className="text-xs text-primary hover:underline"
-              >
-                Clear filters
-              </button>
+          )}
+        </div>{/* end LEFT */}
+
+        {/* RIGHT — sidebar */}
+        <div className="w-80 shrink-0 space-y-4">
+
+          {/* Priority breakdown */}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Priority Breakdown</h3>
+            {PRIORITIES.map((p) => {
+              const count = allTickets.filter((t) => t.priority === p).length;
+              const total = allTickets.length || 1;
+              const pct = Math.round((count / total) * 100);
+              const cfg = priorityCfg[p];
+              return (
+                <div key={p} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-foreground font-medium">
+                      <span className={cn("w-2 h-2 rounded-full", cfg.dot)} />
+                      {p}
+                    </span>
+                    <span className="text-muted-foreground">{count} ticket{count !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all duration-500", cfg.bar)} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            {allTickets.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-2">No open tickets</p>
             )}
           </div>
-        ) : (
-          <div className="space-y-2.5">
-            {tickets.map((t) => (
-              <TicketRow key={t.id} ticket={t} onResolve={setResolveTarget} />
-            ))}
-          </div>
-        )}
 
-        {/* Result count */}
-        {!isLoading && tickets.length > 0 && isFiltered && (
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {tickets.length} of {allTickets.length} unresolved tickets
-          </p>
-        )}
-      </div>
+          {/* Assignee breakdown */}
+          {(() => {
+            const assigneeMap: Record<string, number> = {};
+            allTickets.forEach((t) => {
+              const name = t.assigned_to || "Unassigned";
+              assigneeMap[name] = (assigneeMap[name] ?? 0) + 1;
+            });
+            const entries = Object.entries(assigneeMap).sort((a, b) => b[1] - a[1]).slice(0, 6);
+            return (
+              <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Assigned To</h3>
+                {entries.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-2">No open tickets</p>
+                ) : entries.map(([name, count]) => (
+                  <div key={name} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <User size={10} className="text-primary" />
+                      </div>
+                      <span className="text-xs text-foreground truncate">{name}</span>
+                    </div>
+                    <span className="text-xs font-semibold text-muted-foreground shrink-0">{count}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Recently resolved */}
+          {!isLoading && <RecentlyResolvedPanel />}
+        </div>{/* end RIGHT */}
+
+      </div>{/* end two-col */}
       </AdminShell>
 
       {/* ── Resolve dialog ── */}

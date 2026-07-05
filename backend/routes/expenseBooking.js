@@ -1229,10 +1229,10 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
-  let bookingAmount = EAmount;
-  let bookingNetAmount = ENetAmount;
-  let bookingCgstRate = ECgstRate;
-  let bookingSgstRate = ESgstRate;
+  let bookingAmount;
+  let bookingNetAmount;
+  let bookingCgstRate;
+  let bookingSgstRate;
 
   try {
     await transaction.begin();
@@ -1433,9 +1433,9 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
-      .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
-      .input("EDocDate", sql.Date, EDocDate || null)
+      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EDocumentType", sql.NVarChar(50), EDocumentType)
+      .input("EDocDate", sql.Date, EDocDate)
       .input(
         "EAmount",
         sql.Decimal(18, 2),
@@ -1478,11 +1478,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       .input("EUpdatedAt", sql.DateTime2, new Date())
       .input("ECreatedBy", sql.Int, userId || null)
       .input("EApprovedBy", sql.Int, null)
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      )
+      .input("ECompanyId", sql.Int, parseInt(ECompanyId, 10))
       .input(
         "EDocTypeId",
         sql.Int,
@@ -1643,10 +1639,10 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
-  let bookingAmount = EAmount;
-  let bookingNetAmount = ENetAmount;
-  let bookingCgstRate = ECgstRate;
-  let bookingSgstRate = ESgstRate;
+  let bookingAmount;
+  let bookingNetAmount;
+  let bookingCgstRate;
+  let bookingSgstRate;
 
   try {
     await transaction.begin();
@@ -1948,9 +1944,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
-      .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
-      .input("EDocDate", sql.Date, EDocDate || null)
+      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EDocumentType", sql.NVarChar(50), EDocumentType)
+      .input("EDocDate", sql.Date, EDocDate)
       .input(
         "EAmount",
         sql.Decimal(18, 2),
@@ -1993,11 +1989,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       .input("EUpdatedAt", sql.DateTime2, new Date())
       .input("ECreatedBy", sql.Int, req.user?.userId || null)
       .input("EApprovedBy", sql.Int, null)
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      )
+      .input("ECompanyId", sql.Int, parseInt(ECompanyId, 10))
       .input(
         "EDocTypeId",
         sql.Int,
@@ -2619,9 +2611,9 @@ router.put(
         .request()
         .input("Eid", sql.Int, numericId)
         .input("EName", sql.NVarChar(200), EName || null)
-        .input("EProjectName", sql.NVarChar(150), EProjectName || null)
-        .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
-        .input("EDocDate", sql.Date, EDocDate || null)
+        .input("EProjectName", sql.NVarChar(150), EProjectName)
+        .input("EDocumentType", sql.NVarChar(50), EDocumentType)
+        .input("EDocDate", sql.Date, EDocDate)
         .input(
           "EAmount",
           sql.Decimal(18, 2),
@@ -2661,11 +2653,7 @@ router.put(
         .input("ERemarks", sql.NVarChar(300), ERemarks || null)
         .input("EStatus", sql.NVarChar(50), EStatus || "Draft")
         .input("EUpdatedAt", sql.DateTime2, new Date())
-        .input(
-          "ECompanyId",
-          sql.Int,
-          ECompanyId ? parseInt(ECompanyId, 10) : null,
-        )
+        .input("ECompanyId", sql.Int, parseInt(ECompanyId, 10))
         .input(
           "EDocTypeId",
           sql.Int,

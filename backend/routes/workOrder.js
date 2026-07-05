@@ -17,12 +17,12 @@ const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 router.use(checkPermissionForMethod("Engineering", "WorkOrders"));
 
 const requireUserName = (req, res) => {
-  const email = req.user?.name;
-  if (!email) {
+  const userName = req.user?.name;
+  if (!userName) {
     res.status(401).json({ error: "User context missing" });
     return null;
   }
-  return email;
+  return userName;
 };
 
 const serializeGST = (gstStr) => {
@@ -461,11 +461,11 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
 
     const result = await transaction
       .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar(100), finalDocNo || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
+      .input("CompanyId", sql.Int, CompanyId)
+      .input("ProjectId", sql.Int, ProjectId)
+      .input("DocumentNumber", sql.NVarChar(100), finalDocNo)
+      .input("DocumentDate", sql.Date, DocumentDate)
+      .input("ContractorId", sql.Int, ContractorId)
       .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
@@ -475,7 +475,7 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
         TermsAndConditions || null,
       )
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime, new Date())
       .input("GST", sql.NVarChar(sql.MAX), gstJson)
@@ -490,7 +490,7 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
       `);
     const newId = result.recordset[0].Id;
 
-    if (DocTypeId && finalDocNo) {
+    if (DocTypeId) {
       await backPatchRecordId(pool, sql, finalDocNo, "WorkOrderHeader", newId);
     }
 
@@ -590,11 +590,11 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
     const result = await pool
       .request()
       .input("Id", sql.Int, id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar(100), DocumentNumber || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
+      .input("CompanyId", sql.Int, CompanyId)
+      .input("ProjectId", sql.Int, ProjectId)
+      .input("DocumentNumber", sql.NVarChar(100), DocumentNumber)
+      .input("DocumentDate", sql.Date, DocumentDate)
+      .input("ContractorId", sql.Int, ContractorId)
       .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
@@ -1053,6 +1053,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
       .filter((id) => Number.isFinite(id) && id > 0);
   }
 
+  let tx;
   try {
     const pool = getPool();
 
@@ -1092,7 +1093,10 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
     }
 
     // 1. Update header
-    const headerUpdate = await pool
+    tx = new sql.Transaction(pool);
+    await tx.begin();
+
+    const headerUpdate = await tx
       .request()
       .input("Id", sql.Int, headerId)
       .input("CompanyId", sql.Int, header.CompanyId || null)
@@ -1150,7 +1154,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
         activityDbId = null;
 
       if (!activityDbId) {
-        const r = await pool
+        const r = await tx
           .request()
           .input("WorkOrderHeaderId", sql.Int, headerId)
           .input("DocNo", sql.NVarChar(100), docNo)
@@ -1187,7 +1191,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
           `);
         activityDbId = r.recordset[0].Id;
       } else {
-        await pool
+        await tx
           .request()
           .input("Id", sql.Int, activityDbId)
           .input("ActivityGroupId", sql.Int, act.ActivityGroupId || null)
@@ -1235,7 +1239,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
           materialDbId = null;
 
         if (!materialDbId) {
-          const r = await pool
+          const r = await tx
             .request()
             .input("WorkOrderActivityId", sql.Int, activityDbId)
             .input("ItemId", sql.UniqueIdentifier, String(mat.ItemId).trim())
@@ -1267,7 +1271,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
             `);
           materialDbId = r.recordset[0].Id;
         } else {
-          await pool
+          await tx
             .request()
             .input("Id", sql.Int, materialDbId)
             .input("ItemId", sql.UniqueIdentifier, String(mat.ItemId).trim())
@@ -1303,14 +1307,15 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
       // Delete removed materials for this activity
       const safeMaterialIds = safeIntList(keptMaterialIds);
       if (safeMaterialIds.length > 0) {
-        await pool.request().input("WorkOrderActivityId", sql.Int, activityDbId)
-          .query(`
+        const delMatReq = tx.request().input("WorkOrderActivityId", sql.Int, activityDbId);
+        safeMaterialIds.forEach((mid, i) => delMatReq.input(`MatId${i}`, sql.Int, mid));
+        await delMatReq.query(`
           DELETE FROM dbo.WorkOrderActivityMaterials
           WHERE WorkOrderActivityId = @WorkOrderActivityId
-          AND Id NOT IN (${safeMaterialIds.join(",")})
+          AND Id NOT IN (${safeMaterialIds.map((_, i) => `@MatId${i}`).join(",")})
         `);
       } else {
-        await pool
+        await tx
           .request()
           .input("WorkOrderActivityId", sql.Int, activityDbId)
           .query(
@@ -1322,24 +1327,31 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
     // Delete removed activities (and their materials)
     const safeActivityIds = safeIntList(keptActivityIds);
     if (safeActivityIds.length > 0) {
-      await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
+      const actParamNames = safeActivityIds.map((_, i) => `@ActId${i}`).join(",");
+
+      const delActMatReq = tx.request().input("WorkOrderHeaderId", sql.Int, headerId);
+      safeActivityIds.forEach((aid, i) => delActMatReq.input(`ActId${i}`, sql.Int, aid));
+      await delActMatReq.query(`
         DELETE m FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-        AND a.Id NOT IN (${safeActivityIds.join(",")})
+        AND a.Id NOT IN (${actParamNames})
       `);
-      await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
+
+      const delActReq = tx.request().input("WorkOrderHeaderId", sql.Int, headerId);
+      safeActivityIds.forEach((aid, i) => delActReq.input(`ActId${i}`, sql.Int, aid));
+      await delActReq.query(`
         DELETE FROM dbo.WorkOrderActivities
         WHERE WorkOrderHeaderId = @WorkOrderHeaderId
-        AND Id NOT IN (${safeActivityIds.join(",")})
+        AND Id NOT IN (${actParamNames})
       `);
     } else {
-      await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
+      await tx.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
         DELETE m FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
       `);
-      await pool
+      await tx
         .request()
         .input("WorkOrderHeaderId", sql.Int, headerId)
         .query(
@@ -1347,6 +1359,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
         );
     }
 
+    await tx.commit();
     await bumpCacheVersion("work-orders");
 
     // Auto-submit: move Draft → Pending so it appears in approval inbox
@@ -1551,6 +1564,11 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
       woPOs: createdWOPOs,
     });
   } catch (err) {
+    if (tx) {
+      try { await tx.rollback(); } catch (rbErr) {
+        console.error("[POST /:id/save-full] rollback failed:", rbErr.message);
+      }
+    }
     console.error("[POST /:id/save-full]", err.message);
     res.status(500).json({ error: err.message });
   }
