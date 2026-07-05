@@ -21,10 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Plus, Trash2, Scale, Loader2, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Scale, Loader2, RefreshCw, Check, X } from "lucide-react";
 import {
   getJournalVouchers,
   createJournalVoucher,
+  approveJournalVoucher,
+  rejectJournalVoucher,
   type JournalVoucherSummary,
   type JournalVoucherLine,
 } from "@/api/journalVoucherApi";
@@ -97,6 +99,34 @@ export default function JournalVoucher() {
     setLines([emptyLine(), emptyLine()]);
   };
 
+  const [actingId, setActingId] = useState<number | null>(null);
+
+  const handleApprove = async (id: number) => {
+    setActingId(id);
+    try {
+      await approveJournalVoucher(id);
+      toast.success("Journal Voucher approved and posted to GL");
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Approval failed");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    setActingId(id);
+    try {
+      await rejectJournalVoucher(id);
+      toast.success("Journal Voucher rejected");
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Rejection failed");
+    } finally {
+      setActingId(null);
+    }
+  };
+
   const submit = async () => {
     if (!totals.balanced) {
       toast.error("Debit and Credit totals must match before saving.");
@@ -149,18 +179,20 @@ export default function JournalVoucher() {
               <th className="px-4 py-2">Narration</th>
               <th className="px-4 py-2 text-right">Amount</th>
               <th className="px-4 py-2">Status</th>
+              <th className="px-4 py-2">GL</th>
+              <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin inline mr-2" /> Loading...
                 </td>
               </tr>
             ) : vouchers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                   No journal vouchers yet.
                 </td>
               </tr>
@@ -175,6 +207,42 @@ export default function JournalVoucher() {
                     <span className={cn("px-2 py-0.5 rounded text-xs font-medium", STATUS_STYLES[v.Status])}>
                       {v.Status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2">
+                    {v.Status === "Approved" ? (
+                      <span className={cn(
+                        "px-2 py-0.5 rounded text-xs font-medium",
+                        v.PostedToGL ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"
+                      )}>
+                        {v.PostedToGL ? "Posted" : "Not posted"}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">--</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {v.Status === "Pending" && rights.canEdit && (
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={actingId === v.JVID}
+                          onClick={() => handleApprove(v.JVID)}
+                          title="Approve"
+                        >
+                          {actingId === v.JVID ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-emerald-400" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={actingId === v.JVID}
+                          onClick={() => handleReject(v.JVID)}
+                          title="Reject"
+                        >
+                          <X className="h-4 w-4 text-rose-400" />
+                        </Button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))

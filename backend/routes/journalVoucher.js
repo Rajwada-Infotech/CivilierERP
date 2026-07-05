@@ -13,6 +13,7 @@ const {
 } = require("../utils/docNumberLock");
 const { transition, guardEdit } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
+const { postJournalVoucherApproval, hasPosting } = require("../services/generalLedger");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -83,7 +84,11 @@ router.get("/", authenticateToken, async (req, res) => {
     let query = `
       SELECT jv.JVID, jv.JVNo, jv.JVDate, jv.Narration, jv.CompanyId, jv.ProjectId,
              jv.Status, jv.CreatedBy, jv.CreatedAt,
-             (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount
+             (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.GeneralLedgerEntry gle
+               WHERE gle.SourceType = 'JournalVoucher' AND gle.SourceId = jv.JVID AND gle.IsReversed = 0
+             ) THEN 1 ELSE 0 END AS PostedToGL
       FROM dbo.JournalVoucher jv
     `;
     if (conditions.length) query += " WHERE " + conditions.join(" AND ");
@@ -120,7 +125,8 @@ router.get("/:id", authenticateToken, async (req, res) => {
         ORDER BY jvl.SortOrder, jvl.LineID
       `);
 
-    res.json({ ...header.recordset[0], lines: lines.recordset });
+    const postedToGL = await hasPosting(pool, "JournalVoucher", id);
+    res.json({ ...header.recordset[0], PostedToGL: postedToGL, lines: lines.recordset });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -308,12 +314,40 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
   if (!user) return;
 
   try {
+    const pool = getPool();
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("journal-voucher", id, "Approved", user, req.user?.role, req.body?.note);
+    const current = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.JournalVoucher WHERE JVID = @id");
+    if (!current.recordset.length) return res.status(404).json({ error: "Not found" });
+
+    // If already Approved (a prior posting attempt failed after the status
+    // transition succeeded), skip transition() -- it would reject re-entering
+    // Approved -- and just retry the post. postJournalVoucherApproval() is
+    // idempotent via hasPosting(), so retrying is safe.
+    const alreadyApproved = current.recordset[0].Status === "Approved";
+
+    let transitionResult = {};
+    if (!alreadyApproved) {
+      transitionResult = await transition(
+        "journal-voucher", id, "Approved", user, req.user?.role, req.body?.note,
+      );
+    }
+
+    try {
+      await postJournalVoucherApproval(pool, id, user);
+    } catch (postErr) {
+      return res.status(500).json({
+        error: `Voucher approved, but GL posting failed: ${postErr.message}. Re-submit approval to retry posting.`,
+      });
+    }
+
     await bumpCacheVersion("journal-voucher");
-    res.json({ message: "Journal Voucher approved", ...result });
+    await bumpCacheVersion("general-ledger");
+    res.json({ message: "Journal Voucher approved and posted to GL", ...transitionResult });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
   }
