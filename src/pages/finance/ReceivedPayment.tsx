@@ -716,7 +716,7 @@ export default function ReceivedPaymentPage() {
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
   const approved = payments.filter((p) => p.status === "Approved").length;
   const submitted = payments.filter((p) => p.status === "Pending").length;
-  const pending = payments.filter((p) => p.status === "Draft").length;
+
 
   const stats = [
     {

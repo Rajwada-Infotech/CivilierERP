@@ -202,7 +202,6 @@ const ExpensesMaster: React.FC = () => {
   const {
     data: ledgersData,
     isLoading: ledgersLoading,
-    isError: ledgersError,
   } = useQuery({
     queryKey: ["ledger-heads"],
     queryFn: () => getList(),
@@ -382,29 +381,6 @@ const ExpensesMaster: React.FC = () => {
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
-
-  // ── Sub-components ─────────────────────────────────────────────────────────
-
-  const SortTh = ({
-    label,
-    field,
-  }: {
-    label: string;
-    field: typeof sortField;
-  }) => (
-    <th
-      className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4 cursor-pointer select-none hover:text-foreground transition-colors"
-      onClick={() => toggleSort(field)}
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        <ChevronsUpDown
-          size={11}
-          className={sortField === field ? "text-primary" : "opacity-40"}
-        />
-      </div>
-    </th>
-  );
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
