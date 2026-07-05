@@ -70,35 +70,61 @@ async function safeLoadRoutes(app, routes, options = {}) {
 }
 
 /**
- * Prints a clean summary table after route loading.
+ * Prints a boxed summary after route loading.
  */
 function printRoutesSummary(results, logger = console) {
   const { loaded, skipped, failed } = results;
-  const total = loaded.length + skipped.length + failed.length;
+  const total   = loaded.length + skipped.length + failed.length;
+  const allOk   = failed.length === 0 && skipped.length === 0;
+  const hasFail = failed.length > 0;
 
-  const lines = [
-    "",
-    `✓ ${total} routes loaded  ·  OK ${loaded.length}  ·  WARN ${skipped.length}  ·  FAIL ${failed.length}`,
+  // dot-leader row: "LABEL ........ VALUE"
+  const W = 42;
+  const leader = (label, value) => {
+    const val   = String(value);
+    const dots  = ".".repeat(Math.max(3, W - label.length - val.length - 2));
+    return `  ${label} ${dots} ${val}`;
+  };
+
+  const bar    = `+${"-".repeat(W + 2)}+`;
+  const spacer = `|${" ".repeat(W + 2)}|`;
+  const mid    = `+${"-".repeat(W + 2)}+`;
+  const wrap   = (s) => `|  ${s.padEnd(W)}|`;
+
+  const lines  = [
+    bar,
+    spacer,
+    wrap(`  CivilierERP  >>  Route Loader`),
+    spacer,
+    mid,
+    spacer,
+    wrap(leader("OK",    loaded.length)),
+    wrap(leader("WARN",  skipped.length)),
+    wrap(leader("FAIL",  failed.length)),
+    wrap(leader("TOTAL", total)),
+    spacer,
   ];
 
-  if (failed.length > 0) {
-    lines.push("");
-    lines.push("  Failed routes:");
+  if (hasFail) {
+    lines.push(mid, wrap("  FAILED ROUTES"));
     failed.forEach(({ label, error }) =>
-      lines.push(`    [FAIL] ${label}: ${error}`)
+      lines.push(wrap(`    ${label}  ->  ${error}`))
     );
+    lines.push(spacer);
   }
 
   if (skipped.length > 0) {
-    lines.push("");
-    lines.push("  Skipped routes:");
+    lines.push(mid, wrap("  SKIPPED ROUTES"));
     skipped.forEach(({ label, reason }) =>
-      lines.push(`    [WARN] ${label}: ${reason}`)
+      lines.push(wrap(`    ${label}  ->  ${reason}`))
     );
+    lines.push(spacer);
   }
 
-  lines.push("");
-  lines.forEach((l) => logger.info(l));
+  lines.push(bar);
+
+  const status = allOk ? "info" : hasFail ? "error" : "warn";
+  logger[status](`\n${lines.join("\n")}\n`);
 }
 
 module.exports = { safeLoadRoutes, printRoutesSummary };
