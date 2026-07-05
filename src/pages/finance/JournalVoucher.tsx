@@ -16,7 +16,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -30,12 +32,21 @@ import {
   createJournalVoucher,
   approveJournalVoucher,
   rejectJournalVoucher,
+  getJournalVoucherLedgerOptions,
   type JournalVoucherSummary,
   type JournalVoucherLine,
+  type JournalVoucherLedgerOption,
 } from "@/api/journalVoucherApi";
-import { getLedgerOptions, type LedgerOption } from "@/api/generalLedgerApi";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+
+const LHEAD_TYPE_LABEL: Record<string, string> = {
+  GL: "General Ledger",
+  C: "Customer",
+  S: "Supplier",
+  B: "Bank",
+};
 
 type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
 const emptyLine = (): JournalVoucherLineUI => ({
@@ -90,7 +101,7 @@ export default function JournalVoucher() {
   const rights = usePageRights("journal-voucher");
   const [vouchers, setVouchers] = useState<JournalVoucherSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [ledgerOptions, setLedgerOptions] = useState<LedgerOption[]>([]);
+  const [ledgerOptions, setLedgerOptions] = useState<JournalVoucherLedgerOption[]>([]);
   const [search, setSearch] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -98,6 +109,14 @@ export default function JournalVoucher() {
   const [jvDate, setJvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState("");
   const [lines, setLines] = useState<JournalVoucherLineUI[]>([emptyLine(), emptyLine()]);
+
+  // A JV must belong to a real Company (and optionally a Project within it)
+  // just like every other document in the system — otherwise it floats
+  // free of the entity structure everything else is scoped by.
+  const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null }[]>([]);
+  const [companyId, setCompanyId] = useState<string>("");
+  const [projectId, setProjectId] = useState<string>("");
 
   const [actingId, setActingId] = useState<number | null>(null);
 
@@ -115,8 +134,28 @@ export default function JournalVoucher() {
 
   useEffect(() => {
     load();
-    getLedgerOptions().then(setLedgerOptions).catch(() => setLedgerOptions([]));
+    getJournalVoucherLedgerOptions().then(setLedgerOptions).catch(() => setLedgerOptions([]));
+    getEnterpriseOptions(undefined, "C")
+      .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
+      .catch(() => setCompanies([]));
+    getEnterpriseOptions(undefined, "P")
+      .then((rows) => setAllProjects(rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id }))))
+      .catch(() => setAllProjects([]));
   }, []);
+
+  const projectsForCompany = useMemo(
+    () => (companyId ? allProjects.filter((p) => String(p.company_id) === companyId) : []),
+    [allProjects, companyId],
+  );
+
+  const groupedLedgerOptions = useMemo(() => {
+    const groups: Record<string, JournalVoucherLedgerOption[]> = {};
+    ledgerOptions.forEach((opt) => {
+      const key = opt.type || "GL";
+      (groups[key] ||= []).push(opt);
+    });
+    return groups;
+  }, [ledgerOptions]);
 
   const totals = useMemo(() => {
     const debit  = lines.reduce((s, l) => s + (Number(l.DebitAmount)  || 0), 0);
@@ -135,6 +174,8 @@ export default function JournalVoucher() {
     setJvDate(new Date().toISOString().slice(0, 10));
     setNarration("");
     setLines([emptyLine(), emptyLine()]);
+    setCompanyId("");
+    setProjectId("");
   };
 
   const handleApprove = async (id: number) => {
@@ -164,11 +205,18 @@ export default function JournalVoucher() {
   };
 
   const submit = async () => {
+    if (!companyId) { toast.error("Select the Company this voucher belongs to."); return; }
     if (!totals.balanced) { toast.error("Debit and Credit totals must match before saving."); return; }
     if (lines.some((l) => !l.LHeadId)) { toast.error("Every line requires an account head."); return; }
     setSaving(true);
     try {
-      await createJournalVoucher({ JVDate: jvDate, Narration: narration, lines });
+      await createJournalVoucher({
+        JVDate: jvDate,
+        Narration: narration,
+        CompanyId: parseInt(companyId, 10),
+        ProjectId: projectId ? parseInt(projectId, 10) : null,
+        lines,
+      });
       toast.success("Journal Voucher created and submitted for approval");
       setDialogOpen(false);
       resetForm();
@@ -274,6 +322,7 @@ export default function JournalVoucher() {
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">JV No</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Company / Project</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Narration</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
@@ -284,14 +333,14 @@ export default function JournalVoucher() {
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center">
+                  <td colSpan={8} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading vouchers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-20 text-center">
+                  <td colSpan={8} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Scale size={36} className="opacity-20" />
                       <p className="text-sm font-medium">
@@ -322,6 +371,18 @@ export default function JournalVoucher() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{fmtDate(v.JVDate)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {v.CompanyName ? (
+                        <>
+                          <p className="text-foreground truncate max-w-[160px]">{v.CompanyName}</p>
+                          {v.ProjectName && (
+                            <p className="text-[11px] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
+                          )}
+                        </>
+                      ) : (
+                        <span className="italic text-muted-foreground/50">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm text-foreground max-w-xs">
                       <p className="truncate">{v.Narration || <span className="italic text-muted-foreground/50">—</span>}</p>
                     </td>
@@ -397,6 +458,39 @@ export default function JournalVoucher() {
             {/* Header fields */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
+                <Select
+                  value={companyId}
+                  onValueChange={(v) => { setCompanyId(v); setProjectId(""); }}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Select company…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)} className="text-sm">{c.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
+                <Select
+                  value={projectId}
+                  onValueChange={setProjectId}
+                  disabled={!companyId}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder={companyId ? "Select project (optional)…" : "Select a company first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectsForCompany.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)} className="text-sm">{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
                 <Input type="date" value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
               </div>
@@ -429,8 +523,15 @@ export default function JournalVoucher() {
                             <SelectValue placeholder="Select account…" />
                           </SelectTrigger>
                           <SelectContent>
-                            {ledgerOptions.map((opt) => (
-                              <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
+                            {Object.entries(groupedLedgerOptions).map(([type, opts]) => (
+                              <SelectGroup key={type}>
+                                <SelectLabel className="text-[10px] uppercase tracking-widest">
+                                  {LHEAD_TYPE_LABEL[type] || type}
+                                </SelectLabel>
+                                {opts.map((opt) => (
+                                  <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
                             ))}
                           </SelectContent>
                         </Select>
