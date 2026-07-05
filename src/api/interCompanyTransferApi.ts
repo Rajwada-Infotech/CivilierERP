@@ -62,11 +62,48 @@ export interface InterCompanyTransferSummary {
   ICTId: number;
   DocNo: string;
   TransferDate: string;
+  SenderProjectId?: number;
+  SenderCompanyId?: number;
   SenderProjectName?: string;
+  SenderCompanyName?: string;
+  ReceiverProjectId?: number;
+  ReceiverCompanyId?: number;
   ReceiverProjectName?: string;
+  ReceiverCompanyName?: string;
   TotalAmount: number;
   Status: string;
+  Remarks?: string | null;
+  CreatedBy?: string | null;
+  SaleOrderId?: number | null;
+  SaleInvoiceId?: number | null;
+  ReceivedPaymentId?: number | null;
+  PurchaseOrderId?: number | null;
+  GRNId?: number | null;
+  ExpenseBookingId?: number | null;
+  NewPaymentId?: number | null;
 }
+
+export interface InterCompanyTransferDetailItem {
+  ICTItemId: number;
+  ItemId: string;
+  ItemName: string | null;
+  UOMCode: string | null;
+  Quantity: number;
+  Rate: number;
+  Amount: number;
+  SourceDocNo: string | null;
+}
+
+export interface InterCompanyTransferDetail extends InterCompanyTransferSummary {
+  items: InterCompanyTransferDetailItem[];
+}
+
+export const getInterCompanyTransfer = async (
+  id: number,
+): Promise<InterCompanyTransferDetail> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`);
+  return handleResponse(res);
+};
 
 export const getInterCompanyTransfers = async (params: {
   companyId?: string | number;

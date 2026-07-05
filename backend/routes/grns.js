@@ -709,11 +709,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - Create GRN + Stock Ledger Entries
-router.post(
-  "/",
-  requirePageRight("grn-master", "create"),
-  validateBody(grnBodySchema),
-  async (req, res) => {
+async function createGRNInternal(pool, body, userEmail) {
     const {
       grnNo,
       grnDate,
@@ -725,22 +721,17 @@ router.post(
       docTypeId: clientDocTypeId,
       docNo,
       finYear,
-      parentDocNo = null, // DocNo of the parent PO or WO
-      rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
-      godownId = null, // Target godown for stock credit (null → resolve from project or Main)
-      projectId = null, // Project linked to this GRN (used for godown resolution)
-    } = req.body;
+      parentDocNo = null,
+      rootExBDocNo = null,
+      godownId = null,
+      projectId = null,
+    } = body;
 
     if (!grnDate || !supplierId) {
-      return res
-        .status(400)
-        .json({ error: "GRNDate and SupplierID are required" });
+      throw new Error("GRNDate and SupplierID are required");
     }
 
-    const pool = getPool();
-
     // ── Guard: a GRN can only be raised against an Approved PO ────────────────
-    // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
     if (poId) {
       const poStatusCheck = await pool
         .request()
@@ -750,14 +741,12 @@ router.post(
         );
 
       if (poStatusCheck.recordset.length === 0) {
-        return res.status(404).json({ error: "Purchase Order not found" });
+        throw Object.assign(new Error("Purchase Order not found"), { status: 404 });
       }
 
       const poStatus = poStatusCheck.recordset[0].Status;
       if (poStatus !== "Approved" && poStatus !== "Received") {
-        return res.status(400).json({
-          error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
-        });
+        throw Object.assign(new Error(`Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`), { status: 400 });
       }
     }
 
@@ -787,7 +776,7 @@ router.post(
         finYear,
         tableName: "GoodsReceiptNotes",
         docNoColumn: "DocNo",
-        issuedBy: req.user?.email || req.user?.name || null,
+        issuedBy: userEmail,
         parentDocNo,
         rootExBDocNo,
       });
@@ -879,7 +868,7 @@ router.post(
       await linkGRNAttachments(
         transaction,
         grnId,
-        parseIdList(req.body.attachmentIds),
+        parseIdList(body.attachmentIds),
       );
 
       // IMPORTANT: use transaction.request() not pool.request() — the GRN row
