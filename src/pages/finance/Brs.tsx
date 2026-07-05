@@ -396,6 +396,7 @@ export default function Brs() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "clear" | "unclear" | "bounced">("");
+  const [hideDummyBank, setHideDummyBank] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
@@ -519,9 +520,12 @@ export default function Brs() {
 
   // ── Client-side search ────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    if (!search.trim()) return entries;
+    let result = entries;
+    if (hideDummyBank)
+      result = result.filter((e) => (e.BankName ?? "").toLowerCase() !== "dummy bank");
+    if (!search.trim()) return result;
     const q = search.toLowerCase();
-    return entries.filter(
+    return result.filter(
       (e) =>
         (e.CompanyName ?? "").toLowerCase().includes(q) ||
         (e.BankName ?? "").toLowerCase().includes(q) ||
@@ -532,7 +536,7 @@ export default function Brs() {
         (e.Mode ?? "").toLowerCase().includes(q) ||
         (e.BounceReason ?? "").toLowerCase().includes(q),
     );
-  }, [entries, search]);
+  }, [entries, search, hideDummyBank]);
 
   const exportData = useMemo(() => filtered as unknown as Record<string, unknown>[], [filtered]);
 
@@ -745,6 +749,22 @@ export default function Brs() {
                 <X size={12} />
               </button>
             )}
+
+            {/* Dummy Bank toggle */}
+            <button
+              onClick={() => setHideDummyBank((v) => !v)}
+              title={hideDummyBank ? "Dummy Bank transactions are hidden — click to show" : "Click to hide Dummy Bank (inter-company) transactions"}
+              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium border transition-all ${
+                hideDummyBank
+                  ? "bg-muted text-muted-foreground border-border"
+                  : "bg-orange-500/10 text-orange-600 border-orange-400/30"
+              }`}
+            >
+              <span className={`w-6 h-3.5 rounded-full relative transition-colors ${hideDummyBank ? "bg-muted-foreground/30" : "bg-orange-400"}`}>
+                <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-transform duration-200 ${hideDummyBank ? "left-0.5" : "left-[13px]"}`} />
+              </span>
+              Dummy Bank
+            </button>
 
             {/* Status filter pills */}
             <div className="flex flex-wrap gap-1.5 sm:ml-auto">
