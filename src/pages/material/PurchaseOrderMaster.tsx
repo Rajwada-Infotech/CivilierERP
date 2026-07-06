@@ -2364,7 +2364,7 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                             recordId={item._id}
                             endpoint="/api/purchase-orders"
                             submitOnly
-                            onSuccess={(action: string) => handleApprovalSuccess(item._id, action)}
+                            onSuccess={(action) => handleApprovalSuccess(item._id, action)}
                           />
                           <button
                             onClick={async () => {
