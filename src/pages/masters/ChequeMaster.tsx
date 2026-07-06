@@ -90,9 +90,9 @@ function calcTotal(start: number | "", end: number | ""): number {
 const CSV_HEADERS = {
   company: "Company Name",
   bank: "Bank Name",
-  lotNumber: "Lot Number",
-  startNumber: "Start Number",
-  endNumber: "End Number",
+  lotNumber: "Cheque Book Number",
+  startNumber: "First Cheque Number",
+  endNumber: "Last Cheque Number",
   remarks: "Remarks",
   status: "Status (Active/Inactive)",
 } as const;
@@ -147,7 +147,7 @@ function buildChequeColumns(
     },
     {
       accessorKey: "ChequeLotNumber",
-      header: "Lot Number",
+      header: "Cheque Book Number",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs text-primary">
           {(getValue() as string) || "—"}
@@ -315,7 +315,7 @@ const ChequeMaster: React.FC = () => {
         <tr><td>Account Number</td><td>${cheque.AccountNumber || "—"}</td></tr>
         <tr><td>IFSC Code</td><td>${cheque.IFSCCode || "—"}</td></tr>
         <tr><td>Account Type</td><td>${cheque.BankAccountType || "—"}</td></tr>
-        <tr><td>Lot Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
+        <tr><td>Cheque Book Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
         <tr><td>Cheque Range</td><td>${cheque.ChequeStartNumber ?? "—"} → ${cheque.ChequeEndNumber ?? "—"}</td></tr>
         <tr><td>Total Cheques</td><td>${cheque.TotalCheques ?? "—"}</td></tr>
         <tr><td>Remarks</td><td>${cheque.Remarks || "—"}</td></tr>
@@ -872,10 +872,10 @@ const ChequeMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Lot Number */}
+                {/* Cheque Book Number */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Lot Number <span className="text-destructive">*</span>
+                    Cheque Book Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
                     <BookOpen
@@ -892,15 +892,15 @@ const ChequeMaster: React.FC = () => {
                   </div>
                   {errors.lotNumber && (
                     <p className="text-xs text-destructive mt-1">
-                      Lot number is required
+                      Cheque book number is required
                     </p>
                   )}
                 </div>
 
-                {/* Start */}
+                {/* First Cheque Number */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Start Number <span className="text-destructive">*</span>
+                    First Cheque Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
                     <FileText
@@ -922,15 +922,15 @@ const ChequeMaster: React.FC = () => {
                   </div>
                   {errors.chqStart && (
                     <p className="text-xs text-destructive mt-1">
-                      Start number is required
+                      First cheque number is required
                     </p>
                   )}
                 </div>
 
-                {/* End */}
+                {/* Last Cheque Number */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    End Number <span className="text-destructive">*</span>
+                    Last Cheque Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
                     <FileText
@@ -953,8 +953,8 @@ const ChequeMaster: React.FC = () => {
                   {errors.chqEnd && (
                     <p className="text-xs text-destructive mt-1">
                       {Number(form.chqEnd) < Number(form.chqStart)
-                        ? "End must be ≥ start"
-                        : "End number is required"}
+                        ? "Last cheque number must be ≥ first"
+                        : "Last cheque number is required"}
                     </p>
                   )}
                 </div>
@@ -1228,7 +1228,7 @@ const ChequeMaster: React.FC = () => {
                 { label: "IFSC Code", value: viewRow.IFSCCode, mono: true },
                 { label: "Account Type", value: viewRow.BankAccountType },
                 {
-                  label: "Lot Number",
+                  label: "Cheque Book Number",
                   value: viewRow.ChequeLotNumber,
                   mono: true,
                 },

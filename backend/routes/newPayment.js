@@ -336,18 +336,25 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
 
     const { ChequeStartNumber, ChequeEndNumber } = lotRes.recordset[0];
 
-    // Fetch all cheque numbers already used from this lot in NewPayment
+    // Fetch all cheque numbers used from this lot, plus their bounce status
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
       .query(`
-      SELECT PChequeNo FROM dbo.NewPayment
-      WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
-    `);
-    const usedSet = new Set(usedRes.recordset.map((r) => String(r.PChequeNo)));
+        SELECT np.PChequeNo, COALESCE(brc.IsBounced, 0) AS IsBounced
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.BankReconciliation brc
+          ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
+        WHERE np.PChequeLotId = @PChequeLotId AND np.PChequeNo IS NOT NULL
+      `);
+    const usedSet    = new Set(usedRes.recordset.map((r) => String(r.PChequeNo)));
+    const bouncedSet = new Set(
+      usedRes.recordset.filter((r) => r.IsBounced).map((r) => String(r.PChequeNo))
+    );
 
     // Build list of all cheque numbers in range
     const cheques = [];
     for (let n = ChequeStartNumber; n <= ChequeEndNumber; n++) {
-      cheques.push({ number: String(n), used: usedSet.has(String(n)) });
+      const num = String(n);
+      cheques.push({ number: num, used: usedSet.has(num), bounced: bouncedSet.has(num) });
     }
 
     res.json(cheques);
@@ -458,6 +465,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     IsInterCompanyTransfer,
     // Re-issue: links this payment back to a bounced predecessor
     ReplacesPaymentId,
+    // Optional bounce charge added on top of the original amount
+    BounceCharge,
   } = req.body;
 
   try {
@@ -589,6 +598,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Audit
       .input("ReplacesPaymentId", sql.Int, ReplacesPaymentId ? parseInt(ReplacesPaymentId) : null)
+      .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -600,7 +610,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId,
+          ReplacesPaymentId, BounceCharge,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -611,7 +621,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId,
+          @ReplacesPaymentId, @BounceCharge,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);

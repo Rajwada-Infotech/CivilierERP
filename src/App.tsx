@@ -270,6 +270,9 @@ const CostCenterMaster = lazy(
 const ProfitCenterMaster = lazy(
   () => import("./pages/masters/ProfitCenterMaster"),
 );
+const ReturnReasonMaster = lazy(
+  () => import("./pages/masters/ReturnReasonMaster"),
+);
 
 // New hierarchy pages
 const SuperAdminDashboard = lazy(
@@ -1549,6 +1552,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="profit-center">
             <ProfitCenterMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/return-reason"
+        element={
+          <ProtectedRoute pageKey="return-reason-master">
+            <ReturnReasonMaster />
           </ProtectedRoute>
         }
       />

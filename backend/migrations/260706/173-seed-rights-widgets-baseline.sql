@@ -1554,7 +1554,7 @@ BEGIN
 END
 
 -- ── Verification ─────────────────────────────────────────────────────────
-SELECT 'PageDefinitions' AS TableName, COUNT(*) AS RowCount FROM dbo.PageDefinitions
+SELECT 'PageDefinitions' AS TableName, COUNT(*) AS [RowCount] FROM dbo.PageDefinitions
 UNION ALL SELECT 'WidgetCatalog', COUNT(*) FROM dbo.WidgetCatalog
 UNION ALL SELECT 'RoleRights', COUNT(*) FROM dbo.RoleRights
 UNION ALL SELECT 'UserPageRightsJson (active)', COUNT(*) FROM dbo.UserPageRightsJson WHERE IsActive = 1;
