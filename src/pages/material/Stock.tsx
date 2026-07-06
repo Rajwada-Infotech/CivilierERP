@@ -263,34 +263,34 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground hidden sm:table-cell">
                   #
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
                   Item Name
                 </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground hidden sm:table-cell">
                   Group
                 </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground hidden sm:table-cell">
                   UOM
                 </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground hidden md:table-cell">
                   Opening
                 </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground hidden sm:table-cell">
                   In
                 </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground hidden sm:table-cell">
                   Out
                 </th>
                 <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
                   Closing
                 </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground hidden md:table-cell">
                   Customer Rate
                 </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                <th className="px-4 py-3 text-right font-semibold text-muted-foreground hidden sm:table-cell">
                   Stock Value
                 </th>
               </tr>
@@ -309,7 +309,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={2}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
                     No stock data found for this godown.
@@ -321,7 +321,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                     key={row.ItemID}
                     className="border-b border-border hover:bg-muted/20 transition-colors"
                   >
-                    <td className="px-4 py-2.5 text-muted-foreground font-mono">
+                    <td className="px-4 py-2.5 text-muted-foreground font-mono hidden sm:table-cell">
                       {idx + 1}
                     </td>
                     <td className="px-4 py-2.5">
@@ -329,15 +329,21 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                         <span className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center shrink-0">
                           <Package size={11} className="text-emerald-600" />
                         </span>
-                        <span className="font-medium text-foreground">
-                          {row.ItemName || "—"}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="font-medium text-foreground">
+                            {row.ItemName || "—"}
+                          </span>
+                          <div className="text-[10px] text-muted-foreground sm:hidden">
+                            {row.UOMSymbol || row.UOMName || ""}
+                            {row.ItemGroupName ? ` · ${row.ItemGroupName}` : ""}
+                          </div>
+                        </div>
                       </div>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">
+                    <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">
                       {row.ItemGroupName || "—"}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-2.5 hidden sm:table-cell">
                       {row.UOMSymbol || row.UOMName ? (
                         <span
                           title={row.UOMName ?? undefined}
@@ -349,10 +355,10 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground font-mono">
+                    <td className="px-4 py-2.5 text-right text-muted-foreground font-mono hidden md:table-cell">
                       {fmtNum(row.OpeningStock)}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-2.5 text-right hidden sm:table-cell">
                       {row.StockIn > 0 ? (
                         <span className="text-emerald-600 font-medium">
                           +{fmtNum(row.StockIn)}
@@ -361,7 +367,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-2.5 text-right hidden sm:table-cell">
                       {row.StockOut > 0 ? (
                         <span className="text-red-600 font-medium">
                           -{fmtNum(row.StockOut)}
@@ -383,10 +389,10 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                         {fmtNum(row.ClosingStock)}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">
+                    <td className="px-4 py-2.5 text-right text-muted-foreground hidden md:table-cell">
                       {(row as any).CustomerRate != null ? `₹${fmtNum((row as any).CustomerRate)}` : "—"}
                     </td>
-                    <td className={`px-4 py-2.5 text-right ${(row as any).CustomerRate != null && row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                    <td className={`px-4 py-2.5 text-right hidden sm:table-cell ${(row as any).CustomerRate != null && row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}>
                       {(row as any).CustomerRate != null && row.ClosingStock !== 0
                         ? `₹${fmtNum(row.ClosingStock * (row as any).CustomerRate)}`
                         : "—"}
@@ -398,26 +404,26 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
             {!isLoading && rows.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/60">
-                  <td
-                    colSpan={4}
-                    className="px-4 py-3 font-semibold text-foreground"
-                  >
-                    Total ({rows.length} items)
+                  <td className="px-4 py-3 hidden sm:table-cell" />
+                  <td className="px-4 py-3 font-semibold text-foreground">
+                    Total ({rows.length})
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-foreground">
+                  <td className="px-4 py-3 hidden sm:table-cell" />
+                  <td className="px-4 py-3 hidden sm:table-cell" />
+                  <td className="px-4 py-3 text-right font-bold text-foreground hidden md:table-cell">
                     {fmtNum(totals.opening)}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-600">
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 hidden sm:table-cell">
                     +{fmtNum(totals.in)}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-red-600">
+                  <td className="px-4 py-3 text-right font-bold text-red-600 hidden sm:table-cell">
                     -{fmtNum(totals.out)}
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-foreground">
                     {fmtNum(totals.closing)}
                   </td>
-                  <td className="px-4 py-3" />
-                  <td className="px-4 py-3 text-right font-bold text-foreground">
+                  <td className="px-4 py-3 hidden md:table-cell" />
+                  <td className="px-4 py-3 text-right font-bold text-foreground hidden sm:table-cell">
                     ₹{fmtNum(rows.reduce((s, r) => s + ((r as any).CustomerRate != null ? r.ClosingStock * (r as any).CustomerRate : 0), 0))}
                   </td>
                 </tr>

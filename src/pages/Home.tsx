@@ -1139,11 +1139,16 @@ export default function HomePage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.4 }}
-          className="mt-10 flex items-center justify-center gap-3 text-muted-foreground/25 text-[10px] font-heading tracking-widest uppercase"
+          className="mt-10 flex flex-col items-center gap-1.5"
         >
-          <div className="w-10 h-px bg-border/40" />
-          <span>Civilier ERP · {new Date().getFullYear()}</span>
-          <div className="w-10 h-px bg-border/40" />
+          <div className="flex items-center gap-3 text-muted-foreground/25 text-[10px] font-heading tracking-widest uppercase">
+            <div className="w-10 h-px bg-border/40" />
+            <span>Civilier ERP · {new Date().getFullYear()}</span>
+            <div className="w-10 h-px bg-border/40" />
+          </div>
+          <span className="text-[9px] font-heading tracking-[0.2em] uppercase text-muted-foreground/20">
+            crafted by Rajwada Infotech
+          </span>
         </motion.div>
       </div>
     </div>

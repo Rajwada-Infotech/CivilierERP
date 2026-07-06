@@ -73,26 +73,26 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
         <table className="w-full text-xs">
           <thead className="bg-muted/40 border-b border-border">
             <tr>
-              <th className={thCls + " w-8"}>#</th>
+              <th className={thCls + " w-6 hidden sm:table-cell"}>#</th>
               <th className={thCls}>Description *</th>
-              <th className={thCls + " w-20"}>Qty</th>
-              <th className={thCls + " w-16"}>UOM</th>
-              <th className={thCls + " w-24"}>Rate</th>
-              <th className={thCls + " w-24"}>Amount</th>
-              <th className={thCls + " w-8"}></th>
+              <th className={thCls + " w-16"}>Qty</th>
+              <th className={thCls + " w-14 hidden sm:table-cell"}>UOM</th>
+              <th className={thCls + " w-20"}>Rate</th>
+              <th className={thCls + " w-20"}>Amount</th>
+              <th className={thCls + " w-6"}></th>
             </tr>
           </thead>
           <tbody>
             {items.map((it, idx) => (
               <tr key={idx} className="border-b border-border/50">
-                <td className="px-2 py-1 text-muted-foreground text-center">{idx + 1}</td>
+                <td className="px-2 py-1 text-muted-foreground text-center hidden sm:table-cell">{idx + 1}</td>
                 <td className="px-2 py-1">
                   <input className={inp} value={it.Description} onChange={(e) => update(idx, "Description", e.target.value)} placeholder="Item / description" />
                 </td>
                 <td className="px-2 py-1">
                   <input className={inp + " text-right"} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
                 </td>
-                <td className="px-2 py-1">
+                <td className="px-2 py-1 hidden sm:table-cell">
                   <input className={inp} value={it.UOMSymbol} onChange={(e) => update(idx, "UOMSymbol", e.target.value)} placeholder="Nos" />
                 </td>
                 <td className="px-2 py-1">
@@ -111,7 +111,8 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
           </tbody>
           <tfoot className="border-t border-border bg-muted/20">
             <tr>
-              <td colSpan={5} className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Total</td>
+              <td colSpan={4} className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Total</td>
+              <td className="hidden sm:table-cell" />
               <td className="px-2 py-1.5 text-right text-xs font-bold text-foreground">
                 ₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </td>
@@ -748,11 +749,11 @@ const DebitNoteMaster: React.FC = () => {
   ];
 
   const columns: ColumnDef[] = [
-    { key: "company", label: "Company" },
-    { key: "project", label: "Project", hideOnMobile: true },
     { key: "supplier", label: "Supplier" },
-    { key: "billDiscountGroup", label: "Bill / Doc" },
-    { key: "discountDisplay", label: "Discount" },
+    { key: "company", label: "Company", hideOnMobile: true },
+    { key: "project", label: "Project", hideOnMobile: true },
+    { key: "billDiscountGroup", label: "Bill / Doc", hideOnMobile: true },
+    { key: "discountDisplay", label: "Discount", hideOnMobile: true },
     { key: "createdBy", label: "Created By", hideOnMobile: true },
     { key: "status", label: "Status" },
   ];
