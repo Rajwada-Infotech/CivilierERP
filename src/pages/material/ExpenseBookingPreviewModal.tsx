@@ -322,38 +322,40 @@ export function ExpenseBookingPreviewModal({
       <div className="expense-preview-inner bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
         {/* ── Sticky header ── */}
-        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border expense-preview-print-hide">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
-                <Receipt size={13} className="text-emerald-500" />
+        <div className="sticky top-0 bg-card z-10 border-b border-border expense-preview-print-hide">
+          <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                  <Receipt size={13} className="text-emerald-500" />
+                </div>
+                <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[160px] sm:max-w-none">
+                  {previewRecord.bookingReference ?? "—"}
+                </h2>
+                <StatusBadge status={previewRecord.status} />
               </div>
-              <h2 className="font-heading font-bold text-base font-mono">
-                {previewRecord.bookingReference ?? "—"}
-              </h2>
-              <StatusBadge status={previewRecord.status} />
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Invoice</p>
             </div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Invoice</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
-            >
-              <Printer size={13} /> Print
-            </button>
-            <button
-              onClick={() => { onClose(); onEdit(previewRecord); }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
-            >
-              <Edit size={13} /> Edit
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-            >
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+              >
+                <Printer size={13} /><span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                onClick={() => { onClose(); onEdit(previewRecord); }}
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+              >
+                <Edit size={13} /><span className="hidden sm:inline">Edit</span>
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
         </div>
 

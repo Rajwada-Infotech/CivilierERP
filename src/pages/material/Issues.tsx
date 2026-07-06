@@ -1,5 +1,6 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -35,7 +36,9 @@ import {
   Download,
   Upload,
   Loader2,
+  Printer,
 } from "lucide-react";
+import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -602,11 +605,9 @@ export default function Issues() {
     try {
       const full = await issuesApi.getIssue(record.IssueId);
       setViewingRecord(full);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } catch {
       setViewingRecord(record);
     }
-    setViewMode("view");
   };
 
   const onSave = () => {
@@ -651,6 +652,7 @@ export default function Issues() {
     {
       accessorKey: "DocNo",
       header: "Doc No",
+      size: 400,
       cell: ({ row, getValue }) => (
         <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
           {String(getValue() || row.original.IssueNo || "—")}
@@ -660,6 +662,7 @@ export default function Issues() {
     {
       accessorKey: "CompanyName",
       header: "Company",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <div className="flex items-center gap-1.5 text-sm">
           <Building2 size={12} className="text-muted-foreground shrink-0" />
@@ -670,6 +673,7 @@ export default function Issues() {
     {
       accessorKey: "ProjectName",
       header: "Project",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <FolderOpen size={12} className="shrink-0" />
@@ -680,6 +684,7 @@ export default function Issues() {
     {
       accessorKey: "GodownName",
       header: "Godown",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row, getValue }) => {
         const name = getValue() as string;
         return name ? (
@@ -700,6 +705,7 @@ export default function Issues() {
     {
       accessorKey: "ItemCount",
       header: "Items",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
           <ShoppingCart size={12} className="text-muted-foreground" />
@@ -715,6 +721,7 @@ export default function Issues() {
     {
       accessorKey: "Date",
       header: "Date",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => {
         const v = getValue() as string;
         return (
@@ -733,6 +740,7 @@ export default function Issues() {
     {
       accessorKey: "Status",
       header: "Status",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue, row }) => (
         <div>
           <ApprovalStatusChain
@@ -745,8 +753,10 @@ export default function Issues() {
     {
       id: "actions",
       header: "Actions",
+      size: 120,
+      enableSorting: false,
       cell: ({ row }) => (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={() => handleView(row.original)}
@@ -755,16 +765,6 @@ export default function Issues() {
           >
             <Eye size={15} />
           </button>
-          {rights.canEdit && (
-          <button
-            type="button"
-            onClick={() => handleEdit(row.original)}
-            className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-            title="Edit this issue"
-          >
-            <Edit3 size={15} />
-          </button>
-          )}
           {rights.canDelete && (
           <button
             type="button"
@@ -1529,204 +1529,191 @@ export default function Issues() {
     );
   };
 
-  // ── View mode ─────────────────────────────────────────────────────────────
+  // ── View overlay (portal) ─────────────────────────────────────────────────
 
-  const IssueView = () => {
+  const IssueViewOverlay = () => {
     if (!viewingRecord) return null;
     const items: any[] = viewingRecord.items || [];
+    const close = () => setViewingRecord(null);
+    const fields = [
+      { label: "Doc No", value: viewingRecord.DocNo || viewingRecord.IssueNo, mono: true },
+      { label: "Date", value: viewingRecord.Date ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
+      { label: "Company", value: viewingRecord.CompanyName },
+      { label: "Project", value: viewingRecord.ProjectName },
+      { label: "Financial Year", value: viewingRecord.FinYearName },
+      { label: "Source Godown", value: viewingRecord.GodownName ? `${viewingRecord.GodownName}${viewingRecord.GodownCode ? ` (${viewingRecord.GodownCode})` : ""}` : "—" },
+      ...(viewingRecord.IssuedTo ? [{ label: "Issued To", value: viewingRecord.IssuedTo }] : []),
+      ...(viewingRecord.CostCenter ? [{ label: "Cost Center", value: viewingRecord.CostCenter }] : []),
+    ];
 
-    return (
-      <div className="space-y-5">
-        <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <FileText size={15} className="text-emerald-600 dark:text-emerald-400" />
-              Issue —{" "}
-              {viewingRecord.DocNo ||
-                viewingRecord.IssueNo ||
-                `#${viewingRecord.IssueId}`}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {rights.canEdit && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleEdit(viewingRecord)}
-                className="gap-1.5 h-8"
-              >
-                <Edit3 size={13} /> Edit
-              </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToList}
-                className="h-8 w-8"
-              >
-                <X size={15} />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-5 space-y-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-              <DetailRow
-                label="Doc No"
-                value={
-                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                    {viewingRecord.DocNo || viewingRecord.IssueNo}
-                  </span>
-                }
-              />
-              <DetailRow label="Company" value={viewingRecord.CompanyName} />
-              <DetailRow label="Project" value={viewingRecord.ProjectName} />
-              <DetailRow
-                label="Financial Year"
-                value={viewingRecord.FinYearName}
-              />
-              <DetailRow
-                label="Date"
-                value={
-                  viewingRecord.Date
-                    ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"
-                }
-              />
-              <DetailRow
-                label="Status"
-                value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
-              />
-              <DetailRow
-                label="Source Godown"
-                value={
-                  viewingRecord.GodownName ? (
-                    <GodownBadge
-                      name={viewingRecord.GodownName}
-                      code={viewingRecord.GodownCode}
-                    />
-                  ) : (
-                    "—"
-                  )
-                }
-              />
-              {viewingRecord.IssuedTo && (
-                <DetailRow label="Issued To" value={viewingRecord.IssuedTo} />
-              )}
-              {viewingRecord.CostCenter && (
-                <DetailRow
-                  label="Cost Center"
-                  value={viewingRecord.CostCenter}
-                />
-              )}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
-                  Reason for Issue
-                </p>
-                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
-                  {viewingRecord.Reason || "—"}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
-                  Remarks
-                </p>
-                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
-                  {viewingRecord.Remarks || "—"}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) close(); }}
+      >
+        <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
-        {/* Items table */}
-        <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border bg-muted/20">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShoppingCart size={14} className="text-emerald-600 dark:text-emerald-400" />
-              Issued Items
-              <Badge variant="secondary" className="text-xs">
-                {items.length}
-              </Badge>
-              {viewingRecord.GodownName && (
-                <span className="ml-1">
-                  <GodownBadge
-                    name={viewingRecord.GodownName}
-                    code={viewingRecord.GodownCode}
-                  />
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <span>Item</span>
-              <span>UOM</span>
-              <span>Quantity</span>
-              <span>Balance After</span>
-              <span>Remarks</span>
-            </div>
-            <div className="divide-y divide-border">
-              {items.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No items found
-                </div>
-              ) : (
-                items.map((it, i) => (
-                  <div
-                    key={i}
-                    className="grid md:grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-sm"
-                  >
-                    <div>
-                      <span className="font-medium">
-                        {it.ItemName || it.ItemId}
-                      </span>
-                      {it.ItemGroup && (
-                        <span className="text-xs text-muted-foreground ml-1">
-                          · {it.ItemGroup}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-muted-foreground">
-                      {it.UOMName || it.UOMCode}
-                    </span>
-                    <span className="font-mono font-semibold">
-                      {Number(it.Quantity).toFixed(2)}
-                    </span>
-                    <span
-                      className={`font-mono text-xs font-semibold ${
-                        Number(it.CurrentBalance) < 0
-                          ? "text-destructive"
-                          : "text-emerald-600 dark:text-emerald-400"
-                      }`}
-                    >
-                      {Number(it.CurrentBalance).toFixed(2)} {it.UOMSymbol}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {it.Remarks || "—"}
-                    </span>
+          {/* Header */}
+          <div className="sticky top-0 bg-card z-10 border-b border-border">
+            <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                    <FileText size={13} className="text-emerald-500" />
                   </div>
-                ))
-              )}
+                  <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[160px] sm:max-w-none">
+                    {viewingRecord.DocNo || viewingRecord.IssueNo || `#${viewingRecord.IssueId}`}
+                  </h2>
+                  <StatusBadge status={viewingRecord.Status || "Draft"} />
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Issue</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => {
+                    const rec = viewingRecord;
+                    const itms: any[] = rec.items || [];
+                    printMasterPreview({
+                      title: rec.DocNo || rec.IssueNo || `#${rec.IssueId}`,
+                      subtitle: "Material Issue",
+                      code: rec.DocNo,
+                      status: rec.Status,
+                      sections: [
+                        {
+                          title: "Issue Details",
+                          fields: [
+                            { label: "Doc No", value: rec.DocNo || rec.IssueNo },
+                            { label: "Date", value: rec.Date ? new Date(rec.Date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
+                            { label: "Company", value: rec.CompanyName },
+                            { label: "Project", value: rec.ProjectName },
+                            { label: "Financial Year", value: rec.FinYearName },
+                            { label: "Source Godown", value: rec.GodownName },
+                            { label: "Issued To", value: rec.IssuedTo },
+                            { label: "Cost Center", value: rec.CostCenter },
+                            { label: "Reason", value: rec.Reason },
+                            { label: "Remarks", value: rec.Remarks },
+                          ],
+                        },
+                        {
+                          title: `Issued Items (${itms.length})`,
+                          fields: itms.map((it, i) => ({
+                            label: `${i + 1}. ${it.ItemName || it.ItemId}`,
+                            value: `${Number(it.Quantity).toFixed(2)} ${it.UOMName || it.UOMCode || ""}${it.Remarks ? ` — ${it.Remarks}` : ""}`,
+                          })),
+                        },
+                      ],
+                    });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
+                >
+                  <Printer size={13} /><span className="hidden sm:inline">Print</span>
+                </button>
+                {rights.canEdit && (
+                  <button
+                    onClick={() => { close(); handleEdit(viewingRecord); }}
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                  >
+                    <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
+                  </button>
+                )}
+                <button onClick={close} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
-            {items.length > 0 && (
-              <div className="border-t border-border bg-muted/20 px-4 py-2.5 flex items-center gap-4 text-sm">
-                <span className="text-muted-foreground">Total issued:</span>
-                <span className="font-bold font-mono">
-                  {items
-                    .reduce((s, it) => s + Number(it.Quantity), 0)
-                    .toFixed(2)}{" "}
-                  units
-                </span>
+          </div>
+
+          <div className="p-5 space-y-5">
+
+            {/* Detail fields */}
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                <FileText size={10} className="text-emerald-500" /> Issue Details
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {fields.map(({ label, value, mono }: any) => (
+                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Reason & Remarks */}
+            {(viewingRecord.Reason || viewingRecord.Remarks) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {viewingRecord.Reason && (
+                  <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Reason for Issue</p>
+                    <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Reason}</p>
+                  </div>
+                )}
+                {viewingRecord.Remarks && (
+                  <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Remarks</p>
+                    <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Remarks}</p>
+                  </div>
+                )}
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+
+            {/* Items */}
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                <ShoppingCart size={10} className="text-emerald-500" /> Issued Items
+                <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
+              </p>
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                      <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                      <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Balance After</th>
+                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {items.length === 0 ? (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No items found</td></tr>
+                    ) : items.map((it, i) => (
+                      <tr key={i} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-3 font-medium">
+                          {it.ItemName || it.ItemId}
+                          {it.ItemGroup && <span className="text-muted-foreground ml-1">· {it.ItemGroup}</span>}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{it.UOMName || it.UOMCode || "—"}</td>
+                        <td className="px-4 py-3 text-right font-mono font-semibold">{Number(it.Quantity).toFixed(2)}</td>
+                        <td className={`px-4 py-3 text-right font-mono font-semibold hidden sm:table-cell ${Number(it.CurrentBalance) < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}>
+                          {Number(it.CurrentBalance).toFixed(2)} {it.UOMSymbol}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{it.Remarks || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {items.length > 0 && (
+                    <tfoot className="bg-muted/20 border-t border-border">
+                      <tr>
+                        <td className="px-4 py-2.5 font-semibold text-muted-foreground">Total</td>
+                        <td className="hidden sm:table-cell" />
+                        <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)}
+                        </td>
+                        <td className="hidden sm:table-cell" />
+                        <td className="hidden sm:table-cell" />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>,
+      document.body
     );
   };
 
@@ -1763,7 +1750,7 @@ export default function Issues() {
         icon={ArrowDownToLine}
         action={
           viewMode === "list" ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}
@@ -1801,7 +1788,7 @@ export default function Issues() {
       >
         {viewMode === "list" && IssueList()}
         {viewMode === "form" && IssueForm()}
-        {viewMode === "view" && IssueView()}
+        {IssueViewOverlay()}
       </MaterialShell>
     </>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -201,19 +202,19 @@ export default function IssueReturn() {
 
   const columns: ColumnDef<ReturnRow>[] = [
     {
-      accessorKey: "DocNo", header: "Doc No", size: 120,
+      accessorKey: "DocNo", header: "Doc No", size: 400,
       cell: ({ getValue }) => <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400 font-semibold">{getValue() as string}</span>,
     },
     {
-      accessorKey: "ReturnDate", header: "Date", size: 90,
+      accessorKey: "ReturnDate", header: "Date", size: 90, meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => { const v = getValue() as string; return <span className="text-xs text-muted-foreground">{v ? format(new Date(v), "dd/MM/yy") : "—"}</span>; },
     },
     {
-      accessorKey: "IssueDocNo", header: "Issue Ref", size: 120,
+      accessorKey: "IssueDocNo", header: "Issue Ref", size: 120, meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{(getValue() as string) || "—"}</span>,
     },
     {
-      id: "CompanyProject", header: "Company / Project", size: 200,
+      id: "CompanyProject", header: "Company / Project", size: 200, meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <div className="flex flex-col gap-0.5">
           <span className="text-xs font-medium truncate">{row.original.CompanyName || "—"}</span>
@@ -222,7 +223,7 @@ export default function IssueReturn() {
       ),
     },
     {
-      accessorKey: "Status", header: "Status", size: 100,
+      accessorKey: "Status", header: "Status", size: 100, meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
     },
     {
@@ -291,7 +292,7 @@ export default function IssueReturn() {
                   <h2 className="text-sm font-heading font-bold text-foreground">Issue Returns Register</h2>
                   <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative">
                     <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <input
@@ -527,98 +528,123 @@ export default function IssueReturn() {
           </motion.div>
         )}
 
-        {/* ── DETAIL ──────────────────────────────────────────────────────── */}
-        {view === "detail" && detailRecord && (
-          <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.22 }} className="space-y-5">
-
-            {/* Header */}
-            <div className="rounded-2xl px-5 py-4 flex items-center justify-between gap-3" style={glassSection}>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setView("list")} className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground transition-colors">
-                  <ArrowLeft size={16} />
-                </button>
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)" }}>
-                  <RotateCw size={14} className="text-emerald-500" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-heading font-bold text-foreground font-mono">{detailRecord.DocNo}</h2>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Issue Return</p>
-                </div>
-              </div>
-              <StatusBadge status={detailRecord.Status} />
-            </div>
-
-            {/* Meta grid */}
-            <div className="rounded-2xl p-5" style={glassSection}>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {[
-                  { label: "Return Date", value: detailRecord.ReturnDate?.split("T")[0] || "—" },
-                  { label: "Issue Reference", value: detailRecord.IssueDocNo || "—", color: "text-blue-600 dark:text-blue-400 font-mono" },
-                  { label: "Company", value: detailRecord.CompanyName || "—" },
-                  { label: "Project / Site", value: detailRecord.ProjectName || "—" },
-                  { label: "Reason", value: detailRecord.Reason || "—" },
-                  { label: "Created", value: detailRecord.CreatedAt ? format(new Date(detailRecord.CreatedAt), "dd MMM yyyy") : "—" },
-                ].map(({ label, value, color }: any) => (
-                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
-                    <p className={`text-xs font-semibold truncate ${color || "text-foreground"}`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-              {detailRecord.Remarks && (
-                <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
-                  <p className="text-xs text-foreground">{detailRecord.Remarks}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Items */}
-            <div className="rounded-2xl overflow-hidden" style={glassSection}>
-              <div className="px-5 py-3 border-b border-border/60 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
-                  <Package size={11} className="text-emerald-500" />
-                </div>
-                <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Return Items</h3>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">{(detailRecord.items || []).length}</span>
-              </div>
-              <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {["Item Name", "Qty", "UOM"].map((h, i) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-[9px] uppercase tracking-widest font-heading text-muted-foreground" style={{ width: i === 0 ? "60%" : "20%" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {(detailRecord.items || []).map((item: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-2.5 text-sm font-medium truncate">{item.ItemName}</td>
-                      <td className="px-4 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                        {Number.isFinite(Number(item.Quantity)) ? Number(item.Quantity).toLocaleString("en-IN", { maximumFractionDigits: 4 }) : item.Quantity}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{item.UOMSymbol || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Actions for detail */}
-            {detailRecord.Status === "Draft" && rights.canEdit && (
-              <div className="flex gap-2 justify-end">
-                <button onClick={() => openEdit(detailRecord)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border border-border hover:bg-muted transition-colors">
-                  <Edit3 size={14} /> Edit
-                </button>
-                <button onClick={() => { submitMut.mutate(detailRecord.ReturnId); setView("list"); }} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition shadow-sm">
-                  <CheckCircle2 size={14} /> Submit for Approval
-                </button>
-              </div>
-            )}
-          </motion.div>
-        )}
-
       </AnimatePresence>
+
+      {/* ── DETAIL OVERLAY (portal) ──────────────────────────────────────── */}
+      {detailRecord && createPortal(
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setDetailRecord(null); }}
+        >
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
+
+            {/* Sticky header */}
+            <div className="sticky top-0 bg-card z-10 border-b border-border">
+              <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                      <RotateCw size={13} className="text-emerald-500" />
+                    </div>
+                    <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[160px] sm:max-w-none">
+                      {detailRecord.DocNo}
+                    </h2>
+                    <StatusBadge status={detailRecord.Status} />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Issue Return</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {detailRecord.Status === "Draft" && rights.canEdit && (
+                    <button
+                      onClick={() => { setDetailRecord(null); openEdit(detailRecord); }}
+                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm"
+                    >
+                      <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
+                    </button>
+                  )}
+                  {detailRecord.Status === "Draft" && rights.canEdit && (
+                    <button
+                      onClick={() => { submitMut.mutate(detailRecord.ReturnId); setDetailRecord(null); }}
+                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-blue-500 to-violet-500 shadow-sm"
+                    >
+                      <CheckCircle2 size={13} /><span className="hidden sm:inline">Submit</span>
+                    </button>
+                  )}
+                  <button onClick={() => setDetailRecord(null)} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5">
+
+              {/* Meta fields */}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                  <RotateCw size={10} className="text-emerald-500" /> Return Details
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {[
+                    { label: "Return Date", value: detailRecord.ReturnDate?.split("T")[0] || "—" },
+                    { label: "Issue Reference", value: detailRecord.IssueDocNo || "—", color: "text-blue-600 dark:text-blue-400 font-mono" },
+                    { label: "Company", value: detailRecord.CompanyName || "—" },
+                    { label: "Project / Site", value: detailRecord.ProjectName || "—" },
+                    { label: "Reason", value: detailRecord.Reason || "—" },
+                    { label: "Created", value: detailRecord.CreatedAt ? format(new Date(detailRecord.CreatedAt), "dd MMM yyyy") : "—" },
+                  ].map(({ label, value, color }: any) => (
+                    <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className={`text-xs font-semibold truncate ${color || "text-foreground"}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {detailRecord.Remarks && (
+                  <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                    <p className="text-xs text-foreground">{detailRecord.Remarks}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Items */}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                  <Package size={10} className="text-emerald-500" /> Return Items
+                  <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{(detailRecord.items || []).length}</span>
+                </p>
+                <div className="rounded-xl border border-border overflow-x-auto">
+                  <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
+                    <thead className="bg-muted/40 border-b border-border">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                        <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {(detailRecord.items || []).length === 0 ? (
+                        <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">No items</td></tr>
+                      ) : (detailRecord.items || []).map((item: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                          <td className="px-4 py-3 font-medium">{item.ItemName}</td>
+                          <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {Number.isFinite(Number(item.Quantity)) ? Number(item.Quantity).toLocaleString("en-IN", { maximumFractionDigits: 4 }) : item.Quantity}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{item.UOMSymbol || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
     </MaterialShell>
   );
 }
