@@ -60,8 +60,8 @@ interface FormState {
   accountNumber: string;
   ifscCode: string;
   lotNumber: string;
-  chqStart: number | "";
-  chqEnd: number | "";
+  chqStart: string;
+  chqEnd: string;
   totalCheques: number;
   remarks: string;
   status: boolean;
@@ -81,18 +81,37 @@ const EMPTY: FormState = {
   status: true,
 };
 
-function calcTotal(start: number | "", end: number | ""): number {
-  if (start === "" || end === "" || Number(end) < Number(start)) return 0;
-  return Number(end) - Number(start) + 1;
+// Extract first 6 chars as the cheque sequence number
+function micrSeq(micr: string): number {
+  return parseInt(micr.slice(0, 6), 10) || 0;
+}
+
+function calcTotal(start: string, end: string): number {
+  if (start.length < 6 || end.length < 6) return 0;
+  const s = micrSeq(start);
+  const e = micrSeq(end);
+  if (e < s) return 0;
+  return e - s + 1;
+}
+
+// Parse MICR into labelled segments for display
+function parseMicr(v: string) {
+  const s = v.padEnd(15, " ");
+  return {
+    chequeNo: s.slice(0, 6),
+    cityCode:  s.slice(6, 9),
+    bankCode:  s.slice(9, 12),
+    branchCode: s.slice(12, 15),
+  };
 }
 
 // ─── CSV import ───────────────────────────────────────────────────────────────
 const CSV_HEADERS = {
   company: "Company Name",
   bank: "Bank Name",
-  lotNumber: "Lot Number",
-  startNumber: "Start Number",
-  endNumber: "End Number",
+  lotNumber: "Cheque Book Number",
+  startNumber: "First Cheque Number",
+  endNumber: "Last Cheque Number",
   remarks: "Remarks",
   status: "Status (Active/Inactive)",
 } as const;
@@ -106,6 +125,28 @@ interface ImportRowResult {
   name: string;
   status: "success" | "error";
   message?: string;
+}
+
+// ─── MICR segment breakdown display ──────────────────────────────────────────
+function MicrBreakdown({ value }: { value: string }) {
+  const p = parseMicr(value);
+  const segments = [
+    { label: "Cheque No", val: p.chequeNo, color: "text-primary" },
+    { label: "City",      val: p.cityCode,   color: "text-amber-600 dark:text-amber-400" },
+    { label: "Bank",      val: p.bankCode,   color: "text-emerald-600 dark:text-emerald-400" },
+    { label: "Branch",    val: p.branchCode, color: "text-sky-600 dark:text-sky-400" },
+  ];
+  return (
+    <div className="flex items-center gap-2 mt-1 flex-wrap">
+      {segments.map((s, i) => (
+        <span key={i} className="flex items-center gap-1">
+          <span className={`font-mono text-[11px] font-semibold ${s.color}`}>{s.val.trim() || "···"}</span>
+          <span className="text-[10px] text-muted-foreground">{s.label}</span>
+          {i < segments.length - 1 && <span className="text-muted-foreground/40 text-[10px]">·</span>}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 const inp =
@@ -147,7 +188,7 @@ function buildChequeColumns(
     },
     {
       accessorKey: "ChequeLotNumber",
-      header: "Lot Number",
+      header: "Cheque Book Number",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs text-primary">
           {(getValue() as string) || "—"}
@@ -315,7 +356,7 @@ const ChequeMaster: React.FC = () => {
         <tr><td>Account Number</td><td>${cheque.AccountNumber || "—"}</td></tr>
         <tr><td>IFSC Code</td><td>${cheque.IFSCCode || "—"}</td></tr>
         <tr><td>Account Type</td><td>${cheque.BankAccountType || "—"}</td></tr>
-        <tr><td>Lot Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
+        <tr><td>Cheque Book Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
         <tr><td>Cheque Range</td><td>${cheque.ChequeStartNumber ?? "—"} → ${cheque.ChequeEndNumber ?? "—"}</td></tr>
         <tr><td>Total Cheques</td><td>${cheque.TotalCheques ?? "—"}</td></tr>
         <tr><td>Remarks</td><td>${cheque.Remarks || "—"}</td></tr>
@@ -358,8 +399,11 @@ const ChequeMaster: React.FC = () => {
     AccountNumber: f.accountNumber || null,
     IFSCCode: f.ifscCode || null,
     ChequeLotNumber: f.lotNumber || null,
-    ChequeStartNumber: f.chqStart !== "" ? Number(f.chqStart) : null,
-    ChequeEndNumber: f.chqEnd !== "" ? Number(f.chqEnd) : null,
+    // Store the full MICR string and also extract the 6-digit seq for DB computed column
+    ChequeStartMICR: f.chqStart || null,
+    ChequeEndMICR:   f.chqEnd   || null,
+    ChequeStartNumber: f.chqStart.length >= 6 ? micrSeq(f.chqStart) : null,
+    ChequeEndNumber:   f.chqEnd.length   >= 6 ? micrSeq(f.chqEnd)   : null,
     TotalCheques: f.totalCheques || null,
     Remarks: f.remarks || null,
     Status: f.status,
@@ -374,8 +418,8 @@ const ChequeMaster: React.FC = () => {
       accountNumber: item.AccountNumber || "",
       ifscCode: item.IFSCCode || "",
       lotNumber: item.ChequeLotNumber || "",
-      chqStart: item.ChequeStartNumber ?? "",
-      chqEnd: item.ChequeEndNumber ?? "",
+      chqStart: (item as any).ChequeStartMICR ?? String(item.ChequeStartNumber ?? ""),
+      chqEnd:   (item as any).ChequeEndMICR   ?? String(item.ChequeEndNumber   ?? ""),
       totalCheques: item.TotalCheques ?? 0,
       remarks: item.Remarks || "",
       status: item.Status,
@@ -406,9 +450,9 @@ const ChequeMaster: React.FC = () => {
     !!form.companyId &&
     !!form.bankId &&
     !!form.lotNumber.trim() &&
-    form.chqStart !== "" &&
-    form.chqEnd !== "" &&
-    Number(form.chqEnd) >= Number(form.chqStart);
+    form.chqStart.length === 15 &&
+    form.chqEnd.length === 15 &&
+    micrSeq(form.chqEnd) >= micrSeq(form.chqStart);
 
   const handleSave = async () => {
     if (!(await validate())) return;
@@ -489,8 +533,12 @@ const ChequeMaster: React.FC = () => {
           if (!companyRaw) throw new Error("Company Name is required");
           if (!bankRaw) throw new Error("Bank Name is required");
           if (!lotNumber) throw new Error("Lot Number is required");
-          if (!startRaw) throw new Error("Start Number is required");
-          if (!endRaw) throw new Error("End Number is required");
+          if (!startRaw) throw new Error("First Cheque Number is required");
+          if (!endRaw)   throw new Error("Last Cheque Number is required");
+          if (!/^[A-Za-z0-9]{15}$/.test(startRaw))
+            throw new Error(`First Cheque Number must be 15 alphanumeric chars (MICR format) — got "${startRaw}"`);
+          if (!/^[A-Za-z0-9]{15}$/.test(endRaw))
+            throw new Error(`Last Cheque Number must be 15 alphanumeric chars (MICR format) — got "${endRaw}"`);
 
           const companyMatch = companies.find(
             (c) => c.label.toLowerCase() === companyRaw.toLowerCase(),
@@ -503,20 +551,10 @@ const ChequeMaster: React.FC = () => {
           );
           if (!bankMatch) throw new Error(`Bank not found: "${bankRaw}"`);
 
-          const startNum = parseInt(startRaw);
-          const endNum = parseInt(endRaw);
-          if (isNaN(startNum) || startNum <= 0)
-            throw new Error(
-              `Start Number must be a positive integer (got "${startRaw}")`,
-            );
-          if (isNaN(endNum) || endNum <= 0)
-            throw new Error(
-              `End Number must be a positive integer (got "${endRaw}")`,
-            );
+          const startNum = micrSeq(startRaw);
+          const endNum   = micrSeq(endRaw);
           if (endNum < startNum)
-            throw new Error(
-              `End Number (${endNum}) must be ≥ Start Number (${startNum})`,
-            );
+            throw new Error(`Last cheque number (${endNum}) must be ≥ first cheque number (${startNum})`);
 
           const isActive =
             statusRaw === "" || statusRaw === "active"
@@ -535,8 +573,10 @@ const ChequeMaster: React.FC = () => {
             AccountNumber: bankMatch.accountNumber || null,
             IFSCCode: bankMatch.ifscCode || null,
             ChequeLotNumber: lotNumber,
+            ChequeStartMICR: startRaw.toUpperCase(),
+            ChequeEndMICR:   endRaw.toUpperCase(),
             ChequeStartNumber: startNum,
-            ChequeEndNumber: endNum,
+            ChequeEndNumber:   endNum,
             Remarks: remarks || null,
             Status: isActive,
           });
@@ -620,9 +660,9 @@ const ChequeMaster: React.FC = () => {
 
   const totalCheques = calcTotal(form.chqStart, form.chqEnd);
   const rangeValid =
-    form.chqStart !== "" &&
-    form.chqEnd !== "" &&
-    Number(form.chqEnd) >= Number(form.chqStart);
+    form.chqStart.length === 15 &&
+    form.chqEnd.length === 15 &&
+    micrSeq(form.chqEnd) >= micrSeq(form.chqStart);
 
   if (loadingCheques || loadingBanks)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -872,10 +912,10 @@ const ChequeMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Lot Number */}
+                {/* Cheque Book Number */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Lot Number <span className="text-destructive">*</span>
+                    Cheque Book Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
                     <BookOpen
@@ -892,69 +932,59 @@ const ChequeMaster: React.FC = () => {
                   </div>
                   {errors.lotNumber && (
                     <p className="text-xs text-destructive mt-1">
-                      Lot number is required
+                      Cheque book number is required
                     </p>
                   )}
                 </div>
 
-                {/* Start */}
+                {/* First Cheque Number (MICR) */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Start Number <span className="text-destructive">*</span>
+                    First Cheque Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <FileText
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
+                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <input
-                      type="number"
+                      type="text"
+                      maxLength={15}
                       value={form.chqStart}
-                      onChange={(e) =>
-                        setField(
-                          "chqStart",
-                          e.target.value === "" ? "" : Number(e.target.value),
-                        )
-                      }
-                      placeholder="e.g. 100001"
-                      className={`${inp} pl-8 font-mono ${errors.chqStart ? "border-destructive" : ""}`}
+                      onChange={(e) => setField("chqStart", e.target.value.toUpperCase())}
+                      placeholder="e.g. 600001400001042"
+                      className={`${inp} pl-8 font-mono tracking-widest ${errors.chqStart ? "border-destructive" : ""}`}
                     />
                   </div>
+                  {form.chqStart.length > 0 && (
+                    <MicrBreakdown value={form.chqStart} />
+                  )}
                   {errors.chqStart && (
-                    <p className="text-xs text-destructive mt-1">
-                      Start number is required
-                    </p>
+                    <p className="text-xs text-destructive mt-1">First cheque number is required</p>
                   )}
                 </div>
 
-                {/* End */}
+                {/* Last Cheque Number (MICR) */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    End Number <span className="text-destructive">*</span>
+                    Last Cheque Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <FileText
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
+                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <input
-                      type="number"
+                      type="text"
+                      maxLength={15}
                       value={form.chqEnd}
-                      onChange={(e) =>
-                        setField(
-                          "chqEnd",
-                          e.target.value === "" ? "" : Number(e.target.value),
-                        )
-                      }
-                      placeholder="e.g. 100050"
-                      className={`${inp} pl-8 font-mono ${errors.chqEnd ? "border-destructive" : ""}`}
+                      onChange={(e) => setField("chqEnd", e.target.value.toUpperCase())}
+                      placeholder="e.g. 600050400001042"
+                      className={`${inp} pl-8 font-mono tracking-widest ${errors.chqEnd ? "border-destructive" : ""}`}
                     />
                   </div>
+                  {form.chqEnd.length > 0 && (
+                    <MicrBreakdown value={form.chqEnd} />
+                  )}
                   {errors.chqEnd && (
                     <p className="text-xs text-destructive mt-1">
-                      {Number(form.chqEnd) < Number(form.chqStart)
-                        ? "End must be ≥ start"
-                        : "End number is required"}
+                      {micrSeq(form.chqEnd) < micrSeq(form.chqStart)
+                        ? "Last cheque number must be ≥ first"
+                        : "Last cheque number is required"}
                     </p>
                   )}
                 </div>
@@ -1228,7 +1258,7 @@ const ChequeMaster: React.FC = () => {
                 { label: "IFSC Code", value: viewRow.IFSCCode, mono: true },
                 { label: "Account Type", value: viewRow.BankAccountType },
                 {
-                  label: "Lot Number",
+                  label: "Cheque Book Number",
                   value: viewRow.ChequeLotNumber,
                   mono: true,
                 },

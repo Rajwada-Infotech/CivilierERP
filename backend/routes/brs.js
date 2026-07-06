@@ -173,6 +173,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           np.Status                AS PayStatus,
           np.PCreatedAt            AS CreatedAt,
           np.PChequeNo             AS ChequeNo,
+          np.PChequeLotNumber      AS ChequeLotNumber,
+          COALESCE(ep.name, np.PProject) AS ProjectName,
           COALESCE(brc.IsMatched, 0)  AS IsMatched,
           COALESCE(brc.IsBounced, 0)  AS IsBounced,
           brc.BounceDate           AS BounceDate,
@@ -200,6 +202,10 @@ router.get("/", cache("brs", 60), async (req, res) => {
               AND ent.id = TRY_CAST(np.PCompany AS INT)
             )
           )
+        LEFT JOIN dbo.enterprise ep
+          ON  ep.business_type = 'P'
+          AND TRY_CAST(np.PProject AS INT) IS NOT NULL
+          AND ep.id = TRY_CAST(np.PProject AS INT)
         LEFT JOIN BankReconciliation brc
           ON  brc.SourceType = 'PAYMENT'
           AND brc.SourceID   = np.PPaymentID
@@ -232,6 +238,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           rp.RPStatus              AS PayStatus,
           rp.RPCreatedAt           AS CreatedAt,
           rp.RPCheckNumber         AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc2.IsMatched, 0)  AS IsMatched,
           COALESCE(brc2.IsBounced, 0)  AS IsBounced,
           brc2.BounceDate          AS BounceDate,
