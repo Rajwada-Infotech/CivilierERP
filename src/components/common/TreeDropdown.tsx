@@ -178,13 +178,18 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const panelHeight = 280;
-    const above = spaceBelow < panelHeight && rect.top > panelHeight;
+    const spaceAbove = rect.top;
+    const panelHeight = 360;
+    const above = spaceBelow < panelHeight && spaceAbove > spaceBelow;
+    const maxH = above
+      ? Math.min(panelHeight, spaceAbove - 8)
+      : Math.min(panelHeight, spaceBelow - 8);
     setPanelStyle({
       position: "fixed",
-      top: above ? rect.top - panelHeight - 4 : rect.bottom + 4,
+      top: above ? rect.top - maxH - 4 : rect.bottom + 4,
       left: rect.left,
-      width: rect.width,
+      width: Math.max(rect.width, 260),
+      maxHeight: maxH,
       zIndex: 9999,
     });
   }, []);
@@ -201,12 +206,17 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       const inPanel = panelRef.current?.contains(e.target as Node);
       if (!inTrigger && !inPanel) setOpen(false);
     };
+    const scrollHandler = (e: Event) => {
+      // composedPath includes every ancestor of the scroll target — reliable even for portals
+      if (panelRef.current && e.composedPath().includes(panelRef.current)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", handler);
-    window.addEventListener("scroll", () => setOpen(false), { passive: true, capture: true });
+    window.addEventListener("scroll", scrollHandler, { passive: true, capture: true });
     window.addEventListener("resize", recalcPosition);
     return () => {
       document.removeEventListener("mousedown", handler);
-      window.removeEventListener("scroll", () => setOpen(false), true);
+      window.removeEventListener("scroll", scrollHandler, true);
       window.removeEventListener("resize", recalcPosition);
     };
   }, [open, recalcPosition]);
@@ -318,7 +328,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               <div className="border-t border-border/60" />
 
               {/* Tree nodes */}
-              <div className="max-h-60 overflow-y-auto py-1 px-1">
+              <div className="max-h-72 overflow-y-auto py-1 px-1">
                 {items.map((node) => (
                   <TreeNodeRow
                     key={node._id}
@@ -338,7 +348,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
             </>
           ) : (
             /* ── Flat panel ── */
-            <div className="max-h-56 overflow-y-auto py-1">
+            <div className="max-h-72 overflow-y-auto py-1">
               {/* Placeholder / clear option */}
               <div
                 className={`px-3 py-2 text-sm cursor-pointer transition-colors ${

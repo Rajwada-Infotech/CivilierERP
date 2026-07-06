@@ -786,7 +786,7 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
-    if (!form.LHeadPan.trim()) e.LHeadPan = true;
+    if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LBelongsTo) e.LBelongsTo = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     // Mandatory on create only — blank on edit means "keep current password".
@@ -1180,7 +1180,8 @@ const SupplierMaster: React.FC = () => {
                     PAN <span className="text-destructive">*</span>
                   </label>
                   <input
-                    value={form.LHeadPan}
+                    value={form.LHeadPan === "PANNOTAVBL" ? "" : form.LHeadPan}
+                    disabled={form.LHeadPan === "PANNOTAVBL"}
                     onChange={(e) => {
                       setForm((p) => ({
                         ...p,
@@ -1190,8 +1191,20 @@ const SupplierMaster: React.FC = () => {
                     }}
                     placeholder="e.g. AAPFU0939F"
                     maxLength={10}
-                    className={`${inputCls} font-mono ${errors.LHeadPan ? "border-red-400" : ""}`}
+                    className={`${inputCls} font-mono ${errors.LHeadPan ? "border-red-400" : ""} ${form.LHeadPan === "PANNOTAVBL" ? "opacity-40 cursor-not-allowed" : ""}`}
                   />
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none mt-1">
+                    <input
+                      type="checkbox"
+                      checked={form.LHeadPan === "PANNOTAVBL"}
+                      onChange={(e) => {
+                        setForm((p) => ({ ...p, LHeadPan: e.target.checked ? "PANNOTAVBL" : "" }));
+                        setErrors((p) => ({ ...p, LHeadPan: false }));
+                      }}
+                      className="h-3 w-3 rounded accent-primary"
+                    />
+                    <span className="text-[11px] text-muted-foreground">PAN not available</span>
+                  </label>
                   {errors.LHeadPan && (
                     <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
                       <AlertCircle size={11} /> Required
@@ -1204,10 +1217,10 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST Type
                   </label>
-                  <TreeDropdown
-                    variant="flat"
+                  <select
                     value={form.LGSTType}
-                    onChange={(v) => {
+                    onChange={(e) => {
+                      const v = e.target.value;
                       setForm((p) => ({
                         ...p,
                         LGSTType: v,
@@ -1215,9 +1228,13 @@ const SupplierMaster: React.FC = () => {
                       }));
                       setErrors((p) => ({ ...p, LGST: false }));
                     }}
-                    options={GST_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select type…"
-                  />
+                    className={`${inputCls} appearance-none`}
+                  >
+                    <option value="">Select type…</option>
+                    {GST_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* GST Number — only when Registered */}
@@ -1327,8 +1344,17 @@ const SupplierMaster: React.FC = () => {
               {(() => {
                 const loginUrl = `${window.location.origin}/supplier-login`;
                 const phone = form.LHeadPhone?.replace(/\D/g, "") ?? "";
+                const loginEmail = editingId
+                  ? suppliers.find((s) => s.LHeadId === editingId)?.SupplierLoginEmail ?? ""
+                  : "";
+                const loginPassword = form.SupplierPassword || "";
+                const credLines = loginEmail
+                  ? `\n\nLogin Email: ${loginEmail}${loginPassword ? `\nPassword: ${loginPassword}` : ""}`
+                  : loginPassword
+                  ? `\n\nPassword: ${loginPassword}`
+                  : "";
                 const waText = encodeURIComponent(
-                  `Hello,\n\nYou can access the supplier portal using the link below:\n${loginUrl}\n\nFor login, use your registered email and password.`
+                  `Hello,\n\nYou can access the supplier portal using the link below:\n${loginUrl}${credLines}\n\nFor login, use your registered email and password.`
                 );
                 const waUrl = phone
                   ? `https://wa.me/${phone.startsWith("91") ? phone : `91${phone}`}?text=${waText}`

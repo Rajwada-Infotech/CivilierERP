@@ -457,7 +457,7 @@ const fetchWorkDoneById = async (
 
 const fetchChequeNumbers = async (
   lotId: number,
-): Promise<{ number: string; used: boolean; bounced?: boolean }[]> => {
+): Promise<{ number: string; used: boolean; bounced: boolean }[]> => {
   const res = await fetchWithAuth(`/api/new-payment/cheque-numbers/${lotId}`);
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
@@ -1343,7 +1343,7 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
   const [lots, setLots] = useState<ChequeLot[]>([]);
   const [loadingLots, setLoadingLots] = useState(false);
   const [chequeNumbers, setChequeNumbers] = useState<
-    { number: string; used: boolean }[]
+    { number: string; used: boolean; bounced: boolean }[]
   >([]);
   const [loadingCheques, setLoadingCheques] = useState(false);
   const [validating, setValidating] = useState(false);
