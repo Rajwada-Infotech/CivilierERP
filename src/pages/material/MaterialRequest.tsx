@@ -1158,7 +1158,8 @@ export default function MaterialRequest() {
                         onChange={(e) =>
                           updateCartItem(ci._key, "UOMCode", e.target.value)
                         }
-                        className={selectCls}
+                        disabled={!!ci.DefaultUOM}
+                        className={`${selectCls} ${ci.DefaultUOM ? "opacity-70 cursor-not-allowed bg-muted" : ""}`}
                       >
                         <option value="">UOM…</option>
                         {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
