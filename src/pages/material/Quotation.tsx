@@ -1125,7 +1125,7 @@ ${suppliers.map(s => `<tr><td>${s.SupplierName}</td><td>${s.Status}</td><td>${fm
                     <tr key={s.Id} className="border-b border-border/50 last:border-0">
                       <td className="px-5 py-2.5 font-medium">{s.SupplierName}</td>
                       <td className="px-5 py-2.5">
-                        <StatusBadge status={s.Status === "Submitted" ? "Approved" : "Pending"} />
+                        <StatusBadge status={s.Status} />
                       </td>
                       <td className="px-5 py-2.5 text-muted-foreground">{fmtDate(s.InvitedAt)}</td>
                     </tr>
