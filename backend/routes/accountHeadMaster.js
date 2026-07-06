@@ -7,8 +7,43 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const allowRoles = require("../middleware/role");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const bcrypt = require("bcrypt");
 
 const adminOnly = allowRoles("admin", "super_admin");
+
+// Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
+// bcrypt library and cost factor per the "no new encryption mechanism" spec,
+// not introducing a second constant that could silently drift out of sync.
+const SALT_ROUNDS = 12;
+
+// ── Auto-generate a unique Supplier Portal login email ─────────────────────
+// Format: <sanitized supplier name>@civilier.in. Collisions (two suppliers
+// with the same/very similar name) get a numeric suffix before the @ —
+// checked against both AccountHeadMaster.SupplierLoginEmail and
+// dbo.users.email, since the latter has a UNIQUE constraint and is what
+// actually authenticates the supplier through the shared /login endpoint.
+async function generateSupplierLoginEmail(pool, supplierName) {
+  const base =
+    String(supplierName || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "") || "supplier";
+
+  for (let suffix = 0; suffix < 1000; suffix++) {
+    const candidate = `${base}${suffix || ""}@civilier.in`;
+    const existing = await pool
+      .request()
+      .input("email", sql.NVarChar(150), candidate)
+      .query(`
+        SELECT 1 AS hit FROM dbo.AccountHeadMaster WHERE SupplierLoginEmail = @email
+        UNION ALL
+        SELECT 1 FROM dbo.users WHERE email = @email
+      `);
+    if (!existing.recordset.length) return candidate;
+  }
+  // Astronomically unlikely (1000 same-named suppliers), but never loop forever.
+  throw new Error("Could not generate a unique supplier login email — too many name collisions.");
+}
 
 let accountHeadColumnMetaPromise = null;
 
@@ -86,6 +121,10 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
+    // Login email is safe to expose (it's a username, not a secret); the
+    // bcrypt hash itself is never selected in any GET response.
+    if (hasColumn(columnMeta, "SupplierLoginEmail"))
+      selectColumns.push("lh.SupplierLoginEmail");
 
     const query = `SELECT ${selectColumns.join(", ")}
       FROM dbo.AccountHeadMaster lh
@@ -135,6 +174,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
+    if (hasColumn(columnMeta, "SupplierLoginEmail"))
+      selectColumns.push("lh.SupplierLoginEmail");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -199,6 +240,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     LHeadCategory,
     LHeadType,
   IsTdsApplicable,
+    SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
   try {
@@ -213,8 +255,19 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // across purchaseOrders.js, expenseBooking.js, workOrder.js,
     // materialIssues.js, chequeMasterSchemas.js, debitNote.js,
     // cardMasterSchemas.js, and roomMaster.js during a live-DB workflow test.
+    // Checked before the supplier-password rule below so a request missing
+    // BOTH fields reports the more fundamental error first (matches the
+    // existing precedence other required-field checks in this route use).
     if (!LHeadName || !LHeadName.trim()) {
       return res.status(400).json({ error: "LHeadName is required." });
+    }
+
+    // ── Supplier login password is mandatory ──
+    if (LHeadType === "S" && !(supplierPasswordPlain && supplierPasswordPlain.length >= 6)) {
+      return res.status(400).json({
+        error: "Supplier password is required and must be at least 6 characters.",
+        code: "MISSING_SUPPLIER_PASSWORD",
+      });
     }
 
     // ── Account Group is mandatory (not required for suppliers/customers/contractors) ──
@@ -249,7 +302,22 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
-    const request = pool
+
+    // Both need to be resolved before the insert (email generation queries
+    // the DB for collisions; hashing is async), and both only apply to
+    // suppliers.
+    let supplierLoginEmail = null;
+    let supplierPasswordHash = null;
+    if (LHeadType === "S") {
+      supplierLoginEmail = await generateSupplierLoginEmail(pool, LHeadName);
+      supplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    let newLHeadId;
+    try {
+    const request = tx
       .request()
       .input("LHeadName", sql.NVarChar(200), LHeadName)
       .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
@@ -326,14 +394,68 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       insertColumns.push("CreatedAt");
       insertValues.push("@CreatedAt");
     }
+    if (hasColumn(columnMeta, "SupplierLoginEmail")) {
+      request.input("SupplierLoginEmail", sql.NVarChar(150), supplierLoginEmail);
+      insertColumns.push("SupplierLoginEmail");
+      insertValues.push("@SupplierLoginEmail");
+    }
+    if (hasColumn(columnMeta, "SupplierPassword")) {
+      request.input("SupplierPassword", sql.NVarChar(255), supplierPasswordHash);
+      insertColumns.push("SupplierPassword");
+      insertValues.push("@SupplierPassword");
+    }
 
-    await request.query(`
+    const inserted = await request.query(`
       INSERT INTO dbo.AccountHeadMaster (${insertColumns.join(", ")})
+      OUTPUT INSERTED.LHeadId
       VALUES (${insertValues.join(", ")})
     `);
+    newLHeadId = inserted.recordset[0].LHeadId;
+
+    // ── Wire up real Supplier Portal login ──────────────────────────────────
+    // The AccountHeadMaster.SupplierPassword column above is an on-record
+    // copy for audit/display on the Supplier Master row; what actually
+    // authenticates the supplier is a dbo.users row (same bcrypt hash) with
+    // role='supplier' and LinkedLHeadId pointing back here — the exact
+    // mechanism the existing Supplier Portal login (routes/users.js POST
+    // /login + routes/supplierPortal.js resolveSupplier) already uses, per
+    // the seed pattern in migrations/260702/157-quotation-l1-supplier-portal.sql.
+    // Without this, the supplier's new email/password would be stored but
+    // could never actually log in anywhere.
+    if (LHeadType === "S") {
+      const roleRow = await tx
+        .request()
+        .query("SELECT TOP 1 RId FROM dbo.Role WHERE LOWER(RName) = 'supplier'");
+      const supplierRoleId = roleRow.recordset[0]?.RId ?? null;
+
+      await tx
+        .request()
+        .input("name", sql.NVarChar(200), LHeadName)
+        .input("email", sql.NVarChar(150), supplierLoginEmail)
+        .input("password", sql.NVarChar(255), supplierPasswordHash)
+        .input("RoleId", sql.Int, supplierRoleId)
+        .input("LinkedLHeadId", sql.Int, newLHeadId).query(`
+          INSERT INTO dbo.users (name, email, password, role, RoleId, created_datetime, discontinue, can_accept_tickets, LinkedLHeadId)
+          VALUES (@name, @email, @password, 'supplier', @RoleId, GETDATE(), 0, 0, @LinkedLHeadId)
+        `);
+    }
+
+    await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
 
     await bumpCacheVersion("account-head-master");
-    res.json({ message: "Ledger head added successfully" });
+    res.json({
+      message: "Ledger head added successfully",
+      LHeadId: newLHeadId,
+      ...(supplierLoginEmail ? { SupplierLoginEmail: supplierLoginEmail } : {}),
+    });
   } catch (err) {
     console.error("INSERT ERROR:", err.message);
     res.status(500).json({ error: err.message });
@@ -525,6 +647,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     LHeadCategory,
     LHeadType,
     IsTdsApplicable,
+    SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
   try {
@@ -537,6 +660,16 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // crash the same way the create path did before the fix above.
     if (!LHeadName || !LHeadName.trim()) {
       return res.status(400).json({ error: "LHeadName is required." });
+    }
+
+    // Password is optional on edit (only mandatory at creation) — an admin
+    // resetting it types a new one; leaving it blank keeps the existing
+    // hash untouched on both AccountHeadMaster and the linked dbo.users row.
+    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
+      return res.status(400).json({
+        error: "Supplier password must be at least 6 characters.",
+        code: "MISSING_SUPPLIER_PASSWORD",
+      });
     }
 
     const pool = getPool();
@@ -583,7 +716,16 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     }
 
     const columnMeta = await getAccountHeadColumnMeta();
-    const request = pool
+
+    let newSupplierPasswordHash = null;
+    if (LHeadType === "S" && supplierPasswordPlain) {
+      newSupplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    const request = tx
       .request()
       .input("id", sql.Int, req.params.id)
       .input("LHeadName", sql.NVarChar(200), LHeadName)
@@ -643,11 +785,40 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "UpdatedAt")) {
       updates.push("UpdatedAt=SYSDATETIME()");
     }
+    if (newSupplierPasswordHash && hasColumn(columnMeta, "SupplierPassword")) {
+      request.input("SupplierPassword", sql.NVarChar(255), newSupplierPasswordHash);
+      updates.push("SupplierPassword=@SupplierPassword");
+    }
 
     await request.query(`
       UPDATE dbo.AccountHeadMaster SET ${updates.join(", ")}
       WHERE LHeadId = @id
     `);
+
+    // Keep the linked Supplier Portal login (dbo.users) in sync — that's
+    // what actually authenticates the supplier, not the copy on
+    // AccountHeadMaster above. Note: LHeadName intentionally is NOT synced
+    // back to the login email here even if it changed — regenerating a
+    // supplier's login email on every name edit would silently invalidate
+    // credentials they already know, so the login email is fixed at
+    // creation time (see POST / and generateSupplierLoginEmail).
+    if (newSupplierPasswordHash) {
+      await tx
+        .request()
+        .input("id", sql.Int, req.params.id)
+        .input("password", sql.NVarChar(255), newSupplierPasswordHash)
+        .query("UPDATE dbo.users SET password=@password WHERE LinkedLHeadId=@id AND role='supplier'");
+    }
+
+    await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
 
     await bumpCacheVersion("account-head-master");
     res.json({ message: "Ledger head updated" });
