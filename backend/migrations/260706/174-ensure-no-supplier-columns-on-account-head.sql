@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 173: Defensively ensure dbo.AccountHeadMaster carries no
+-- Migration 174: Defensively ensure dbo.AccountHeadMaster carries no
 -- supplier login columns.
 --
 -- AccountHeadMaster is the shared, generic ledger-head table (suppliers,

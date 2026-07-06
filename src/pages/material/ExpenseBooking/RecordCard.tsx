@@ -1,9 +1,8 @@
 import React from "react";
-import { Button } from "@/components/ui/button";
-import { Edit, Trash2 } from "lucide-react";
+import { Eye, Edit, Trash2, CreditCard } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { computeBreakdown, fmt } from "./helpers";
+import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
@@ -20,82 +19,101 @@ interface Props {
 export function RecordCard({
   rec,
   onEdit,
+  onPreview,
   onDelete,
   onApprovalSuccess,
   canEdit = true,
   canDelete = true,
 }: Props) {
-  const rbd = computeBreakdown(
-    rec.basicAmount,
-    rec.cgstRate,
-    rec.sgstRate,
-    rec.discount,
-  );
-  const displayNet =
-    rec.netAmount && rec.netAmount > 0 ? rec.netAmount : rbd.netAmount;
+  const effectiveNet = (() => {
+    if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+      const terms =
+        rec.billingTerms && rec.billingTerms.length > 0
+          ? rec.billingTerms
+          : rec.discount
+            ? [rec.discount]
+            : [];
+      return computeGrnNetWithTerms(rec.grnTotalAmount, terms, rec.basicAmount);
+    }
+    const rbd = computeBreakdown(
+      rec.basicAmount,
+      rec.cgstRate,
+      rec.sgstRate,
+      rec.billingTerms && rec.billingTerms.length > 0
+        ? rec.billingTerms
+        : rec.discount,
+    );
+    return rec.netAmount && rec.netAmount > 0 ? rec.netAmount : rbd.netAmount;
+  })();
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {/* Header row */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[10px] text-muted-foreground font-medium truncate">
-            {rec.docTypeName || "No Doc Type"}
+            {rec.docTypeName || rec.materialCategory || "Invoice"}
           </p>
-          <p className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+          <p className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 truncate max-w-[200px]">
             {rec.bookingReference || "—"}
           </p>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            {rec.supplier}
-          </p>
+          {rec.supplier && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {rec.supplier}
+            </p>
+          )}
         </div>
         <StatusBadge status={rec.status} />
       </div>
 
+      {/* Detail grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         <div>
           <span className="text-muted-foreground">Date: </span>
-          {rec.bookingDate}
+          <span>{rec.bookingDate || "—"}</span>
         </div>
         <div>
           <span className="text-muted-foreground">Due: </span>
-          {rec.dueDate || "-"}
+          <span>{rec.dueDate || "—"}</span>
         </div>
-        <div>
-          <span className="text-muted-foreground">PO: </span>
-          <span className="font-mono">{rec.poId || "-"}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Invoice: </span>
-          <span className="font-mono">{rec.invoiceReference || "-"}</span>
-        </div>
+        {rec.companyName && (
+          <div className="col-span-2 truncate">
+            <span className="text-muted-foreground">Company: </span>
+            <span>{rec.companyName}</span>
+          </div>
+        )}
         <div>
           <span className="text-muted-foreground">Basic: </span>
-          <span className="font-mono">Rs.{fmt(rec.basicAmount)}</span>
+          <span className="font-mono">₹{fmt(rec.basicAmount)}</span>
         </div>
-        <div>
-          <span className="text-muted-foreground">EMI: </span>
-          {rec.emi.enabled ? (
-            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-              {rec.emi.installmentCount}x
+        {rec.emi?.enabled ? (
+          <div className="flex items-center gap-1">
+            <CreditCard size={10} className="text-violet-500 shrink-0" />
+            <span className="text-violet-600 dark:text-violet-400 font-medium text-[11px]">
+              {rec.emi.installmentCount}x EMI
             </span>
-          ) : (
-            <span className="text-muted-foreground">-</span>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div>
+            <span className="text-muted-foreground">GST: </span>
+            <span className="font-mono">
+              {(rec.cgstRate || 0) + (rec.sgstRate || 0)}%
+            </span>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center justify-between pt-2 border-t border-border">
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
         <div>
           <p className="text-[10px] text-muted-foreground">Net Payable</p>
           <p className="text-sm font-mono font-semibold text-foreground">
-            Rs.{fmt(displayNet)}
+            ₹{fmt(effectiveNet)}
           </p>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} 
-            compact
-          />
-          <div className="flex gap-1.5 items-center">
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} compact />
+          <div className="flex items-center gap-1">
             <ApprovalActions
               status={rec.status}
               recordId={rec.id}
@@ -103,27 +121,35 @@ export function RecordCard({
               submitOnly
               onSuccess={onApprovalSuccess}
             />
+            <button
+              type="button"
+              onClick={onPreview}
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 border border-transparent hover:border-sky-500/20 transition-colors"
+              title="Preview"
+            >
+              <Eye size={14} />
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted border border-transparent hover:border-border transition-colors"
+                title="Edit / Amend"
+              >
+                <Edit size={14} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors"
+                title="Delete"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
-          {canEdit && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onEdit}
-          >
-            <Edit size={13} />
-          </Button>
-          )}
-          {canDelete && (
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onDelete}
-          >
-            <Trash2 size={13} />
-          </Button>
-          )}
         </div>
       </div>
     </div>
