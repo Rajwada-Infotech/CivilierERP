@@ -19,6 +19,7 @@ import {
   Calendar,
   RefreshCw,
   ChevronDown,
+  ChevronRight,
   HardHat,
   ClipboardList,
   AlertCircle,
