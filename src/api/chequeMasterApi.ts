@@ -60,6 +60,8 @@ export interface ChequePayload {
   ChequeLotNumber: string | null;
   ChequeStartNumber: number | null;
   ChequeEndNumber: number | null;
+  ChequeStartMICR: string | null;
+  ChequeEndMICR: string | null;
   Remarks: string | null;
   Status: boolean;
 }

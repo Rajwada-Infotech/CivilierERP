@@ -315,9 +315,9 @@ export default function IssueReturn() {
                     setImporting(true);
                     try {
                       const text = await file.text();
-                      const rows = parseCsv(text);
-                      if (!rows.length) { toast.error("CSV is empty"); return; }
-                      toast.success(`${rows.length} rows read — full import coming soon`);
+                      const parsedRows = parseCsv(text);
+                      if (!parsedRows.length) { toast.error("CSV is empty"); return; }
+                      toast.success(`${parsedRows.length} rows read — full import coming soon`);
                     } catch (err: any) {
                       toast.error(err?.message || "Failed to parse CSV");
                     } finally {

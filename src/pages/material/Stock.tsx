@@ -309,7 +309,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={2}
+                    colSpan={10}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
                     No stock data found for this godown.

@@ -215,7 +215,7 @@ interface POListItem {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const uid = () => Math.random().toString(36).slice(2, 9);
+const uid = () => generateUUID();
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -878,29 +878,33 @@ const PurchaseOrderMaster: React.FC = () => {
   const totalPages = Math.max(dbData?.totalPages ?? 1, 1);
   const totalRecords = dbData?.total ?? dbItems.length;
 
-  const listData: POListItem[] = dbItems.map((item) => ({
-    _id: String(item.PurchaseOrderID ?? ""),
-    poNumber: item.PurchaseOrderNo ?? "",
-    poDate: item.PODate ?? "",
-    supplierName:
-      suppliers.find((s) => s.id === String(item.SupplierID))?.name ??
-      item.SupplierName ??
-      "",
-    companyName:
-      companies.find((c) => c.id === String(item.CompanyId))?.name ??
-      item.CompanyName ??
-      "",
-    projectName:
-      allProjects.find((p) => p.id === String(item.ProjectId))?.name ??
-      item.ProjectName ??
-      "",
-    totalAmount: Number(item.TotalAmount ?? 0),
-    status: item.Status ?? "Draft",
-    docNo: item.DocNo ?? "",
-    remarks: item.Remarks ?? "",
-    poType: item.POType ?? "Direct",
-    sourceWODocNo: item.SourceWODocNo ?? null,
-  }));
+  const listData: POListItem[] = useMemo(
+    () =>
+      dbItems.map((item) => ({
+        _id: String(item.PurchaseOrderID ?? ""),
+        poNumber: item.PurchaseOrderNo ?? "",
+        poDate: item.PODate ?? "",
+        supplierName:
+          suppliers.find((s) => s.id === String(item.SupplierID))?.name ??
+          item.SupplierName ??
+          "",
+        companyName:
+          companies.find((c) => c.id === String(item.CompanyId))?.name ??
+          item.CompanyName ??
+          "",
+        projectName:
+          allProjects.find((p) => p.id === String(item.ProjectId))?.name ??
+          item.ProjectName ??
+          "",
+        totalAmount: Number(item.TotalAmount ?? 0),
+        status: item.Status ?? "Draft",
+        docNo: item.DocNo ?? "",
+        remarks: item.Remarks ?? "",
+        poType: item.POType ?? "Direct",
+        sourceWODocNo: item.SourceWODocNo ?? null,
+      })),
+    [dbItems, suppliers, companies, allProjects],
+  );
 
   // ── Pre-populate form when arriving from Material Request ─────────────────
   useEffect(() => {
@@ -1592,10 +1596,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/purchase-orders/${id}/can-delete`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`/api/purchase-orders/${id}/can-delete`);
       const data = await res.json();
       if (!data.deletable) {
         setDeleteBlockInfo(data);
@@ -1702,9 +1703,23 @@ const PurchaseOrderMaster: React.FC = () => {
     const remarks = viewingPO.Remarks ?? viewingPO.remarks ?? "";
     const payTerms = viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "";
 
-    const logoHtml = activeLogo
-      ? `<img src="${activeLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
-      : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${companyName}</span>`;
+    const supplierNameEsc = escapeHtml(String(supplierName));
+    const companyNameEsc = escapeHtml(String(companyName));
+    const projectNameEsc = escapeHtml(String(projectName));
+    const poNumberEsc = escapeHtml(String(poNumber));
+    const poDateEsc = escapeHtml(String(poDate));
+    const expectedDateEsc = escapeHtml(String(expectedDate));
+    const poStatusEsc = escapeHtml(String(poStatus));
+    const remarksEsc = escapeHtml(String(remarks));
+    const payTermsEsc = escapeHtml(String(payTerms));
+
+    const isSafeLogoUrl =
+      typeof activeLogo === "string" &&
+      /^(https?:\/\/|data:image\/|\/)/i.test(activeLogo);
+    const safeLogoSrc = isSafeLogoUrl ? escapeHtml(activeLogo) : "";
+    const logoHtml = safeLogoSrc
+      ? `<img src="${safeLogoSrc}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
+      : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${companyNameEsc}</span>`;
 
     const statusColors: Record<
       string,
@@ -1756,45 +1771,44 @@ const PurchaseOrderMaster: React.FC = () => {
       0,
     );
 
-    const tcHtml = payTerms
-      ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTerms}</div></div>`
+    const tcHtml = payTermsEsc
+      ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTermsEsc}</div></div>`
       : "";
 
-    const supAddr = sup?.LHeadAddress ?? "";
-    const supContact = sup?.LHeadContactPerson ?? "";
-    const supGST = sup?.LGST ?? "";
-    const supPhone = sup?.LHeadPhone ?? "";
-    const supEmail = sup?.LHeadEmail ?? "";
-    const compAddr = [
-      comp?.address,
-      comp?.address_line2,
-      comp?.city,
-      comp?.state,
-      comp?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
-    const compGST = comp?.gst_no ?? "";
-    const compEmail = comp?.email ?? "";
-    const compPhone = comp?.phone_number ?? "";
+    const supAddr = escapeHtml(sup?.LHeadAddress ?? "");
+    const supContact = escapeHtml(sup?.LHeadContactPerson ?? "");
+    const supGST = escapeHtml(sup?.LGST ?? "");
+    const supPhone = escapeHtml(sup?.LHeadPhone ?? "");
+    const supEmail = escapeHtml(sup?.LHeadEmail ?? "");
+    const compAddr = escapeHtml(
+      [comp?.address, comp?.address_line2, comp?.city, comp?.state, comp?.pincode]
+        .filter(Boolean)
+        .join(", "),
+    );
+    const compGST = escapeHtml(comp?.gst_no ?? "");
+    const compEmail = escapeHtml(comp?.email ?? "");
+    const compPhone = escapeHtml(comp?.phone_number ?? "");
+    const projAddr = escapeHtml(
+      proj ? [proj.address, proj.city, proj.state].filter(Boolean).join(", ") : "",
+    );
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumber}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumberEsc}</title>
 <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
   <div>${logoHtml}</div>
   <div style="text-align:right;">
     <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
-    <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${poNumber}</div>
-    <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(poDate)}</strong></div>
-    ${expectedDate ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(expectedDate)}</strong></div>` : ""}
+    <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${poNumberEsc}</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(poDateEsc)}</strong></div>
+    ${expectedDateEsc ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(expectedDateEsc)}</strong></div>` : ""}
     ${statusHtml}
   </div>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
   <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
-    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplierName}</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplierNameEsc}</div>
     ${supAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${supAddr}</div>` : ""}
     ${supContact ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Contact: <strong style="color:#111827;">${supContact}</strong></div>` : ""}
     ${supPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${supPhone}</div>` : ""}
@@ -1803,7 +1817,7 @@ const PurchaseOrderMaster: React.FC = () => {
   </div>
   <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Billing Details</div>
-    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${companyName}</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${companyNameEsc}</div>
     ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
     ${compPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${compPhone}</div>` : ""}
     ${compEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${compEmail}</div>` : ""}
@@ -1811,8 +1825,8 @@ const PurchaseOrderMaster: React.FC = () => {
   </div>
   <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
-    <div style="font-weight:600;font-size:13px;">${projectName}</div>
-    ${proj ? [proj.address, proj.city, proj.state].filter(Boolean).join(", ") : ""}
+    <div style="font-weight:600;font-size:13px;">${projectNameEsc}</div>
+    ${projAddr}
   </div>
 </div>
 <table><thead><tr>
@@ -1832,7 +1846,7 @@ const PurchaseOrderMaster: React.FC = () => {
   </tbody></table>
 </div>
 ${tcHtml}
-${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${remarks}</div></div>` : ""}
+${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${remarksEsc}</div></div>` : ""}
 <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
   <span>Generated by CivilierERP</span>
   <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
