@@ -24,6 +24,7 @@ import {
   Send,
   X,
   Plus,
+  Check,
   Package,
   Building2,
   Printer,
@@ -135,6 +136,7 @@ export default function Quotation() {
   const [items, setItems] = useState<qtApi.QuotationLineItem[]>([]);
   const [supplierIds, setSupplierIds] = useState<string[]>([]);
   const [tcIds, setTcIds] = useState<string[]>([]);
+  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
   const [addSupplierId, setAddSupplierId] = useState("");
 
   const setH = <K extends keyof FormHeader>(k: K, v: FormHeader[K]) =>
@@ -447,12 +449,14 @@ export default function Quotation() {
       id: "CompanyName",
       accessorKey: "CompanyName",
       header: "Company",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => <span className="text-sm">{String(getValue() || "—")}</span>,
     },
     {
       id: "ProjectName",
       accessorKey: "ProjectName",
       header: "Project",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
       ),
@@ -460,6 +464,7 @@ export default function Quotation() {
     {
       id: "SupplierCount",
       header: "Suppliers",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm">
           <span className="font-semibold">{row.original.SubmittedCount || 0}</span>
@@ -471,6 +476,7 @@ export default function Quotation() {
       id: "ItemCount",
       accessorKey: "ItemCount",
       header: "Items",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <span className="inline-flex items-center gap-1 text-xs font-medium bg-muted px-2 py-0.5 rounded-full">
           {Number(getValue() || 0)}
@@ -481,12 +487,14 @@ export default function Quotation() {
       id: "DocDate",
       accessorKey: "DocDate",
       header: "Date",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>,
     },
     {
       id: "Status",
       accessorKey: "Status",
       header: "Status",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
     },
     {
@@ -495,7 +503,7 @@ export default function Quotation() {
       cell: ({ row }) => {
         const status = row.original.Status;
         return (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={() => handleView(row.original)}
@@ -855,27 +863,80 @@ export default function Quotation() {
                     placeholder="Optional notes…"
                   />
                 </Field>
-                {(tcRecords as any[]).length > 0 && (
-                  <Field label="Terms & Conditions">
-                    <div className="rounded-lg border border-border p-3 h-[90px] overflow-y-auto space-y-1.5 bg-muted/20">
-                      {(tcRecords as any[]).map((tc) => (
-                        <label key={tc.Id} className="flex items-start gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={tcIds.includes(String(tc.Id))}
-                            onChange={(e) =>
-                              setTcIds((p) =>
-                                e.target.checked ? [...p, String(tc.Id)] : p.filter((id) => id !== String(tc.Id)),
-                              )
-                            }
-                            className="mt-0.5 shrink-0"
-                          />
-                          <span className="font-medium">{tc.Name}</span>
-                        </label>
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                      <ClipboardList size={11} className="text-emerald-600 dark:text-emerald-400" />
+                      Terms &amp; Conditions
+                    </h3>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setTcDropdownOpen((o) => !o)}
+                        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
+                      >
+                        <Plus size={13} /> Add T&amp;C
+                      </button>
+                      {tcDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setTcDropdownOpen(false)} />
+                          <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                            <div className="px-3 py-2 border-b border-border">
+                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Terms &amp; Conditions</p>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                              {(tcRecords as any[]).length === 0 ? (
+                                <p className="px-4 py-6 text-xs text-center text-muted-foreground">No T&amp;C records found</p>
+                              ) : (
+                                (tcRecords as any[]).map((tc) => {
+                                  const isSelected = tcIds.includes(String(tc.Id));
+                                  return (
+                                    <button
+                                      key={tc.Id}
+                                      type="button"
+                                      onClick={() => setTcIds((p) => isSelected ? p.filter((id) => id !== String(tc.Id)) : [...p, String(tc.Id)])}
+                                      className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
+                                    >
+                                      <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}>
+                                        {isSelected && <Check size={10} className="text-primary-foreground" />}
+                                      </span>
+                                      <span className="block text-sm font-medium text-foreground truncate">{tc.Name}</span>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <div className="px-3 py-2 border-t border-border">
+                              <button type="button" onClick={() => setTcDropdownOpen(false)} className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1">Done</button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {tcIds.length > 0 ? (
+                    <div className="space-y-2">
+                      {(tcRecords as any[]).filter((tc) => tcIds.includes(String(tc.Id))).map((tc, idx) => (
+                        <div key={tc.Id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
+                          <p className="flex-1 text-sm font-semibold text-foreground min-w-0 truncate">{tc.Name}</p>
+                          <button
+                            type="button"
+                            onClick={() => setTcIds((p) => p.filter((id) => id !== String(tc.Id)))}
+                            className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
                       ))}
                     </div>
-                  </Field>
-                )}
+                  ) : (
+                    <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-muted-foreground text-xs">
+                      <ClipboardList size={14} className="opacity-40" />
+                      <span>No terms selected — click <strong>+ Add T&amp;C</strong> to add from master</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
         </CardContent>
@@ -960,7 +1021,7 @@ ${suppliers.map(s => `<tr><td>${s.SupplierName}</td><td>${s.Status}</td><td>${fm
             <span className="font-mono font-bold text-foreground text-sm">{r.DocNo}</span>
             <StatusBadge status={r.Status} />
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => handlePrint(r)}

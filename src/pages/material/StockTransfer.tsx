@@ -1016,16 +1016,21 @@ function TransferHistory() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/40">
               <tr>
-                {["Doc No", "Date", "Route", "Items", "Status", ""].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2.5 text-left font-semibold text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  { label: "Doc No", cls: "" },
+                  { label: "Date", cls: "hidden sm:table-cell" },
+                  { label: "Route", cls: "hidden sm:table-cell" },
+                  { label: "Items", cls: "hidden md:table-cell" },
+                  { label: "Status", cls: "" },
+                  { label: "", cls: "" },
+                ].map(({ label, cls }) => (
+                  <th
+                    key={label}
+                    className={`px-3 py-2.5 text-left font-semibold text-muted-foreground ${cls}`}
+                  >
+                    {label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -1058,12 +1063,13 @@ function TransferHistory() {
                         className="border-b border-border hover:bg-muted/20 transition-colors bg-teal-500/[0.03]"
                       >
                         <td className="px-3 py-2.5 font-mono text-teal-600 dark:text-teal-400 font-semibold whitespace-nowrap">
-                          {t.DocNo}
+                          <div>{t.DocNo}</div>
+                          <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                         </td>
-                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                           {fmtDate(t.TransferDate)}
                         </td>
-                        <td className="px-3 py-2.5">
+                        <td className="px-3 py-2.5 hidden sm:table-cell">
                           <div className="flex items-center gap-1 whitespace-nowrap">
                             <span className="text-orange-600 dark:text-orange-400">
                               {t.SenderProjectName}
@@ -1077,7 +1083,7 @@ function TransferHistory() {
                             </span>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden md:table-cell">
                           {fmtNum(t.TotalAmount)}
                         </td>
                         <td className="px-3 py-2.5">
@@ -1127,12 +1133,13 @@ function TransferHistory() {
                       className="border-b border-border hover:bg-muted/20 transition-colors"
                     >
                       <td className="px-3 py-2.5 font-mono text-emerald-600 dark:text-emerald-400 font-semibold whitespace-nowrap">
-                        {t.DocNo}
+                        <div>{t.DocNo}</div>
+                        <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                       </td>
-                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                         {fmtDate(t.TransferDate)}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2.5 hidden sm:table-cell">
                         <div className="flex items-center gap-1 whitespace-nowrap">
                           <span className="text-orange-600 dark:text-orange-400">
                             {t.FromGodownName}
@@ -1143,7 +1150,7 @@ function TransferHistory() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden md:table-cell">
                         {t.TransferItems.length} item
                         {t.TransferItems.length !== 1 ? "s" : ""}
                       </td>
@@ -1745,6 +1752,8 @@ export default function StockTransfer() {
                 </div>
 
                 <div className="p-4 space-y-2">
+                  <div className="overflow-x-auto">
+                  <div className="min-w-[480px]">
                   <div className="grid grid-cols-12 gap-2 px-1 mb-1">
                     {["#", "Item", "Avail", "Qty", "UOM", ""].map((h, i) => (
                       <span
@@ -1779,6 +1788,8 @@ export default function StockTransfer() {
                       isLoadingStock={isLoadingStock}
                     />
                   ))}
+                  </div>{/* min-w */}
+                  </div>{/* overflow-x-auto */}
                 </div>
 
                 <div className="px-5 py-4 border-t border-border space-y-3">

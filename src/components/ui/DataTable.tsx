@@ -198,7 +198,7 @@ export function DataTable<TData extends RowData>({
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""
-                      }`}
+                      } ${(header.column.columnDef.meta as any)?.className ?? ""}`}
                       onClick={
                         canSort
                           ? header.column.getToggleSortingHandler()
@@ -264,7 +264,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-5 py-4 text-foreground text-sm align-middle overflow-hidden"
+                      className={`px-5 py-4 text-foreground text-sm align-middle overflow-hidden ${(cell.column.columnDef.meta as any)?.className ?? ""}`}
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
