@@ -19,9 +19,13 @@ const SALT_ROUNDS = 12;
 // ── Auto-generate a unique Supplier Portal login email ─────────────────────
 // Format: <sanitized supplier name>@civilier.in. Collisions (two suppliers
 // with the same/very similar name) get a numeric suffix before the @ —
-// checked against both AccountHeadMaster.SupplierLoginEmail and
-// dbo.users.email, since the latter has a UNIQUE constraint and is what
-// actually authenticates the supplier through the shared /login endpoint.
+// checked against dbo.users.email (UNIQUE-constrained there), the only
+// table a supplier's login identity actually lives in. AccountHeadMaster
+// is the shared, generic ledger-head table (suppliers/customers/banks/GL
+// heads as rows, distinguished by LHeadType) and deliberately has no
+// login-related columns at all — a supplier's credentials are a dbo.users
+// row (role='supplier', LinkedLHeadId -> this ledger head), exactly the
+// same mechanism every other user in the system authenticates through.
 async function generateSupplierLoginEmail(pool, supplierName) {
   const base =
     String(supplierName || "")
@@ -34,11 +38,7 @@ async function generateSupplierLoginEmail(pool, supplierName) {
     const existing = await pool
       .request()
       .input("email", sql.NVarChar(150), candidate)
-      .query(`
-        SELECT 1 AS hit FROM dbo.AccountHeadMaster WHERE SupplierLoginEmail = @email
-        UNION ALL
-        SELECT 1 FROM dbo.users WHERE email = @email
-      `);
+      .query("SELECT 1 AS hit FROM dbo.users WHERE email = @email");
     if (!existing.recordset.length) return candidate;
   }
   // Astronomically unlikely (1000 same-named suppliers), but never loop forever.
@@ -121,13 +121,15 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
-    // Login email is safe to expose (it's a username, not a secret); the
-    // bcrypt hash itself is never selected in any GET response.
-    if (hasColumn(columnMeta, "SupplierLoginEmail"))
-      selectColumns.push("lh.SupplierLoginEmail");
 
-    const query = `SELECT ${selectColumns.join(", ")}
+    // Login email lives on dbo.users (role='supplier', LinkedLHeadId -> this
+    // row), not on AccountHeadMaster — same table every other user's login
+    // identity lives in. Safe to expose (it's a username, not a secret);
+    // the bcrypt hash itself is never selected in any GET response.
+    const query = `SELECT ${selectColumns.join(", ")},
+        su.email AS SupplierLoginEmail
       FROM dbo.AccountHeadMaster lh
+      LEFT JOIN dbo.users su ON su.LinkedLHeadId = lh.LHeadId AND su.role = 'supplier'
       WHERE lh.LHeadId = @id`;
 
     const result = await pool.request().input("id", sql.Int, id).query(query);
@@ -174,8 +176,6 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
-    if (hasColumn(columnMeta, "SupplierLoginEmail"))
-      selectColumns.push("lh.SupplierLoginEmail");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -187,14 +187,18 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
     if (hasColumn(columnMeta, "UpdatedBy"))
       selectColumns.push("lh.UpdatedBy AS UpdatedByEmail");
 
+    // Login email lives on dbo.users (role='supplier', LinkedLHeadId -> this
+    // row) — see GET /:id above for the full rationale.
     let query = `SELECT
         ${selectColumns.join(",\n        ")},
         ag.Name         AS GroupName,
         ag.ParentGroupId,
-        parent.Name     AS ParentGroupName
+        parent.Name     AS ParentGroupName,
+        su.email        AS SupplierLoginEmail
       FROM dbo.AccountHeadMaster lh
       LEFT JOIN dbo.AccountGroup ag     ON ag.AGId     = lh.LBelongsTo
-      LEFT JOIN dbo.AccountGroup parent ON parent.AGId = ag.ParentGroupId`;
+      LEFT JOIN dbo.AccountGroup parent ON parent.AGId = ag.ParentGroupId
+      LEFT JOIN dbo.users su            ON su.LinkedLHeadId = lh.LHeadId AND su.role = 'supplier'`;
 
     const request = pool.request();
     const conditions = [];
@@ -394,17 +398,6 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       insertColumns.push("CreatedAt");
       insertValues.push("@CreatedAt");
     }
-    if (hasColumn(columnMeta, "SupplierLoginEmail")) {
-      request.input("SupplierLoginEmail", sql.NVarChar(150), supplierLoginEmail);
-      insertColumns.push("SupplierLoginEmail");
-      insertValues.push("@SupplierLoginEmail");
-    }
-    if (hasColumn(columnMeta, "SupplierPassword")) {
-      request.input("SupplierPassword", sql.NVarChar(255), supplierPasswordHash);
-      insertColumns.push("SupplierPassword");
-      insertValues.push("@SupplierPassword");
-    }
-
     const inserted = await request.query(`
       INSERT INTO dbo.AccountHeadMaster (${insertColumns.join(", ")})
       OUTPUT INSERTED.LHeadId
@@ -413,15 +406,14 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     newLHeadId = inserted.recordset[0].LHeadId;
 
     // ── Wire up real Supplier Portal login ──────────────────────────────────
-    // The AccountHeadMaster.SupplierPassword column above is an on-record
-    // copy for audit/display on the Supplier Master row; what actually
-    // authenticates the supplier is a dbo.users row (same bcrypt hash) with
-    // role='supplier' and LinkedLHeadId pointing back here — the exact
-    // mechanism the existing Supplier Portal login (routes/users.js POST
-    // /login + routes/supplierPortal.js resolveSupplier) already uses, per
-    // the seed pattern in migrations/260702/157-quotation-l1-supplier-portal.sql.
-    // Without this, the supplier's new email/password would be stored but
-    // could never actually log in anywhere.
+    // AccountHeadMaster never stores login credentials — a supplier's login
+    // is a dbo.users row (bcrypt hash, role='supplier', LinkedLHeadId
+    // pointing back here), the exact mechanism the existing Supplier Portal
+    // login (routes/users.js POST /login + routes/supplierPortal.js
+    // resolveSupplier) already uses, per the seed pattern in
+    // migrations/260702/157-quotation-l1-supplier-portal.sql. Without this,
+    // the supplier's new email/password would be stored but could never
+    // actually log in anywhere.
     if (LHeadType === "S") {
       const roleRow = await tx
         .request()
@@ -785,23 +777,19 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "UpdatedAt")) {
       updates.push("UpdatedAt=SYSDATETIME()");
     }
-    if (newSupplierPasswordHash && hasColumn(columnMeta, "SupplierPassword")) {
-      request.input("SupplierPassword", sql.NVarChar(255), newSupplierPasswordHash);
-      updates.push("SupplierPassword=@SupplierPassword");
-    }
 
     await request.query(`
       UPDATE dbo.AccountHeadMaster SET ${updates.join(", ")}
       WHERE LHeadId = @id
     `);
 
-    // Keep the linked Supplier Portal login (dbo.users) in sync — that's
-    // what actually authenticates the supplier, not the copy on
-    // AccountHeadMaster above. Note: LHeadName intentionally is NOT synced
-    // back to the login email here even if it changed — regenerating a
-    // supplier's login email on every name edit would silently invalidate
-    // credentials they already know, so the login email is fixed at
-    // creation time (see POST / and generateSupplierLoginEmail).
+    // Update the linked Supplier Portal login (dbo.users) — AccountHeadMaster
+    // never stores credentials (see POST / above). Note: LHeadName
+    // intentionally is NOT synced back to the login email here even if it
+    // changed — regenerating a supplier's login email on every name edit
+    // would silently invalidate credentials they already know, so the
+    // login email is fixed at creation time (see POST / and
+    // generateSupplierLoginEmail).
     if (newSupplierPasswordHash) {
       await tx
         .request()
