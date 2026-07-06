@@ -32,7 +32,9 @@ import {
   type BrsEntry,
   type BrsFilterOption,
 } from "@/api/brsApi";
+import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
+import { getReturnReasonOptions } from "@/api/returnReasonApi";
 import {
   CheckCircle2,
   Landmark,
@@ -70,18 +72,6 @@ function isBounced(e: BrsEntry): boolean {
   return e.IsBounced === true || e.IsBounced === 1;
 }
 
-const BOUNCE_REASONS = [
-  "Insufficient Funds",
-  "Payment Stopped by Drawer",
-  "Account Closed",
-  "Account Frozen / Under Lien",
-  "Signature Mismatch",
-  "Cheque Expired / Stale",
-  "Amount in Words and Figures Differ",
-  "Cheque Mutilated / Damaged",
-  "Technical / Clearing Error",
-  "Other",
-];
 
 // ─── Export column definitions ────────────────────────────────────────────────
 
@@ -201,6 +191,11 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   const [bounceDate, setBounceDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [bounceReason, setBounceReason] = useState("");
   const [bounceRemarks, setBounceRemarks] = useState("");
+  const { data: bounceReasons = [] } = useQuery({
+    queryKey: ["return-reason-options"],
+    queryFn: getReturnReasonOptions,
+    staleTime: 5 * 60 * 1000,
+  });
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
@@ -273,8 +268,8 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
             className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-red-400 outline-none appearance-none"
           >
             <option value="">— Select reason —</option>
-            {BOUNCE_REASONS.map((r) => (
-              <option key={r} value={r}>{r}</option>
+            {bounceReasons.map((r) => (
+              <option key={r.id} value={r.name}>{r.name}</option>
             ))}
           </select>
         </div>
@@ -507,16 +502,22 @@ export default function Brs() {
 
   // ── Re-issue navigation ───────────────────────────────────────────────────
   const handleReissue = useCallback((entry: BrsEntry) => {
-    // Store context in sessionStorage so the payment page can pre-fill
-    sessionStorage.setItem("reissue_payment", JSON.stringify({
-      replacesPaymentId: entry.SourceID,
-      replacesDocNo: entry.DocNo,
-      amount: entry.Amount,
-      paymentName: entry.PaymentName,
-      companyName: entry.CompanyName,
-      bounceReason: entry.BounceReason,
-    }));
-    navigate("/payments");
+    navigate("/payments", {
+      state: {
+        reissue: {
+          replacesPaymentId: entry.SourceID,
+          replacesDocNo:     entry.DocNo,
+          amount:            entry.Amount,
+          paymentName:       entry.PaymentName,
+          companyName:       entry.CompanyName,
+          expenseRef:        (entry as any).PExpenseRef ?? null,
+          project:           (entry as any).PProject ?? null,
+          company:           (entry as any).PCompany ?? null,
+          bankId:            (entry as any).PBankID ?? null,
+          bounceReason:      entry.BounceReason,
+        },
+      },
+    });
   }, [navigate]);
 
   // ── Client-side search ────────────────────────────────────────────────────
@@ -963,8 +964,8 @@ export default function Brs() {
                             <CornerDownRight size={10} className="shrink-0" />
                             <span className="font-mono truncate">{entry.OriginalDocNo}</span>
                           </span>
-                        ) : entry.ChequeNo ? (
-                          // Cheque payment — can be marked bounced
+                        ) : entry.ChequeNo && !cleared ? (
+                          // Cheque payment — can be marked bounced (only while uncleared)
                           <button
                             onClick={() => setBounceEntry(entry)}
                             title="Mark this cheque as bounced / dishonoured"

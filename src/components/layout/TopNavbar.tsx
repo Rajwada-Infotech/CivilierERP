@@ -38,6 +38,7 @@ import {
   Megaphone,
   UsersRound,
   ShieldCheck,
+  RotateCcw,
 } from "lucide-react";
 import {
   Crown,
@@ -228,6 +229,13 @@ const financeSetupItems = [
     path: "/masters/profit-center",
     color: "text-teal-500",
     pageKey: "profit-center",
+  },
+  {
+    icon: RotateCcw,
+    label: "Return Reason",
+    path: "/masters/return-reason",
+    color: "text-red-400",
+    pageKey: "return-reason-master",
   },
 ];
 

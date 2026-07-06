@@ -401,19 +401,21 @@ const ALL_REPORTS: ReportDef[] = [
     },
     columns: [
       {
-        header: "Date",
-        accessor: (r) => (r.PayDate ? String(r.PayDate).slice(0, 10) : "—"),
-      },
-      { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
-      { header: "Cheque No", accessor: (r) => (r.ChequeNo ?? "—") as string },
-      { header: "Party", accessor: (r) => (r.PaymentName ?? "—") as string },
-      { header: "Bank", accessor: (r) => (r.BankName ?? "—") as string },
-      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
-      {
         header: "Bounce Date",
         accessor: (r) =>
           r.BounceDate ? String(r.BounceDate).slice(0, 10) : "—",
       },
+      { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Cheque No", accessor: (r) => (r.ChequeNo ?? "—") as string },
+      {
+        header: "Cheque Book",
+        accessor: (r) => (r.ChequeLotNumber ?? "—") as string,
+      },
+      { header: "Party", accessor: (r) => (r.PaymentName ?? "—") as string },
+      { header: "Bank", accessor: (r) => (r.BankName ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
       {
         header: "Bounce Reason",
         accessor: (r) => (r.BounceReason ?? "—") as string,
@@ -423,7 +425,11 @@ const ALL_REPORTS: ReportDef[] = [
         accessor: (r) => (r.BounceRemarks ?? "—") as string,
       },
       {
-        header: "Replacement Doc",
+        header: "Pay Date",
+        accessor: (r) => (r.PayDate ? String(r.PayDate).slice(0, 10) : "—"),
+      },
+      {
+        header: "Re-issued Via",
         accessor: (r) => (r.ReplacementDocNo ?? "—") as string,
       },
     ],
