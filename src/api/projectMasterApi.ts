@@ -54,3 +54,19 @@ export const deleteProject = async (id: number) => {
   }
   return res.json().catch(() => ({}));
 };
+
+// Super-admin-only: deletes the project and every transactional record
+// under it (see backend/services/projectCascadeDelete.js for exact scope).
+// Irreversible — the caller must re-type the exact project name.
+export const deleteProjectCascade = async (id: number, confirmName: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/cascade`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete project and its transactions");
+  }
+  return res.json().catch(() => ({}));
+};
