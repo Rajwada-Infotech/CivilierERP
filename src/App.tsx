@@ -484,6 +484,29 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Approval Inbox Route — admin-tier OR users with explicit approval-inbox right ─
+function ApprovalInboxRoute({ children }: { children: React.ReactNode }) {
+  const { currentUser, canAccessPage } = useAuth();
+  if (
+    !currentUser ||
+    (!ADMIN_ROLES.includes(currentUser.role as any) &&
+      !canAccessPage("approval-inbox"))
+  ) {
+    return <Navigate to="/" replace />;
+  }
+  return (
+    <RequireAuth>
+      <ProtectedProviders>
+        <AppLayout>
+          <RouteErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </RouteErrorBoundary>
+        </AppLayout>
+      </ProtectedProviders>
+    </RequireAuth>
+  );
+}
+
 // ─── Super Admin Only Route ───────────────────────────────────────────────────
 function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -1743,9 +1766,9 @@ function AppRoutes() {
       <Route
         path="/admin/approval/inbox"
         element={
-          <AdminRoute>
+          <ApprovalInboxRoute>
             <ApprovalInbox />
-          </AdminRoute>
+          </ApprovalInboxRoute>
         }
       />
       <Route

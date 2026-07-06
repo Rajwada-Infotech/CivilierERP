@@ -252,7 +252,11 @@ router.get("/health", async (req, res) => {
           SELECT SUM(size * 8.0 / 1024)
           FROM sys.master_files
           WHERE database_id = DB_ID()
-        ) AS total_size_mb
+        ) AS total_size_mb,
+        (
+          SELECT COUNT(*)
+          FROM dbo.dba_query_log
+        ) AS total_queries
     `);
 
     res.json(result.recordset[0]);

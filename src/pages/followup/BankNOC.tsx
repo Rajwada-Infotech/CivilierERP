@@ -5,7 +5,6 @@ import {
   Search,
   X,
   Landmark,
-  ChevronDown,
   Pencil,
   CheckCircle2,
   Clock,
@@ -267,7 +266,7 @@ export function BankNOCPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<BankNOCFormState>(EMPTY_FORM);
-  const [, setDeleteId] = useState<number | null>(null);
+  const [, _setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   const {

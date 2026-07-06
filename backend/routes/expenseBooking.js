@@ -268,7 +268,6 @@ async function buildGrnGstData(pool, grnId) {
     const cgstAmount = roundMoney((taxableAmount * cgstRate) / 100);
     const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
     const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
-    const splitGstAmount = roundMoney(cgstAmount + sgstAmount + igstAmount);
     return {
       lineNo: index + 1,
       itemId: itemId || null,
@@ -1168,10 +1167,6 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     EProjectName,
     EDocumentType,
     EDocDate,
-    EAmount,
-    ENetAmount,
-    ECgstRate,
-    ESgstRate,
     EDiscountData,
     EDocNo,
     ERemarks,
@@ -1579,10 +1574,6 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EProjectName,
     EDocumentType,
     EDocDate,
-    EAmount,
-    ENetAmount,
-    ECgstRate,
-    ESgstRate,
     EDiscountData,
     EDocNo,
     EEmiPayment,

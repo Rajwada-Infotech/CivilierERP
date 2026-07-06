@@ -34,7 +34,6 @@ router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 // still use the in-process variable (zero overhead).  Cold starts pay one
 // Redis GET (~2ms) instead of a SQL Server sys.columns scan (~200ms+).
 let _hasNewCols = null;
-const HAS_NEW_COLS_REDIS_KEY = "schema:ReceivedPayment:hasRPDocNo";
 
 const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard"];
 

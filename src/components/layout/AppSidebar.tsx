@@ -22,6 +22,7 @@ import {
   Setting2,
   Buildings2,
   Volume,
+  TickCircle,
 } from "iconsax-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -269,8 +270,9 @@ export const AppSidebar = () => {
     role === "super_admin" && location.pathname.startsWith("/superadmin");
   // marketing_head cannot access DBA or system admin panels
   const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
+  const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
   const isAdminPage =
-    isAdminTier &&
+    (isAdminTier || canAccessApprovalInbox) &&
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
@@ -286,6 +288,22 @@ export const AppSidebar = () => {
     if (isSuperAdminPage) return superAdminNavItems;
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;
+    if (isAdminPage && !isAdminTier) {
+      // Non-admin-tier users with approval-inbox access see only that item
+      return [
+        {
+          label: "Approval",
+          icon: TickCircle,
+          children: [
+            {
+              label: "Inbox",
+              path: "/admin/approval/inbox",
+              badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined,
+            },
+          ],
+        },
+      ];
+    }
     if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
 
     let raw: NavItem[] = [];

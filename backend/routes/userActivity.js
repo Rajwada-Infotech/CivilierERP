@@ -140,7 +140,7 @@ function mapActivityRow(row) {
 router.get(
   "/",
   checkPermission("UserActivity", "List", "CanView"),
-  cache("user-activity", 60),
+  cache("user-activity", 10),
   async (req, res) => {
     try {
       const pool = getPool();

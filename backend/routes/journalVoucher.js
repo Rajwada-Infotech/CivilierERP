@@ -366,12 +366,14 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
       );
     }
 
-    try {
-      await postJournalVoucherApproval(pool, id, user);
-    } catch (postErr) {
-      return res.status(500).json({
-        error: `Voucher approved, but GL posting failed: ${postErr.message}. Re-submit approval to retry posting.`,
-      });
+    if (alreadyApproved) {
+      try {
+        await postJournalVoucherApproval(pool, id, user);
+      } catch (postErr) {
+        return res.status(500).json({
+          error: `Voucher approved, but GL posting failed: ${postErr.message}. Re-submit approval to retry posting.`,
+        });
+      }
     }
 
     await bumpCacheVersion("journal-voucher");
