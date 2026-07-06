@@ -542,6 +542,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "RefDoc",
     header: "Ref Doc",
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ row }) => {
       const grn = row.original;
       const isTRF = isTransferGRN(grn);
@@ -579,6 +580,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "SupplierOrSource",
     header: "Supplier / Source MR",
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ row }) => {
       const grn = row.original;
       const isTRF = isTransferGRN(grn);
@@ -609,6 +611,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "CompanyProject",
     header: "Company / Project",
+    meta: { className: "hidden md:table-cell" },
     cell: ({ row }) => {
       const grn = row.original;
       return (
@@ -625,6 +628,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "GRNDate",
     header: "Date",
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
@@ -638,6 +642,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "TotalAmount",
     header: "Amount",
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => {
       const v = getValue() as number;
       return (
@@ -651,6 +656,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     id: "chain",
     header: "Status",
+    meta: { className: "hidden sm:table-cell" },
     enableSorting: false,
     cell: ({ row }) => (
       <ApprovalStatusChain
@@ -1471,7 +1477,7 @@ export default function GRN() {
         icon={Truck}
         action={
           !showForm ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 ref={importFileInputRef}
                 type="file"
@@ -1890,7 +1896,7 @@ export default function GRN() {
                             </div>
                           ))}
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {(["receivedQty", "rate", "quantity"] as const).map(
                             (field) => (
                               <div key={field}>
@@ -2555,7 +2561,7 @@ export default function GRN() {
                                   {item.uom || "—"}
                                 </span>
                               </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                                 {[
                                   ["Ordered", String(item.orderedQty), ""],
                                   [
@@ -2579,7 +2585,7 @@ export default function GRN() {
                                   </div>
                                 ))}
                               </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
                                 <div>
                                   <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Rate
