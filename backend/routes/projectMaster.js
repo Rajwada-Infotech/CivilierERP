@@ -536,3 +536,4 @@ router.delete("/:id", adminOnly, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.ensureProjectLedgerHeads = ensureProjectLedgerHeads;
