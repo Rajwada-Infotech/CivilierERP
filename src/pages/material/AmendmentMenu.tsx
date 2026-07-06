@@ -1206,10 +1206,10 @@ function DocTable({
           <TableRow className="bg-muted/30">
             <TableHead className="w-8" />
             <TableHead>Doc No.</TableHead>
-            <TableHead>Party / Vendor</TableHead>
-            <TableHead>Project</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Date</TableHead>
+            <TableHead className="hidden sm:table-cell">Party / Vendor</TableHead>
+            <TableHead className="hidden sm:table-cell">Project</TableHead>
+            <TableHead className="hidden md:table-cell">Amount</TableHead>
+            <TableHead className="hidden md:table-cell">Date</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -1269,8 +1269,11 @@ function DocTable({
                     <span className="font-semibold font-mono text-sm text-foreground">
                       {row.docNo}
                     </span>
+                    <div className="text-[10px] text-muted-foreground sm:hidden mt-0.5">
+                      {row.party}{row.project && row.project !== "—" ? ` · ${row.project}` : ""}
+                    </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <div className="text-sm font-medium">{row.party}</div>
                     {row.company && row.company !== "—" && (
                       <div className="text-xs text-muted-foreground">
@@ -1278,11 +1281,11 @@ function DocTable({
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-sm">{row.project}</TableCell>
-                  <TableCell className="text-sm font-medium">
+                  <TableCell className="text-sm hidden sm:table-cell">{row.project}</TableCell>
+                  <TableCell className="text-sm font-medium hidden md:table-cell">
                     {formatMoney(row.amount)}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
                     {formatDate(row.date)}
                   </TableCell>
                   <TableCell>
@@ -1302,7 +1305,7 @@ function DocTable({
                         onClick={() => toggleExpand(row.id)}
                       >
                         <History size={12} />
-                        {expandedId === row.id ? "Hide" : "History"}
+                        <span className="hidden sm:inline">{expandedId === row.id ? "Hide" : "History"}</span>
                       </Button>
                       {canCreate !== false && (
                         <Button
@@ -1311,7 +1314,7 @@ function DocTable({
                           onClick={() => onAmend(row)}
                         >
                           <FilePenLine size={12} />
-                          Amend
+                          <span className="hidden sm:inline">Amend</span>
                         </Button>
                       )}
                     </div>

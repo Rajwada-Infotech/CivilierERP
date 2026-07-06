@@ -378,8 +378,8 @@ export default function Amendments() {
             </CardDescription>
           </div>
 
-          <div className="flex flex-col gap-3 md:flex-row">
-            <div className="relative min-w-[260px]">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
               <FileSearch className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 className="pl-10"
@@ -399,7 +399,7 @@ export default function Amendments() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Filter status" />
               </SelectTrigger>
               <SelectContent>
@@ -414,14 +414,15 @@ export default function Amendments() {
         </CardHeader>
 
         <CardContent>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Amendment No</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Value Change</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead className="hidden sm:table-cell">Reference</TableHead>
+                <TableHead className="hidden sm:table-cell">Project</TableHead>
+                <TableHead className="hidden md:table-cell">Value Change</TableHead>
+                <TableHead className="hidden md:table-cell">Date</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -452,21 +453,24 @@ export default function Amendments() {
                 rows.map((amendment) => (
                   <TableRow key={amendment.Id}>
                     <TableCell className="font-medium text-emerald-600 dark:text-emerald-400">
-                      {amendment.AmendmentNo}
+                      <div>{amendment.AmendmentNo}</div>
+                      <div className="text-[10px] text-muted-foreground font-normal sm:hidden">
+                        {amendment.ProjectName || amendment.CompanyName || ""}
+                      </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <div className="font-medium">{amendment.RefDocNo || "—"}</div>
                       <div className="text-xs text-muted-foreground">
                         {amendment.RefDocType || "No reference type"}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <div className="font-medium">{amendment.ProjectName || "—"}</div>
                       <div className="text-xs text-muted-foreground">
                         {amendment.CompanyName || "No company"}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">
                       <div className="text-xs text-muted-foreground">
                         From {formatMoney(amendment.OriginalValue)}
                       </div>
@@ -486,7 +490,7 @@ export default function Amendments() {
                         </div>
                       ) : null}
                     </TableCell>
-                    <TableCell>{formatDate(amendment.AmendmentDate)}</TableCell>
+                    <TableCell className="hidden md:table-cell">{formatDate(amendment.AmendmentDate)}</TableCell>
                     <TableCell>
                       <StatusBadge status={amendment.Status} />
                     </TableCell>
@@ -500,8 +504,8 @@ export default function Amendments() {
                                 size="sm"
                                 onClick={() => openEdit(amendment)}
                               >
-                                <Pencil className="mr-1 h-3.5 w-3.5" />
-                                Edit
+                                <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+                                <span className="hidden sm:inline">Edit</span>
                               </Button>
                             )}
                             {rights.canCreate && (
@@ -511,8 +515,8 @@ export default function Amendments() {
                                 disabled={submitMutation.isPending}
                                 onClick={() => submitMutation.mutate(amendment.Id)}
                               >
-                                <Send className="mr-1 h-3.5 w-3.5" />
-                                Submit
+                                <Send className="h-3.5 w-3.5 sm:mr-1" />
+                                <span className="hidden sm:inline">Submit</span>
                               </Button>
                             )}
                             {rights.canDelete && (
@@ -522,8 +526,8 @@ export default function Amendments() {
                                 className="border-rose-200 text-rose-700 hover:bg-rose-50"
                                 onClick={() => setDeleteTarget(amendment)}
                               >
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                Delete
+                                <Trash2 className="h-3.5 w-3.5 sm:mr-1" />
+                                <span className="hidden sm:inline">Delete</span>
                               </Button>
                             )}
                           </>
@@ -537,8 +541,8 @@ export default function Amendments() {
                               disabled={approveMutation.isPending}
                               onClick={() => approveMutation.mutate(amendment.Id)}
                             >
-                              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                              Approve
+                              <ShieldCheck className="h-3.5 w-3.5 sm:mr-1" />
+                              <span className="hidden sm:inline">Approve</span>
                             </Button>
                             <Button
                               variant="outline"
@@ -546,8 +550,8 @@ export default function Amendments() {
                               className="border-rose-200 text-rose-700 hover:bg-rose-50"
                               onClick={() => setRejectTarget(amendment)}
                             >
-                              <XCircle className="mr-1 h-3.5 w-3.5" />
-                              Reject
+                              <XCircle className="h-3.5 w-3.5 sm:mr-1" />
+                              <span className="hidden sm:inline">Reject</span>
                             </Button>
                           </>
                         ) : null}
@@ -559,6 +563,7 @@ export default function Amendments() {
             </TableBody>
           </Table>
 
+          </div>
           {pagination ? (
             <div className="mt-4 flex flex-col gap-3 border-t pt-4 md:flex-row md:items-center md:justify-between">
               <p className="text-sm text-muted-foreground">
@@ -611,7 +616,7 @@ export default function Amendments() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-2 md:grid-cols-2">
+          <div className="grid gap-4 py-2 grid-cols-1 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Reference Doc Type</Label>
               <Select

@@ -442,6 +442,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "VehicleNo",
     header: "Vehicle No",
     size: 110,
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
       <span className="font-mono text-xs font-semibold text-primary">
         {(getValue() as string) || "—"}
@@ -452,6 +453,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "SupplierName",
     header: "Supplier",
     size: 160,
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
       <span className="text-xs truncate block">{(getValue() as string) || "—"}</span>
     ),
@@ -460,6 +462,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "PONumber",
     header: "PO No",
     size: 110,
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
       <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
     ),
@@ -468,6 +471,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     id: "CompanyProject",
     header: "Company / Project",
     size: 150,
+    meta: { className: "hidden md:table-cell" },
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
         <span className="text-xs truncate block">{row.original.CompanyName || "—"}</span>
@@ -481,6 +485,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "EntryTime",
     header: "Entry Time",
     size: 130,
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
@@ -499,6 +504,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "ChallanNo",
     header: "Challan No",
     size: 130,
+    meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
       <span className="text-xs font-mono">{(getValue() as string) || "—"}</span>
     ),
@@ -507,6 +513,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     id: "status",
     header: "Status",
     size: 170,
+    meta: { className: "hidden sm:table-cell" },
     enableSorting: false,
     cell: ({ row }) => (
       <div className="whitespace-nowrap">
@@ -940,7 +947,7 @@ export default function VehicleInOut() {
         icon={Truck}
         action={
           !showForm ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}

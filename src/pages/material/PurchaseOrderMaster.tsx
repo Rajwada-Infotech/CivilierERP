@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
   fetchNextDocNumber,
   fetchDocTypes,
@@ -2161,7 +2162,7 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
           subtitle="Create and manage purchase orders"
           icon={ShoppingCart}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 ref={importFileInputRef}
                 type="file"
@@ -2255,160 +2256,145 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/30">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        PO No
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Date
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Supplier
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden md:table-cell">
-                        Company
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden lg:table-cell">
-                        Project / Site
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {isLoading ? (
-                      Array.from({ length: 5 }).map((_, i) => (
-                        <tr key={i}>
-                          {Array.from({ length: 8 }).map((_, j) => (
-                            <td key={j} className="px-4 py-3">
-                              <div className="h-4 bg-muted/50 animate-pulse rounded" />
-                            </td>
-                          ))}
-                        </tr>
-                      ))
-                    ) : filteredList.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="px-4 py-12 text-center text-muted-foreground"
-                        >
-                          <p>
-                            No purchase orders found. Click 'New PO' to create
-                            one.
-                          </p>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredList.map((item) => (
-                        <tr
-                          key={item._id}
-                          className="hover:bg-muted/20 transition-colors group"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs font-semibold text-foreground">
-                                {item.poNumber || item.docNo || "—"}
-                              </span>
-                              {item.poType === "WO_PO" && (
-                                <span
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                                  title={
-                                    item.sourceWODocNo
-                                      ? `From Work Order: ${item.sourceWODocNo}`
-                                      : "Auto-generated from Work Order"
-                                  }
-                                >
-                                  WO-PO
-                                </span>
-                              )}
-                              {item.poType === "Direct" && (
-                                <span
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                                  title="Direct Purchase Order"
-                                >
-                                  Direct
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground text-xs">
-                            {fmtDate(item.poDate)}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-foreground">
-                            {item.supplierName || "—"}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                            {item.companyName || "—"}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
-                            {item.projectName || "—"}
-                          </td>
-                          <td className="px-4 py-3 text-right font-semibold text-foreground">
-                            {fmt(item.totalAmount)}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <ApprovalStatusChain
-                                table="PurchaseOrders"
-                                recordId={item._id}
-                              />
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-center gap-1">
-                              <ApprovalActions
-                                status={item.status}
-                                recordId={item._id}
-                                endpoint="/api/purchase-orders"
-                                submitOnly
-                                onSuccess={(action) =>
-                                  handleApprovalSuccess(item._id, action)
-                                }
-                              />
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const full = await getPurchaseOrderById(
-                                      item._id,
-                                    );
-                                    setViewingPO(full);
-                                  } catch {
-                                    setViewingPO(item);
-                                  }
-                                }}
-                                className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                title="View details"
-                              >
-                                <Eye size={15} />
-                              </button>
-                              {rights.canDelete && (
-                                <button
-                                  onClick={() => handleDelete(item._id)}
-                                  className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                                  title="Delete this order"
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
+              <DataTable
+                data={filteredList}
+                loading={isLoading}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No purchase orders found. Click 'New PO' to create one."
+                columns={[
+                  {
+                    id: "poNumber",
+                    accessorFn: (row: any) => row.poNumber || row.docNo,
+                    header: "PO No",
+                    size: 150,
+                    cell: ({ row }: any) => {
+                      const item = row.original;
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                            {item.poNumber || item.docNo || "—"}
+                          </span>
+                          {item.poType === "WO_PO" && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              WO-PO
+                            </span>
+                          )}
+                          {item.poType === "Direct" && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              Direct
+                            </span>
+                          )}
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    id: "poDate",
+                    accessorKey: "poDate",
+                    header: "Date",
+                    size: 110,
+                    meta: { className: "hidden sm:table-cell" },
+                    cell: ({ getValue }: any) => (
+                      <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
+                    ),
+                  },
+                  {
+                    id: "supplierName",
+                    accessorKey: "supplierName",
+                    header: "Supplier",
+                    size: 160,
+                    meta: { className: "hidden sm:table-cell" },
+                    cell: ({ getValue }: any) => (
+                      <span className="text-sm font-medium">{String(getValue() || "—")}</span>
+                    ),
+                  },
+                  {
+                    id: "companyName",
+                    accessorKey: "companyName",
+                    header: "Company",
+                    size: 150,
+                    meta: { className: "hidden md:table-cell" },
+                    cell: ({ getValue }: any) => (
+                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+                    ),
+                  },
+                  {
+                    id: "projectName",
+                    accessorKey: "projectName",
+                    header: "Project / Site",
+                    size: 150,
+                    meta: { className: "hidden lg:table-cell" },
+                    cell: ({ getValue }: any) => (
+                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+                    ),
+                  },
+                  {
+                    id: "totalAmount",
+                    accessorKey: "totalAmount",
+                    header: "Amount",
+                    size: 110,
+                    meta: { className: "hidden sm:table-cell" },
+                    cell: ({ getValue }: any) => (
+                      <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
+                    ),
+                  },
+                  {
+                    id: "status",
+                    accessorKey: "status",
+                    header: "Status",
+                    size: 180,
+                    meta: { className: "hidden sm:table-cell" },
+                    cell: ({ row }: any) => (
+                      <div className="flex flex-col items-start gap-1">
+                        <ApprovalStatusChain table="PurchaseOrders" recordId={row.original._id} />
+                      </div>
+                    ),
+                  },
+                  {
+                    id: "actions",
+                    header: "Actions",
+                    size: 120,
+                    cell: ({ row }: any) => {
+                      const item = row.original;
+                      return (
+                        <div className="flex items-center justify-end gap-1">
+                          <ApprovalActions
+                            status={item.status}
+                            recordId={item._id}
+                            endpoint="/api/purchase-orders"
+                            submitOnly
+                            onSuccess={(action: string) => handleApprovalSuccess(item._id, action)}
+                          />
+                          <button
+                            onClick={async () => {
+                              try {
+                                const full = await getPurchaseOrderById(item._id);
+                                setViewingPO(full);
+                              } catch {
+                                setViewingPO(item);
+                              }
+                            }}
+                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                            title="View details"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => handleDelete(item._id)}
+                              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                              title="Delete this order"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    },
+                  },
+                ] as ColumnDef<any, unknown>[]}
+              />
               {/* Pagination */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
                 <span>
@@ -2649,13 +2635,14 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
               {/* Modal header */}
-              <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20">
+              <div className="sticky top-0 bg-card z-10 border-b border-border">
+                <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
                       <ShoppingCart size={13} className="text-emerald-500" />
                     </div>
-                    <h2 className="font-heading font-bold text-base font-mono">
+                    <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[150px] sm:max-w-none">
                       {viewingPO.PurchaseOrderNo ?? viewingPO.poNumber ?? "—"}
                     </h2>
                     {viewingPO.Status && (
@@ -2666,12 +2653,12 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                     Purchase Order
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={handlePrintFromPreview}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
                   >
-                    <Printer size={13} /> Print
+                    <Printer size={13} /><span className="hidden sm:inline">Print</span>
                   </button>
                   {rights.canEdit && (
                     <button
@@ -2684,9 +2671,9 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                         setViewingPO(null);
                         if (item) goToAmend(item);
                       }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
                     >
-                      <FilePenLine size={13} /> Amend
+                      <FilePenLine size={13} /><span className="hidden sm:inline">Amend</span>
                     </button>
                   )}
                   <button
@@ -2695,6 +2682,7 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   >
                     <X size={16} />
                   </button>
+                </div>
                 </div>
               </div>
 
@@ -3045,30 +3033,20 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                         <Package size={10} className="text-emerald-500" /> Order
                         Items ({lineItems.length})
                       </p>
-                      <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="rounded-xl border border-border overflow-x-auto">
                         <table
                           className="w-full text-xs"
-                          style={{ tableLayout: "fixed" }}
+                          style={{ tableLayout: "auto" }}
                         >
                           <thead className="bg-muted/40 border-b border-border">
                             <tr>
-                              {[
-                                ["Item / Description", "32%"],
-                                ["Qty", "9%"],
-                                ["Unit", "9%"],
-                                ["Rate", "13%"],
-                                ["GST%", "9%"],
-                                ["Amount", "13%"],
-                                ["Received", "15%"],
-                              ].map(([h, w]) => (
-                                <th
-                                  key={h}
-                                  className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${["Qty", "Rate", "GST%", "Amount", "Received"].includes(h) ? "text-right" : "text-left"}`}
-                                  style={{ width: w }}
-                                >
-                                  {h}
-                                </th>
-                              ))}
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item / Description</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">GST%</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
+                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Received</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/50">
@@ -3098,30 +3076,15 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                                   key={i}
                                   className="hover:bg-muted/20 transition-colors"
                                 >
-                                  <td className="px-3 py-2 truncate font-medium">
-                                    {name}
-                                  </td>
-                                  <td className="px-3 py-2 text-right">
-                                    {qty}
-                                  </td>
-                                  <td className="px-3 py-2 text-muted-foreground">
-                                    {unit}
-                                  </td>
-                                  <td className="px-3 py-2 text-right">
-                                    ₹{rate.toLocaleString("en-IN")}
-                                  </td>
-                                  <td className="px-3 py-2 text-right text-muted-foreground">
-                                    {tax ? `${tax}%` : "—"}
-                                  </td>
+                                  <td className="px-3 py-2 font-medium">{name}</td>
+                                  <td className="px-3 py-2 text-right">{qty}</td>
+                                  <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{unit}</td>
+                                  <td className="px-3 py-2 text-right hidden sm:table-cell">₹{rate.toLocaleString("en-IN")}</td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground hidden sm:table-cell">{tax ? `${tax}%` : "—"}</td>
                                   <td className="px-3 py-2 text-right font-semibold">
-                                    ₹
-                                    {amount.toLocaleString("en-IN", {
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    ₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
                                   </td>
-                                  <td
-                                    className={`px-3 py-2 text-right ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}
-                                  >
+                                  <td className={`px-3 py-2 text-right hidden sm:table-cell ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}>
                                     {received != null ? received : "—"}
                                   </td>
                                 </tr>
@@ -3369,7 +3332,7 @@ ${remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weigh
                   Invoice. The backend will validate that the invoice is fully
                   paid before saving.
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="number"
                     value={saleInvoiceInput}

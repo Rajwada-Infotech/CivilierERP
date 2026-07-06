@@ -535,6 +535,7 @@ export default function MaterialRequest() {
       id: "DocNo",
       accessorKey: "DocNo",
       header: "Doc No",
+      size: 130,
       cell: ({ getValue }) => (
         <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
           {String(getValue() || "—")}
@@ -545,6 +546,8 @@ export default function MaterialRequest() {
       id: "Priority",
       accessorKey: "Priority",
       header: "Priority",
+      size: 90,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => {
         const v = (getValue() as string) || "Normal";
         return (
@@ -561,6 +564,7 @@ export default function MaterialRequest() {
       accessorKey: "CompanyName",
       header: "Company",
       size: 160,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm truncate">{String(getValue() || "—")}</span>
       ),
@@ -570,6 +574,7 @@ export default function MaterialRequest() {
       accessorKey: "ProjectName",
       header: "Project",
       size: 160,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm text-muted-foreground truncate">{String(getValue() || "—")}</span>
       ),
@@ -579,6 +584,7 @@ export default function MaterialRequest() {
       accessorKey: "ItemCount",
       header: "Items",
       size: 140,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm whitespace-nowrap">
           <span className="font-semibold">{row.original.ItemCount || 0}</span>
@@ -590,6 +596,8 @@ export default function MaterialRequest() {
       id: "RequestDate",
       accessorKey: "RequestDate",
       header: "Requested",
+      size: 110,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm text-muted-foreground">
           {fmtDate(getValue() as string)}
@@ -600,6 +608,8 @@ export default function MaterialRequest() {
       id: "RequiredByDate",
       accessorKey: "RequiredByDate",
       header: "Required By",
+      size: 110,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
         const isUrgent = v && new Date(v) < new Date();
@@ -617,6 +627,7 @@ export default function MaterialRequest() {
       accessorKey: "Status",
       header: "Status",
       size: 180,
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <div className="whitespace-nowrap">
           <ApprovalStatusChain
@@ -634,7 +645,7 @@ export default function MaterialRequest() {
         const status = row.original.Status as string;
         const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-2">
             {/* View — always visible */}
             <button
               type="button"
@@ -721,9 +732,6 @@ export default function MaterialRequest() {
                 "",
                 "Pending",
                 "Approved",
-                "Ordered",
-                "Partially Ordered",
-                "Draft",
               ].map((s) => (
                 <button
                   key={s || "all"}
@@ -1332,13 +1340,14 @@ export default function MaterialRequest() {
       <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
 
         {/* ── Sticky header ── */}
-        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="sticky top-0 bg-card z-10 border-b border-border">
+          <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
               <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
                 <ClipboardList size={13} className="text-emerald-500" />
               </div>
-              <h2 className="font-heading font-bold text-base font-mono">
+              <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[160px] sm:max-w-none">
                 {viewingRecord.DocNo || `MR-${viewingRecord.MRId}`}
               </h2>
               <StatusBadge status={viewingRecord.Status || "Draft"} />
@@ -1348,7 +1357,7 @@ export default function MaterialRequest() {
             </div>
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Request</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
               <button
                 onClick={() => {
                   const rec = viewingRecord;
@@ -1383,16 +1392,16 @@ export default function MaterialRequest() {
                     ],
                   });
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
               >
-                <Printer size={13} /> Print
+                <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
             {rights.canEdit && viewingRecord.Status === "Draft" && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
               >
-                <Edit3 size={13} /> Edit
+                <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
               </button>
             )}
             {rights.canDelete && (
@@ -1404,9 +1413,9 @@ export default function MaterialRequest() {
                     closeOverlay();
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 text-xs font-semibold text-destructive hover:bg-destructive/10 transition disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-destructive/40 text-xs font-semibold text-destructive hover:bg-destructive/10 transition disabled:opacity-50"
               >
-                <Trash2 size={13} /> {deleteMutation.isPending ? "Deleting…" : "Delete"}
+                <Trash2 size={13} /><span className="hidden sm:inline">{deleteMutation.isPending ? "Deleting…" : "Delete"}</span>
               </button>
             )}
             <button
@@ -1415,6 +1424,7 @@ export default function MaterialRequest() {
             >
               <X size={16} />
             </button>
+          </div>
           </div>
         </div>
 
@@ -1466,37 +1476,43 @@ export default function MaterialRequest() {
               <ShoppingCart size={10} className="text-emerald-500" /> Requested Items
               <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
             </p>
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] px-4 py-2.5 bg-muted/40 border-b border-border text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                <span>Item</span>
-                <span>UOM</span>
-                <span>Qty</span>
-                <span>Remarks</span>
-              </div>
-              <div className="divide-y divide-border/60">
-                {items.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">No items found</div>
-                ) : (
-                  items.map((it, i) => (
-                    <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1.5fr] px-4 py-3 items-center hover:bg-muted/20 transition-colors text-xs">
-                      <span className="font-medium text-foreground">{it.ItemName || it.ItemId}</span>
-                      <span className="text-muted-foreground">{it.UOMName || it.UOMCode || "—"}</span>
-                      <span className="font-mono font-semibold">{Number(it.Quantity).toFixed(2)}</span>
-                      <span className="text-muted-foreground">{it.Remarks || "—"}</span>
-                    </div>
-                  ))
+            <div className="rounded-xl border border-border overflow-x-auto">
+              <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                    <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {items.length === 0 ? (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No items found</td></tr>
+                  ) : (
+                    items.map((it, i) => (
+                      <tr key={i} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-3 font-medium text-foreground">{it.ItemName || it.ItemId}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{it.UOMName || it.UOMCode || "—"}</td>
+                        <td className="px-4 py-3 text-right font-mono font-semibold">{Number(it.Quantity).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{it.Remarks || "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {items.length > 0 && (
+                  <tfoot className="bg-muted/20 border-t border-border">
+                    <tr>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">Total</td>
+                      <td className="hidden sm:table-cell" />
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)}
+                      </td>
+                      <td className="hidden sm:table-cell" />
+                    </tr>
+                  </tfoot>
                 )}
-              </div>
-              {items.length > 0 && (
-                <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] px-4 py-2.5 bg-muted/20 border-t border-border text-xs font-semibold">
-                  <span className="text-muted-foreground">Total</span>
-                  <span />
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                    {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)}
-                  </span>
-                  <span />
-                </div>
-              )}
+              </table>
             </div>
           </div>
 
@@ -1543,7 +1559,7 @@ export default function MaterialRequest() {
         icon={Send}
         action={
           viewMode === "list" ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}
