@@ -8,8 +8,8 @@ export const materialNavItems: NavItem[] = [
     icon: Receipt21,
     children: [
       { label: "Material Request", path: "/material/material-request", pageKey: "material-request" },
-      { label: "Purchase Order",   path: "/material/purchase-order",   pageKey: "purchase-orders" },
       { label: "Quotation",        path: "/material/quotation",        pageKey: "quotation" },
+      { label: "Purchase Order",   path: "/material/purchase-order",   pageKey: "purchase-orders" },
       { label: "Vehicle In/Out",   path: "/material/vehicle-in-out",   pageKey: "vehicle-in-out" },
       { label: "GRN",              path: "/material/grn",              pageKey: "grn-master" },
       { label: "Issues",           path: "/material/issues",           pageKey: "material-issues" },

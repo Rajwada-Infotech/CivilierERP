@@ -556,7 +556,8 @@ router.get("/:id/po-prefill", authenticateToken, async (req, res) => {
       SELECT q.QuotationId, q.DocNo, q.Status,
              q.CompanyId, ec.name AS CompanyName,
              q.ProjectId, ep.name AS ProjectName,
-             q.FinYearId, q.Remarks
+             q.FinYearId, q.Remarks,
+             q.SourceMRId, q.SourceMRDocNo
       FROM dbo.Quotations q
       LEFT JOIN dbo.enterprise ec ON ec.id = q.CompanyId
       LEFT JOIN dbo.enterprise ep ON ep.id = q.ProjectId
@@ -608,6 +609,8 @@ router.get("/:id/po-prefill", authenticateToken, async (req, res) => {
       Remarks: qt.Remarks,
       SupplierId: supplierId,
       SupplierName: supplierName.recordset[0]?.Name || null,
+      SourceMRId: qt.SourceMRId ?? null,
+      SourceMRDocNo: qt.SourceMRDocNo ?? null,
       items: items.recordset,
     });
   } catch (err) {
