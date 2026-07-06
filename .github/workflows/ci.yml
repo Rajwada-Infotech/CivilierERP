@@ -60,7 +60,15 @@ jobs:
           xargs -0 -r -n1 node --check
 
       - name: Docker build check
+        # docker-compose.yml requires LOCAL_SA_PASSWORD (no weak hardcoded
+        # default, intentionally) — but Compose interpolates every variable
+        # in the file at parse time even when only building one unrelated
+        # service, so `build backend` fails without it even though this
+        # step never starts sqlserver or touches that value. A throwaway
+        # value here is fine; it's never used for anything real.
         run: docker compose build backend
+        env:
+          LOCAL_SA_PASSWORD: ci-build-only-unused
 
   # Manual only — go to the Actions tab, pick this workflow, click
   # "Run workflow", choose the branch, and run. Produces a downloadable
