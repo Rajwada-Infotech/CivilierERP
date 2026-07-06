@@ -586,16 +586,26 @@ router.delete("/:id/cascade", async (req, res) => {
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='P'");
 
-    await pool
-      .request()
-      .input("ProjectId", sql.Int, id)
-      .input("ProjectName", sql.NVarChar(255), project.name)
-      .input("CompanyId", sql.Int, project.company_id || null)
-      .input("DeletedBy", sql.NVarChar(255), req.user?.email || req.user?.name || "unknown")
-      .input("SummaryJson", sql.NVarChar(sql.MAX), JSON.stringify(summary)).query(`
-        INSERT INTO dbo.ProjectDeletionLog (ProjectId, ProjectName, CompanyId, DeletedBy, SummaryJson)
-        VALUES (@ProjectId, @ProjectName, @CompanyId, @DeletedBy, @SummaryJson)
-      `);
+    // Best-effort audit trail — the deletion itself already committed above,
+    // so a failure here (e.g. migration 171 not yet applied on this DB)
+    // must never turn an already-successful deletion into a reported 500.
+    try {
+      await pool
+        .request()
+        .input("ProjectId", sql.Int, id)
+        .input("ProjectName", sql.NVarChar(255), project.name)
+        .input("CompanyId", sql.Int, project.company_id || null)
+        .input("DeletedBy", sql.NVarChar(255), req.user?.email || req.user?.name || "unknown")
+        .input("SummaryJson", sql.NVarChar(sql.MAX), JSON.stringify(summary)).query(`
+          INSERT INTO dbo.ProjectDeletionLog (ProjectId, ProjectName, CompanyId, DeletedBy, SummaryJson)
+          VALUES (@ProjectId, @ProjectName, @CompanyId, @DeletedBy, @SummaryJson)
+        `);
+    } catch (auditErr) {
+      console.error(
+        `[projectMaster] Project ${id} (${project.name}) was deleted successfully, but writing to ProjectDeletionLog failed (non-fatal):`,
+        auditErr.message,
+      );
+    }
 
     await Promise.all([
       bumpCacheVersion("enterprises"),
