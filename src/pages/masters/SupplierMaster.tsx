@@ -1344,8 +1344,17 @@ const SupplierMaster: React.FC = () => {
               {(() => {
                 const loginUrl = `${window.location.origin}/supplier-login`;
                 const phone = form.LHeadPhone?.replace(/\D/g, "") ?? "";
+                const loginEmail = editingId
+                  ? suppliers.find((s) => s.LHeadId === editingId)?.SupplierLoginEmail ?? ""
+                  : "";
+                const loginPassword = form.SupplierPassword || "";
+                const credLines = loginEmail
+                  ? `\n\nLogin Email: ${loginEmail}${loginPassword ? `\nPassword: ${loginPassword}` : ""}`
+                  : loginPassword
+                  ? `\n\nPassword: ${loginPassword}`
+                  : "";
                 const waText = encodeURIComponent(
-                  `Hello,\n\nYou can access the supplier portal using the link below:\n${loginUrl}\n\nFor login, use your registered email and password.`
+                  `Hello,\n\nYou can access the supplier portal using the link below:\n${loginUrl}${credLines}\n\nFor login, use your registered email and password.`
                 );
                 const waUrl = phone
                   ? `https://wa.me/${phone.startsWith("91") ? phone : `91${phone}`}?text=${waText}`

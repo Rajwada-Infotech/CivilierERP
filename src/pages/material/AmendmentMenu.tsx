@@ -1103,6 +1103,7 @@ function DocTable({
   page,
   onPageChange,
   onAmend,
+  onEditAmendment,
   queryClient,
   canApprove,
   canCreate,
@@ -1114,6 +1115,7 @@ function DocTable({
   page: number;
   onPageChange: (p: number) => void;
   onAmend: (row: DocRow) => void;
+  onEditAmendment: (a: Amendment) => void;
   queryClient: ReturnType<typeof useQueryClient>;
   canApprove: boolean;
   canCreate?: boolean;
@@ -1330,9 +1332,7 @@ function DocTable({
                         docNo={row.docNo}
                         docId={row.id}
                         canApprove={canApprove}
-                        onEdit={(a) => {
-                          /* bubble up handled by parent via state */
-                        }}
+                        onEdit={onEditAmendment}
                         queryClient={queryClient}
                         canEdit={canEdit}
                         canDelete={canDelete}
@@ -1615,6 +1615,22 @@ export default function AmendmentMenu() {
         page={page}
         onPageChange={setPage}
         onAmend={openAmendFromDoc}
+        onEditAmendment={(a) => {
+          setInitialForm({
+            RefDocType: a.RefDocType ?? "",
+            RefDocId: a.RefDocId != null ? String(a.RefDocId) : "",
+            RefDocNo: a.RefDocNo ?? "",
+            ProjectName: a.ProjectName ?? "",
+            CompanyName: a.CompanyName ?? "",
+            Description: a.Description ?? "",
+            Reason: a.Reason ?? "",
+            AmendmentDate: a.AmendmentDate ?? today(),
+            OriginalValue: a.OriginalValue != null ? String(a.OriginalValue) : "",
+            RevisedValue: a.RevisedValue != null ? String(a.RevisedValue) : "",
+          });
+          setEditing(a);
+          setFormOpen(true);
+        }}
         queryClient={queryClient}
         canApprove={canApprove}
         canCreate={rights.canCreate}

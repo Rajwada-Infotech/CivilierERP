@@ -178,13 +178,18 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const panelHeight = 280;
-    const above = spaceBelow < panelHeight && rect.top > panelHeight;
+    const spaceAbove = rect.top;
+    const panelHeight = 360;
+    const above = spaceBelow < panelHeight && spaceAbove > spaceBelow;
+    const maxH = above
+      ? Math.min(panelHeight, spaceAbove - 8)
+      : Math.min(panelHeight, spaceBelow - 8);
     setPanelStyle({
       position: "fixed",
-      top: above ? rect.top - panelHeight - 4 : rect.bottom + 4,
+      top: above ? rect.top - maxH - 4 : rect.bottom + 4,
       left: rect.left,
-      width: rect.width,
+      width: Math.max(rect.width, 260),
+      maxHeight: maxH,
       zIndex: 9999,
     });
   }, []);
@@ -323,7 +328,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               <div className="border-t border-border/60" />
 
               {/* Tree nodes */}
-              <div className="max-h-60 overflow-y-auto py-1 px-1">
+              <div className="max-h-72 overflow-y-auto py-1 px-1">
                 {items.map((node) => (
                   <TreeNodeRow
                     key={node._id}
@@ -343,7 +348,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
             </>
           ) : (
             /* ── Flat panel ── */
-            <div className="max-h-56 overflow-y-auto py-1">
+            <div className="max-h-72 overflow-y-auto py-1">
               {/* Placeholder / clear option */}
               <div
                 className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
