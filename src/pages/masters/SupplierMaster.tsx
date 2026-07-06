@@ -115,6 +115,10 @@ interface Supplier {
   LHeadStatus: boolean;
   IsTdsApplicable: boolean;
   GroupName: string | null;
+  // Auto-generated on create as <SupplierName>@civilier.in — this is the
+  // supplier's login username for the Supplier Portal, distinct from
+  // LHeadEmail (their own business contact address).
+  SupplierLoginEmail: string | null;
 }
 
 interface AccountGroup {
@@ -154,6 +158,8 @@ interface SupplierForm {
   LHeadStatus: boolean;
   LBelongsTo: string;
   isTdsApplicable: boolean;
+  // Mandatory on create; optional on edit (blank = keep existing password).
+  SupplierPassword: string;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -170,6 +176,7 @@ const EMPTY_FORM: SupplierForm = {
   LBelongsTo: "",
   LHeadStatus: true,
   isTdsApplicable: false,
+  SupplierPassword: "",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -217,6 +224,7 @@ const CSV_HEADERS = {
   group: "Group Name",
   address: "Address",
   status: "Status (Active/Inactive)",
+  password: "Password (min 6 characters)",
 } as const;
 
 const SUPPLIER_CSV_TEMPLATE_COLUMNS: CsvExportColumn[] = [
@@ -232,6 +240,7 @@ const SUPPLIER_CSV_TEMPLATE_COLUMNS: CsvExportColumn[] = [
   { header: CSV_HEADERS.group, accessor: "GroupName" },
   { header: CSV_HEADERS.address, accessor: "LHeadAddress" },
   { header: CSV_HEADERS.status, accessor: "LHeadStatus" },
+  { header: CSV_HEADERS.password, accessor: "SupplierPassword" },
 ];
 
 interface ImportRowResult {
@@ -465,6 +474,7 @@ const SupplierMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       IsTdsApplicable: Boolean(item.IsTdsApplicable),
       GroupName: item.GroupName ?? null,
+      SupplierLoginEmail: item.SupplierLoginEmail ?? null,
     }));
   }, [rawData]);
 
@@ -490,12 +500,20 @@ const SupplierMaster: React.FC = () => {
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
+    // Omitted (not sent as an empty string) when blank, so editing a
+    // supplier without changing their password leaves it untouched —
+    // required on create, optional on edit (see accountHeadMaster.js).
+    ...(f.SupplierPassword ? { SupplierPassword: f.SupplierPassword } : {}),
   });
 
   const createMut = useMutation({
     mutationFn: (f: SupplierForm) => addRecord(buildPayload(f), SUPPLIER_TYPE),
-    onSuccess: () => {
-      toast.success("Supplier created");
+    onSuccess: (res: { SupplierLoginEmail?: string }) => {
+      toast.success(
+        res?.SupplierLoginEmail
+          ? `Supplier created — login email: ${res.SupplierLoginEmail}`
+          : "Supplier created",
+      );
       invalidate();
       resetForm();
     },
@@ -578,6 +596,7 @@ const SupplierMaster: React.FC = () => {
         try {
           const name = (raw[CSV_HEADERS.name] || "").trim();
           const pan = (raw[CSV_HEADERS.pan] || "").trim();
+          const password = (raw[CSV_HEADERS.password] || "").trim();
           const contactPerson = (raw[CSV_HEADERS.contactPerson] || "").trim();
           const phone = (raw[CSV_HEADERS.phone] || "").trim();
           const email = (raw[CSV_HEADERS.email] || "").trim();
@@ -593,6 +612,8 @@ const SupplierMaster: React.FC = () => {
 
           if (!name) throw new Error("Supplier Name is required");
           if (!pan) throw new Error("PAN Number is required");
+          if (!password || password.length < 6)
+            throw new Error("Password is required and must be at least 6 characters");
 
           // Category is optional — validate against the known list when given.
           const category = categoryRaw
@@ -665,6 +686,7 @@ const SupplierMaster: React.FC = () => {
             LBelongsTo: groupId,
             LHeadStatus: isActive,
             isTdsApplicable: false,
+            SupplierPassword: password,
           };
 
           await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
@@ -716,7 +738,10 @@ const SupplierMaster: React.FC = () => {
   const canSave =
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
-    (form.LGSTType !== "Registered" || form.LGST.trim() !== "");
+    (form.LGSTType !== "Registered" || form.LGST.trim() !== "") &&
+    // Password is mandatory on create; on edit, leaving it blank keeps the
+    // supplier's existing login credentials unchanged.
+    (editingId !== null || form.SupplierPassword.trim().length >= 6);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const normalizeGSTType = (t: string | null): string => {
@@ -742,6 +767,9 @@ const SupplierMaster: React.FC = () => {
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
       LHeadStatus: s.LHeadStatus,
       isTdsApplicable: Boolean(s.IsTdsApplicable),
+      // Never pre-filled from the existing (hashed) password — blank means
+      // "keep current password" on save.
+      SupplierPassword: "",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -759,6 +787,9 @@ const SupplierMaster: React.FC = () => {
     if (!form.LHeadPan.trim()) e.LHeadPan = true;
     if (!form.LBelongsTo) e.LBelongsTo = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
+    // Mandatory on create only — blank on edit means "keep current password".
+    if (editingId === null && form.SupplierPassword.trim().length < 6)
+      e.SupplierPassword = true;
     if (Object.keys(e).length) {
       setErrors(e);
       return;
@@ -1226,6 +1257,67 @@ const SupplierMaster: React.FC = () => {
                     options={GST_STATES.map((s) => ({ value: s, label: s }))}
                     placeholder="Select state…"
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Supplier Portal Login ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <User size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Supplier Portal Login
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
+                {/* Login email — auto-generated, read-only, only shown once it exists */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Login Email
+                  </label>
+                  <input
+                    value={
+                      editingId
+                        ? suppliers.find((s) => s.LHeadId === editingId)
+                            ?.SupplierLoginEmail || "—"
+                        : "Auto-generated on save (<name>@civilier.in)"
+                    }
+                    readOnly
+                    disabled
+                    className={`${inputCls} bg-muted/40 text-muted-foreground cursor-not-allowed`}
+                  />
+                </div>
+
+                {/* Password */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Password{" "}
+                    {!editingId && <span className="text-destructive">*</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={form.SupplierPassword}
+                    onChange={(e) => {
+                      setForm((p) => ({
+                        ...p,
+                        SupplierPassword: e.target.value,
+                      }));
+                      setErrors((p) => ({ ...p, SupplierPassword: false }));
+                    }}
+                    placeholder={
+                      editingId
+                        ? "Leave blank to keep current password"
+                        : "Min 6 characters"
+                    }
+                    className={`${inputCls} ${errors.SupplierPassword ? "border-red-400" : ""}`}
+                  />
+                  {errors.SupplierPassword && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required, min 6 characters
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

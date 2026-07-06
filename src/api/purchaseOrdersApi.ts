@@ -70,7 +70,7 @@ export interface PurchaseOrder {
   SourceQTDocNo?: string | null;
   SourceWDId?: number | null;
   SourceWDDocNo?: string | null;
-  POType?: "Normal" | "Direct" | "WO_PO";
+  POType?: "Normal" | "Direct" | "WO_PO" | "QPO";
   CreatedBy?: string;
   CreatedAt?: string;
   UpdatedAt?: string;
@@ -124,7 +124,7 @@ export interface CreatePOPayload {
   SourceQTDocNo?: string | null;
   SourceWDId?: number | string | null;
   SourceWDDocNo?: string | null;
-  POType?: "Normal" | "Direct" | "WO_PO";
+  POType?: "Normal" | "Direct" | "WO_PO" | "QPO";
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

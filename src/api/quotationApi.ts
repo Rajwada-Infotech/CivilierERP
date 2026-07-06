@@ -111,6 +111,8 @@ export interface QTPOPrefill {
   Remarks: string;
   SupplierId: number;
   SupplierName: string | null;
+  SourceMRId?: number | null;
+  SourceMRDocNo?: string | null;
   items: QTPOPrefillItem[];
 }
 
