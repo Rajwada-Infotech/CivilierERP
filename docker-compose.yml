@@ -48,7 +48,12 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${LOCAL_SA_PASSWORD:-infotech@123}
+      # No hardcoded fallback — a weak, documented default here would apply
+      # to any environment that forgets to set LOCAL_SA_PASSWORD, and it's
+      # reachable from the host via the published 1433 port below. Compose
+      # fails fast with a clear error if the var isn't set, instead of
+      # silently starting SQL Server with a guessable sa password.
+      MSSQL_SA_PASSWORD: ${LOCAL_SA_PASSWORD:?Set LOCAL_SA_PASSWORD in your .env before running docker compose}
     ports:
       - "1433:1433"
     volumes:

@@ -418,6 +418,8 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
         POType ||
           (SourceSaleInvoiceId
             ? "SaleOrder"
+            : SourceQTId
+            ? "QPO"
             : SourceWOId
             ? "WO_PO"
             : SourceMRId

@@ -410,15 +410,17 @@ const PurchaseOrderMaster: React.FC = () => {
           return !label.startsWith("ExB-PO");
         });
         setPoDocTypes(filtered);
-        // Auto-select DPO for direct POs (no MR/Sale Invoice source yet)
+        // Auto-select QPO when arriving from L1 chart, DPO otherwise
         if (!poDocTypeId && filtered.length > 0) {
-          const dpo =
+          const preferredPrefix = qtPrefill ? "QPO" : "DPO";
+          const preferred =
+            filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === preferredPrefix) ??
             filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === "DPO") ??
             filtered[0];
           fetchNextDocNumber(
-            dpo.TypeOfDocId,
+            preferred.TypeOfDocId,
             selectedFinYear || undefined,
-          ).then((docNo) => applyPoDocNumber(dpo.TypeOfDocId, docNo));
+          ).then((docNo) => applyPoDocNumber(preferred.TypeOfDocId, docNo));
         }
       })
       .finally(() => setPoDocTypesLoading(false));
@@ -1044,6 +1046,9 @@ const PurchaseOrderMaster: React.FC = () => {
 
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceQT({ id: qtPrefill.QuotationId, docNo: qtPrefill.DocNo });
+    if (qtPrefill.SourceMRId && qtPrefill.SourceMRDocNo) {
+      setSourceMR({ id: qtPrefill.SourceMRId, docNo: qtPrefill.SourceMRDocNo });
+    }
 
     setViewMode("create");
     // Only run once when qtPrefill is present and master data is loaded
@@ -1531,13 +1536,13 @@ const PurchaseOrderMaster: React.FC = () => {
       SourceSaleOrderDocNo: null,
       SourceSaleInvoiceId: sourceSaleInvoice?.id ?? null,
       SourceSaleInvoiceDocNo: sourceSaleInvoice?.docNo ?? null,
-      POType: (sourceMR || sourceQT
-        ? "Normal"
-        : sourceWD
-          ? "WO_PO"
-          : sourceWO
+      POType: (sourceQT
+        ? "QPO"
+        : sourceMR
+          ? "Normal"
+          : sourceWD || sourceWO
             ? "WO_PO"
-            : "Direct") as "Normal" | "WO_PO" | "Direct",
+            : "Direct") as "Normal" | "WO_PO" | "Direct" | "QPO",
     };
   };
 

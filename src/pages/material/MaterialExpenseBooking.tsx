@@ -672,7 +672,7 @@ function DocSelectorPanel({
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     if (
       filterSupplier &&
-      (p.SupplierName || "").toLowerCase() !== filterSupplier.toLowerCase()
+      !(p.SupplierName || "").trim().toLowerCase().includes(filterSupplier.trim().toLowerCase())
     )
       return false;
     return (
@@ -697,7 +697,7 @@ function DocSelectorPanel({
     if (!inFinYear(wd.DocNo, wd.FinYear)) return false;
     if (
       filterSupplier &&
-      (wd.ContractorName || "").toLowerCase() !== filterSupplier.toLowerCase()
+      !(wd.ContractorName || "").trim().toLowerCase().includes(filterSupplier.trim().toLowerCase())
     )
       return false;
     return (
@@ -727,7 +727,7 @@ function DocSelectorPanel({
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     if (
       filterSupplier &&
-      (p.SupplierName || "").toLowerCase() !== filterSupplier.toLowerCase()
+      !(p.SupplierName || "").trim().toLowerCase().includes(filterSupplier.trim().toLowerCase())
     )
       return false;
     return (
@@ -762,8 +762,7 @@ function DocSelectorPanel({
     if (!inFinYear(grnDocNo, (g as any).FinYear)) return false;
     if (
       filterSupplier &&
-      (g.SupplierName || "").trim().toLowerCase() !==
-        filterSupplier.trim().toLowerCase()
+      !(g.SupplierName || "").trim().toLowerCase().includes(filterSupplier.trim().toLowerCase())
     )
       return false;
     return (
@@ -3004,22 +3003,22 @@ export default function MaterialExpenseBooking() {
                           </span>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
+                          <table className="w-full text-xs" style={{ minWidth: 720 }}>
                             <thead>
                               <tr className="bg-muted/20 border-b border-teal-500/15">
                                 <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
                                   Item
                                 </th>
-                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px] hidden sm:table-cell">
                                   HSN
                                 </th>
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
                                   Rcvd Qty
                                 </th>
-                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px] hidden sm:table-cell">
                                   UOM
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px] hidden sm:table-cell">
                                   Rate (₹)
                                 </th>
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
@@ -3028,10 +3027,10 @@ export default function MaterialExpenseBooking() {
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
                                   Base (₹)
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px] hidden md:table-cell">
                                   CGST
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px] hidden md:table-cell">
                                   SGST
                                 </th>
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-orange-600 dark:text-orange-400 text-[10px]">
@@ -3065,16 +3064,16 @@ export default function MaterialExpenseBooking() {
                                     <td className="px-3 py-2.5 font-medium text-foreground max-w-[160px] truncate">
                                       {item.itemName || `Item ${idx + 1}`}
                                     </td>
-                                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[10px]">
+                                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[10px] hidden sm:table-cell">
                                       {item.hsnCode || "—"}
                                     </td>
                                     <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                                       {fmtQty(Number(item.receivedQty) || 0)}
                                     </td>
-                                    <td className="px-3 py-2.5 text-muted-foreground">
+                                    <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
                                       {item.uom || "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                                    <td className="px-3 py-2.5 text-right font-mono text-muted-foreground hidden sm:table-cell">
                                       {Number(item.rate || 0) > 0
                                         ? `₹${fmt(Number(item.rate))}`
                                         : "—"}
@@ -3089,7 +3088,7 @@ export default function MaterialExpenseBooking() {
                                         ? `₹${fmt(item.baseAmount)}`
                                         : "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400 hidden md:table-cell">
                                       {item.cgstRate != null &&
                                       item.cgstAmount != null ? (
                                         <span className="flex flex-col items-end gap-0.5">
@@ -3102,7 +3101,7 @@ export default function MaterialExpenseBooking() {
                                         "—"
                                       )}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400 hidden md:table-cell">
                                       {item.sgstRate != null &&
                                       item.sgstAmount != null ? (
                                         <span className="flex flex-col items-end gap-0.5">
