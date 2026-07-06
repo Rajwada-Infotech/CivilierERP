@@ -67,6 +67,8 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
         cm.ChequeStartNumber,
         cm.ChequeEndNumber,
         cm.TotalCheques,
+        TRY_CAST(cm.ChequeStartMICR AS NVARCHAR(15)) AS ChequeStartMICR,
+        TRY_CAST(cm.ChequeEndMICR   AS NVARCHAR(15)) AS ChequeEndMICR,
         cm.Remarks,
         cm.Status,
         cm.CreatedBy,
@@ -99,6 +101,8 @@ router.post("/", requirePageRight("cheque-master", "create"), validateBody(chequ
     ChequeLotNumber,
     ChequeStartNumber,
     ChequeEndNumber,
+    ChequeStartMICR,
+    ChequeEndMICR,
     Remarks,
     Status,
   } = req.body;
@@ -133,6 +137,13 @@ router.post("/", requirePageRight("cheque-master", "create"), validateBody(chequ
       "Remarks",
       "Status",
     ];
+
+    // Store full MICR strings if the columns exist (added by migration)
+    if (hasColumn(columnMeta, "chequeStartMICR".toLowerCase())) {
+      request.input("ChequeStartMICR", sql.NVarChar(15), ChequeStartMICR || null);
+      request.input("ChequeEndMICR",   sql.NVarChar(15), ChequeEndMICR   || null);
+      insertColumns.push("ChequeStartMICR", "ChequeEndMICR");
+    }
     const insertValues = insertColumns.map((col) => `@${col}`);
 
     // TotalCheques is computed as ((ChequeEndNumber - ChequeStartNumber) + 1)
@@ -176,6 +187,8 @@ router.put("/:id", requirePageRight("cheque-master", "edit"), validateBody(chequ
     ChequeLotNumber,
     ChequeStartNumber,
     ChequeEndNumber,
+    ChequeStartMICR,
+    ChequeEndMICR,
     Remarks,
     Status,
   } = req.body;
@@ -213,6 +226,12 @@ router.put("/:id", requirePageRight("cheque-master", "edit"), validateBody(chequ
     ];
 
     // TotalCheques is computed — DB recalculates automatically, NEVER update it
+
+    if (hasColumn(columnMeta, "chequeStartMICR".toLowerCase())) {
+      request.input("ChequeStartMICR", sql.NVarChar(15), ChequeStartMICR || null);
+      request.input("ChequeEndMICR",   sql.NVarChar(15), ChequeEndMICR   || null);
+      updates.push("ChequeStartMICR=@ChequeStartMICR", "ChequeEndMICR=@ChequeEndMICR");
+    }
 
     if (hasColumn(columnMeta, "updatedby")) {
       request.input("UpdatedBy", sql.NVarChar(100), userEmail);
