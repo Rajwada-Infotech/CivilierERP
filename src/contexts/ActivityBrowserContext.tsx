@@ -458,8 +458,20 @@ export const ActivityBrowserProvider: React.FC<{
       resource: string;
       details?: string;
     }) => {
-      const sessionId = localStorage.getItem("currentSessionId");
       const user = getStoredUser();
+      let sessionId = localStorage.getItem("currentSessionId");
+
+      // Sessions that started before recordLogin ran (e.g. a user already
+      // logged in when this tracking was deployed, or localStorage was
+      // partially cleared) never get a currentSessionId, which would
+      // otherwise skip every single action log for that session forever.
+      // Self-heal by minting one lazily as long as the user is actually
+      // authenticated, instead of just warning on every action.
+      if (!sessionId && user.id) {
+        sessionId = generateUUID();
+        localStorage.setItem("currentSessionId", sessionId);
+        localStorage.setItem("sessionLoginTime", String(Date.now()));
+      }
 
       if (!sessionId) {
         console.warn("Skipping activity action log: missing currentSessionId", {

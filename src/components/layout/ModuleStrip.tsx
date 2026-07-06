@@ -164,9 +164,10 @@ export const ModuleStrip: React.FC = () => {
     return pages.some((pk) => canAccessPage(pk as any));
   };
 
-  // Filter regular modules; admin only for admin-tier
+  // Filter regular modules; admin for admin-tier OR users with approval-inbox access
+  const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
   const regularItems = MODULES.filter((m) => userHasModuleAccess(m.id));
-  const adminItems = isAdminTier ? [ADMIN_MODULE] : [];
+  const adminItems = (isAdminTier || canAccessApprovalInbox) ? [ADMIN_MODULE] : [];
 
   const handleSwitch = async (mod: NonNullable<Module>) => {
     setTooltip(null);
@@ -175,7 +176,12 @@ export const ModuleStrip: React.FC = () => {
     setModuleSwitching(true);
     await new Promise((r) => setTimeout(r, 260));
     setActiveModule(mod);
-    navigate(MODULE_DASHBOARD_ROUTES[mod]);
+    // Non-admin-tier users with only approval-inbox access land directly on the inbox
+    const dest =
+      mod === "admin" && !isAdminTier
+        ? "/admin/approval/inbox"
+        : MODULE_DASHBOARD_ROUTES[mod];
+    navigate(dest);
     setTimeout(() => setModuleSwitching(false), 60);
   };
 
