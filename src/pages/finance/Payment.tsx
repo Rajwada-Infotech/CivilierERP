@@ -1,6 +1,6 @@
 import React from "react";
 import { useState, useCallback, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -457,7 +457,7 @@ const fetchWorkDoneById = async (
 
 const fetchChequeNumbers = async (
   lotId: number,
-): Promise<{ number: string; used: boolean }[]> => {
+): Promise<{ number: string; used: boolean; bounced?: boolean }[]> => {
   const res = await fetchWithAuth(`/api/new-payment/cheque-numbers/${lotId}`);
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
@@ -1198,8 +1198,7 @@ function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
       .then((data) => setGrns(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [expenseId]);
-  if (!grns.length)
-    return <span className="text-muted-foreground text-xs">—</span>;
+  if (!grns.length) return null;
   return (
     <div className="flex flex-wrap gap-1">
       {grns.map((g) => (
@@ -1384,7 +1383,7 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
   }, [form.chequeLotId]);
 
   const activeLot = lots.find((l) => l.CId === form.chequeLotId) ?? null;
-  const availableCheques = chequeNumbers.filter((c) => !c.used);
+  const availableCheques = chequeNumbers.filter((c) => !c.used && !c.bounced);
 
   const handleChequeSelect = async (chequeNo: string) => {
     set("chequeNo", chequeNo);
@@ -1826,6 +1825,7 @@ const Payment: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const queryClient = useQueryClient();
+  const location = useLocation();
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState(""); // stores numeric ID for display
@@ -1842,6 +1842,18 @@ const Payment: React.FC = () => {
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Re-issue (bounced cheque replacement) context
+  const [reissueCtx, setReissueCtx] = useState<{
+    replacesPaymentId: number;
+    replacesDocNo: string;
+    amount: number;
+    paymentName: string;
+    companyName: string;
+    expenseRef: string | null;
+    bounceReason: string | null;
+  } | null>(null);
+  const [bounceCharge, setBounceCharge] = useState<string>("");
   const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
   const [viewingCompanyDetail, setViewingCompanyDetail] =
     useState<CompanyDetail | null>(null);
@@ -1891,6 +1903,49 @@ const Payment: React.FC = () => {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Detect bounce re-issue context passed from BRS page
+  useEffect(() => {
+    const ri = (location.state as any)?.reissue;
+    if (!ri?.replacesPaymentId) return;
+    setReissueCtx(ri);
+    setBounceCharge("");
+    setView("form");
+    window.history.replaceState({}, "", location.pathname);
+
+    // Fetch the full original payment record to pre-fill all fields
+    fetchWithAuth(`/api/new-payment/${ri.replacesPaymentId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: any) => {
+        if (!data) return;
+        setForm((prev) => ({
+          ...prev,
+          paymentName: data.PPaymentName ?? ri.paymentName ?? prev.paymentName,
+          amount:      data.PAmount      != null ? parseFloat(data.PAmount) : (ri.amount ?? prev.amount),
+          expenseRef:  data.PExpenseRef  ?? ri.expenseRef  ?? prev.expenseRef,
+          company:     data.PCompanyName ?? data.PCompany  ?? ri.company    ?? prev.company,
+          project:     data.PProjectName ?? data.PProject  ?? ri.project    ?? prev.project,
+          projectSite: data.PProjectName ?? data.PProject  ?? ri.project    ?? prev.projectSite,
+          bankId:      data.PBankID      ?? ri.bankId      ?? prev.bankId,
+          paidTo:      data.PSupplierName ?? prev.paidTo,
+          docType:     data.PDocType     ?? prev.docType,
+        }));
+      })
+      .catch(() => {
+        // Fallback to the BRS-provided summary if the fetch fails
+        setForm((prev) => ({
+          ...prev,
+          paymentName: ri.paymentName ?? prev.paymentName,
+          amount:      ri.amount      ?? prev.amount,
+          expenseRef:  ri.expenseRef  ?? prev.expenseRef,
+          company:     ri.company     ?? prev.company,
+          project:     ri.project     ?? prev.project,
+          bankId:      ri.bankId      ?? prev.bankId,
+        }));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // Print/PDF payment voucher
   const handlePrintPayment = (
@@ -2591,6 +2646,21 @@ const Payment: React.FC = () => {
     [expenseOptions, companyOptions],
   );
 
+  // Auto-select the matching invoice for re-issue once expenseOptions loads
+  useEffect(() => {
+    if (!reissueCtx || !expenseOptions.length || form.expenseId) return;
+    const ref = reissueCtx.expenseRef;
+    if (!ref) return;
+    const opt =
+      expenseOptions.find((o) => o.docNo === ref) ??
+      expenseOptions.find(
+        (o) =>
+          o.label.startsWith(ref + " ") || o.label.startsWith(ref + " —"),
+      );
+    if (opt) handleExpenseSelect(opt.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseOptions, reissueCtx]);
+
   const clearExpenseLink = () => {
     setForm((prev) => ({
       ...prev,
@@ -2744,6 +2814,13 @@ const Payment: React.FC = () => {
       impsReference: form.impsReference || null,
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
+      // Re-issue fields
+      ...(reissueCtx ? {
+        ReplacesPaymentId: reissueCtx.replacesPaymentId,
+        BounceCharge: bounceCharge ? parseFloat(bounceCharge) : null,
+        // Total = original amount + bounce charge
+        amount: (form.amount ?? 0) + (bounceCharge ? parseFloat(bounceCharge) : 0),
+      } : {}),
     } as any;
 
     try {
@@ -2753,7 +2830,7 @@ const Payment: React.FC = () => {
         toast.success("Payment updated.");
       } else {
         await addPayment(payload);
-        toast.success("Payment saved.");
+        toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
@@ -3226,7 +3303,7 @@ const Payment: React.FC = () => {
                         <ReadOnlyField
                           value={
                             expenseOptions.find((o) => o.id === form.expenseId)
-                              ?.supplierName || ""
+                              ?.supplierName || form.paidTo || ""
                           }
                           placeholder="From expense booking"
                         />
@@ -3795,12 +3872,64 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
+              {/* ── Re-issue banner ── */}
+              {reissueCtx && (
+                <div className="flex items-start gap-3 rounded-xl bg-amber-500/[0.08] border border-amber-500/30 px-4 py-3">
+                  <RefreshCw size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      Re-issuing bounced payment
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Replaces <span className="font-mono font-medium">{reissueCtx.replacesDocNo}</span>
+                      {reissueCtx.bounceReason && <> · <span className="italic">{reissueCtx.bounceReason}</span></>}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Original amount: <span className="font-mono font-semibold">{formatINR(reissueCtx.amount)}</span>
+                      {bounceCharge && parseFloat(bounceCharge) > 0 && (
+                        <> + bounce charge: <span className="font-mono font-semibold text-red-500">{formatINR(parseFloat(bounceCharge))}</span>
+                        {" "}= <span className="font-mono font-semibold text-foreground">{formatINR(reissueCtx.amount + parseFloat(bounceCharge))}</span></>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setReissueCtx(null); setBounceCharge(""); }}
+                    className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="Cancel re-issue"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+
+              {/* ── Bounce Charge (re-issue only) ── */}
+              {reissueCtx && (
+                <div className="space-y-3">
+                  <SectionHeader icon={AlertTriangle} label="Bounce Charge" />
+                  <Field label="Bank Bounce Charge" hint="Optional — added on top of the original payment amount">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold pointer-events-none">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bounceCharge}
+                        onChange={(e) => setBounceCharge(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60 font-mono"
+                      />
+                    </div>
+                  </Field>
+                </div>
+              )}
+
               {/* ── 3. Payment Mode ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
                   <div className="flex flex-wrap gap-2">
-                    {PAYMENT_MODES.map((m) => {
+                    {PAYMENT_MODES.filter((m) => !reissueCtx || m !== "Cash").map((m) => {
                       const s = MODE_STYLE[m] ?? {
                         ring: "ring-border bg-muted",
                         text: "text-muted-foreground",
@@ -4595,8 +4724,8 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-2.5 hidden lg:table-cell">
                             {rec.chequeNo ? (
                               <div className="space-y-0.5">
-                                <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
-                                  # {rec.chequeNo}
+                                <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                  #{rec.chequeNo}
                                 </span>
                                 {rec.isPostDated && rec.chequeDate && (
                                   <p className="text-[10px] text-indigo-500 font-mono">

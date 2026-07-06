@@ -30,7 +30,6 @@ async function safeLoadRoutes(app, routes, options = {}) {
     const label = routePath.replace(/^\/api\//, "");
 
     try {
-      // Support both .js and .ts extensions
       const jsPath = path.resolve(baseDir, file + ".js");
       const tsPath = path.resolve(baseDir, file + ".ts");
 
@@ -44,7 +43,6 @@ async function safeLoadRoutes(app, routes, options = {}) {
         continue;
       }
 
-      // Strip extension for require() compatibility
       const requirePath = fullPath.replace(/\.(js|ts)$/, "");
       const router = require(requirePath);
 
@@ -70,7 +68,7 @@ async function safeLoadRoutes(app, routes, options = {}) {
 }
 
 /**
- * Prints a boxed summary after route loading.
+ * Prints a redesigned summary after route loading.
  */
 function printRoutesSummary(results, logger = console) {
   const { loaded, skipped, failed } = results;
@@ -78,53 +76,64 @@ function printRoutesSummary(results, logger = console) {
   const allOk   = failed.length === 0 && skipped.length === 0;
   const hasFail = failed.length > 0;
 
-  // dot-leader row: "LABEL ........ VALUE"
-  const W = 42;
-  const leader = (label, value) => {
-    const val   = String(value);
-    const dots  = ".".repeat(Math.max(3, W - label.length - val.length - 2));
-    return `  ${label} ${dots} ${val}`;
+  // ANSI colour codes (no-op if the terminal strips them)
+  const c = {
+    reset:  "\x1b[0m",
+    bold:   "\x1b[1m",
+    dim:    "\x1b[2m",
+    green:  "\x1b[32m",
+    yellow: "\x1b[33m",
+    red:    "\x1b[31m",
+    cyan:   "\x1b[36m",
+    white:  "\x1b[97m",
+    grey:   "\x1b[90m",
   };
 
-  const bar    = `+${"-".repeat(W + 2)}+`;
-  const spacer = `|${" ".repeat(W + 2)}|`;
-  const mid    = `+${"-".repeat(W + 2)}+`;
-  const wrap   = (s) => `|  ${s.padEnd(W)}|`;
+  const symbol = { ok: "✔", warn: "◆", fail: "✘", bullet: "›" };
 
-  const lines  = [
-    bar,
-    spacer,
-    wrap(`  CivilierERP  >>  Route Loader`),
-    spacer,
-    mid,
-    spacer,
-    wrap(leader("OK",    loaded.length)),
-    wrap(leader("WARN",  skipped.length)),
-    wrap(leader("FAIL",  failed.length)),
-    wrap(leader("TOTAL", total)),
-    spacer,
+  // ── Header ──────────────────────────────────────────────────────────────
+  const lines = [
+    "",
+    `  ${c.bold}${c.cyan}CIVILIER ERP${c.reset}  ${c.grey}·${c.reset}  Route Boot`,
+    `  ${c.grey}${"─".repeat(36)}${c.reset}`,
+    "",
   ];
 
+  // ── Stats row ────────────────────────────────────────────────────────────
+  const stat = (col, sym, label, val) =>
+    `  ${col}${sym}${c.reset}  ${c.dim}${label}${c.reset}   ${c.bold}${col}${val}${c.reset}`;
+
+  lines.push(stat(c.green,  symbol.ok,   "loaded  ", loaded.length));
+  lines.push(stat(c.yellow, symbol.warn, "skipped ", skipped.length));
+  lines.push(stat(c.red,    symbol.fail, "failed  ", failed.length));
+  lines.push("");
+  lines.push(`  ${c.grey}${"─".repeat(36)}${c.reset}`);
+  lines.push(
+    `  ${c.grey}total${c.reset}  ${c.bold}${c.white}${total}${c.reset}` +
+    `  ${c.grey}routes registered${c.reset}`,
+  );
+
+  // ── Failed detail ─────────────────────────────────────────────────────
   if (hasFail) {
-    lines.push(mid, wrap("  FAILED ROUTES"));
-    failed.forEach(({ label, error }) =>
-      lines.push(wrap(`    ${label}  ->  ${error}`))
-    );
-    lines.push(spacer);
+    lines.push("", `  ${c.red}${c.bold}Failed routes${c.reset}`);
+    failed.forEach(({ label, error }) => {
+      lines.push(`  ${c.red}${symbol.bullet}${c.reset}  ${c.bold}${label}${c.reset}`);
+      lines.push(`     ${c.dim}${error}${c.reset}`);
+    });
   }
 
+  // ── Skipped detail ───────────────────────────────────────────────────
   if (skipped.length > 0) {
-    lines.push(mid, wrap("  SKIPPED ROUTES"));
-    skipped.forEach(({ label, reason }) =>
-      lines.push(wrap(`    ${label}  ->  ${reason}`))
-    );
-    lines.push(spacer);
+    lines.push("", `  ${c.yellow}${c.bold}Skipped routes${c.reset}`);
+    skipped.forEach(({ label, reason }) => {
+      lines.push(`  ${c.yellow}${symbol.bullet}${c.reset}  ${c.bold}${label}${c.reset}  ${c.dim}(${reason})${c.reset}`);
+    });
   }
 
-  lines.push(bar);
+  lines.push("");
 
-  const status = allOk ? "info" : hasFail ? "error" : "warn";
-  logger[status](`\n${lines.join("\n")}\n`);
+  const level = allOk ? "info" : hasFail ? "error" : "warn";
+  logger[level](lines.join("\n"));
 }
 
 module.exports = { safeLoadRoutes, printRoutesSummary };
