@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
+const { deleteProjectCascade } = require("../services/projectCascadeDelete");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -530,6 +531,79 @@ router.delete("/:id", adminOnly, async (req, res) => {
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /:id/cascade — super_admin ONLY: wipes the project and every ────
+// transactional record under it (see services/projectCascadeDelete.js for
+// exactly what is and isn't included, and why). Deliberately gated with its
+// own literal role check rather than `adminOnly` or `requirePageRight` — no
+// rights-matrix toggle should ever be able to grant this to admin/dba/any
+// other role, so the check can't be widened by a future rights change.
+// The caller must re-type the exact project name as `confirmName` to guard
+// against a stray click on something this irreversible.
+router.delete("/:id/cascade", async (req, res) => {
+  if ((req.user?.role || "").toLowerCase() !== "super_admin") {
+    return res.status(403).json({
+      error: "Only Super Admin can delete a project and its transactions.",
+    });
+  }
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid project ID" });
+
+  const { confirmName } = req.body || {};
+
+  try {
+    const pool = getPool();
+    const projectRow = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT id, name, company_id FROM dbo.enterprise WHERE id=@id AND business_type='P'",
+      );
+
+    if (!projectRow.recordset.length)
+      return res.status(404).json({ error: "Project not found" });
+
+    const project = projectRow.recordset[0];
+
+    if (!confirmName || confirmName.trim() !== project.name) {
+      return res.status(400).json({
+        error: "Confirmation name does not match the project name.",
+      });
+    }
+
+    const summary = await deleteProjectCascade(pool, id, project.name);
+
+    // The project's own AccountHeadMaster ledger heads and TypeOfDoc rows
+    // are intentionally left in place (see projectCascadeDelete.js) — only
+    // the enterprise row itself is removed here, after everything under it.
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='P'");
+
+    await pool
+      .request()
+      .input("ProjectId", sql.Int, id)
+      .input("ProjectName", sql.NVarChar(255), project.name)
+      .input("CompanyId", sql.Int, project.company_id || null)
+      .input("DeletedBy", sql.NVarChar(255), req.user?.email || req.user?.name || "unknown")
+      .input("SummaryJson", sql.NVarChar(sql.MAX), JSON.stringify(summary)).query(`
+        INSERT INTO dbo.ProjectDeletionLog (ProjectId, ProjectName, CompanyId, DeletedBy, SummaryJson)
+        VALUES (@ProjectId, @ProjectName, @CompanyId, @DeletedBy, @SummaryJson)
+      `);
+
+    await Promise.all([
+      bumpCacheVersion("enterprises"),
+      bumpCacheVersion("project-master"),
+      bumpCacheVersion("account-head-master"),
+    ]);
+
+    res.json({ success: true, deleted: summary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
