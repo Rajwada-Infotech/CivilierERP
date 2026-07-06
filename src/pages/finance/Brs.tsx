@@ -92,17 +92,17 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Date",       accessor: (r) => fmt(r.PayDate as string) },
   { header: "Amount",     accessor: (r) => `Rs. ${Number(r.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}` },
   { header: "Mode",       accessor: "Mode" },
-  { header: "Cheque No",  accessor: (r) => (r as BrsEntry).ChequeNo ?? "—" },
+  { header: "Cheque No",  accessor: (r) => (r as unknown as BrsEntry).ChequeNo ?? "—" },
   { header: "Doc No.",    accessor: (r) => r.DocNo ?? "—" },
   { header: "Txn ID",     accessor: (r) => r.TxnId ?? "—" },
   { header: "Pay Status", accessor: "PayStatus" },
   { header: "BRS Status", accessor: (r) => {
-    if ((r as BrsEntry).IsBounced === 1 || (r as BrsEntry).IsBounced === true) return "Bounced";
-    return (r as BrsEntry).IsMatched === 1 || (r as BrsEntry).IsMatched === true ? "Clear" : "Unclear";
+    if ((r as unknown as BrsEntry).IsBounced === 1 || (r as unknown as BrsEntry).IsBounced === true) return "Bounced";
+    return (r as unknown as BrsEntry).IsMatched === 1 || (r as unknown as BrsEntry).IsMatched === true ? "Clear" : "Unclear";
   }},
-  { header: "Bounce Date",   accessor: (r) => fmt((r as BrsEntry).BounceDate) },
-  { header: "Bounce Reason", accessor: (r) => (r as BrsEntry).BounceReason ?? "—" },
-  { header: "Bounce Remarks",accessor: (r) => (r as BrsEntry).BounceRemarks ?? "—" },
+  { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
+  { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
+  { header: "Bounce Remarks",accessor: (r) => (r as unknown as BrsEntry).BounceRemarks ?? "—" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────

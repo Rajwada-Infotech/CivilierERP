@@ -22,6 +22,7 @@ import {
   Printer,
   CalendarDays,
   ChevronDown,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -30,11 +31,13 @@ import {
   createProject,
   updateProject,
   deleteProject,
+  deleteProjectCascade,
 } from "@/api/projectMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Project {
   Id?: number;
@@ -416,6 +419,8 @@ function buildProjectColumns(
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
   rights: { canEdit: boolean; canDelete: boolean },
+  isSuperAdmin: boolean,
+  setCascadeTarget: (row: { Id: number; Name: string }) => void,
 ): ColumnDef<any, unknown>[] {
   return [
     {
@@ -535,6 +540,17 @@ function buildProjectColumns(
               <Trash2 size={13} />
             </button>
           )}
+          {isSuperAdmin && (
+            <button
+              onClick={() =>
+                setCascadeTarget({ Id: row.original.Id, Name: row.original.Name })
+              }
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+              title="Super Admin: delete project and ALL its transactions"
+            >
+              <ShieldAlert size={13} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -554,7 +570,11 @@ export default function ProjectMaster() {
     "general" | "location" | "compliance" | "timeline" | "financial"
   >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [cascadeTarget, setCascadeTarget] = useState<{ Id: number; Name: string } | null>(null);
+  const [cascadeConfirmText, setCascadeConfirmText] = useState("");
   const [imagePreview, setImagePreview] = useState<string>("");
+  const { currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
   const [complianceLoading, setComplianceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -728,6 +748,23 @@ export default function ProjectMaster() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const cascadeDeleteMutation = useMutation({
+    mutationFn: () => deleteProjectCascade(cascadeTarget!.Id, cascadeConfirmText),
+    onSuccess: (res: any) => {
+      const tableCount = Object.keys(res?.deleted || {}).length;
+      toast.success(
+        tableCount
+          ? `Project and its transactions deleted (${tableCount} table${tableCount > 1 ? "s" : ""} affected).`
+          : "Project deleted — it had no linked transactions.",
+      );
+      qc.invalidateQueries({ queryKey: ["project-master"] });
+      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      setCascadeTarget(null);
+      setCascadeConfirmText("");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const resetForm = () => {
     setForm({ ...emptyProject });
     setImagePreview("");
@@ -783,9 +820,16 @@ export default function ProjectMaster() {
   const openView = (row: any) => setViewTarget(rowToForm(row));
 
   const columns = useMemo(
-    () => buildProjectColumns(openView, openEdit, setDeleteConfirm, rights),
-
-    [rights],
+    () =>
+      buildProjectColumns(
+        openView,
+        openEdit,
+        setDeleteConfirm,
+        rights,
+        isSuperAdmin,
+        setCascadeTarget,
+      ),
+    [rights, isSuperAdmin],
   );
 
   // Reusable text input
@@ -1400,6 +1444,62 @@ export default function ProjectMaster() {
                   className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
                 >
                   Delete
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Super Admin: Delete Project + ALL Transactions */}
+        {cascadeTarget !== null && createPortal(
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
+            <div className="bg-card border border-red-500/40 rounded-xl p-6 w-[26rem] shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <ShieldAlert size={18} className="text-red-600" />
+                </div>
+                <div>
+                  <p className="font-heading font-semibold text-foreground">
+                    Delete "{cascadeTarget.Name}" and ALL its transactions?
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Every purchase order, GRN, invoice, payment, journal
+                    voucher, stock ledger entry, follow-up record and more
+                    under this project will be permanently deleted. This
+                    cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Type the project name to confirm: <span className="font-mono text-foreground">{cascadeTarget.Name}</span>
+              </label>
+              <input
+                autoFocus
+                value={cascadeConfirmText}
+                onChange={(e) => setCascadeConfirmText(e.target.value)}
+                placeholder="Type project name exactly"
+                className="w-full mb-4 px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-red-500/40"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setCascadeTarget(null);
+                    setCascadeConfirmText("");
+                  }}
+                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={
+                    cascadeConfirmText.trim() !== cascadeTarget.Name ||
+                    cascadeDeleteMutation.isPending
+                  }
+                  onClick={() => cascadeDeleteMutation.mutate()}
+                  className="flex-1 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {cascadeDeleteMutation.isPending ? "Deleting…" : "Delete Everything"}
                 </button>
               </div>
             </div>

@@ -1377,8 +1377,11 @@ export default function StockTransfer() {
       const senderProjectId = fromGodown?.ProjectID;
       const receiverProjectId = toGodown?.ProjectID;
       if (!senderProjectId || !receiverProjectId) {
+        const missing: string[] = [];
+        if (!senderProjectId) missing.push(`source godown "${fromGodown?.GodownName ?? "unknown"}"`);
+        if (!receiverProjectId) missing.push(`destination godown "${toGodown?.GodownName ?? "unknown"}"`);
         setErrorMsg(
-          "Both the source and destination godowns must be linked to a Project to route this transfer via the Dummy Bank.",
+          `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not linked to a Project. Assign a Project to ${missing.length > 1 ? "them" : "it"} in Godown Admin before routing this transfer via the Dummy Bank.`,
         );
         return;
       }
