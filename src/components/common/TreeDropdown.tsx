@@ -201,12 +201,17 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       const inPanel = panelRef.current?.contains(e.target as Node);
       if (!inTrigger && !inPanel) setOpen(false);
     };
+    const scrollHandler = (e: Event) => {
+      // composedPath includes every ancestor of the scroll target — reliable even for portals
+      if (panelRef.current && e.composedPath().includes(panelRef.current)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", handler);
-    window.addEventListener("scroll", () => setOpen(false), { passive: true, capture: true });
+    window.addEventListener("scroll", scrollHandler, { passive: true, capture: true });
     window.addEventListener("resize", recalcPosition);
     return () => {
       document.removeEventListener("mousedown", handler);
-      window.removeEventListener("scroll", () => setOpen(false), true);
+      window.removeEventListener("scroll", scrollHandler, true);
       window.removeEventListener("resize", recalcPosition);
     };
   }, [open, recalcPosition]);
