@@ -1,5 +1,12 @@
 process.env.NODE_ENV = "test";
 
+// services/projectCascadeDelete.js requires ../db, which calls
+// config/env.js's loadEnv() at module-load time — that throws in CI (no
+// .env / DB secrets present there) unless config/env is mocked before
+// anything transitively requires db.js, matching every other test file
+// in this suite (see e.g. interCompanyTransferValidation.test.js).
+jest.mock("../config/env", () => ({ loadEnv: jest.fn(), envPath: "" }));
+
 /**
  * Project cascade delete (services/projectCascadeDelete.js).
  *
