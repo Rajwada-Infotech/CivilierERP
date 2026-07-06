@@ -40,6 +40,7 @@ import {
   Boxes,
   Settings2,
   Warehouse,
+  XCircle,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -380,6 +381,51 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
       { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "bounced-cheques",
+    label: "Bounced Cheques",
+    description: "Dishonoured cheque payments with bounce details",
+    icon: XCircle,
+    color: "#ef4444",
+    apiPath: "/api/brs",
+    defaultParams: { status: "bounced", hideDummyBank: "true", limit: "500" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: "fromDate",
+      dateFromParam: "fromDate",
+      dateToParam: "toDate",
+      dataKey: "data",
+    },
+    columns: [
+      {
+        header: "Date",
+        accessor: (r) => (r.PayDate ? String(r.PayDate).slice(0, 10) : "—"),
+      },
+      { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Cheque No", accessor: (r) => (r.ChequeNo ?? "—") as string },
+      { header: "Party", accessor: (r) => (r.PaymentName ?? "—") as string },
+      { header: "Bank", accessor: (r) => (r.BankName ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      {
+        header: "Bounce Date",
+        accessor: (r) =>
+          r.BounceDate ? String(r.BounceDate).slice(0, 10) : "—",
+      },
+      {
+        header: "Bounce Reason",
+        accessor: (r) => (r.BounceReason ?? "—") as string,
+      },
+      {
+        header: "Remarks",
+        accessor: (r) => (r.BounceRemarks ?? "—") as string,
+      },
+      {
+        header: "Replacement Doc",
+        accessor: (r) => (r.ReplacementDocNo ?? "—") as string,
+      },
     ],
   },
   {
@@ -813,6 +859,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "work-order-register",
       "boq-register",
       "work-done",
+      "bounced-cheques",
     ],
   },
   {

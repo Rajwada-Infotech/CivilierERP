@@ -1,6 +1,5 @@
 ﻿import { useEffect, useState, useMemo } from "react";
 import { useUserMap } from "@/hooks/useUserMap";
-import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";

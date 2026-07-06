@@ -360,7 +360,7 @@ function makeColumns(
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FollowupLog() {
   const queryClient = useQueryClient();
-  const [, setSearch] = useState("");
+  const [, _setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | LogType>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [form, setForm] = useState<FollowupLogFormState>(EMPTY_FORM);

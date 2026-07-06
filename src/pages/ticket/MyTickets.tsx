@@ -579,43 +579,6 @@ function DbAttachmentList({ attachments }: { attachments: TicketAttachment[] }) 
 //   2. Python-style array:   ['/api/tickets/file/a.png','/api/tickets/file/b.pdf']
 //   3. Space-separated URLs: /api/tickets/file/a.png /api/tickets/file/b.pdf
 //   4. Single URL:           /api/tickets/file/a.png
-function parseAttachmentPath(raw: string): string[] {
-  if (!raw || !raw.trim()) return [];
-  const trimmed = raw.trim();
-
-  // Try standard JSON first
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) return parsed.map((u: unknown) => String(u)).filter(Boolean);
-    if (typeof parsed === "string") return [parsed];
-  } catch {
-    // not JSON
-  }
-
-  // Python-style single-quoted array: ['...','...']
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    const inner = trimmed.slice(1, -1);
-    const matches = inner.match(/'([^']+)'/g);
-    if (matches && matches.length > 0) {
-      return matches.map((m) => m.slice(1, -1)).filter(Boolean);
-    }
-    // Also try double-quote variant that JSON.parse may have missed
-    const dqMatches = inner.match(/"([^"]+)"/g);
-    if (dqMatches && dqMatches.length > 0) {
-      return dqMatches.map((m) => m.slice(1, -1)).filter(Boolean);
-    }
-  }
-
-  // Space-separated or comma-separated URLs
-  const parts = trimmed
-    .split(/[\s,]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.startsWith("/api/") || s.startsWith("http"));
-  if (parts.length > 0) return parts;
-
-  // Fallback: treat entire string as single URL
-  return [trimmed];
-}
 
 // ─── Ticket List Card ─────────────────────────────────────────────────────────
 

@@ -321,7 +321,7 @@ async function runEscalation() {
   try {
     await assertRequiredSchema();
 
-    const [lm, aw, sd, bk] = await Promise.all([
+    await Promise.all([
       escalateLegalMilestones(),
       escalateAgreementWorkflows(),
       escalateSalesDeeds(),

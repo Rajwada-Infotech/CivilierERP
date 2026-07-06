@@ -3,7 +3,6 @@ import React, { useRef, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { FileText, Download, Upload, Check, X, Loader2 } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -83,7 +82,6 @@ interface ImportRowResult {
 const TdsMaster: React.FC = () => {
   const rights = usePageRights("tds-master");
   const queryClient = useQueryClient();
-  const { theme } = useTheme();
   // CSV import state
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);

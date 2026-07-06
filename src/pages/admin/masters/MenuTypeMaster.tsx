@@ -87,7 +87,7 @@ const MenuTypeMaster: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const { register, handleSubmit, reset, watch } = useForm<MenuTypeForm>({
+  const { register, handleSubmit, reset } = useForm<MenuTypeForm>({
     resolver: zodResolver(menuTypeSchema),
     defaultValues: EMPTY_FORM,
   });

@@ -113,7 +113,6 @@ function SupplierBell() {
 
 // ── SupplierLayout ─────────────────────────────────────────────────────────────
 export function SupplierLayout({ children }: { children: React.ReactNode }) {
-  const { currentUser } = useAuth();
   const { handleLogout, overlay } = useGracefulLogout();
   const location = useLocation();
   const { theme } = useTheme();
