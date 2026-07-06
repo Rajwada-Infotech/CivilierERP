@@ -5,14 +5,15 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "account-head-supplier-login-
  * Supplier Master: auto-generated login email + bcrypt password.
  *
  * New requirement: creating a Supplier (LHeadType='S') requires a password,
- * auto-generates a <name>@civilier.in login email, bcrypt-hashes the
+ * auto-generates a <name>@civilier.in login email, and bcrypt-hashes the
  * password (reusing routes/users.js's own bcrypt/SALT_ROUNDS convention,
- * not a new mechanism), stores the hash on AccountHeadMaster.SupplierPassword
- * for on-record visibility, and — critically — also creates a linked
- * dbo.users row (role='supplier', LinkedLHeadId) so the supplier can
- * actually log in through the existing shared /login endpoint and
- * Supplier Portal (routes/supplierPortal.js), rather than storing
- * credentials nowhere any login path checks.
+ * not a new mechanism). AccountHeadMaster is the shared, generic ledger-
+ * head table (suppliers/customers/banks/GL heads as rows, distinguished by
+ * LHeadType) and stores NO login-related columns at all — the credential
+ * lives solely in a linked dbo.users row (role='supplier', LinkedLHeadId),
+ * exactly the mechanism every other user in the system authenticates
+ * through. Without that row the supplier could never actually log in
+ * anywhere.
  *
  * The mssql pool/transaction is faked (same pattern as
  * materialRequestsAtomicity.test.js) so these tests exercise only the
@@ -64,7 +65,6 @@ const COLUMN_META_ROWS = [
   "LBranchName", "LGST", "LGSTState", "LCountry", "LBelongsTo", "LDescription",
   "Status", "isEdited", "LGSTType", "LHeadPan", "LHeadCategory", "IsTdsApplicable",
   "CreatedBy", "CreatedAt", "UpdatedBy", "UpdatedAt", "ApprovedBy", "ApprovedAt",
-  "SupplierLoginEmail", "SupplierPassword",
 ].map((name) => ({ COLUMN_NAME: name, DATA_TYPE: "nvarchar", IS_NULLABLE: "YES" }));
 
 function makeFakePool() {
@@ -76,8 +76,9 @@ function makeFakePool() {
           return { recordset: COLUMN_META_ROWS };
         }
         // Email-collision check inside generateSupplierLoginEmail — no
-        // existing rows, so the first candidate (no numeric suffix) is free.
-        if (/FROM dbo\.AccountHeadMaster WHERE SupplierLoginEmail/i.test(text)) {
+        // existing dbo.users row with this email yet, so the first
+        // candidate (no numeric suffix) is free.
+        if (/FROM dbo\.users WHERE email/i.test(text)) {
           return { recordset: [] };
         }
         if (/SELECT Status FROM dbo\.AccountHeadMaster WHERE LHeadId/i.test(text)) {
