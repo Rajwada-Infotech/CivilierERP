@@ -27,6 +27,30 @@ const { initSocket } = require("./socket");
 const { isOriginAllowed } = require("./config/origins");
 const { validateApprovalModuleMap } = require("./services/approvalService");
 
+// ─── Crash visibility ───────────────────────────────────────────────────────
+// Node has no default handler for these, so without one an uncaught error in
+// a fire-and-forget async call (a socket handler, a cron job, a .catch()-less
+// promise anywhere in the app) kills the entire process with only whatever
+// happened to be on stdout at that moment — often nothing, if stdout isn't
+// being captured by whatever runs `node server.js` on the live server. Log
+// first so the failure is diagnosable, then let Node exit as it already
+// would (this does not change crash-vs-continue behavior, only visibility).
+if (!isTest) {
+  process.on("unhandledRejection", (reason) => {
+    logger.error(
+      { event: "UNHANDLED_REJECTION", err: reason instanceof Error ? reason.stack : reason },
+      "Unhandled promise rejection — process will exit",
+    );
+  });
+  process.on("uncaughtException", (err) => {
+    logger.error(
+      { event: "UNCAUGHT_EXCEPTION", err: err?.stack || err },
+      "Uncaught exception — process will exit",
+    );
+    process.exit(1);
+  });
+}
+
 const {
   getRedis,
   closeRedis,
