@@ -2950,7 +2950,7 @@ router.get("/:id/payment-summary", async (req, res) => {
           eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           -- GRN info
-          grn.GRNNo, grn.GRNID,
+          grn.GRNNo, grn.GRNID, grn.TotalAmount AS GrnTotalAmount,
           -- PO info via GRN or direct
           po.PurchaseOrderNo, po.PurchaseOrderID,
           po.SourceMRDocNo, po.SupplierID,
@@ -2979,7 +2979,10 @@ router.get("/:id/payment-summary", async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const eb = ebRes.recordset[0];
-    const netAmount = parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
+    const netAmount =
+      eb.ESourceType === 'GRN' && eb.GrnTotalAmount && parseFloat(eb.GrnTotalAmount) > 0
+        ? parseFloat(eb.GrnTotalAmount)
+        : parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
 
     // Fetch approved payments against this booking
     const payRes = await pool

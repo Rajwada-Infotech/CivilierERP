@@ -1588,6 +1588,14 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
+  const openPreview = useCallback((rec: ExpenseRecord | null) => {
+    setPreviewRecord(rec);
+    if (!rec?.id) return;
+    // Re-fetch fresh data so totalPaid/billStatus reflect latest payment state
+    apiFetch(`${API}/${rec.id}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch(() => {/* non-fatal — stale data still shown */});
+  }, []);
   const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>(
     [],
   );
@@ -3555,7 +3563,7 @@ export default function MaterialExpenseBooking() {
                           }
                           rec={rec}
                           onEdit={() => openAmend(rec)}
-                          onPreview={() => setPreviewRecord(rec)}
+                          onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
                           canEdit={rights.canEdit}
@@ -3765,7 +3773,7 @@ export default function MaterialExpenseBooking() {
                                       <button
                                         type="button"
                                         className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                        onClick={() => setPreviewRecord(rec)}
+                                        onClick={() => openPreview(rec)}
                                         title="Preview"
                                       >
                                         <Eye size={15} />

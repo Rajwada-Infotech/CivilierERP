@@ -134,7 +134,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/civilworkdpr")) {
       setActiveModuleState("civilworkdpr");
       localStorage.setItem("activeModule", "civilworkdpr");
-    } else if (pathname.startsWith("/finance") || pathname === "/finance") {
+    } else if (pathname.startsWith("/finance") || pathname === "/finance" || pathname.startsWith("/brs")) {
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
     } else if (pathname === "/home" || pathname === "/") {

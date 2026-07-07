@@ -13,11 +13,22 @@ async function syncBillStatus(pool, sql, expenseRef) {
     const ebRes = await pool
       .request()
       .input("EDocNo", sql.NVarChar(100), expenseRef)
-      .query("SELECT Eid, ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      .query(`
+        SELECT eb.Eid, eb.ENetAmount, eb.EAmount, eb.ESourceType,
+               grn.TotalAmount AS GrnTotalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        WHERE eb.EDocNo = @EDocNo
+      `);
     if (!ebRes.recordset.length) return;
 
-    const { Eid, ENetAmount, EAmount } = ebRes.recordset[0];
-    const netAmount = parseFloat(ENetAmount ?? EAmount ?? 0) || 0;
+    const { Eid, ENetAmount, EAmount, ESourceType, GrnTotalAmount } = ebRes.recordset[0];
+    // Use GRN total (GST-inclusive) when available — same logic as the payment picker
+    const netAmount =
+      ESourceType === "GRN" && GrnTotalAmount && parseFloat(GrnTotalAmount) > 0
+        ? parseFloat(GrnTotalAmount)
+        : parseFloat(ENetAmount ?? EAmount ?? 0) || 0;
 
     // Exclude bounced payments — a bounced cheque must not reduce outstanding balance
     const payRes = await pool

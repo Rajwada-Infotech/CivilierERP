@@ -386,6 +386,21 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
       `);
 
     await bumpCacheVersion("brs");
+
+    if (sourceType === "PAYMENT") {
+      try {
+        const pool2 = getPool();
+        const refRes = await pool2
+          .request()
+          .input("PPaymentID", sql.Int, parseInt(sourceId))
+          .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
+        const expenseRef = refRes.recordset[0]?.PExpenseRef;
+        if (expenseRef) await syncBillStatus(pool2, sql, expenseRef);
+      } catch (syncErr) {
+        console.warn("syncBillStatus after clear failed:", syncErr.message);
+      }
+    }
+
     res.json({ message: "Marked as clear" });
   } catch (err) {
     console.error("BRS clear error:", err);
