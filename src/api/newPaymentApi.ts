@@ -141,8 +141,6 @@ export interface PaymentChainItem {
   PCreatedBy: string | null;
   PCreatedAt: string;
   PApprovedBy: string | null;
-  PUpdatedBy: string | null;
-  PUpdatedAt: string | null;
   IsMatched: number;
   IsBounced: number;
   BounceDate: string | null;

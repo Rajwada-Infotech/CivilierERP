@@ -442,12 +442,16 @@ router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
     const finYear = (req.query.finYear || "").toString().trim() || null;
+    // When "Pay Remaining" navigates to a payment that's already marked Paid,
+    // include that specific invoice regardless of EBillStatus so the form can pre-fill.
+    const includeRef = (req.query.includeRef || "").toString().trim() || null;
 
     // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
     // and exclude any already linked to an active DebitNote
     const bookingsResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("IncludeRef", sql.NVarChar(100), includeRef).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -512,7 +516,10 @@ router.get("/options", async (req, res) => {
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
-          AND ISNULL(eb.EBillStatus, '') <> 'Paid'
+          AND (
+            ISNULL(eb.EBillStatus, '') <> 'Paid'
+            OR (@IncludeRef IS NOT NULL AND eb.EDocNo = @IncludeRef)
+          )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
