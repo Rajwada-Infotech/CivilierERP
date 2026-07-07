@@ -139,7 +139,7 @@ export default function SupplierDashboard() {
         </div>
 
         {/* Mobile stat row */}
-        <div className="grid grid-cols-3 gap-3 mb-6 md:hidden">
+        <div className="grid grid-cols-2 gap-3 mb-6 md:hidden">
           {[
             { label: "Total", value: quotations.length, cls: "" },
             { label: "Pending", value: pending.length, cls: pending.length > 0 ? "text-amber-500" : "" },

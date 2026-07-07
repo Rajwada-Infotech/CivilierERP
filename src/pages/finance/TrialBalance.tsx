@@ -179,21 +179,28 @@ function flattenVisible(
 ): TBNode[] {
   const result: TBNode[] = [];
   const q = search.toLowerCase();
+
+  // Returns true if this node or any descendant matches the query
   function hasMatch(n: TBNode): boolean {
     if (!q) return true;
-    if (
-      n.name.toLowerCase().includes(q) ||
-      (n.code ?? "").toLowerCase().includes(q)
-    )
-      return true;
+    if (n.name.toLowerCase().includes(q) || (n.code ?? "").toLowerCase().includes(q)) return true;
     return n.children.some(hasMatch);
   }
-  function walk(n: TBNode) {
-    if (!hasMatch(n)) return;
+
+  // parentMatched: an ancestor already satisfied the query — show all descendants
+  function walk(n: TBNode, parentMatched: boolean) {
+    const selfMatches = !q || n.name.toLowerCase().includes(q) || (n.code ?? "").toLowerCase().includes(q);
+    const visible = parentMatched || selfMatches || n.children.some(hasMatch);
+    if (!visible) return;
     result.push(n);
-    if (expanded.has(n.id) || q) n.children.forEach(walk);
+    if (expanded.has(n.id) || q) {
+      // If this node itself matched, all its children are shown regardless of query
+      const childParentMatched = parentMatched || selfMatches;
+      n.children.forEach((c) => walk(c, childParentMatched));
+    }
   }
-  nodes.forEach(walk);
+
+  nodes.forEach((n) => walk(n, false));
   return result;
 }
 
@@ -250,11 +257,19 @@ function TBRow({
   expanded,
   onToggle,
   onDrill,
+  isDrillOpen,
+  drillLoading,
+  drillData,
+  onOpenSource,
 }: {
   node: TBNode;
   expanded: Set<number>;
   onToggle: (id: number) => void;
   onDrill: (node: TBNode) => void;
+  isDrillOpen: boolean;
+  drillLoading: boolean;
+  drillData: TBTransactionsResponse | null;
+  onOpenSource: (t: TBTransaction) => void;
 }) {
   const isOpen = expanded.has(node.id);
   const hasKids = node.children.length > 0;
@@ -265,11 +280,10 @@ function TBRow({
     node.transactions.debit > 0 ||
     node.transactions.credit > 0;
   const dot = node.type ? TYPE_DOT[node.type] : null;
-  // Leaf (non-group) rows are clickable — Level 2 of the drill-down opens
-  // the transaction list for that entity. Groups already expand/collapse.
   const isDrillable = !node.isGroup;
 
   return (
+    <>
     <tr
       onClick={isDrillable ? () => onDrill(node) : undefined}
       className={`border-b border-border/40 transition-colors ${
@@ -277,7 +291,9 @@ function TBRow({
           ? node.level === 0
             ? "bg-muted/35 hover:bg-muted/50"
             : "bg-muted/15 hover:bg-muted/28"
-          : "hover:bg-primary/5 cursor-pointer"
+          : isDrillOpen
+            ? "bg-primary/8 hover:bg-primary/10"
+            : "hover:bg-primary/5 cursor-pointer"
       }`}
     >
       <td className="py-2.5 pr-3" style={{ paddingLeft: `${indent + 14}px` }}>
@@ -359,6 +375,105 @@ function TBRow({
         {fmt(node.closing.credit)}
       </td>
     </tr>
+
+    {/* ── Inline drill-down panel ───────────────────────────────────── */}
+    {isDrillOpen && (
+      <tr>
+        <td colSpan={7} className="p-0">
+          <div className="mx-4 my-2 rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+            {/* Header bar */}
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-primary/15 bg-primary/8">
+              <Receipt size={13} className="text-primary shrink-0" />
+              <span className="text-xs font-heading font-semibold text-primary">{node.name}</span>
+              <span className="text-[10px] text-muted-foreground/60 ml-1">
+                {node.type ? (TYPE_LABEL[node.type] ?? node.type) : ""} · transactions in period
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDrill(node); }}
+                className="ml-auto w-5 h-5 flex items-center justify-center rounded hover:bg-primary/15 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X size={11} />
+              </button>
+            </div>
+
+            {drillLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-xs">
+                <Loader2 size={14} className="animate-spin" /> Loading transactions…
+              </div>
+            ) : !drillData || drillData.transactions.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                No transactions found for this entity in the selected period.
+              </div>
+            ) : (
+              <div className="overflow-x-auto max-h-72">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-card/95 backdrop-blur-sm z-10">
+                    <tr className="border-b border-border text-left text-muted-foreground uppercase text-[10px] tracking-wide">
+                      <th className="px-3 py-2">Voucher No.</th>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Source / Entry</th>
+                      <th className="px-3 py-2">Invoice No.</th>
+                      <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2 text-right">Debit</th>
+                      <th className="px-3 py-2 text-right">Credit</th>
+                      <th className="px-3 py-2">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillData.transactions.map((t, ti) => {
+                      const st = (t.sourceType ?? "").toLowerCase();
+                      const isPending = (t as any).status !== "posted" && !(t as any).entryId;
+                      const badge = st === "newpayment"      ? { label: "Payment",    cls: "bg-blue-500/10 text-blue-500" }
+                                  : st === "receivedpayment" ? { label: "Received",   cls: "bg-emerald-500/10 text-emerald-600" }
+                                  : st === "expensebooking"  ? { label: "Expense Bkg",cls: "bg-amber-500/10 text-amber-600" }
+                                  : st === "grn"             ? { label: "GRN",        cls: "bg-violet-500/10 text-violet-500" }
+                                  : st === "journalvoucher"  ? { label: "JV",         cls: "bg-rose-500/10 text-rose-500" }
+                                  : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
+
+                      const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
+                      const displayDoc = (t as any).docNo || t.voucherNo || (ref?.docNo) || "—";
+                      const isClickable = st === "newpayment" && t.payment;
+
+                      return (
+                        <tr
+                          key={t.entryId ?? `direct-${ti}`}
+                          onClick={(e) => { e.stopPropagation(); if (isClickable) onOpenSource(t); }}
+                          className={`border-b border-border/30 ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
+                        >
+                          <td className="px-3 py-1.5 font-mono text-[11px]">{t.voucherNo || "—"}</td>
+                          <td className="px-3 py-1.5 whitespace-nowrap">{t.date ? fmtDate(t.date) : "—"}</td>
+                          <td className="px-3 py-1.5">
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>
+                                {badge.label}
+                              </span>
+                              {isPending && (
+                                <span className="text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium bg-yellow-500/10 text-yellow-600">
+                                  Pending
+                                </span>
+                              )}
+                              <span className={`font-mono text-[11px] ${isClickable ? "text-primary underline" : "text-foreground/70"}`}>
+                                {displayDoc}
+                              </span>
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
+                          <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">{t.debit ? fmt(t.debit) : "—"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">{t.credit ? fmt(t.credit) : "—"}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[11px]">{t.narration || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 
@@ -649,6 +764,12 @@ export default function TrialBalance() {
   // screen.
   const openDrillDown = useCallback(
     async (node: TBNode) => {
+      // Toggle: clicking the same row closes it
+      if (drillNode?.id === node.id) {
+        setDrillNode(null);
+        setDrillData(null);
+        return;
+      }
       setDrillNode(node);
       setDrillData(null);
       setDrillLoading(true);
@@ -913,8 +1034,8 @@ export default function TrialBalance() {
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
           <div className="flex flex-col gap-3 px-4 py-3.5 border-b border-border bg-muted/20">
 
-            {/* Row 1 — Scope filters: Enterprise / Company / Project (equal columns) */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* Row 1 — Enterprise + Company (2-col on mobile, 3-col on sm+) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
               <FilterSelect
                 label="Enterprise"
                 icon={Building}
@@ -931,77 +1052,82 @@ export default function TrialBalance() {
                 options={companies}
                 placeholder="All companies"
               />
-              <FilterSelect
-                label="Project"
-                icon={FolderKanban}
-                value={selProject?.id ?? null}
-                onChange={(id, opt) => setSelProject(opt)}
-                options={projects}
-                placeholder="All projects"
-              />
+              <div className="col-span-2 sm:col-span-1">
+                <FilterSelect
+                  label="Project"
+                  icon={FolderKanban}
+                  value={selProject?.id ?? null}
+                  onChange={(id, opt) => setSelProject(opt)}
+                  options={projects}
+                  placeholder="All projects"
+                />
+              </div>
             </div>
 
-            {/* Row 2 — all period controls on one flat line */}
-            <div className="flex flex-wrap items-center gap-2">
-              {/* "Filter by" label */}
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0">
-                Period:
-              </span>
-
-              {/* Mode tabs */}
-              <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="Financial Year" />
-              <ModeTab active={filterMode === "range"} onClick={() => switchMode("range")} icon={CalendarRange} label="Date Range" />
-              <ModeTab active={filterMode === "ason"}  onClick={() => switchMode("ason")}  icon={CalendarCheck} label="As On Date" />
-
-              {/* Divider */}
-              <div className="w-px h-6 bg-border/60 mx-1" />
-
-              {/* Period input inline — no label, the active tab makes it clear */}
-              {filterMode === "fy" && (
-                <div className="relative">
-                  <select
-                    value={selectedFYId ?? ""}
-                    onChange={(e) => handleFYChange(e.target.value ? Number(e.target.value) : null)}
-                    disabled={finYearsLoading}
-                    className="h-8 pl-2.5 pr-7 rounded-lg text-xs bg-background border border-primary/40 ring-1 ring-primary/20 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
-                  >
-                    <option value="">{finYearsLoading ? "Loading…" : "Select FY"}</option>
-                    {finYears.map((fy) => (
-                      <option key={fy.FId} value={fy.FId}>{fy.FName}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                </div>
-              )}
-              {filterMode === "fy" && selectedFY && (
-                <span className="text-[10px] text-muted-foreground/60">
-                  {fmtDate(toDateStr(selectedFY.FStartDate))} – {fmtDate(toDateStr(selectedFY.FEndDate))}
+            {/* Row 2 — Period mode tabs + picker */}
+            <div className="flex flex-col gap-2">
+              {/* Mode tabs row */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0 mr-0.5">
+                  Period:
                 </span>
-              )}
-              {filterMode === "range" && (
-                <>
-                  <DateField label="From" value={from} onChange={setFrom} />
-                  <DateField label="To"   value={to}   onChange={setTo} />
-                </>
-              )}
-              {filterMode === "ason" && (
-                <>
-                  <DateField label="FY Start" value={from} onChange={setFrom} />
-                  <DateField label="As On"    value={asOn} onChange={setAsOn} highlight />
-                </>
-              )}
+                <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="FY" />
+                <ModeTab active={filterMode === "range"} onClick={() => switchMode("range")} icon={CalendarRange} label="Range" />
+                <ModeTab active={filterMode === "ason"}  onClick={() => switchMode("ason")}  icon={CalendarCheck} label="As On" />
+              </div>
 
-              {/* Push controls to the right */}
-              <div className="ml-auto flex items-center gap-2 shrink-0">
-                <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={!hideEmpty}
-                    onChange={(e) => setHideEmpty(!e.target.checked)}
-                    className="accent-primary"
-                  />
-                  Show all accounts
-                </label>
+              {/* Period input row */}
+              <div className="flex flex-wrap items-center gap-2">
+                {filterMode === "fy" && (
+                  <>
+                    <div className="relative">
+                      <select
+                        value={selectedFYId ?? ""}
+                        onChange={(e) => handleFYChange(e.target.value ? Number(e.target.value) : null)}
+                        disabled={finYearsLoading}
+                        className="h-8 pl-2.5 pr-7 rounded-lg text-xs bg-background border border-primary/40 ring-1 ring-primary/20 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
+                      >
+                        <option value="">{finYearsLoading ? "Loading…" : "Select FY"}</option>
+                        {finYears.map((fy) => (
+                          <option key={fy.FId} value={fy.FId}>{fy.FName}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    </div>
+                    {selectedFY && (
+                      <span className="text-[10px] text-muted-foreground/60">
+                        {fmtDate(toDateStr(selectedFY.FStartDate))} – {fmtDate(toDateStr(selectedFY.FEndDate))}
+                      </span>
+                    )}
+                  </>
+                )}
+                {filterMode === "range" && (
+                  <>
+                    <DateField label="From" value={from} onChange={setFrom} />
+                    <DateField label="To"   value={to}   onChange={setTo} />
+                  </>
+                )}
+                {filterMode === "ason" && (
+                  <>
+                    <DateField label="FY Start" value={from} onChange={setFrom} />
+                    <DateField label="As On"    value={asOn} onChange={setAsOn} highlight />
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Row 3 — Show all accounts + Export */}
+            <div className="flex items-center gap-2">
+              <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap flex-1 sm:flex-none">
+                <input
+                  type="checkbox"
+                  checked={!hideEmpty}
+                  onChange={(e) => setHideEmpty(!e.target.checked)}
+                  className="accent-primary"
+                />
+                Show all accounts
+              </label>
+              <div className="ml-auto">
                 <ExportMenu
                   data={exportData}
                   columns={TB_EXPORT_COLUMNS}
@@ -1076,8 +1202,125 @@ export default function TrialBalance() {
             </div>
           )}
 
-          {/* Table */}
-          <div className="overflow-x-auto">
+          {/* ── Mobile cards (< md) ─────────────────────────────────────────── */}
+          <div className="md:hidden divide-y divide-border/40">
+            {loading ? (
+              <div className="py-12 text-center text-muted-foreground text-sm">
+                <Loader2 className="h-5 w-5 animate-spin inline mb-2" />
+                <p>Loading…</p>
+              </div>
+            ) : visible.length === 0 ? (
+              <div className="py-16 text-center text-muted-foreground text-sm px-4">
+                {rows.length === 0
+                  ? "No entries found for the selected period."
+                  : search
+                    ? "No accounts match your search."
+                    : "No accounts with activity. Toggle \"Show all accounts\" to see zero-balance accounts."}
+              </div>
+            ) : (
+              visible.map((node) => {
+                const indent = node.level * 12;
+                const hasKids = node.children.length > 0;
+                const isOpen = expanded.has(node.id);
+                const dot = node.type ? TYPE_DOT[node.type] : null;
+                return (
+                  <div
+                    key={`${node.isGroup ? "g" : "e"}-${node.id}`}
+                    style={{ paddingLeft: `${indent + 12}px` }}
+                    className={`pr-3 py-2.5 transition-colors ${
+                      node.isGroup
+                        ? node.level === 0 ? "bg-muted/35" : "bg-muted/15"
+                        : "cursor-pointer hover:bg-primary/5"
+                    }`}
+                    onClick={!node.isGroup ? () => openDrillDown(node) : undefined}
+                  >
+                    {/* Name row */}
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      {node.isGroup && hasKids ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
+                          className="w-4 h-4 flex items-center justify-center rounded text-muted-foreground shrink-0"
+                        >
+                          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </button>
+                      ) : <span className="w-4 shrink-0" />}
+                      {node.isGroup ? (
+                        <span className="text-amber-400/80 shrink-0">
+                          {isOpen && hasKids ? <FolderOpen size={12} /> : <Folder size={12} />}
+                        </span>
+                      ) : dot ? (
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+                      ) : <span className="w-2 shrink-0" />}
+                      <span className={`text-xs leading-tight flex-1 ${
+                        node.isGroup
+                          ? node.level === 0
+                            ? "font-bold font-heading uppercase tracking-wide text-foreground text-[11px]"
+                            : "font-semibold font-heading uppercase tracking-wide text-foreground/90 text-[11px]"
+                          : "text-foreground/80"
+                      }`}>
+                        {node.name}
+                      </span>
+                      {node.code && (
+                        <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0">{node.code}</span>
+                      )}
+                    </div>
+                    {/* Values grid: 3 cols × 2 rows (Dr/Cr per section) */}
+                    <div className="grid grid-cols-3 gap-x-2 pl-5 text-[10px] tabular-nums">
+                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Opening</span>
+                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Txn</span>
+                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Closing</span>
+                      <div>
+                        {node.opening.debit > 0 && <div className="text-rose-400">{fmt(node.opening.debit)}</div>}
+                        {node.opening.credit > 0 && <div className="text-emerald-400">{fmt(node.opening.credit)}</div>}
+                        {node.opening.debit === 0 && node.opening.credit === 0 && <span className="text-muted-foreground/30">—</span>}
+                      </div>
+                      <div>
+                        {node.transactions.debit > 0 && <div className="text-rose-400">{fmt(node.transactions.debit)}</div>}
+                        {node.transactions.credit > 0 && <div className="text-emerald-400">{fmt(node.transactions.credit)}</div>}
+                        {node.transactions.debit === 0 && node.transactions.credit === 0 && <span className="text-muted-foreground/30">—</span>}
+                      </div>
+                      <div>
+                        {node.closing.debit > 0 && <div className="text-rose-400 font-medium">{fmt(node.closing.debit)}</div>}
+                        {node.closing.credit > 0 && <div className="text-emerald-400 font-medium">{fmt(node.closing.credit)}</div>}
+                        {node.closing.debit === 0 && node.closing.credit === 0 && <span className="text-muted-foreground/30">—</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {/* Grand total */}
+            {summary && !loading && visible.length > 0 && (
+              <div className="px-3 py-3 bg-muted/40 border-t-2 border-border">
+                <p className="text-xs font-heading font-bold text-foreground uppercase tracking-wider mb-2">Grand Total</p>
+                <div className="grid grid-cols-3 gap-x-2 text-[10px] tabular-nums">
+                  <span className="text-muted-foreground/50 font-heading uppercase">Opening</span>
+                  <span className="text-muted-foreground/50 font-heading uppercase">Txn</span>
+                  <span className="text-muted-foreground/50 font-heading uppercase">Closing</span>
+                  <div>
+                    <div className="text-rose-400 font-bold">{formatINR(summary.openingDebit)}</div>
+                    <div className="text-emerald-400 font-bold">{formatINR(summary.openingCredit)}</div>
+                  </div>
+                  <div>
+                    <div className="text-rose-400 font-bold">{formatINR(summary.totalDebit)}</div>
+                    <div className="text-emerald-400 font-bold">{formatINR(summary.totalCredit)}</div>
+                  </div>
+                  <div>
+                    <div className="text-rose-400 font-bold">{formatINR(summary.openingDebit + summary.totalDebit)}</div>
+                    <div className="text-emerald-400 font-bold">{formatINR(summary.openingCredit + summary.totalCredit)}</div>
+                  </div>
+                </div>
+                {balanced && (
+                  <p className="mt-2 text-center text-[11px] font-heading text-emerald-500 font-semibold">
+                    ✓ Books are balanced — Debit = Credit
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Desktop table (md+) ─────────────────────────────────────────── */}
+          <div className="overflow-x-auto hidden md:block">
             <table className="w-full text-sm min-w-[820px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
@@ -1179,6 +1422,10 @@ export default function TrialBalance() {
                       expanded={expanded}
                       onToggle={toggle}
                       onDrill={openDrillDown}
+                      isDrillOpen={!node.isGroup && drillNode?.id === node.id}
+                      drillLoading={drillLoading}
+                      drillData={!node.isGroup && drillNode?.id === node.id ? drillData : null}
+                      onOpenSource={openSourceEntry}
                     />
                   ))
                 )}
@@ -1311,84 +1558,7 @@ export default function TrialBalance() {
       </Dialog>
 
       {/* ── Drill-down dialog — Level 2: entity transactions, Level 3: open receipt ── */}
-      <Dialog open={!!drillNode} onOpenChange={(open) => !open && setDrillNode(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 border border-primary/20">
-                <Receipt size={16} className="text-primary" />
-              </div>
-              <div>
-                <DialogTitle className="font-heading text-base">{drillNode?.name}</DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {drillNode?.type ? TYPE_LABEL[drillNode.type] ?? drillNode.type : ""} · transactions in the selected period
-                </p>
-              </div>
-            </div>
-          </DialogHeader>
 
-          {drillLoading ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
-              <Loader2 size={16} className="animate-spin" /> Loading transactions...
-            </div>
-          ) : !drillData || drillData.transactions.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground text-sm">
-              No transactions found for this entity in the selected period.
-            </div>
-          ) : (
-            <div className="overflow-x-auto max-h-[60vh]">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="border-b border-border text-left text-muted-foreground uppercase text-[10px] tracking-wide">
-                    <th className="px-3 py-2">Voucher No.</th>
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Source / Entry</th>
-                    <th className="px-3 py-2">Invoice No.</th>
-                    <th className="px-3 py-2">Mode</th>
-                    <th className="px-3 py-2 text-right">Debit</th>
-                    <th className="px-3 py-2 text-right">Credit</th>
-                    <th className="px-3 py-2">Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drillData.transactions.map((t) => (
-                    <tr
-                      key={t.entryId}
-                      onClick={() => (t.sourceId || t.payment) && openSourceEntry(t)}
-                      className={`border-b border-border/40 ${(t.sourceId || t.payment) ? "cursor-pointer hover:bg-primary/5" : ""}`}
-                      title={(t.sourceId || t.payment) ? "Open source entry" : undefined}
-                    >
-                      <td className="px-3 py-2 font-mono">{t.voucherNo || "—"}</td>
-                      <td className="px-3 py-2">{t.date ? fmtDate(t.date) : "—"}</td>
-                      <td className="px-3 py-2">
-                        {t.sourceId ? (
-                          <span className="inline-flex items-center gap-1">
-                            <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded">
-                              {t.sourceType ?? "entry"}
-                            </span>
-                            <span className="text-primary font-medium underline">
-                              {t.payment?.docNo || `#${t.sourceId}`}
-                            </span>
-                          </span>
-                        ) : t.payment ? (
-                          <span className="text-primary font-medium underline">{t.payment.docNo || `#${t.payment.id}`}</span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-3 py-2">{t.invoiceNo || "—"}</td>
-                      <td className="px-3 py-2">{t.payment?.mode || "—"}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-rose-400">{fmt(t.debit)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-400">{fmt(t.credit)}</td>
-                      <td className="px-3 py-2 text-muted-foreground truncate max-w-[160px]">{t.narration || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

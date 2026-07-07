@@ -474,6 +474,15 @@ router.get("/options", async (req, res) => {
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
           eb.EEmiPayment                  AS emiEnabled,
+          ISNULL(eb.EBillStatus, 'Payment Due') AS billStatus,
+          ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
+          ISNULL(eb.ERemainingAmount,
+            CASE
+              WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+              THEN grn.TotalAmount
+              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+            END
+          )                               AS remainingAmount,
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',

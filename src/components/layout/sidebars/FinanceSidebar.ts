@@ -3,6 +3,7 @@ import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
   { label: "Proceeding", icon: Chart2, path: "/finance", pageKey: "finance-dashboard", isDashboard: true },
+  { label: "Contract", icon: DocumentText, path: "/finance/contracts", pageKey: "finance-contracts" },
   {
     label: "Transaction",
     icon: Bank,
