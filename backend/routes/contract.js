@@ -7,6 +7,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, previewNextDocNumber } = require("../utils/docNumberLock");
+const { transition } = require("../services/approvalService");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -69,15 +70,22 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get("/contact-persons", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const allowed = ["S", "C", "A"];
+    const t = (req.query.type || "").toString().toUpperCase();
+    const typeFilter = allowed.includes(t)
+      ? `AND LHeadType = '${t}'`
+      : `AND LHeadType IN ('S','C','A')`;
     const result = await pool.request().query(`
-      SELECT DISTINCT LTRIM(RTRIM(LHeadContactPerson)) AS name
+      SELECT DISTINCT
+        LTRIM(RTRIM(LHeadContactPerson)) AS name,
+        LHeadType                        AS type
       FROM dbo.AccountHeadMaster
-      WHERE LHeadType IN ('S', 'C', 'A')
-        AND LHeadContactPerson IS NOT NULL
+      WHERE LHeadContactPerson IS NOT NULL
         AND LTRIM(RTRIM(LHeadContactPerson)) <> ''
+        ${typeFilter}
       ORDER BY name
     `);
-    res.json(result.recordset.map((r) => r.name));
+    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -161,9 +169,16 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
 
     const newId = insert.recordset[0]?.ContractId;
     await backPatchRecordId(pool, sql, docNo, "Contract", newId);
-    await bumpCacheVersion("contracts");
 
-    res.json({ contractId: newId, docNo });
+    // Auto-submit: Draft → Pending immediately (same pattern as PO)
+    try {
+      await transition("contracts", newId, "Pending", email, req.user?.role);
+    } catch (submitErr) {
+      console.warn("[contract] auto-submit failed (non-fatal):", submitErr.message);
+    }
+
+    await bumpCacheVersion("contracts");
+    res.json({ contractId: newId, docNo, status: "Pending" });
   } catch (err) {
     console.error("[contract] POST /:", err.message);
     res.status(500).json({ error: err.message });
@@ -253,6 +268,41 @@ router.delete("/:id", authenticateToken, requirePageRight("finance-contracts", "
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Approval routes ───────────────────────────────────────────────────────────
+router.put("/:id/submit", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const email = requireUser(req, res); if (!email) return;
+    const result = await transition("contracts", id, "Pending", email, req.user?.role);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Contract submitted for approval", ...result });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.put("/:id/approve", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const email = requireUser(req, res); if (!email) return;
+    const result = await transition("contracts", id, "Approved", email, req.user?.role);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Contract approved", ...result });
+  } catch (err) { res.status(err.message?.includes("not authorized") ? 403 : 400).json({ error: err.message }); }
+});
+
+router.put("/:id/reject", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  const { note } = req.body;
+  try {
+    const email = requireUser(req, res); if (!email) return;
+    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Contract rejected", ...result });
+  } catch (err) { res.status(err.message?.includes("not authorized") ? 403 : 400).json({ error: err.message }); }
 });
 
 module.exports = router;

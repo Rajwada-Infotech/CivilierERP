@@ -13,7 +13,9 @@ import {
   addPayment,
   updatePayment,
   deletePayment,
+  getPaymentChain,
 } from "@/api/newPaymentApi";
+import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks } from "@/api/bankMasterApi";
 import { getCompanyById } from "@/api/enterpriseApi";
@@ -59,6 +61,7 @@ import {
   ArrowRight,
   CreditCard,
   RefreshCw,
+  History,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -84,6 +87,7 @@ interface DbPayment {
   ParentDocNo?: string | null;
   RootExBDocNo?: string | null;
   Status?: string;
+  DisplayStatus?: string;
   // Cheque
   PChequeNo?: string | null;
   PChequeLotId?: number | null;
@@ -158,6 +162,9 @@ interface ExpenseOption {
   dueDate?: string | null;
   status?: string;
   parentDocNo?: string;
+  billStatus?: string;
+  totalPaid?: number;
+  remainingAmount?: number;
 }
 
 interface ExpenseDetail {
@@ -211,6 +218,7 @@ interface PaymentRecord {
   rootExBDocNo: string;
   docType: string;
   status: string;
+  displayStatus: string;
   // Cheque
   chequeNo: string;
   chequeLotId: number | null;
@@ -542,6 +550,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     rootExBDocNo: "",
     docType: "",
     status: "Draft",
+    displayStatus: "Draft",
     chequeNo: "",
     chequeLotId: null,
     chequeLotNumber: "",
@@ -584,6 +593,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     rootExBDocNo: item.RootExBDocNo || "",
     docType: item.PDocType || "",
     status: (item as any).Status || "Draft",
+    displayStatus: (item as any).DisplayStatus || (item as any).Status || "Draft",
     chequeNo: item.PChequeNo || "",
     chequeLotId: item.PChequeLotId ?? null,
     chequeLotNumber: item.PChequeLotNumber || "",
@@ -1858,12 +1868,19 @@ const Payment: React.FC = () => {
   const [viewingCompanyDetail, setViewingCompanyDetail] =
     useState<CompanyDetail | null>(null);
   const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
+  const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
+  const [loadingChain, setLoadingChain] = useState(false);
+  const [detailTab, setDetailTab] = useState<"details" | "chain">("details");
+  const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
+  const [loadingFormChain, setLoadingFormChain] = useState(false);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
     setViewingRec(rec);
     setViewingCompanyDetail(null);
     setViewingChain(null);
+    setPaymentChainData(null);
+    setDetailTab("details");
     const matched = companyOptions.find(
       (c) => c.label === rec.company || String(c.id) === rec.company,
     );
@@ -1879,6 +1896,13 @@ const Payment: React.FC = () => {
       fetchPaymentSummary(rec.expenseId)
         .then(setViewingChain)
         .catch(() => {});
+    }
+    if (rec.expenseRef) {
+      setLoadingChain(true);
+      getPaymentChain(rec.expenseRef)
+        .then(setPaymentChainData)
+        .catch(() => {})
+        .finally(() => setLoadingChain(false));
     }
   };
 
@@ -2661,6 +2685,21 @@ const Payment: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseOptions, reissueCtx]);
 
+  // Fetch payment chain for the form view whenever an invoice is linked
+  useEffect(() => {
+    if (!form.expenseRef) {
+      setFormChainData(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingFormChain(true);
+    getPaymentChain(form.expenseRef)
+      .then((data) => { if (!cancelled) setFormChainData(data); })
+      .catch(() => { if (!cancelled) setFormChainData(null); })
+      .finally(() => { if (!cancelled) setLoadingFormChain(false); });
+    return () => { cancelled = true; };
+  }, [form.expenseRef]);
+
   const clearExpenseLink = () => {
     setForm((prev) => ({
       ...prev,
@@ -2849,6 +2888,7 @@ const Payment: React.FC = () => {
       await deletePayment(id);
       toast.success("Payment deleted.");
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
       setDeleteId(null);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -3142,6 +3182,27 @@ const Payment: React.FC = () => {
                           onChange={handleExpenseSelect}
                           loading={loadingExpense}
                         />
+                        {filteredOptions.length === 0 && !loadingExpense && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
+                            <button
+                              type="button"
+                              className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                              onClick={async () => {
+                                try {
+                                  const r = await fetchWithAuth("/api/new-payment/recalculate-balances", { method: "POST" });
+                                  const d = await r.json().catch(() => ({}));
+                                  toast.success(`Balances synced (${d.updated ?? 0} invoices updated). Refreshing…`);
+                                  window.location.reload();
+                                } catch {
+                                  toast.error("Sync failed — please try again.");
+                                }
+                              }}
+                            >
+                              Sync invoice balances
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -3360,6 +3421,55 @@ const Payment: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* ── Outstanding Balance Card ── */}
+              {form.expenseRef && (() => {
+                const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
+                if (!opt || opt.type === "emi") return null;
+                // Prefer the GRN item-level total (incl. GST) when breakdown has loaded;
+                // grn.TotalAmount stored in the DB is often the pre-tax base only.
+                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+                const netAmt = grnTotal > 0 ? grnTotal : (opt.amount ?? 0);
+                const paid = opt.totalPaid ?? 0;
+                const remaining = opt.remainingAmount != null
+                  ? (grnTotal > 0 ? Math.max(0, netAmt - paid) : opt.remainingAmount)
+                  : Math.max(0, netAmt - paid);
+                const bStatus = opt.billStatus ?? (paid >= netAmt && netAmt > 0 ? "Paid" : paid > 0 ? "Partially Paid" : "Payment Due");
+                return (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary flex items-center gap-1.5">
+                        <Wallet size={9} /> Invoice Balance
+                      </p>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        bStatus === "Paid"
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                          : bStatus === "Partially Paid"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
+                      }`}>
+                        {bStatus}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
+                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>
+                        <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Outstanding</p>
+                        <p className={`font-mono text-xs font-bold ${remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                          {formatINR(remaining)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
@@ -3865,12 +3975,150 @@ const Payment: React.FC = () => {
                               bold
                               large
                             />
+
+                            {/* ── Real-time partial/over-payment indicator ── */}
+                            {(() => {
+                              const entered = Number(form.amount ?? 0);
+                              if (entered <= 0 || Math.abs(entered - net) < 0.01) return null;
+
+                              const opt = expenseOptions.find(
+                                (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+                              );
+                              const prevPaid = opt?.totalPaid ?? 0;
+                              const invoiceTotal = opt?.amount ?? net;
+                              const prevOutstanding = Math.max(0, invoiceTotal - prevPaid);
+                              const afterThisPayment = Math.max(0, prevOutstanding - entered);
+                              const isPartial = entered < net;
+                              const isOver = entered > net;
+
+                              return (
+                                <div className={`mt-2 rounded-lg border px-3 py-2.5 space-y-1.5 ${
+                                  isOver
+                                    ? "border-amber-500/30 bg-amber-500/5"
+                                    : "border-blue-500/30 bg-blue-500/5"
+                                }`}>
+                                  <p className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${
+                                    isOver ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"
+                                  }`}>
+                                    {isOver ? <AlertTriangle size={9} /> : <TrendingUp size={9} />}
+                                    {isOver ? "Overpayment" : "Partial Payment"}
+                                  </p>
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-[11px]">
+                                      <span className="text-muted-foreground">You're paying</span>
+                                      <span className="font-mono font-semibold text-foreground">{formatINR(entered)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[11px]">
+                                      <span className="text-muted-foreground">Invoice net payable</span>
+                                      <span className="font-mono text-muted-foreground">{formatINR(net)}</span>
+                                    </div>
+                                    <div className={`flex justify-between text-[11px] font-semibold border-t border-border/40 pt-1 ${
+                                      isPartial ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"
+                                    }`}>
+                                      <span>{isPartial ? "Shortfall" : "Excess"}</span>
+                                      <span className="font-mono">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - net))}</span>
+                                    </div>
+                                    {opt && prevOutstanding > 0 && (
+                                      <div className={`flex justify-between text-[11px] font-semibold pt-0.5 ${
+                                        afterThisPayment > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                                      }`}>
+                                        <span>Remaining after payment</span>
+                                        <span className="font-mono">{formatINR(afterThisPayment)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
                     })()}
                 </div>
               </div>
+
+              {/* ── Payment Chain (form view) ── */}
+              {form.expenseRef && (formChainData?.payments?.length ?? 0) > 0 && (
+                <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40 bg-background/60">
+                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                      <History size={9} /> Payment Chain
+                    </p>
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="px-4 py-3 space-y-2">
+                    {loadingFormChain ? (
+                      <p className="text-[11px] text-muted-foreground text-center py-2">Loading…</p>
+                    ) : (
+                      formChainData!.payments.map((p: PaymentChainItem, idx: number) => {
+                        const ds = p.DisplayStatus;
+                        const borderCls =
+                          ds === "Success" || ds === "Cheque Cleared"
+                            ? "border-emerald-500"
+                            : ds === "Cheque Bounced"
+                            ? "border-red-500"
+                            : ds === "Reissued"
+                            ? "border-violet-500"
+                            : ds === "Cheque Issued"
+                            ? "border-blue-500"
+                            : ds === "Pending"
+                            ? "border-amber-500"
+                            : "border-border";
+                        const badgeCls =
+                          ds === "Success" || ds === "Cheque Cleared"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                            : ds === "Cheque Bounced"
+                            ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
+                            : ds === "Reissued"
+                            ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
+                            : ds === "Cheque Issued"
+                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+                            : ds === "Pending"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                            : "bg-muted text-muted-foreground border-border";
+                        return (
+                          <div key={p.PPaymentID} className={`flex gap-2.5 pl-3 border-l-2 ${borderCls}`}>
+                            <div className="min-w-0 flex-1 py-0.5 space-y-0.5">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-[11px] font-semibold text-foreground">
+                                    {p.DocNo ?? `#${p.PPaymentID}`}
+                                  </span>
+                                  {idx === formChainData!.payments.length - 1 && (
+                                    <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-semibold">LATEST</span>
+                                  )}
+                                </div>
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>{ds}</span>
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                                <span>{p.PDate ? new Date(p.PDate).toLocaleDateString("en-IN") : "—"}</span>
+                                <span>·</span>
+                                <span className="font-mono font-semibold text-foreground">{formatINR(p.PAmount ?? 0)}</span>
+                                <span>·</span>
+                                <span>{p.PMode ?? "—"}</span>
+                                {p.PChequeNo && <><span>·</span><span>Chq {p.PChequeNo}</span></>}
+                              </div>
+                              {p.BounceReason && (
+                                <p className="text-[10px] text-red-600 dark:text-red-400 italic">
+                                  Bounced: {p.BounceReason}
+                                  {p.BounceDate && <> on {new Date(p.BounceDate).toLocaleDateString("en-IN")}</>}
+                                </p>
+                              )}
+                              {p.ReplacementDocNo && (
+                                <p className="text-[10px] text-violet-600 dark:text-violet-400">
+                                  Reissued as {p.ReplacementDocNo}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* ── Re-issue banner ── */}
               {reissueCtx && (
@@ -4771,7 +5019,25 @@ const Payment: React.FC = () => {
                           {/* Status */}
                           <td className="px-4 py-2.5">
                             <div className="flex flex-col gap-1">
-                              <StatusBadge status={rec.status} />
+                              {rec.displayStatus && rec.displayStatus !== rec.status ? (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                                  rec.displayStatus === "Success" || rec.displayStatus === "Cheque Cleared"
+                                    ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
+                                  : rec.displayStatus === "Pending"
+                                    ? "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
+                                  : rec.displayStatus === "Cheque Issued"
+                                    ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800"
+                                  : rec.displayStatus === "Cheque Bounced"
+                                    ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
+                                  : rec.displayStatus === "Reissued"
+                                    ? "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-800"
+                                  : "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-950/40 dark:text-gray-400 dark:border-gray-800"
+                                }`}>
+                                  {rec.displayStatus}
+                                </span>
+                              ) : (
+                                <StatusBadge status={rec.status} />
+                              )}
                               {rec.status === "Pending" && (
                                 <ApprovalStatusChain
                                   table="NewPayment"
@@ -4914,8 +5180,171 @@ const Payment: React.FC = () => {
               </button>
             </div>
 
+            {/* Tab strip */}
+            {viewingRec.expenseRef && (
+              <div className="flex border-b border-border px-5 bg-muted/10">
+                {(["details", "chain"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setDetailTab(t)}
+                    className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                      detailTab === t
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {t === "details" ? "Details" : "Payment Chain"}
+                    {t === "chain" && paymentChainData && (
+                      <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
+                        {paymentChainData.payments.length}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Body */}
             <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+
+              {/* ── Payment Chain Tab ── */}
+              {detailTab === "chain" && viewingRec.expenseRef && (
+                <div className="space-y-3">
+                  {/* Invoice summary */}
+                  {paymentChainData?.invoice && (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                        Invoice Summary
+                      </p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Invoice Total</p>
+                          <p className="font-mono text-xs font-bold text-foreground">
+                            {formatINR(Number(paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0))}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Paid</p>
+                          <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatINR(Number(paymentChainData.invoice.ETotalPaid ?? 0))}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Outstanding</p>
+                          <p className={`font-mono text-xs font-bold ${Number(paymentChainData.invoice.ERemainingAmount ?? 0) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                            {formatINR(Number(paymentChainData.invoice.ERemainingAmount ?? 0))}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Timeline */}
+                  {loadingChain ? (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground text-xs">Loading chain…</div>
+                  ) : paymentChainData?.payments.length === 0 ? (
+                    <p className="text-center text-xs text-muted-foreground py-6">No payments found for this invoice.</p>
+                  ) : (
+                    <div className="relative">
+                      {/* Vertical line */}
+                      <div className="absolute left-3 top-0 bottom-0 w-px bg-border" />
+                      <div className="space-y-3 pl-8">
+                        {paymentChainData?.payments.map((p: PaymentChainItem) => {
+                          const ds = p.DisplayStatus as DisplayStatus;
+                          const borderColor =
+                            ds === "Success" || ds === "Cheque Cleared" ? "border-l-emerald-500" :
+                            ds === "Pending" ? "border-l-amber-500" :
+                            ds === "Cheque Issued" ? "border-l-blue-500" :
+                            ds === "Cheque Bounced" ? "border-l-red-500" :
+                            ds === "Reissued" ? "border-l-violet-500" :
+                            "border-l-gray-400";
+                          const dotColor =
+                            ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500" :
+                            ds === "Pending" ? "bg-amber-500" :
+                            ds === "Cheque Issued" ? "bg-blue-500" :
+                            ds === "Cheque Bounced" ? "bg-red-500" :
+                            ds === "Reissued" ? "bg-violet-500" :
+                            "bg-gray-400";
+                          const badgeClass =
+                            ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
+                            ds === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" :
+                            ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
+                            ds === "Cheque Bounced" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
+                            ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
+                            "bg-gray-500/10 border-gray-500/20 text-gray-700 dark:text-gray-400";
+                          return (
+                            <div key={p.PPaymentID} className="relative">
+                              {/* Dot */}
+                              <div className={`absolute -left-5 top-3 w-2.5 h-2.5 rounded-full border-2 border-background ${dotColor}`} />
+                              <div className={`rounded-lg border border-l-2 bg-card p-3 space-y-1.5 ${borderColor}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono text-[10px] font-semibold text-foreground">{p.DocNo ?? "—"}</span>
+                                    {p.PDate && <span className="text-[10px] text-muted-foreground">· {p.PDate.slice(0, 10)}</span>}
+                                  </div>
+                                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                                    {ds}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                                  <span className="font-mono font-semibold text-foreground text-xs">{formatINR(Number(p.PAmount ?? 0))}</span>
+                                  {p.PMode && <span>· {p.PMode}</span>}
+                                  {p.PChequeNo && <span>· Chq #{p.PChequeNo}</span>}
+                                </div>
+                                {p.BounceDate && (
+                                  <div className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                    <AlertTriangle size={9} />
+                                    Bounced {p.BounceDate.slice(0,10)}{p.BounceReason ? ` — ${p.BounceReason}` : ""}
+                                  </div>
+                                )}
+                                {p.ReplacementDocNo && (
+                                  <div className="text-[10px] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                                    <RefreshCw size={9} /> Reissued as {p.ReplacementDocNo}
+                                  </div>
+                                )}
+                                {p.OriginalDocNo && (
+                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <ArrowLeft size={9} /> Replaces {p.OriginalDocNo}
+                                    {p.BounceCharge ? ` (+${formatINR(Number(p.BounceCharge))} bounce charge)` : ""}
+                                  </div>
+                                )}
+                                {/* Reissue button for bounced payments with no replacement */}
+                                {ds === "Cheque Bounced" && !p.ReplacementDocNo && (
+                                  <button
+                                    className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-1 mt-0.5"
+                                    onClick={() => {
+                                      setViewingRec(null);
+                                      setViewingChain(null);
+                                      setReissueCtx({
+                                        replacesPaymentId: p.PPaymentID,
+                                        replacesDocNo: p.DocNo ?? "",
+                                        amount: Number(p.PAmount ?? 0),
+                                        paymentName: "",
+                                        companyName: viewingRec?.company ?? "",
+                                        expenseRef: viewingRec?.expenseRef ?? null,
+                                        bounceReason: p.BounceReason ?? null,
+                                      });
+                                      setBounceCharge("");
+                                      setView("form");
+                                    }}
+                                  >
+                                    <RefreshCw size={9} /> Reissue Payment
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Details Tab (default) ── */}
+              {detailTab === "details" && (
+                <>
+
               {/* Status + Mode row */}
               <div className="flex items-center gap-2">
                 <StatusBadge status={viewingRec.status} />
@@ -5219,6 +5648,8 @@ const Payment: React.FC = () => {
                   </div>
                 ))}
               </div>
+              </>
+              )}
             </div>
 
             {/* Footer */}

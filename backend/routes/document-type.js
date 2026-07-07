@@ -52,6 +52,7 @@ const MODULE_LINKS = {
   ISS: ["Material Issue"], // further filtered below to exclude ExB-ISS prefixes
   SI: ["Sale Invoice"],
   QT: ["Quotation"],
+  CON: ["Contract"],
 };
 
 // ── GET / — list all doc types, optionally filtered by ?module= ───────────────
