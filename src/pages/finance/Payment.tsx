@@ -4031,38 +4031,38 @@ const Payment: React.FC = () => {
                               const isOver = entered > net;
 
                               return (
-                                <div className={`mt-2 rounded-lg border px-3 py-2.5 space-y-1.5 ${
+                                <div className={`mt-3 rounded-xl border px-4 py-4 space-y-2 ${
                                   isOver
-                                    ? "border-amber-500/30 bg-amber-500/5"
-                                    : "border-blue-500/30 bg-blue-500/5"
+                                    ? "border-amber-500/40 bg-amber-500/5"
+                                    : "border-blue-500/40 bg-blue-500/5"
                                 }`}>
-                                  <p className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1 ${
+                                  <p className={`text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 mb-3 ${
                                     isOver ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"
                                   }`}>
-                                    {isOver ? <AlertTriangle size={9} /> : <TrendingUp size={9} />}
+                                    {isOver ? <AlertTriangle size={11} /> : <TrendingUp size={11} />}
                                     {isOver ? "Overpayment" : "Partial Payment"}
                                   </p>
-                                  <div className="space-y-1">
-                                    <div className="flex justify-between text-[11px]">
+                                  <div className="space-y-2">
+                                    <div className="flex justify-between items-center text-sm">
                                       <span className="text-muted-foreground">You're paying</span>
-                                      <span className="font-mono font-semibold text-foreground">{formatINR(entered)}</span>
+                                      <span className="font-mono font-bold text-foreground text-base">{formatINR(entered)}</span>
                                     </div>
-                                    <div className="flex justify-between text-[11px]">
+                                    <div className="flex justify-between items-center text-sm">
                                       <span className="text-muted-foreground">Invoice net payable</span>
                                       <span className="font-mono text-muted-foreground">{formatINR(net)}</span>
                                     </div>
-                                    <div className={`flex justify-between text-[11px] font-semibold border-t border-border/40 pt-1 ${
+                                    <div className={`flex justify-between items-center text-sm font-bold border-t border-border/40 pt-2 ${
                                       isPartial ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"
                                     }`}>
                                       <span>{isPartial ? "Shortfall" : "Excess"}</span>
-                                      <span className="font-mono">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - net))}</span>
+                                      <span className="font-mono text-base">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - net))}</span>
                                     </div>
                                     {opt && prevOutstanding > 0 && (
-                                      <div className={`flex justify-between text-[11px] font-semibold pt-0.5 ${
+                                      <div className={`flex justify-between items-center text-sm font-bold pt-0.5 ${
                                         afterThisPayment > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
                                       }`}>
                                         <span>Remaining after payment</span>
-                                        <span className="font-mono">{formatINR(afterThisPayment)}</span>
+                                        <span className="font-mono text-base">{formatINR(afterThisPayment)}</span>
                                       </div>
                                     )}
                                   </div>
