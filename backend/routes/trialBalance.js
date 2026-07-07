@@ -315,16 +315,54 @@ router.get("/:lheadId/transactions", async (req, res) => {
       .input("companyId", sql.Int, companyId)
       .input("projectId", sql.Int, projectId).query(`
         SELECT
-          gle.EntryId, gle.VoucherNo, gle.VoucherDate,
-          gle.DebitAmount, gle.CreditAmount, gle.Narration,
-          gle.SourceType, gle.SourceId,
-          np.PPaymentID, np.DocNo AS PaymentDocNo, np.PMode AS PaymentMode,
-          np.PExpenseRef, np.Status AS PaymentStatus,
-          eb.EVendorInvoiceNo
+          gle.EntryId,
+          gle.VoucherNo,
+          CONVERT(varchar(10), gle.VoucherDate, 23) AS VoucherDate,
+          gle.DebitAmount,
+          gle.CreditAmount,
+          gle.Narration,
+          gle.SourceType,
+          gle.SourceId,
+
+          -- NewPayment
+          np.PPaymentID,
+          np.DocNo        AS NPDocNo,
+          np.PMode        AS NPMode,
+          np.Status       AS NPStatus,
+
+          -- ReceivedPayment
+          rp.RPPaymentID  AS RPID,
+          rp.DocNo        AS RPDocNo,
+          rp.RPMode       AS RPMode,
+
+          -- ExpenseBooking (direct EB entry, e.g. GRN-linked)
+          eb.Eid          AS EBId,
+          eb.EDocNo       AS EBDocNo,
+          eb.EVendorInvoiceNo,
+          eb.ESourceType  AS EBSourceType,
+          eb.ESourceId    AS EBSourceId,
+
+          -- GRN (direct GRN entry)
+          grn.GRNID,
+          ISNULL(grn.DocNo, grn.GRNNo) AS GRNDocNo,
+
+          -- JournalVoucher
+          jv.JVID,
+          jv.JVNo         AS JVDocNo
+
         FROM dbo.GeneralLedgerEntry gle
+
         LEFT JOIN dbo.NewPayment np
           ON gle.SourceType = 'NewPayment' AND np.PPaymentID = gle.SourceId
-        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        LEFT JOIN dbo.ReceivedPayment rp
+          ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
+        LEFT JOIN dbo.ExpenseBooking eb
+          ON gle.SourceType = 'ExpenseBooking' AND eb.Eid = gle.SourceId
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON gle.SourceType = 'GRN' AND grn.GRNID = gle.SourceId
+        LEFT JOIN dbo.JournalVoucher jv
+          ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
+
         WHERE gle.LHeadId = @LHeadId
           AND gle.IsReversed = 0
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
@@ -333,27 +371,174 @@ router.get("/:lheadId/transactions", async (req, res) => {
         ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
       `);
 
-    const transactions = entriesRes.recordset.map((r) => ({
-      entryId: r.EntryId,
-      voucherNo: r.VoucherNo,
-      date: r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : null,
-      debit: Number(r.DebitAmount) || 0,
-      credit: Number(r.CreditAmount) || 0,
-      narration: r.Narration,
-      sourceType: r.SourceType,
-      sourceId: r.SourceId,
-      invoiceNo: r.EVendorInvoiceNo || null,
-      payment: r.PPaymentID
-        ? {
-            id: r.PPaymentID,
-            docNo: r.PaymentDocNo,
-            mode: r.PaymentMode,
-            status: r.PaymentStatus,
-          }
-        : null,
-    }));
+    const glRows = entriesRes.recordset;
 
-    res.json({ entity: headRes.recordset[0], from, to, transactions });
+    // Track which EB ids are already in the GL (approved → posted to supplier)
+    // so we don't show them twice in the pending-EB query below.
+    const postedEBIds = new Set(
+      glRows.filter((r) => r.SourceType === "ExpenseBooking").map((r) => r.SourceId)
+    );
+
+    const head = headRes.recordset[0];
+    const isSupplierOrContractor = head.type === "S" || head.type === "C";
+
+    // ── Direct GRN + EB queries (only meaningful for supplier/contractor heads) ──
+    let directGRNs = [];
+    let directEBs = [];
+
+    if (isSupplierOrContractor) {
+      // GRNs for this supplier in the period — always shown as reference
+      // regardless of whether a GL entry exists (GRN posts to provision accounts,
+      // never directly to the supplier leg, so there is no GL-side duplicate here).
+      const grnsRes = await pool
+        .request()
+        .input("LHeadId", sql.Int, lheadId)
+        .input("from", sql.Date, from)
+        .input("to", sql.Date, to)
+        .query(`
+          SELECT grn.GRNID,
+                 ISNULL(grn.DocNo, grn.GRNNo)              AS docNo,
+                 CONVERT(varchar(10), grn.GRNDate, 23)      AS grnDate,
+                 grn.TotalAmount,
+                 ISNULL(grn.Status, 'Unknown')              AS grnStatus,
+                 po.PurchaseOrderNo                         AS poNo
+          FROM dbo.GoodsReceiptNotes grn
+          LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+          WHERE grn.SupplierID = @LHeadId
+            AND grn.GRNDate >= @from AND grn.GRNDate <= @to
+          ORDER BY grn.GRNDate DESC
+        `);
+
+      directGRNs = grnsRes.recordset.map((r) => ({
+        entryId: null,
+        voucherNo: r.docNo,
+        date: r.grnDate,
+        debit: 0,
+        credit: Number(r.TotalAmount) || 0,
+        narration: `GRN — goods received${r.poNo ? ` (PO ${r.poNo})` : ""}`,
+        sourceType: "GRN",
+        sourceId: r.GRNID,
+        docNo: r.docNo,
+        mode: null,
+        invoiceNo: r.poNo || null,
+        sourceRef: { id: r.GRNID, docNo: r.docNo, type: "GRN" },
+        payment: null,
+        status: r.grnStatus,
+      }));
+
+      // ExpenseBookings for this supplier that are NOT already posted to GL
+      // (approved EBs are already in the GL entries above).
+      const ebsRes = await pool
+        .request()
+        .input("LHeadId", sql.Int, lheadId)
+        .input("from", sql.Date, from)
+        .input("to", sql.Date, to)
+        .query(`
+          SELECT eb.Eid,
+                 eb.EDocNo,
+                 CONVERT(varchar(10), eb.EDocDate, 23)       AS ebDate,
+                 ISNULL(eb.ENetAmount, eb.EAmount)           AS amount,
+                 ISNULL(eb.EStatus, 'Pending')               AS ebStatus,
+                 eb.ESourceType,
+                 eb.ESourceId,
+                 eb.EVendorInvoiceNo,
+                 ISNULL(grn.DocNo, grn.GRNNo)               AS linkedGRNNo
+          FROM dbo.ExpenseBooking eb
+          LEFT JOIN dbo.GoodsReceiptNotes grn
+            ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+          LEFT JOIN dbo.PurchaseOrders po
+            ON eb.ESourceType IN ('PO','WO_PO') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+          WHERE (
+              (eb.ESourceType = 'GRN' AND grn.SupplierID = @LHeadId)
+              OR (eb.ESourceType IN ('PO','WO_PO') AND po.SupplierID = @LHeadId)
+              OR EXISTS (
+                SELECT 1 FROM dbo.AccountHeadMaster ahm
+                WHERE ahm.LHeadId = @LHeadId AND ahm.LHeadName = eb.EName
+              )
+            )
+            AND eb.EDocDate >= @from AND eb.EDocDate <= @to
+          ORDER BY eb.EDocDate DESC
+        `);
+
+      directEBs = ebsRes.recordset
+        .filter((r) => !postedEBIds.has(r.Eid))
+        .map((r) => ({
+          entryId: null,
+          voucherNo: r.EDocNo,
+          date: r.ebDate,
+          debit: 0,
+          credit: Number(r.amount) || 0,
+          narration: `Expense Booking${r.linkedGRNNo ? ` — GRN ${r.linkedGRNNo}` : ""}`,
+          sourceType: "ExpenseBooking",
+          sourceId: r.Eid,
+          docNo: r.EDocNo,
+          mode: null,
+          invoiceNo: r.EVendorInvoiceNo || null,
+          sourceRef: { id: r.Eid, docNo: r.EDocNo, type: "ExpenseBooking", subType: r.ESourceType, subId: r.ESourceId },
+          payment: null,
+          status: r.ebStatus,
+        }));
+    }
+
+    // Map GL entries
+    const glTransactions = glRows.map((r) => {
+      let docNo = r.VoucherNo || null;
+      let mode = null;
+      let invoiceNo = r.EVendorInvoiceNo || null;
+      let sourceRef = null;
+
+      const st = (r.SourceType || "").toLowerCase();
+
+      if (st === "newpayment" && r.PPaymentID) {
+        docNo = r.NPDocNo || docNo;
+        mode = r.NPMode;
+        sourceRef = { id: r.PPaymentID, docNo: r.NPDocNo, type: "NewPayment" };
+      } else if (st === "receivedpayment" && r.RPID) {
+        docNo = r.RPDocNo || docNo;
+        mode = r.RPMode;
+        sourceRef = { id: r.RPID, docNo: r.RPDocNo, type: "ReceivedPayment" };
+      } else if (st === "expensebooking" && r.EBId) {
+        docNo = r.EBDocNo || docNo;
+        sourceRef = { id: r.EBId, docNo: r.EBDocNo, type: "ExpenseBooking", subType: r.EBSourceType, subId: r.EBSourceId };
+      } else if (st === "grn" && r.GRNID) {
+        docNo = r.GRNDocNo || docNo;
+        sourceRef = { id: r.GRNID, docNo: r.GRNDocNo, type: "GRN" };
+      } else if (st === "journalvoucher" && r.JVID) {
+        docNo = r.JVDocNo || docNo;
+        sourceRef = { id: r.JVID, docNo: r.JVDocNo, type: "JournalVoucher" };
+      }
+
+      return {
+        entryId: r.EntryId,
+        voucherNo: r.VoucherNo,
+        date: r.VoucherDate || null,
+        debit: Number(r.DebitAmount) || 0,
+        credit: Number(r.CreditAmount) || 0,
+        narration: r.Narration,
+        sourceType: r.SourceType,
+        sourceId: r.SourceId,
+        docNo,
+        mode,
+        invoiceNo,
+        sourceRef,
+        status: "posted",
+        payment: r.PPaymentID
+          ? { id: r.PPaymentID, docNo: r.NPDocNo, mode: r.NPMode, status: r.NPStatus }
+          : null,
+      };
+    });
+
+    // Merge GL entries with direct source-doc entries, sorted by date descending
+    const transactions = [...glTransactions, ...directGRNs, ...directEBs].sort(
+      (a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return b.date.localeCompare(a.date);
+      }
+    );
+
+    res.json({ entity: head, from, to, transactions });
   } catch (err) {
     console.error("[trial-balance] transactions error:", err.message, err.stack);
     res.status(500).json({ error: err.message });

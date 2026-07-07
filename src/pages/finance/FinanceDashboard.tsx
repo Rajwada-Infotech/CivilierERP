@@ -232,7 +232,7 @@ const FinanceDashboard = () => {
           icon={Receipt}
           accentColor="#6366f1"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {isLoading
               ? Array.from({ length: 4 }).map((_, i) => (
                   <StatCardSkeleton key={i} />
