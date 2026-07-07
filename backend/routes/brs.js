@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -458,6 +459,21 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
           VALUES
             (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
       `);
+
+    // Sync outstanding balance on the linked invoice — bounced cheques must not count as paid
+    if (sourceType === "PAYMENT") {
+      try {
+        const pool2 = getPool();
+        const refRes = await pool2
+          .request()
+          .input("PPaymentID", sql.Int, parseInt(sourceId))
+          .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
+        const expenseRef = refRes.recordset[0]?.PExpenseRef;
+        if (expenseRef) await syncBillStatus(pool2, sql, expenseRef);
+      } catch (syncErr) {
+        console.warn("syncBillStatus after bounce failed:", syncErr.message);
+      }
+    }
 
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as bounced" });

@@ -5,6 +5,8 @@ import {
   Plus, X, Check, FileText, Upload, Eye,
   ChevronDown, RefreshCw, Search, Trash2, ArrowLeft,
 } from "lucide-react";
+import { ApprovalActions } from "@/components/ApprovalActions";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getFinYears } from "@/api/finYearApi";
@@ -12,7 +14,7 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import {
   getContracts, getContract, getContactPersons,
   createContract, updateContract, deleteContract,
-  type ContractListItem, type ContractDetail, type Attachment,
+  type ContractListItem, type ContractDetail, type Attachment, type ContactPerson,
 } from "@/api/contractApi";
 import {
   fetchDocTypes, fetchNextDocNumber, type DocType,
@@ -40,6 +42,8 @@ function ensureArray<T>(v: unknown): T[] {
 }
 
 interface TCRecord { id: number; name: string; terms: string; }
+// Raw shape from the API (PascalCase DB columns)
+interface TCRaw { Id: number; Name: string; TermsAndCondition: string; isActive: number | boolean; }
 
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return "—";
@@ -70,16 +74,16 @@ const emptyForm = () => ({
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
-  const s = (status || "Draft").toLowerCase();
+  const s = (status || "Pending").toLowerCase();
   const cfg =
-    s === "active"   ? "bg-violet-500/10 text-violet-600 border-violet-200 dark:border-violet-800" :
-    s === "expired"  ? "bg-red-500/10 text-red-500 border-red-200 dark:border-red-800" :
-    s === "draft"    ? "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-800" :
+    s === "approved" ? "bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-800" :
+    s === "pending"  ? "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-800" :
+    s === "rejected" ? "bg-red-500/10 text-red-500 border-red-200 dark:border-red-800" :
     s === "deleted"  ? "bg-red-900/10 text-red-400 border-red-900/20" :
                        "bg-muted text-muted-foreground border-border";
   return (
     <span className={`inline-flex items-center text-[10px] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold border ${cfg}`}>
-      {status || "Draft"}
+      {status || "Pending"}
     </span>
   );
 }
@@ -117,7 +121,7 @@ function AttachmentRow({ att, onRemove, readOnly }: { att: Attachment; onRemove:
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Contract() {
   const qc = useQueryClient();
-  const { finYear: ctxFinYear } = useFinYear();
+  const { finYears: _finYears } = useFinYear(); // loaded via contract form's own FY query
 
   // ── view state ───────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<"list" | "form" | "detail">("list");
@@ -146,9 +150,14 @@ export default function Contract() {
     queryFn: () => getContracts(),
   });
 
-  const { data: enterprises = [] } = useQuery({
-    queryKey: ["enterprise-options"],
-    queryFn: () => getEnterpriseOptions(),
+  const { data: companiesRaw = [] } = useQuery({
+    queryKey: ["enterprise-options-C"],
+    queryFn: () => getEnterpriseOptions(undefined, "C"),
+  });
+
+  const { data: projectsRaw = [] } = useQuery({
+    queryKey: ["enterprise-options-P"],
+    queryFn: () => getEnterpriseOptions(undefined, "P"),
   });
 
   const { data: finYears = [] } = useQuery({
@@ -156,9 +165,11 @@ export default function Contract() {
     queryFn: getFinYears,
   });
 
+  const [contactCategory, setContactCategory] = useState<string>("");
+
   const { data: contactPersonsRaw = [] } = useQuery({
-    queryKey: ["contract-contact-persons"],
-    queryFn: getContactPersons,
+    queryKey: ["contract-contact-persons", contactCategory],
+    queryFn: () => getContactPersons(contactCategory || undefined),
   });
 
   const { data: tcRaw = [] } = useQuery({
@@ -175,25 +186,31 @@ export default function Contract() {
     [rawContracts, searchQ]
   );
 
+  type EnterpriseOption = { id: number; label: string; belongs_to: string | null; company_id: number | null };
+
   const companies = useMemo(
-    () => ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(enterprises)
-          .filter((e) => !e.belongs_to || e.belongs_to === null),
-    [enterprises]
+    () => ensureArray<EnterpriseOption>(companiesRaw),
+    [companiesRaw]
   );
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(enterprises)
-      .filter((e) => e.company_id === Number(form.companyId) || String(e.belongs_to) === String(form.companyId));
-  }, [enterprises, form.companyId]);
+    return ensureArray<EnterpriseOption>(projectsRaw).filter(
+      (e) => e.company_id === Number(form.companyId) || String(e.belongs_to) === String(form.companyId)
+    );
+  }, [projectsRaw, form.companyId]);
 
   const tcRecords = useMemo(
-    () => ensureArray<TCRecord>(tcRaw).filter((t) => (t as { isActive?: boolean }).isActive !== false),
+    () => ensureArray<TCRaw>(tcRaw)
+      .filter((t) => t.isActive !== false && t.isActive !== 0)
+      .map((t) => ({ id: t.Id, name: t.Name || "", terms: t.TermsAndCondition || "" })),
     [tcRaw]
   );
 
   const fyOptions = useMemo(
-    () => ensureArray<{ id: number; fy_label: string; is_active: boolean }>(finYears).filter((f) => f.is_active),
+    () => ensureArray<{ FId: number; FName: string; FStatus: number | boolean }>(finYears)
+      .filter((f) => f.FStatus === 1 || f.FStatus === true)
+      .map((f) => ({ id: f.FId, label: f.FName })),
     [finYears]
   );
 
@@ -250,7 +267,7 @@ export default function Contract() {
 
   // ── helpers ──────────────────────────────────────────────────────────────────
   const resetForm = () => {
-    setForm({ ...emptyForm(), finYear: ctxFinYear || "" });
+    setForm({ ...emptyForm(), finYear: "" });
     setSelectedTCs([]);
     setAttachments([]);
     setEditingId(null);
@@ -261,17 +278,23 @@ export default function Contract() {
     setViewMode("form");
     setDocTypeLoading(true);
     try {
-      const types = await fetchDocTypes("CON" as never);
+      const all = await fetchDocTypes();
+      const conTypes = all.filter(
+        (t) => (t.DocNoPrefix ?? t.Prefix ?? "").toUpperCase() === "CON"
+      );
+      const types = conTypes.length > 0 ? conTypes : all.filter(
+        (t) => (t.Description ?? "").toLowerCase().includes("contract")
+      );
       setDocTypes(types);
       if (types.length > 0) {
         const first = types[0];
-        const preview = await fetchNextDocNumber(first.TypeOfDocId, ctxFinYear || "");
+        const preview = await fetchNextDocNumber(first.TypeOfDocId, "");
         setField("docTypeId", first.TypeOfDocId);
         setField("docNo", preview);
       }
     } catch { /* silent */ }
     setDocTypeLoading(false);
-  }, [ctxFinYear]);
+  }, [""]);
 
   const goToEdit = useCallback(async (c: ContractListItem | ContractDetail) => {
     setEditingId(c.ContractId);
@@ -280,7 +303,7 @@ export default function Contract() {
     try { existingAttachments = detail.Attachments ? JSON.parse(detail.Attachments) : []; } catch { /* */ }
     let existingTCs: TCRecord[] = [];
     if (detail.TermsAndConditions) {
-      const allTCs = ensureArray<TCRecord>(tcRaw);
+      const allTCs = ensureArray<TCRaw>(tcRaw).map((t) => ({ id: t.Id, name: t.Name || "", terms: t.TermsAndCondition || "" }));
       existingTCs = allTCs.filter((t) => detail.TermsAndConditions!.includes(t.name));
     }
     setForm({
@@ -405,17 +428,27 @@ export default function Contract() {
       id: "status",
       accessorKey: "Status",
       header: "Status",
-      size: 100,
-      cell: ({ getValue }: any) => <StatusBadge status={getValue() as string} />,
+      size: 180,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ row }: any) => (
+        <ApprovalStatusChain table="Contract" recordId={row.original.ContractId} />
+      ),
     },
     {
       id: "actions",
       header: "Actions",
-      size: 100,
+      size: 120,
       cell: ({ row }: any) => {
         const item = row.original as ContractListItem;
         return (
           <div className="flex items-center justify-end gap-1">
+            <ApprovalActions
+              status={item.Status}
+              recordId={item.ContractId}
+              endpoint="/api/contract"
+              submitOnly
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["contracts"] })}
+            />
             <button
               onClick={(e) => { e.stopPropagation(); openDetail(item); }}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
@@ -556,25 +589,11 @@ export default function Contract() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Document Type</label>
-                      {docTypeLoading ? (
-                        <div className={`${inputCls} text-muted-foreground`}>Loading types…</div>
-                      ) : (
-                        <select
-                          value={form.docTypeId ?? ""}
-                          onChange={async (e) => {
-                            const id = parseInt(e.target.value, 10);
-                            setField("docTypeId", id);
-                            const preview = await fetchNextDocNumber(id, form.finYear || ctxFinYear || "");
-                            setField("docNo", preview);
-                          }}
-                          className={inputCls}
-                        >
-                          <option value="">Select type…</option>
-                          {docTypes.map((t) => (
-                            <option key={t.TypeOfDocId} value={t.TypeOfDocId}>{t.Description}</option>
-                          ))}
-                        </select>
-                      )}
+                      <input
+                        readOnly
+                        value={docTypeLoading ? "Loading…" : (docTypes[0]?.Description ?? "Contract")}
+                        className={`${inputCls} bg-muted/30 cursor-not-allowed`}
+                      />
                     </div>
                     <div>
                       <label className={labelCls}>Document No.</label>
@@ -583,7 +602,7 @@ export default function Contract() {
                         {form.docTypeId && (
                           <button
                             onClick={async () => {
-                              const preview = await fetchNextDocNumber(form.docTypeId!, form.finYear || ctxFinYear || "");
+                              const preview = await fetchNextDocNumber(form.docTypeId!, form.finYear || "" || "");
                               setField("docNo", preview);
                             }}
                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted text-muted-foreground"
@@ -607,10 +626,17 @@ export default function Contract() {
                   </div>
                   <div>
                     <label className={labelCls}>Financial Year</label>
-                    <select value={form.finYear} onChange={(e) => setField("finYear", e.target.value)} className={inputCls}>
+                    <select value={form.finYear} onChange={async (e) => {
+                      const fy = e.target.value;
+                      setField("finYear", fy);
+                      if (form.docTypeId && fy) {
+                        const preview = await fetchNextDocNumber(form.docTypeId, fy);
+                        setField("docNo", preview);
+                      }
+                    }} className={inputCls}>
                       <option value="">Select FY…</option>
                       {fyOptions.map((f) => (
-                        <option key={f.id} value={f.fy_label}>{f.fy_label}</option>
+                        <option key={f.id} value={f.label}>{f.label}</option>
                       ))}
                     </select>
                   </div>
@@ -665,9 +691,31 @@ export default function Contract() {
               <CardContent className="pt-4 space-y-4">
                 <div>
                   <label className={labelCls}>Contact Person</label>
+                  {/* Category filter */}
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {[
+                      { label: "All",        value: "" },
+                      { label: "Supplier",   value: "S" },
+                      { label: "Contractor", value: "C" },
+                      { label: "Customer",   value: "A" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => { setContactCategory(opt.value); setField("contactPerson", ""); }}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          contactCategory === opt.value
+                            ? "bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white border-transparent shadow-sm"
+                            : "bg-background text-muted-foreground border-border hover:border-violet-400"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                   <select value={form.contactPerson} onChange={(e) => setField("contactPerson", e.target.value)} className={inputCls}>
                     <option value="">Select contact person…</option>
-                    {contactPersonsRaw.map((name) => <option key={name} value={name}>{name}</option>)}
+                    {contactPersonsRaw.map((p) => <option key={`${p.type}-${p.name}`} value={p.name}>{p.name}</option>)}
                   </select>
                 </div>
 
@@ -854,6 +902,12 @@ export default function Contract() {
                 className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
                 <ArrowLeft size={14} /> Back
               </button>
+              <ApprovalActions
+                status={c.Status}
+                recordId={c.ContractId}
+                endpoint="/api/contract"
+                onSuccess={() => qc.invalidateQueries({ queryKey: ["contracts"] })}
+              />
               <button onClick={() => goToEdit(c)}
                 className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
                 Edit
@@ -870,7 +924,7 @@ export default function Contract() {
             {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                ["Status", <StatusBadge key="s" status={c.Status} />],
+                ["Approval", <ApprovalStatusChain key="a" table="Contract" recordId={c.ContractId} />],
                 ["Doc Date", fmtDate(c.DocDate)],
                 ["Contract Date", fmtDate(c.ContractDate)],
                 ["Financial Year", c.FinYear || "—"],

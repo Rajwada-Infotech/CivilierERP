@@ -83,8 +83,11 @@ export const getContract = async (id: number): Promise<ContractDetail> => {
   return res.json();
 };
 
-export const getContactPersons = async (): Promise<string[]> => {
-  const res = await fetchWithAuth(`${BASE}/contact-persons`);
+export interface ContactPerson { name: string; type: string; }
+
+export const getContactPersons = async (type?: string): Promise<ContactPerson[]> => {
+  const qs = type ? `?type=${encodeURIComponent(type)}` : "";
+  const res = await fetchWithAuth(`${BASE}/contact-persons${qs}`);
   if (!res.ok) await handleError(res, "Failed to fetch contact persons");
   return res.json();
 };
