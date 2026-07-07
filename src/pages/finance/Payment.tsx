@@ -4886,24 +4886,6 @@ const Payment: React.FC = () => {
                               );
                             }}
                           />
-                          {(() => {
-                            if (!rec.expenseRef) return null;
-                            if (["Reissued", "Failed", "Cancelled"].includes(rec.displayStatus)) return null;
-                            const opt = expenseOptions.find((o) => o.docNo === rec.expenseRef);
-                            const hasRemaining = opt
-                              ? (opt.remainingAmount ?? 0) > 0 || opt.billStatus === "Partially Paid"
-                              : false;
-                            if (!hasRemaining) return null;
-                            return (
-                              <button
-                                onClick={() => handlePayRemaining(rec)}
-                                title="Pay remaining balance"
-                                className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                              >
-                                <Plus size={12} />
-                              </button>
-                            );
-                          })()}
                           <button
                             onClick={() => openViewRec(rec)}
                             title="View details"
@@ -5130,23 +5112,6 @@ const Payment: React.FC = () => {
                                   );
                                 }}
                               />
-                              {(() => {
-                                if (!rec.expenseRef) return null;
-                                const opt = expenseOptions.find((o) => o.docNo === rec.expenseRef);
-                                const hasRemaining = opt
-                                  ? (opt.remainingAmount ?? 0) > 0 || opt.billStatus === "Partially Paid"
-                                  : false;
-                                if (!hasRemaining) return null;
-                                return (
-                                  <button
-                                    onClick={() => handlePayRemaining(rec)}
-                                    title="Pay remaining balance"
-                                    className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                                  >
-                                    <Plus size={12} />
-                                  </button>
-                                );
-                              })()}
                               <button
                                 onClick={() => openViewRec(rec)}
                                 title="View details"
@@ -5764,6 +5729,20 @@ const Payment: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >
                   <Edit size={12} /> Edit
+                </button>
+              )}
+              {viewingRec && viewingChain && viewingChain.remaining > 0 &&
+                !["Reissued", "Failed", "Cancelled"].includes(viewingRec.displayStatus) && (
+                <button
+                  onClick={() => {
+                    const rec = viewingRec;
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    handlePayRemaining(rec);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                >
+                  <Plus size={12} /> Pay Remaining
                 </button>
               )}
               <button
