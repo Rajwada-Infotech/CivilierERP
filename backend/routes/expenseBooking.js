@@ -1602,6 +1602,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EGLAccount,
     EWorkDoneRef,
     PaymentTermId,
+    // Contract Master (Migration 177) — see services/contractLedger.js
+    ContractId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -2014,7 +2016,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
+
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
 
@@ -2030,7 +2034,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef
+          ECostCenter, EGLAccount, EWorkDoneRef, ContractId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
@@ -2043,7 +2047,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef
+          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
@@ -2063,6 +2067,63 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     }
 
     await transaction.commit();
+
+    // ── Contract Master: auto-allocate (FIFO) any available advance ─────────
+    // Mirror of saleInvoices.js's receivable-side logic: a real, system-
+    // generated NewPayment (routed through the existing Dummy Bank
+    // convention) is created so the booking's bill status is recomputed by
+    // the SAME syncBillStatus() every real vendor payment already uses —
+    // never a second, parallel "how much has this booking been paid"
+    // calculation that could silently drift from the real one.
+    if (ContractId && newExpenseId) {
+      const { autoAllocateFIFO } = require("../services/contractLedger");
+      const settleAmount = parseFloat(bookingNetAmount ?? bookingAmount) || 0;
+      const allocation = await autoAllocateFIFO(pool, {
+        contractId: parseInt(ContractId, 10),
+        sourceType: "ExpenseBooking",
+        sourceId: newExpenseId,
+        sourceDocNo: finalDocNo,
+        documentAmount: settleAmount,
+        createdBy: req.user?.email || req.user?.name,
+      });
+
+      if (allocation.allocatedAmount > 0) {
+        const dummyBank = await pool.request().query(
+          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
+        );
+        if (dummyBank.recordset.length) {
+          const syntheticDocNo = `CONTRACT-ADJ-${newExpenseId}`;
+          await pool
+            .request()
+            .input("PPaymentName", sql.VarChar, `Contract Advance (${finalDocNo})`)
+            .input("PMode", sql.VarChar, "Cash")
+            .input("PAmount", sql.Decimal(18, 2), allocation.allocatedAmount)
+            .input("PDocType", sql.VarChar, "Contract Adjustment")
+            .input("PDate", sql.Date, new Date())
+            .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
+            .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
+            .input("PProject", sql.VarChar, EProjectName || "")
+            .input("PCompany", sql.VarChar, "")
+            .input("PExpenseRef", sql.NVarChar(100), finalDocNo)
+            .input("DocNo", sql.NVarChar(100), syntheticDocNo)
+            .input("ContractId", sql.Int, parseInt(ContractId, 10))
+            .input("PCreatedAt", sql.DateTime, new Date())
+            .input("PCreatedBy", sql.NVarChar(100), req.user?.email || req.user?.name)
+            .input("Status", sql.NVarChar(20), "Approved").query(`
+              INSERT INTO dbo.NewPayment
+                (PPaymentName, PMode, PAmount, PDocType, PDate, PBankID, PBankName,
+                 PProject, PCompany, PExpenseRef, DocNo, ContractId,
+                 PCreatedAt, PCreatedBy, Status)
+              VALUES
+                (@PPaymentName, @PMode, @PAmount, @PDocType, @PDate, @PBankID, @PBankName,
+                 @PProject, @PCompany, @PExpenseRef, @DocNo, @ContractId,
+                 @PCreatedAt, @PCreatedBy, @Status)
+            `);
+          const { syncBillStatus } = require("./newPayment");
+          await syncBillStatus(pool, finalDocNo);
+        }
+      }
+    }
 
     if (EEmiPayment && EEmiData && newExpenseId) {
       let schedule = [];
