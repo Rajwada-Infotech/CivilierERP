@@ -3007,7 +3007,7 @@ router.get("/:id/payment-summary", async (req, res) => {
     }));
 
     const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
-    const remaining = parseFloat(eb.ERemainingAmount ?? netAmount) || 0;
+    const remaining = Math.max(0, netAmount - totalPaid);
 
     res.json({
       expenseId: eb.Eid,
