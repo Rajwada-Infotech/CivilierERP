@@ -1207,12 +1207,15 @@ router.get("/chain/:expenseRef", async (req, res) => {
       .input("EDocNo", sql.NVarChar(100), expenseRef)
       .query(`
         SELECT
-          eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount,
+          eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType,
           eb.ETotalPaid, eb.ERemainingAmount, eb.EBillStatus,
           COALESCE(proj.name, eb.EProjectName, '') AS ProjectName,
-          eb.EName AS PartyName
+          eb.EName AS PartyName,
+          grn.TotalAmount AS GrnTotalAmount
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
         WHERE eb.EDocNo = @EDocNo
       `);
 

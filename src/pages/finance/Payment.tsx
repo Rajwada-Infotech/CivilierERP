@@ -5302,7 +5302,11 @@ const Payment: React.FC = () => {
                         <div>
                           <p className="text-[9px] text-muted-foreground uppercase">Invoice Total</p>
                           <p className="font-mono text-xs font-bold text-foreground">
-                            {formatINR(Number(paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0))}
+                            {formatINR(Number(
+                              (paymentChainData.invoice.ESourceType === "GRN" && paymentChainData.invoice.GrnTotalAmount)
+                                ? paymentChainData.invoice.GrnTotalAmount
+                                : (paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0)
+                            ))}
                           </p>
                         </div>
                         <div>
