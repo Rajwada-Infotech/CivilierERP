@@ -3221,27 +3221,27 @@ const Payment: React.FC = () => {
                           onChange={handleExpenseSelect}
                           loading={loadingExpense}
                         />
-                        {filteredOptions.length === 0 && !loadingExpense && (
-                          <div className="flex items-center gap-2 pt-1">
+                        <div className="flex items-center gap-2 pt-1">
+                          {filteredOptions.length === 0 && !loadingExpense && (
                             <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
-                            <button
-                              type="button"
-                              className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
-                              onClick={async () => {
-                                try {
-                                  const r = await fetchWithAuth("/api/new-payment/recalculate-balances", { method: "POST" });
-                                  const d = await r.json().catch(() => ({}));
-                                  toast.success(`Balances synced (${d.updated ?? 0} invoices updated). Refreshing…`);
-                                  window.location.reload();
-                                } catch {
-                                  toast.error("Sync failed — please try again.");
-                                }
-                              }}
-                            >
-                              Sync invoice balances
-                            </button>
-                          </div>
-                        )}
+                          )}
+                          <button
+                            type="button"
+                            className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                            onClick={async () => {
+                              try {
+                                const r = await fetchWithAuth("/api/new-payment/recalculate-balances", { method: "POST" });
+                                const d = await r.json().catch(() => ({}));
+                                toast.success(`Balances synced (${d.updated ?? 0} invoices updated). Refreshing…`);
+                                window.location.reload();
+                              } catch {
+                                toast.error("Sync failed — please try again.");
+                              }
+                            }}
+                          >
+                            Sync invoice balances
+                          </button>
+                        </div>
                       </div>
                     );
                   })()}
@@ -4886,16 +4886,24 @@ const Payment: React.FC = () => {
                               );
                             }}
                           />
-                          {rec.expenseRef &&
-                            !["Reissued", "Failed", "Cancelled"].includes(rec.displayStatus) && (
-                            <button
-                              onClick={() => handlePayRemaining(rec)}
-                              title="Pay remaining balance"
-                              className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                            >
-                              <Plus size={12} />
-                            </button>
-                          )}
+                          {(() => {
+                            if (!rec.expenseRef) return null;
+                            if (["Reissued", "Failed", "Cancelled"].includes(rec.displayStatus)) return null;
+                            const opt = expenseOptions.find((o) => o.docNo === rec.expenseRef);
+                            const hasRemaining = opt
+                              ? (opt.remainingAmount ?? 0) > 0 || opt.billStatus === "Partially Paid"
+                              : false;
+                            if (!hasRemaining) return null;
+                            return (
+                              <button
+                                onClick={() => handlePayRemaining(rec)}
+                                title="Pay remaining balance"
+                                className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                              >
+                                <Plus size={12} />
+                              </button>
+                            );
+                          })()}
                           <button
                             onClick={() => openViewRec(rec)}
                             title="View details"
@@ -4927,31 +4935,31 @@ const Payment: React.FC = () => {
 
                 {/* Desktop table — compact, no horizontal scroll */}
                 <div className="hidden sm:block">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Payment Purpose
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[13%]">
                           Doc No
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[18%]">
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Expense Ref
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%] hidden md:table-cell">
                           Mode
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%] hidden lg:table-cell">
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[11%] hidden lg:table-cell">
                           Cheque / Ref
                         </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
                           Amount
                         </th>
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
                           Bank
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%]">
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[11%]">
                           Status
                         </th>
                         <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
@@ -4980,12 +4988,12 @@ const Payment: React.FC = () => {
                           className="hover:bg-muted/20 transition-colors"
                         >
                           {/* Payment purpose + paid-to + date stacked */}
-                          <td className="px-4 py-2.5">
-                            <p className="font-heading font-medium text-foreground text-xs truncate max-w-[180px]">
+                          <td className="px-4 py-3">
+                            <p className="font-heading font-medium text-foreground text-xs truncate">
                               {rec.paymentName || "—"}
                             </p>
                             {rec.paidTo && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[180px]">
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
                                 Paid to{" "}
                                 <span className="text-foreground/80">
                                   {rec.paidTo}
@@ -4996,15 +5004,15 @@ const Payment: React.FC = () => {
                               {rec.date || "—"}
                             </p>
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-3">
                             <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                               {rec.docNo || "—"}
                             </span>
                           </td>
                           {/* Expense Ref + GRN stacked */}
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-3">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit max-w-[160px] truncate">
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate">
                                 {rec.expenseRef}
                               </span>
                             ) : (
@@ -5012,18 +5020,18 @@ const Payment: React.FC = () => {
                                 —
                               </span>
                             )}
-                            <div className="mt-0.5">
+                            <div className="mt-1">
                               <PaymentGRNBadges
                                 expenseId={rec.expenseId || ""}
                               />
                             </div>
                           </td>
                           {/* Mode */}
-                          <td className="px-4 py-2.5 hidden md:table-cell">
+                          <td className="px-4 py-3 hidden md:table-cell">
                             <ModeBadge mode={rec.mode} />
                           </td>
                           {/* Cheque / Ref */}
-                          <td className="px-4 py-2.5 hidden lg:table-cell">
+                          <td className="px-4 py-3 hidden lg:table-cell">
                             {rec.chequeNo ? (
                               <div className="space-y-0.5">
                                 <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
@@ -5063,15 +5071,15 @@ const Payment: React.FC = () => {
                             )}
                           </td>
                           {/* Amount */}
-                          <td className="px-4 py-2.5 font-mono text-xs font-semibold text-right whitespace-nowrap">
+                          <td className="px-4 py-3 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
                           {/* Bank */}
-                          <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate hidden md:table-cell">
+                          <td className="px-4 py-3 text-xs text-muted-foreground truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
                           {/* Status */}
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
                               {rec.displayStatus && rec.displayStatus !== rec.status ? (
                                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
@@ -5101,8 +5109,8 @@ const Payment: React.FC = () => {
                             </div>
                           </td>
                           {/* Actions */}
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-1 justify-end">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5 justify-end">
                               <ApprovalActions
                                 status={rec.status}
                                 recordId={Number(rec.id)}
@@ -5112,6 +5120,9 @@ const Payment: React.FC = () => {
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
                                     exact: false,
+                                  });
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["expense-options-payment"],
                                   });
                                   refetchPayments();
                                   window.dispatchEvent(
