@@ -1877,6 +1877,7 @@ const Payment: React.FC = () => {
   const [viewingCompanyDetail, setViewingCompanyDetail] =
     useState<CompanyDetail | null>(null);
   const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
+  const [viewingGrnTotal, setViewingGrnTotal] = useState<number>(0);
   const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
   const [detailTab, setDetailTab] = useState<"details" | "chain">("details");
@@ -1888,6 +1889,7 @@ const Payment: React.FC = () => {
     setViewingRec(rec);
     setViewingCompanyDetail(null);
     setViewingChain(null);
+    setViewingGrnTotal(0);
     setPaymentChainData(null);
     setDetailTab("details");
     const matched = companyOptions.find(
@@ -1904,6 +1906,20 @@ const Payment: React.FC = () => {
     if (rec.expenseId) {
       fetchPaymentSummary(rec.expenseId)
         .then(setViewingChain)
+        .catch(() => {});
+      // Fetch GRN breakdown to get GST-inclusive total (bypasses stale ENetAmount in payment-summary)
+      fetchWithAuth(`/api/expense-booking/${rec.expenseId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then(async (eb: any) => {
+          if (eb?.ESourceType === "GRN" && eb?.ESourceId) {
+            const br = await fetchWithAuth(`/api/grns/${eb.ESourceId}/gst-breakdown`);
+            if (br.ok) {
+              const bd = await br.json();
+              const total = bd?.totals?.totalInclGST ?? 0;
+              if (total > 0) setViewingGrnTotal(total);
+            }
+          }
+        })
         .catch(() => {});
     }
     if (rec.expenseRef) {
@@ -5571,10 +5587,11 @@ const Payment: React.FC = () => {
 
                   {/* Payment summary strip */}
                   {viewingChain.netAmount > 0 && (() => {
-                    // Prefer GRN-inclusive total from chain endpoint over the base ENetAmount from payment-summary
-                    const grnTotal = paymentChainData?.invoice?.GrnTotalAmount
-                      ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
-                      : 0;
+                    // Prefer live GRN breakdown total (GST-inclusive) over stale ENetAmount from payment-summary
+                    const grnTotal = viewingGrnTotal > 0 ? viewingGrnTotal
+                      : paymentChainData?.invoice?.GrnTotalAmount
+                        ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
+                        : 0;
                     const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
                     const displayRemaining = Math.max(0, displayNet - viewingChain.totalPaid);
                     return (
@@ -5736,8 +5753,9 @@ const Payment: React.FC = () => {
                 </button>
               )}
               {viewingRec && viewingChain && (() => {
-                const _grnTotal = paymentChainData?.invoice?.GrnTotalAmount
-                  ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
+                const _grnTotal = viewingGrnTotal > 0 ? viewingGrnTotal
+                  : paymentChainData?.invoice?.GrnTotalAmount
+                    ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
                 const _displayNet = _grnTotal > 0 ? _grnTotal : viewingChain.netAmount;
                 const _displayRemaining = Math.max(0, _displayNet - viewingChain.totalPaid);
                 return _displayRemaining > 0 &&
@@ -5745,10 +5763,7 @@ const Payment: React.FC = () => {
                 <button
                   onClick={() => {
                     const rec = viewingRec;
-                    const _grnTotal2 = paymentChainData?.invoice?.GrnTotalAmount
-                      ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
-                    const _net2 = _grnTotal2 > 0 ? _grnTotal2 : viewingChain.netAmount;
-                    const remaining = Math.max(0, _net2 - viewingChain.totalPaid);
+                    const remaining = _displayRemaining;
                     setViewingRec(null);
                     setViewingChain(null);
                     handlePayRemaining(rec, remaining);
