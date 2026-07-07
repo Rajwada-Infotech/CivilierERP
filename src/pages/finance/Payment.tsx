@@ -2533,13 +2533,15 @@ const Payment: React.FC = () => {
             );
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
-          // Amount field = stored ENetAmount (net after billing terms on GRN total).
-          // Falls back to EGrnTotalAmount (incl-GST) if ENetAmount not set, then EAmount.
-          amount: detail.ENetAmount
-            ? parseFloat(String(detail.ENetAmount))
-            : (detail as any).EGrnTotalAmount
-              ? parseFloat((detail as any).EGrnTotalAmount)
-              : (detail.EAmount ?? null),
+          // If an override is provided (Pay Remaining flow), always use it.
+          // Otherwise fall back to stored ENetAmount → GRN total → EAmount.
+          amount: amountOverride != null
+            ? amountOverride
+            : detail.ENetAmount
+              ? parseFloat(String(detail.ENetAmount))
+              : (detail as any).EGrnTotalAmount
+                ? parseFloat((detail as any).EGrnTotalAmount)
+                : (detail.EAmount ?? null),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
           // GST breakdown API will override these with precise per-item values.
@@ -2909,11 +2911,9 @@ const Payment: React.FC = () => {
   // ── Pay Remaining ──────────────────────────────────────────────────────────
   // Opens a blank new-payment form pre-filled with the same invoice. Works even
   // when the invoice is marked 'Paid' in EBillStatus (uses includeRef bypass).
-  const handlePayRemaining = async (rec: PaymentRecord) => {
+  const handlePayRemaining = async (rec: PaymentRecord, knownRemaining?: number) => {
     if (!rec.expenseRef) return;
     openNew();
-    // Try the already-loaded options first; fall back to a targeted fetch that
-    // bypasses the EBillStatus filter via the includeRef param.
     let opt = expenseOptions.find(
       (o) => o.docNo === rec.expenseRef || String(o.id) === rec.expenseId,
     );
@@ -2921,12 +2921,13 @@ const Payment: React.FC = () => {
       opt = await fetchExpenseOptionByRef(rec.expenseRef).catch(() => null) ?? undefined;
     }
     if (opt) {
-      const remaining =
-        opt.remainingAmount != null
+      // knownRemaining comes from viewingChain (live-computed from payment-summary).
+      // Fall back to opt fields if not provided.
+      const remaining = knownRemaining != null
+        ? knownRemaining
+        : opt.remainingAmount != null
           ? opt.remainingAmount
           : Math.max(0, (opt.amount ?? 0) - (opt.totalPaid ?? 0));
-      // Pass remaining as amountOverride so the GRN breakdown fetch doesn't
-      // overwrite it with the full invoice total when it completes.
       await handleExpenseSelect(String(opt.id), remaining > 0 ? remaining : undefined);
     }
   };
@@ -5731,9 +5732,10 @@ const Payment: React.FC = () => {
                 <button
                   onClick={() => {
                     const rec = viewingRec;
+                    const remaining = viewingChain.remaining;
                     setViewingRec(null);
                     setViewingChain(null);
-                    handlePayRemaining(rec);
+                    handlePayRemaining(rec, remaining);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
