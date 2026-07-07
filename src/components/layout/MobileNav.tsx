@@ -31,6 +31,7 @@ import {
   Target,
   Calendar,
   Package,
+  RotateCcw,
 } from "lucide-react";
 import {
   Bank,
@@ -99,6 +100,7 @@ interface SetupItem {
   label: string;
   path: string;
   color: string;
+  pageKey?: string;
 }
 
 // ── Module colour system ──────────────────────────────────────────────────────
@@ -255,6 +257,20 @@ const financeSetupItems: SetupItem[] = [
     label: "Profit Center",
     path: "/masters/profit-center",
     color: "text-teal-500",
+  },
+  {
+    icon: RotateCcw,
+    label: "Return Reason",
+    path: "/masters/return-reason",
+    color: "text-red-400",
+    pageKey: "return-reason-master",
+  },
+  {
+    icon: FileText,
+    label: "Contracts",
+    path: "/finance/contracts",
+    color: "text-violet-500",
+    pageKey: "finance-contracts",
   },
 ];
 
@@ -706,10 +722,10 @@ export const MobileNav: React.FC = () => {
             </div>
 
             {/* ── Header row ─────────────────────────────────────────────────── */}
-            <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0">
+            <div className="flex items-center gap-2.5 px-4 py-3 flex-shrink-0">
               {/* Avatar */}
               <div
-                className="relative w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden"
+                className="relative w-8 h-8 rounded-lg flex-shrink-0 overflow-hidden"
                 style={
                   currentUser?.avatarUrl
                     ? { background: "hsl(var(--muted))" }
@@ -747,10 +763,10 @@ export const MobileNav: React.FC = () => {
               </div>
 
               <div className="min-w-0 flex-1">
-                <p className="font-heading font-semibold text-sm text-foreground truncate leading-tight">
+                <p className="font-heading font-semibold text-xs text-foreground truncate leading-tight">
                   {currentUser?.name}
                 </p>
-                <p className="text-xs text-muted-foreground truncate leading-tight">
+                <p className="text-[11px] text-muted-foreground truncate leading-tight">
                   {currentUser?.email}
                 </p>
               </div>
@@ -769,19 +785,19 @@ export const MobileNav: React.FC = () => {
                             : "/user/profile",
                     );
                   }}
-                  className="w-9 h-9 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors"
+                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
                 >
                   <Profile size={15} className="text-muted-foreground" />
                 </button>
                 <button
                   onClick={handleLogout}
-                  className="w-9 h-9 rounded-xl border border-destructive/30 flex items-center justify-center hover:bg-destructive/10 transition-colors"
+                  className="w-7 h-7 rounded-lg border border-destructive/30 flex items-center justify-center hover:bg-destructive/10 transition-colors"
                 >
                   <Logout size={15} className="text-destructive" />
                 </button>
                 <button
                   onClick={() => setOpen(false)}
-                  className="w-9 h-9 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors"
+                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
                 >
                   <X size={15} className="text-muted-foreground" />
                 </button>
@@ -812,7 +828,7 @@ export const MobileNav: React.FC = () => {
                         navigate(meta.route);
                         setOpen(false);
                       }}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl flex-shrink-0 transition-all duration-200 text-xs font-heading font-medium border"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[11px] font-heading font-medium border"
                       style={
                         isActive
                           ? {
@@ -845,13 +861,13 @@ export const MobileNav: React.FC = () => {
             </div>
 
             {/* ── Tab bar ─────────────────────────────────────────────────────── */}
-            <div className="px-4 pb-2 flex-shrink-0">
-              <div className="flex gap-1 p-1 rounded-xl bg-muted">
+            <div className="px-4 pb-2.5 flex-shrink-0">
+              <div className="flex gap-1 p-0.5 rounded-lg bg-muted">
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className="flex-1 py-2 rounded-lg text-xs font-heading font-medium transition-all text-center"
+                    className="flex-1 py-1.5 rounded-md text-[11px] font-heading font-medium transition-all text-center"
                     style={
                       activeTab === tab.id
                         ? {
@@ -868,12 +884,12 @@ export const MobileNav: React.FC = () => {
             </div>
 
             {/* ── Scrollable content ───────────────────────────────────────────── */}
-            <div className="flex-1 overflow-y-auto overscroll-contain pb-8">
+            <div className="flex-1 overflow-y-auto overscroll-contain pb-6">
               {/* ── Navigation tab ──────────────────────────────────────────────── */}
               {activeTab === "nav" && (
-                <div className="px-4 space-y-1 pt-1">
+                <div className="px-4 space-y-0.5 pt-1">
                   {/* Quick links */}
-                  <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="grid grid-cols-2 gap-1.5 mb-2">
                     {[
                       { label: "Home", icon: Home, path: "/home" },
                       { label: "Reports", icon: BarChart3, path: "/reports" },
@@ -885,7 +901,7 @@ export const MobileNav: React.FC = () => {
                         <button
                           key={path}
                           onClick={() => go(path)}
-                          className="nav-item-enter flex items-center gap-2.5 px-3.5 py-3 rounded-xl border text-sm font-heading transition-all text-left"
+                          className="nav-item-enter flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-heading transition-all text-left"
                           style={{
                             animationDelay: `${i * 35}ms`,
                             borderColor: active
@@ -934,7 +950,7 @@ export const MobileNav: React.FC = () => {
                             onClick={() =>
                               setExpandedGroup(isExpanded ? null : item.label)
                             }
-                            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-heading transition-all text-left border"
+                            className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
                             style={{
                               borderColor: active
                                 ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.35)`
@@ -949,7 +965,7 @@ export const MobileNav: React.FC = () => {
                             }}
                           >
                             <div
-                              className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                               style={{
                                 background:
                                   active || isExpanded
@@ -1003,7 +1019,7 @@ export const MobileNav: React.FC = () => {
                                   <button
                                     key={child.path}
                                     onClick={() => go(child.path)}
-                                    className="nav-item-enter w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-all text-left"
+                                    className="nav-item-enter w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left"
                                     style={{
                                       animationDelay: `${ci * 30}ms`,
                                       background: childActive
@@ -1041,7 +1057,7 @@ export const MobileNav: React.FC = () => {
                       <button
                         key={item.path}
                         onClick={() => go(item.path!)}
-                        className="nav-item-enter w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-heading transition-all text-left border"
+                        className="nav-item-enter w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
                         style={{
                           animationDelay: `${(idx + 4) * 40}ms`,
                           borderColor: active
@@ -1053,7 +1069,7 @@ export const MobileNav: React.FC = () => {
                         }}
                       >
                         <div
-                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                           style={{
                             background: active
                               ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
@@ -1096,16 +1112,16 @@ export const MobileNav: React.FC = () => {
 
               {/* ── Setup tab ───────────────────────────────────────────────────── */}
               {activeTab === "setup" && (
-                <div className="px-4 pt-2">
+                <div className="px-4 pt-1.5">
                   {setupConfig.available ? (
                     <>
-                      <div className="flex items-center gap-2 mb-3 px-1">
+                      <div className="flex items-center gap-2 mb-2 px-1">
                         <Settings size={13} className="text-muted-foreground" />
                         <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
                           {setupConfig.label} Setup
                         </p>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-3 gap-1.5">
                         {setupConfig.items.map(
                           ({ icon: Icon, label, path, color }, i) => {
                             const active = location.pathname === path;
@@ -1113,7 +1129,7 @@ export const MobileNav: React.FC = () => {
                               <button
                                 key={path}
                                 onClick={() => go(path)}
-                                className="nav-item-enter group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all duration-150 active:scale-95"
+                                className="nav-item-enter group flex flex-col items-center gap-1.5 p-2 rounded-xl border transition-all duration-150 active:scale-95"
                                 style={{
                                   animationDelay: `${i * 30}ms`,
                                   borderColor: active
@@ -1125,14 +1141,14 @@ export const MobileNav: React.FC = () => {
                                 }}
                               >
                                 <div
-                                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
+                                  className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
                                   style={{
                                     background: active
                                       ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
                                       : "hsl(var(--muted))",
                                   }}
                                 >
-                                  <Icon size={18} className={color} />
+                                  <Icon size={15} className={color} />
                                 </div>
                                 <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
                                   {label}
@@ -1174,7 +1190,7 @@ export const MobileNav: React.FC = () => {
                         <button
                           key={t}
                           onClick={() => setTheme(t)}
-                          className="nav-item-enter flex items-center gap-4 px-4 py-3.5 rounded-2xl border transition-all text-left"
+                          className="nav-item-enter flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left"
                           style={{
                             animationDelay: `${i * 50}ms`,
                             borderColor: isSelected
@@ -1184,7 +1200,7 @@ export const MobileNav: React.FC = () => {
                           }}
                         >
                           <div
-                            className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center shadow-sm"
+                            className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center shadow-sm"
                             style={{ background: bg }}
                           >
                             {isSelected && (
