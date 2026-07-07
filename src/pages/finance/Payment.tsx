@@ -4028,8 +4028,8 @@ const Payment: React.FC = () => {
                                   : (opt?.amount ?? net);
                               const prevOutstanding = Math.max(0, invoiceTotal - prevPaid);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
-                              const isPartial = entered < net;
-                              const isOver = entered > net;
+                              const isPartial = entered < prevOutstanding;
+                              const isOver = entered > prevOutstanding;
 
                               return (
                                 <div className={`mt-3 rounded-xl border px-4 py-4 space-y-2 ${
@@ -4049,14 +4049,14 @@ const Payment: React.FC = () => {
                                       <span className="font-mono font-bold text-foreground text-base">{formatINR(entered)}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
-                                      <span className="text-muted-foreground">Invoice net payable</span>
-                                      <span className="font-mono text-muted-foreground">{formatINR(net)}</span>
+                                      <span className="text-muted-foreground">Outstanding balance</span>
+                                      <span className="font-mono text-muted-foreground">{formatINR(prevOutstanding)}</span>
                                     </div>
                                     <div className={`flex justify-between items-center text-sm font-bold border-t border-border/40 pt-2 ${
                                       isPartial ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"
                                     }`}>
                                       <span>{isPartial ? "Shortfall" : "Excess"}</span>
-                                      <span className="font-mono text-base">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - net))}</span>
+                                      <span className="font-mono text-base">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - prevOutstanding))}</span>
                                     </div>
                                     {opt && prevOutstanding > 0 && (
                                       <div className={`flex justify-between items-center text-sm font-bold pt-0.5 ${
