@@ -157,6 +157,8 @@ export interface PaymentChainInvoice {
   EDocNo: string | null;
   ENetAmount: number | null;
   EAmount: number | null;
+  ESourceType: string | null;
+  GrnTotalAmount: number | null;
   ETotalPaid: number | null;
   ERemainingAmount: number | null;
   EBillStatus: string | null;
