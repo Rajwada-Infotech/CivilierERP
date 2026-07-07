@@ -5570,14 +5570,21 @@ const Payment: React.FC = () => {
                   </div>
 
                   {/* Payment summary strip */}
-                  {viewingChain.netAmount > 0 && (
+                  {viewingChain.netAmount > 0 && (() => {
+                    // Prefer GRN-inclusive total from chain endpoint over the base ENetAmount from payment-summary
+                    const grnTotal = paymentChainData?.invoice?.GrnTotalAmount
+                      ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
+                      : 0;
+                    const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    const displayRemaining = Math.max(0, displayNet - viewingChain.totalPaid);
+                    return (
                     <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">
                       <div className="flex-1 text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
                           Net Payable
                         </p>
                         <p className="font-mono text-xs font-bold text-foreground">
-                          {formatINR(viewingChain.netAmount)}
+                          {formatINR(displayNet)}
                         </p>
                       </div>
                       <div className="w-px h-6 bg-border" />
@@ -5595,13 +5602,14 @@ const Payment: React.FC = () => {
                           Remaining
                         </p>
                         <p
-                          className={`font-mono text-xs font-bold ${viewingChain.remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                          className={`font-mono text-xs font-bold ${displayRemaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
                         >
-                          {formatINR(viewingChain.remaining)}
+                          {formatINR(displayRemaining)}
                         </p>
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Vendor invoice if present */}
                   {viewingChain.chain.vendorInvoiceNo && (
@@ -5727,12 +5735,20 @@ const Payment: React.FC = () => {
                   <Edit size={12} /> Edit
                 </button>
               )}
-              {viewingRec && viewingChain && viewingChain.remaining > 0 &&
-                !["Reissued", "Failed", "Cancelled"].includes(viewingRec.displayStatus) && (
+              {viewingRec && viewingChain && (() => {
+                const _grnTotal = paymentChainData?.invoice?.GrnTotalAmount
+                  ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
+                const _displayNet = _grnTotal > 0 ? _grnTotal : viewingChain.netAmount;
+                const _displayRemaining = Math.max(0, _displayNet - viewingChain.totalPaid);
+                return _displayRemaining > 0 &&
+                  !["Reissued", "Failed", "Cancelled"].includes(viewingRec.displayStatus) && (
                 <button
                   onClick={() => {
                     const rec = viewingRec;
-                    const remaining = viewingChain.remaining;
+                    const _grnTotal2 = paymentChainData?.invoice?.GrnTotalAmount
+                      ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
+                    const _net2 = _grnTotal2 > 0 ? _grnTotal2 : viewingChain.netAmount;
+                    const remaining = Math.max(0, _net2 - viewingChain.totalPaid);
                     setViewingRec(null);
                     setViewingChain(null);
                     handlePayRemaining(rec, remaining);
@@ -5741,7 +5757,8 @@ const Payment: React.FC = () => {
                 >
                   <Plus size={12} /> Pay Remaining
                 </button>
-              )}
+                );
+              })()}
               <button
                 onClick={() => {
                   setViewingRec(null);
