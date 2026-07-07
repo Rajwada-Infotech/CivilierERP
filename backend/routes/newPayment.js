@@ -164,6 +164,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(eb.EFinYear, '')                            AS EBFinYear,
         -- Ref Doc = the ExpenseBooking DocNo
         eb.EDocNo                                          AS RefDoc,
+        -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
+        eb.Eid                                             AS PExpenseId,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set
@@ -1088,6 +1090,44 @@ router.post("/recalculate-balances", async (req, res) => {
   }
 });
 
+// ── GET /:id — single payment by PPaymentID (used by ApprovalActions) ─────────
+router.get("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(404).json({ error: "Not found" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("PPaymentID", sql.Int, id)
+      .query(`
+        SELECT np.*, eb.EDocNo AS RefDoc, eb.Eid AS PExpenseId,
+          COALESCE(brc_list.IsMatched, 0) AS IsMatched,
+          COALESCE(brc_list.IsBounced, 0) AS IsBounced,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM dbo.NewPayment r2 WHERE r2.ReplacesPaymentId = np.PPaymentID AND r2.Status NOT IN ('Rejected','Deleted')) THEN 'Reissued'
+            WHEN COALESCE(brc_list.IsBounced, 0) = 1 THEN 'Cheque Bounced'
+            WHEN COALESCE(brc_list.IsMatched, 0) = 1 AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Cleared'
+            WHEN np.Status = 'Approved' AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Issued'
+            WHEN np.Status = 'Approved' THEN 'Success'
+            WHEN np.Status = 'Pending' THEN 'Pending'
+            WHEN np.Status = 'Rejected' THEN 'Failed'
+            WHEN np.Status = 'Deleted' THEN 'Cancelled'
+            ELSE np.Status
+          END AS DisplayStatus
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        LEFT JOIN dbo.BankReconciliation brc_list
+          ON brc_list.SourceType = 'PAYMENT' AND brc_list.SourceID = np.PPaymentID
+        WHERE np.PPaymentID = @PPaymentID
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    return res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("[GET /new-payment/:id]", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /chain/:expenseRef — all payment attempts for one invoice ─────────────
 router.get("/chain/:expenseRef", async (req, res) => {
   const expenseRef = req.params.expenseRef;
@@ -1112,8 +1152,7 @@ router.get("/chain/:expenseRef", async (req, res) => {
           np.BounceCharge,
           np.PCreatedBy,
           np.PCreatedAt,
-          np.PUpdatedBy,
-          np.PUpdatedAt,
+          np.PApprovedBy,
           -- BRS state
           COALESCE(brc.IsMatched, 0)  AS IsMatched,
           COALESCE(brc.IsBounced, 0)  AS IsBounced,

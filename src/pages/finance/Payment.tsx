@@ -106,6 +106,7 @@ interface DbPayment {
   PCardNumber?: string | null;
   PCardNetwork?: string | null;
   PCardHolderName?: string | null;
+  PExpenseId?: number | null;
 }
 
 interface BankOption {
@@ -352,19 +353,11 @@ const fetchCardsByBank = async (
   }));
 };
 
-const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
-  const res = await fetchWithAuth("/api/expense-booking/options");
-  if (!res.ok) return [];
-  const raw = await res.json().catch(() => ({}));
-  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  const mapped = items.map((o: any) => ({
+const normaliseExpenseOptions = (items: any[]): ExpenseOption[] =>
+  items.map((o: any) => ({
     ...o,
     companyName:
-      o.companyName ||
-      o.ECompanyName ||
-      o.company_name ||
-      o.CompanyName ||
-      null,
+      o.companyName || o.ECompanyName || o.company_name || o.CompanyName || null,
     projectName:
       o.projectName ||
       o.EProjectDisplayName ||
@@ -384,7 +377,23 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
       null,
   }));
 
-  return mapped;
+const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
+  const res = await fetchWithAuth("/api/expense-booking/options");
+  if (!res.ok) return [];
+  const raw = await res.json().catch(() => ({}));
+  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+  return normaliseExpenseOptions(items);
+};
+
+const fetchExpenseOptionByRef = async (ref: string): Promise<ExpenseOption | null> => {
+  const res = await fetchWithAuth(
+    `/api/expense-booking/options?includeRef=${encodeURIComponent(ref)}`,
+  );
+  if (!res.ok) return null;
+  const raw = await res.json().catch(() => ({}));
+  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+  const all = normaliseExpenseOptions(items);
+  return all.find((o) => o.docNo === ref) ?? all[0] ?? null;
 };
 
 const fetchExpenseDetail = async (
@@ -587,7 +596,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     projectSite: item.PProjectName || item.PProject || "",
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
-    expenseId: "",
+    expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
     docNo: item.DocNo || "",
     parentDocNo: item.ParentDocNo || "",
     rootExBDocNo: item.RootExBDocNo || "",
@@ -2897,6 +2906,36 @@ const Payment: React.FC = () => {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
+  // ── Pay Remaining ──────────────────────────────────────────────────────────
+  // Opens a blank new-payment form pre-filled with the same invoice. Works even
+  // when the invoice is marked 'Paid' in EBillStatus (uses includeRef bypass).
+  const handlePayRemaining = async (rec: PaymentRecord) => {
+    if (!rec.expenseRef) return;
+    openNew();
+    // Try the already-loaded options first; fall back to a targeted fetch that
+    // bypasses the EBillStatus filter via the includeRef param.
+    let opt = expenseOptions.find(
+      (o) => o.docNo === rec.expenseRef || String(o.id) === rec.expenseId,
+    );
+    if (!opt) {
+      opt = await fetchExpenseOptionByRef(rec.expenseRef).catch(() => null) ?? undefined;
+    }
+    if (opt) {
+      await handleExpenseSelect(String(opt.id));
+      // Override the auto-filled amount with the remaining outstanding balance.
+      // opt.remainingAmount comes from ERemainingAmount (set by syncBillStatus).
+      // If GRN breakdown later loads a different total, the Invoice Balance card
+      // will reflect it, but we prime the field with the DB's outstanding figure.
+      const remaining =
+        opt.remainingAmount != null
+          ? opt.remainingAmount
+          : Math.max(0, (opt.amount ?? 0) - (opt.totalPaid ?? 0));
+      if (remaining > 0) {
+        setForm((prev) => ({ ...prev, amount: remaining }));
+      }
+    }
+  };
+
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
   const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
@@ -3985,7 +4024,12 @@ const Payment: React.FC = () => {
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
                               const prevPaid = opt?.totalPaid ?? 0;
-                              const invoiceTotal = opt?.amount ?? net;
+                              // Use the GRN breakdown total (incl. GST) when available —
+                              // opt.amount is often the pre-tax base stored in the DB.
+                              const invoiceTotal =
+                                (grnGstBreakdown?.totals?.totalInclGST ?? 0) > 0
+                                  ? grnGstBreakdown!.totals.totalInclGST
+                                  : (opt?.amount ?? net);
                               const prevOutstanding = Math.max(0, invoiceTotal - prevPaid);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
                               const isPartial = entered < net;
@@ -4842,6 +4886,16 @@ const Payment: React.FC = () => {
                               );
                             }}
                           />
+                          {rec.expenseRef &&
+                            !["Reissued", "Failed", "Cancelled"].includes(rec.displayStatus) && (
+                            <button
+                              onClick={() => handlePayRemaining(rec)}
+                              title="Pay remaining balance"
+                              className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                            >
+                              <Plus size={12} />
+                            </button>
+                          )}
                           <button
                             onClick={() => openViewRec(rec)}
                             title="View details"
@@ -5065,6 +5119,23 @@ const Payment: React.FC = () => {
                                   );
                                 }}
                               />
+                              {(() => {
+                                if (!rec.expenseRef) return null;
+                                const opt = expenseOptions.find((o) => o.docNo === rec.expenseRef);
+                                const hasRemaining = opt
+                                  ? (opt.remainingAmount ?? 0) > 0 || opt.billStatus === "Partially Paid"
+                                  : false;
+                                if (!hasRemaining) return null;
+                                return (
+                                  <button
+                                    onClick={() => handlePayRemaining(rec)}
+                                    title="Pay remaining balance"
+                                    className="p-1.5 rounded-md border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                );
+                              })()}
                               <button
                                 onClick={() => openViewRec(rec)}
                                 title="View details"
