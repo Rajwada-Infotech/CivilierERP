@@ -1883,6 +1883,8 @@ const Payment: React.FC = () => {
   const [detailTab, setDetailTab] = useState<"details" | "chain">("details");
   const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingFormChain, setLoadingFormChain] = useState(false);
+  // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
+  const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
@@ -2459,6 +2461,8 @@ const Payment: React.FC = () => {
 
   const handleExpenseSelect = useCallback(
     async (expenseId: string, amountOverride?: number) => {
+      // Reset known total paid unless this is a Pay Remaining call (amountOverride set)
+      if (amountOverride == null) setFormKnownTotalPaid(null);
       if (!expenseId) {
         setForm((prev) => ({
           ...prev,
@@ -4035,7 +4039,9 @@ const Payment: React.FC = () => {
                               const opt = expenseOptions.find(
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
-                              const prevPaid = opt?.totalPaid ?? 0;
+                              // formKnownTotalPaid is set by "Pay Remaining" from live chain data,
+                              // overriding stale ETotalPaid stored in DB (opt.totalPaid)
+                              const prevPaid = formKnownTotalPaid ?? opt?.totalPaid ?? 0;
                               // Use the GRN breakdown total (incl. GST) when available —
                               // opt.amount is often the pre-tax base stored in the DB.
                               const invoiceTotal =
@@ -5764,6 +5770,7 @@ const Payment: React.FC = () => {
                   onClick={() => {
                     const rec = viewingRec;
                     const remaining = _displayRemaining;
+                    setFormKnownTotalPaid(viewingChain.totalPaid);
                     setViewingRec(null);
                     setViewingChain(null);
                     handlePayRemaining(rec, remaining);
