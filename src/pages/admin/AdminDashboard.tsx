@@ -295,7 +295,7 @@ export default function AdminDashboard() {
         )}
 
         {/* ── Stat row: one spotlight card + three compact cards ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Spotlight: Total Users with active-ratio progress ring */}
           <div className="lg:col-span-1 relative overflow-hidden rounded-xl border border-blue-500/25 bg-gradient-to-br from-blue-600 to-indigo-600 text-white p-3.5 flex flex-col justify-between min-h-[100px]">
             <div

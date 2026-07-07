@@ -216,7 +216,7 @@ const MetricsDashboard = () => {
             )}
           </div>
           <div className="p-6 space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="baseURL" className="text-xs font-semibold">
                   Server URL
