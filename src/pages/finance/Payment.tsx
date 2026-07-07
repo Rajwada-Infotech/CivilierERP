@@ -2442,7 +2442,7 @@ const Payment: React.FC = () => {
   // ── Expense booking selection → auto-fill ──────────────────────────────────
 
   const handleExpenseSelect = useCallback(
-    async (expenseId: string) => {
+    async (expenseId: string, amountOverride?: number) => {
       if (!expenseId) {
         setForm((prev) => ({
           ...prev,
@@ -2631,7 +2631,7 @@ const Payment: React.FC = () => {
 
                 setForm((prev) => ({
                   ...prev,
-                  amount: netPayable, // correct net after billing terms
+                  amount: amountOverride != null ? amountOverride : netPayable,
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -2921,18 +2921,13 @@ const Payment: React.FC = () => {
       opt = await fetchExpenseOptionByRef(rec.expenseRef).catch(() => null) ?? undefined;
     }
     if (opt) {
-      await handleExpenseSelect(String(opt.id));
-      // Override the auto-filled amount with the remaining outstanding balance.
-      // opt.remainingAmount comes from ERemainingAmount (set by syncBillStatus).
-      // If GRN breakdown later loads a different total, the Invoice Balance card
-      // will reflect it, but we prime the field with the DB's outstanding figure.
       const remaining =
         opt.remainingAmount != null
           ? opt.remainingAmount
           : Math.max(0, (opt.amount ?? 0) - (opt.totalPaid ?? 0));
-      if (remaining > 0) {
-        setForm((prev) => ({ ...prev, amount: remaining }));
-      }
+      // Pass remaining as amountOverride so the GRN breakdown fetch doesn't
+      // overwrite it with the full invoice total when it completes.
+      await handleExpenseSelect(String(opt.id), remaining > 0 ? remaining : undefined);
     }
   };
 
