@@ -5287,6 +5287,9 @@ const Payment: React.FC = () => {
                     const chainTotalPaid = (paymentChainData.payments ?? [])
                       .filter((p) => p.Status === "Approved" && !p.IsBounced)
                       .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0);
+                    const chainBounceTotal = (paymentChainData.payments ?? [])
+                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
+                      .reduce((sum, p) => sum + Number(p.BounceCharge ?? 0), 0);
                     const chainOutstanding = Math.max(0, chainInvoiceTotal - chainTotalPaid);
                     return (
                     <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
@@ -5305,6 +5308,9 @@ const Payment: React.FC = () => {
                           <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                             {formatINR(chainTotalPaid)}
                           </p>
+                          {chainBounceTotal > 0 && (
+                            <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(chainBounceTotal)} bounce</p>
+                          )}
                         </div>
                         <div>
                           <p className="text-[9px] text-muted-foreground uppercase">Outstanding</p>
@@ -5622,6 +5628,9 @@ const Payment: React.FC = () => {
                           .filter((p) => p.Status === "Approved" && !p.IsBounced)
                           .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0)
                       : viewingChain.totalPaid;
+                    const displayBounceTotal = (paymentChainData?.payments ?? [])
+                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
+                      .reduce((sum, p) => sum + Number(p.BounceCharge ?? 0), 0);
                     const displayRemaining = Math.max(0, displayNet - displayTotalPaid);
                     return (
                     <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">
@@ -5641,6 +5650,9 @@ const Payment: React.FC = () => {
                         <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                           {formatINR(displayTotalPaid)}
                         </p>
+                        {displayBounceTotal > 0 && (
+                          <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(displayBounceTotal)} bounce</p>
+                        )}
                       </div>
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
