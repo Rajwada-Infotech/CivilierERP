@@ -1242,6 +1242,184 @@ router.get("/chain/:expenseRef", async (req, res) => {
   }
 });
 
+// ── Chain-wide Posting: all payments for an invoice ────────────────────────
+router.get("/chain-posting/:expenseRef", async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params.expenseRef);
+  if (!expenseRef) return res.status(400).json({ error: "No expenseRef" });
+  try {
+    const pool = getPool();
+
+    // All approved payments for this invoice
+    const pmtRes = await pool.request()
+      .input("PExpenseRef", sql.NVarChar(100), expenseRef)
+      .query(`
+        SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount,
+               ISNULL(np.BounceCharge, 0) AS BounceCharge,
+               np.PMode, np.Status,
+               np.PBankID, np.PBankName,
+               bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
+               ISNULL(brc.IsBounced, 0) AS IsBounced,
+               brc.BounceDate, brc.BounceReason
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.AccountHeadMaster bank ON bank.LHeadId = np.PBankID
+        LEFT JOIN dbo.BankReconciliation brc
+          ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
+        WHERE np.PExpenseRef = @PExpenseRef AND np.Status = 'Approved'
+        ORDER BY np.PDate ASC, np.PPaymentID ASC
+      `);
+
+    // Invoice net payable
+    const ebRes = await pool.request()
+      .input("EDocNo", sql.NVarChar(100), expenseRef)
+      .query(`SELECT TOP 1 ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+    const eb = ebRes.recordset[0];
+    const invoiceTotal = parseFloat(eb?.ENetAmount ?? eb?.EAmount ?? 0) || 0;
+
+    // GL accounts
+    const ledRes = await pool.request().query(`
+      SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster
+      WHERE LHeadStatus = 1 AND (
+        (LHeadType = 'GL' AND IsSystemGenerated = 1)
+        OR LHeadName LIKE '%Bank Charge%'
+        OR LHeadName LIKE '%bank charge%'
+      )
+    `);
+    const leds = ledRes.recordset;
+    const findLed = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
+    const supplierLed = findLed((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const bankChargesLed = findLed((l) => l.LHeadName.toLowerCase().includes("bank charge"));
+
+    // Check posted status for payment and bounce-charge entries
+    const pmtIds = pmtRes.recordset.map((p) => p.PPaymentID);
+    const postedMap = {};
+    const bouncePostedMap = {};
+    if (pmtIds.length) {
+      const pIds = pmtIds.join(",");
+      const postedRes = await pool.request().query(
+        `SELECT SourceId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId IN (${pIds}) AND IsReversed=0`
+      );
+      postedRes.recordset.forEach((r) => { postedMap[r.SourceId] = r.VoucherNo; });
+
+      const bPostedRes = await pool.request().query(
+        `SELECT SourceId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='BounceChargePosting' AND SourceId IN (${pIds}) AND IsReversed=0`
+      );
+      bPostedRes.recordset.forEach((r) => { bouncePostedMap[r.SourceId] = r.VoucherNo; });
+    }
+
+    const toDateStr = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
+
+    const entries = [];
+    for (const p of pmtRes.recordset) {
+      const bankLed = p.PBankID
+        ? { id: p.PBankID, label: p.BankLedgerName || p.PBankName, code: p.BankLedgerCode ?? null }
+        : null;
+      const pmtAmt = parseFloat(p.PAmount) || 0;
+      const bounceCharge = parseFloat(p.BounceCharge) || 0;
+      const netAmt = Math.max(0, pmtAmt - bounceCharge);
+
+      if (!p.IsBounced) {
+        // Normal cleared payment: Supplier Dr / Bank Cr
+        entries.push({
+          date: toDateStr(p.PDate),
+          docNo: p.DocNo,
+          pmtId: p.PPaymentID,
+          type: "payment",
+          amount: netAmt,
+          mode: p.PMode,
+          accounts: { supplier: supplierLed, bank: bankLed },
+          isPosted: !!postedMap[p.PPaymentID],
+          jvNo: postedMap[p.PPaymentID] ?? null,
+        });
+      }
+
+      // Bounce charge: Bank Charges Dr / Bank Cr (on bounce date)
+      if (bounceCharge > 0) {
+        entries.push({
+          date: toDateStr(p.BounceDate) ?? toDateStr(p.PDate),
+          docNo: p.DocNo,
+          pmtId: p.PPaymentID,
+          type: "bounce_charge",
+          amount: bounceCharge,
+          mode: p.PMode,
+          bounceReason: p.BounceReason,
+          accounts: { bankCharges: bankChargesLed, bank: bankLed },
+          isPosted: !!bouncePostedMap[p.PPaymentID],
+          jvNo: bouncePostedMap[p.PPaymentID] ?? null,
+        });
+      }
+    }
+
+    // Sort all entries by date ascending
+    entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.pmtId - b.pmtId);
+
+    res.json({ expenseRef, invoiceTotal, entries });
+  } catch (err) {
+    console.error("Chain posting error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Bounce Charge: post to GL ────────────────────────────────────────────────
+router.post("/:id/post-bounce-charge-to-gl", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const { postVoucher } = require("../services/generalLedger");
+
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PExpenseRef, np.PBankID, np.PBankName,
+             ISNULL(np.BounceCharge, 0) AS BounceCharge,
+             brc.BounceDate,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.BankReconciliation brc ON brc.SourceType='PAYMENT' AND brc.SourceID=np.PPaymentID
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    const bounceCharge = parseFloat(pmt.BounceCharge) || 0;
+    if (bounceCharge <= 0) return res.status(400).json({ error: "No bounce charge to post." });
+
+    const already = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='BounceChargePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (already.recordset.length) return res.status(409).json({ error: "Bounce charge already posted." });
+
+    const ledRes = await pool.request().query(`
+      SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster
+      WHERE LHeadStatus=1 AND (LHeadName LIKE '%Bank Charge%' OR LHeadName LIKE '%bank charge%')
+    `);
+    const bankChargesId = ledRes.recordset[0]?.LHeadId;
+    if (!bankChargesId) return res.status(422).json({ error: "Bank Charges ledger not configured." });
+
+    const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+    if (!bankId) return res.status(422).json({ error: "No bank account on this payment." });
+
+    const narration = `Bounce charge: ${pmt.DocNo}`;
+    const legs = [
+      { lheadId: bankChargesId, debit: bounceCharge, credit: 0, narration },
+      { lheadId: bankId,        debit: 0, credit: bounceCharge, narration },
+    ];
+
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+
+    await postVoucher(pool, { sourceType: "BounceChargePosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+
+    res.json({ jvNo: finalDocNo, message: "Bounce charge posted." });
+  } catch (err) {
+    console.error("Bounce charge posting error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Payment Posting: preview ────────────────────────────────────────────────
 router.get("/:id/posting", async (req, res) => {
   const pmtId = parseInt(req.params.id, 10);
