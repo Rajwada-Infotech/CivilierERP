@@ -4404,18 +4404,16 @@ const Payment: React.FC = () => {
                                     <span className="font-mono text-primary">− {formatINR(entered)}</span>
                                   </div>
                                   <div className={`flex justify-between items-center font-bold border-t border-border/30 pt-1.5 ${
-                                    isExact
+                                    isExact || isOver
                                       ? "text-emerald-600 dark:text-emerald-400"
-                                      : isPartial
-                                        ? "text-amber-600 dark:text-amber-400"
-                                        : "text-red-500"
+                                      : "text-amber-600 dark:text-amber-400"
                                   }`}>
                                     <span className="flex items-center gap-1.5">
                                       {isExact
                                         ? <><CheckCircle2 size={12} /> Fully settled</>
                                         : isPartial
                                           ? "Remaining"
-                                          : <><AlertTriangle size={12} /> Overpaid by</>}
+                                          : <><Wallet size={12} /> On A/c for {form.paidTo || "Supplier"}</>}
                                     </span>
                                     <span className="font-mono text-base">
                                       {isOver ? `+ ${formatINR(entered - prevOutstanding)}` : formatINR(afterThisPayment)}
