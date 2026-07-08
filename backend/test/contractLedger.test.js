@@ -18,10 +18,12 @@ process.env.NODE_ENV = "test";
 jest.mock("../db", () => ({
   sql: {
     Int: "Int",
-    NVarChar: "NVarChar",
-    Decimal: () => "Decimal",
+    NVarChar: (n) => `NVarChar(${n})`,
+    Decimal: (p, s) => `Decimal(${p},${s})`,
     DateTime: "DateTime",
+    DateTime2: (s) => `DateTime2(${s})`,
     Bit: "Bit",
+    MAX: "MAX",
   },
   getPool: jest.fn(),
 }));
