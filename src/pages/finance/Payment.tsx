@@ -5277,14 +5277,15 @@ const Payment: React.FC = () => {
                 <div className="space-y-3">
                   {/* Invoice summary */}
                   {paymentChainData?.invoice && (() => {
-                    const chainInvoiceTotal = Number(
+                    // Use live GRN breakdown total when available (viewingGrnTotal), chain endpoint GrnTotalAmount as fallback
+                    const chainInvoiceTotal = viewingGrnTotal > 0 ? viewingGrnTotal : Number(
                       (paymentChainData.invoice.ESourceType === "GRN" && paymentChainData.invoice.GrnTotalAmount)
                         ? paymentChainData.invoice.GrnTotalAmount
                         : (paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0)
                     );
-                    // Sum only non-bounced approved payments, excluding bounce charge (bank fee, not supplier payment)
+                    // Sum non-bounced Approved payments, subtract bounce charge (bank fee, not supplier payment)
                     const chainTotalPaid = (paymentChainData.payments ?? [])
-                      .filter((p) => p.Status === "APPROVED" && !p.IsBounced)
+                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
                       .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0);
                     const chainOutstanding = Math.max(0, chainInvoiceTotal - chainTotalPaid);
                     return (
@@ -5296,7 +5297,7 @@ const Payment: React.FC = () => {
                         <div>
                           <p className="text-[9px] text-muted-foreground uppercase">Invoice Total</p>
                           <p className="font-mono text-xs font-bold text-foreground">
-                            {formatINR(chainInvoiceTotal > 0 ? chainInvoiceTotal : viewingGrnTotal || chainInvoiceTotal)}
+                            {formatINR(chainInvoiceTotal)}
                           </p>
                         </div>
                         <div>
@@ -5618,7 +5619,7 @@ const Payment: React.FC = () => {
                     // Exclude bounce charges — they're bank fees, not supplier payments
                     const displayTotalPaid = paymentChainData?.payments?.length
                       ? (paymentChainData.payments)
-                          .filter((p) => p.Status === "APPROVED" && !p.IsBounced)
+                          .filter((p) => p.Status === "Approved" && !p.IsBounced)
                           .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0)
                       : viewingChain.totalPaid;
                     const displayRemaining = Math.max(0, displayNet - displayTotalPaid);
@@ -5787,7 +5788,7 @@ const Payment: React.FC = () => {
                 const _displayNet = _grnTotal > 0 ? _grnTotal : viewingChain.netAmount;
                 const _displayTotalPaid = paymentChainData?.payments?.length
                   ? (paymentChainData.payments)
-                      .filter((p) => p.Status === "APPROVED" && !p.IsBounced)
+                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
                       .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0)
                   : viewingChain.totalPaid;
                 const _displayRemaining = Math.max(0, _displayNet - _displayTotalPaid);
