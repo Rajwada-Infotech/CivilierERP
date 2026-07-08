@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
-const { lockNextDocNumber, backPatchRecordId, previewNextDocNumber } = require("../utils/docNumberLock");
+const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;

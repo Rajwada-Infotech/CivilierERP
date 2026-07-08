@@ -2130,7 +2130,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
             .input("PDate", sql.Date, new Date())
             .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
             .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
-            .input("PProject", sql.VarChar, EProjectName || "")
+            .input("PProject", sql.VarChar, EProjectName)
             .input("PCompany", sql.VarChar, "")
             .input("PExpenseRef", sql.NVarChar(100), finalDocNo)
             .input("DocNo", sql.NVarChar(100), syntheticDocNo)
@@ -3357,7 +3357,6 @@ router.post("/:id/post-to-gl", async (req, res) => {
       totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
     } else {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
-      baseAmount = totalAmount;
     }
 
     if (totalAmount <= 0) return res.status(400).json({ error: "No amount to post." });

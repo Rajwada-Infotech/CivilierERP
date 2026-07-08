@@ -1709,7 +1709,6 @@ const PurchaseOrderMaster: React.FC = () => {
     const poNumberEsc = escapeHtml(String(poNumber));
     const poDateEsc = escapeHtml(String(poDate));
     const expectedDateEsc = escapeHtml(String(expectedDate));
-    const poStatusEsc = escapeHtml(String(poStatus));
     const remarksEsc = escapeHtml(String(remarks));
     const payTermsEsc = escapeHtml(String(payTerms));
 

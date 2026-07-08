@@ -64,7 +64,6 @@ router.post("/", requirePageRight("sa-commissions", "create"), async (req, res) 
   try {
     const pool  = getPool();
     const b     = req.body;
-    const actor = actorId(req);
 
     const spRate   = toNullableNumber(b.SpRate);
     const tlRate   = toNullableNumber(b.TlRate);

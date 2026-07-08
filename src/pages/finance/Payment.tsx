@@ -3188,30 +3188,6 @@ const Payment: React.FC = () => {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  // ── Pay Remaining ──────────────────────────────────────────────────────────
-  // Opens a blank new-payment form pre-filled with the same invoice. Works even
-  // when the invoice is marked 'Paid' in EBillStatus (uses includeRef bypass).
-  const handlePayRemaining = async (rec: PaymentRecord, knownRemaining?: number) => {
-    if (!rec.expenseRef) return;
-    openNew();
-    let opt = expenseOptions.find(
-      (o) => o.docNo === rec.expenseRef || String(o.id) === rec.expenseId,
-    );
-    if (!opt) {
-      opt = await fetchExpenseOptionByRef(rec.expenseRef).catch(() => null) ?? undefined;
-    }
-    if (opt) {
-      // knownRemaining comes from viewingChain (live-computed from payment-summary).
-      // Fall back to opt fields if not provided.
-      const remaining = knownRemaining != null
-        ? knownRemaining
-        : opt.remainingAmount != null
-          ? opt.remainingAmount
-          : Math.max(0, (opt.amount ?? 0) - (opt.totalPaid ?? 0));
-      await handleExpenseSelect(String(opt.id), remaining > 0 ? remaining : undefined);
-    }
-  };
-
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
   const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
@@ -6155,8 +6131,6 @@ const Payment: React.FC = () => {
                       accounts: any; isPosted: boolean; jvNo: string | null;
                     };
                     const entries: ChainEntry[] = pmtPostingData.entries;
-                    const postingIds = new Set<string>();
-
                     return (
                       <div className="space-y-4">
                         {entries.map((entry, idx) => {
