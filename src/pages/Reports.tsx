@@ -41,6 +41,7 @@ import {
   Settings2,
   Warehouse,
   XCircle,
+  Wallet,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -826,6 +827,32 @@ const ALL_REPORTS: ReportDef[] = [
       },
     ],
   },
+  {
+    id: "on-account-report",
+    label: "On Account",
+    description: "Excess payment credits stored & adjusted per party",
+    icon: Wallet,
+    color: "#10b981",
+    apiPath: "/api/on-account/report",
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Date",     accessor: (r) => (r.TxnDate ? String(r.TxnDate).slice(0, 10) : "—") },
+      { header: "Party",    accessor: (r) => (r.PartyName ?? "—") as string },
+      { header: "Type",     accessor: (r) => (r.PartyType ?? "—") as string },
+      { header: "Txn Type", accessor: (r) => (r.TxnType === "CREDIT" ? "Stored" : "Adjusted") },
+      { header: "Credit",   accessor: (r) => (Number(r.OnAccountCreated) > 0 ? fmt(r.OnAccountCreated as number) : "—") },
+      { header: "Debit",    accessor: (r) => (Number(r.OnAccountAdjusted) > 0 ? fmt(r.OnAccountAdjusted as number) : "—") },
+      { header: "Balance",  accessor: (r) => fmt(r.RunningBalance as number) },
+      { header: "Ref Doc",  accessor: (r) => (r.RefDocNo ?? "—") as string },
+      { header: "Notes",    accessor: (r) => (r.Notes ?? "—") as string },
+    ],
+  },
 ];
 
 const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
@@ -848,6 +875,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "brs-report",
       "ledger-report",
       "journal-voucher-report",
+      "on-account-report",
     ],
   },
   {
