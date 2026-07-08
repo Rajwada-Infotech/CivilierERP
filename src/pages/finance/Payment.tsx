@@ -6064,7 +6064,7 @@ const Payment: React.FC = () => {
 
               {/* ── Posting Tab ── */}
               {detailTab === "posting" && (
-                <div className="space-y-5">
+                <div className="flex flex-col gap-4 h-full">
                   {/* Header */}
                   <div className="flex items-center gap-2">
                     <BookOpen size={14} className="text-primary" />
@@ -6208,28 +6208,37 @@ const Payment: React.FC = () => {
                           );
                         })}
 
-                        {/* Invoice summary */}
-                        {pmtPostingData.invoiceTotal > 0 && (() => {
-                          const totalPosted = entries
-                            .filter((e) => e.type === "payment")
-                            .reduce((s, e) => s + e.amount, 0);
-                          const remaining = Math.max(0, pmtPostingData.invoiceTotal - totalPosted);
-                          return remaining > 0.01 ? (
-                            <div className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
-                              Posted ₹{fmtAmt(totalPosted)} of ₹{fmtAmt(pmtPostingData.invoiceTotal)} — ₹{fmtAmt(remaining)} outstanding.
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-emerald-600 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3 py-2">
-                              Invoice fully posted — ₹{fmtAmt(pmtPostingData.invoiceTotal)} cleared.
-                            </div>
-                          );
-                        })()}
                       </div>
                     );
                   })()}
                 </div>
               )}
             </div>
+
+            {/* Posting tab — invoice summary bar pinned above footer */}
+            {detailTab === "posting" && pmtPostingData?.invoiceTotal > 0 && (() => {
+              const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const totalPosted = (pmtPostingData.entries ?? [])
+                .filter((e: any) => e.type === "payment" && !e.isBounced)
+                .reduce((s: number, e: any) => s + (e.amount ?? 0), 0);
+              const remaining = Math.max(0, pmtPostingData.invoiceTotal - totalPosted);
+              return (
+                <div className={`flex items-center justify-between px-5 py-2.5 border-t text-[11px] font-medium ${
+                  remaining <= 0.01
+                    ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                }`}>
+                  <span>
+                    {remaining <= 0.01
+                      ? `Invoice fully posted — ₹${fmtAmt(pmtPostingData.invoiceTotal)} cleared`
+                      : `Posted ₹${fmtAmt(totalPosted)} of ₹${fmtAmt(pmtPostingData.invoiceTotal)}`}
+                  </span>
+                  {remaining > 0.01 && (
+                    <span className="font-semibold">₹{fmtAmt(remaining)} outstanding</span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Footer */}
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
