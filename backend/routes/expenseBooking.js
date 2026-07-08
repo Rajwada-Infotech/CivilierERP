@@ -2991,10 +2991,11 @@ router.get("/:id/payment-summary", async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const eb = ebRes.recordset[0];
-    const netAmount =
-      eb.ESourceType === 'GRN' && eb.GrnTotalAmount && parseFloat(eb.GrnTotalAmount) > 0
-        ? parseFloat(eb.GrnTotalAmount)
-        : parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
+    // ENetAmount is the finalized net payable (base + GST + billing terms adjustments).
+    // Never use GrnTotalAmount — it is the pre-tax GRN base, not the net payable.
+    const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0
+      ? parseFloat(eb.ENetAmount)
+      : parseFloat(eb.EAmount ?? 0) || 0;
 
     // Fetch approved payments against this booking, joining BRS to detect bounced cheques
     const payRes = await pool
@@ -3003,6 +3004,7 @@ router.get("/:id/payment-summary", async (req, res) => {
         SELECT
           np.PPaymentID, np.DocNo, np.PDate, np.PMode, np.PAmount, np.Status,
           np.PPaymentName, np.PChequeNo, np.PNeftNumber, np.PUpiTransactionId,
+          ISNULL(np.BounceCharge, 0) AS BounceCharge,
           ISNULL(br.IsBounced, 0) AS IsBounced
         FROM dbo.NewPayment np
         LEFT JOIN dbo.BankReconciliation br

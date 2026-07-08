@@ -62,6 +62,7 @@ import {
   CreditCard,
   RefreshCw,
   History,
+  Info,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -1039,7 +1040,7 @@ function ExpenseBookingPicker({
 }: {
   options: ExpenseOption[];
   value: string;
-  onChange: (id: string) => void;
+  onChange: (id: string, remaining?: number) => void;
   loading?: boolean;
   contracts?: any[];
   contractsLoading?: boolean;
@@ -1050,7 +1051,7 @@ function ExpenseBookingPicker({
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [source, setSource] = React.useState<"invoice" | "contract">("invoice");
-  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi">("all");
+  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi" | "partial">("all");
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -1064,12 +1065,26 @@ function ExpenseBookingPicker({
   const selected = options.find((o) => o.id === value);
   const hasSelection = !!selected || !!selectedContract;
 
-  const filteredInvoices = options.filter((o) => {
-    if (typeFilter !== "all" && o.type !== typeFilter) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return o.label.toLowerCase().includes(q) || (o.projectName ?? "").toLowerCase().includes(q);
-  });
+  // isPartiallyPaid: DB status OR derived from totalPaid/remainingAmount when status is stale
+  const isPartiallyPaid = (o: ExpenseOption) =>
+    (o as any).billStatus === "Partially Paid" ||
+    ((o.totalPaid ?? 0) > 0 && (o.remainingAmount ?? 0) > 0);
+
+  const partialCount = options.filter(isPartiallyPaid).length;
+
+  const filteredInvoices = options
+    .filter((o) => {
+      if (typeFilter === "partial") return isPartiallyPaid(o);
+      if (typeFilter !== "all" && o.type !== typeFilter) return false;
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return o.label.toLowerCase().includes(q) || (o.projectName ?? "").toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      const aP = isPartiallyPaid(a) ? 0 : 1;
+      const bP = isPartiallyPaid(b) ? 0 : 1;
+      return aP - bP;
+    });
 
   const filteredContracts = contracts.filter((c) => {
     if (!search) return true;
@@ -1158,14 +1173,22 @@ function ExpenseBookingPicker({
               </div>
               {/* Type filter pills — only for invoices */}
               {source === "invoice" && (
-                <div className="flex gap-1.5">
-                  {(["all", "booking", "emi"] as const).map((t) => {
-                    const count = t === "all" ? options.length : t === "booking" ? bookingCount : emiCount;
+                <div className="flex gap-1.5 flex-wrap">
+                  {(["all", "booking", "emi", "partial"] as const).map((t) => {
+                    const count = t === "all" ? options.length : t === "booking" ? bookingCount : t === "emi" ? emiCount : partialCount;
+                    if (t === "partial" && count === 0) return null;
+                    const isActive = typeFilter === t;
+                    const cls = t === "partial"
+                      ? isActive ? "bg-amber-500/15 text-amber-600 border-amber-500/40" : "bg-muted text-muted-foreground border-border hover:border-amber-500/30"
+                      : t === "emi"
+                        ? isActive ? "bg-violet-500/15 text-violet-600 border-violet-500/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                        : isActive ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20";
                     return (
                       <button key={t} type="button" onClick={() => setTypeFilter(t)}
-                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${typeFilter === t ? t === "emi" ? "bg-violet-500/15 text-violet-600 border-violet-500/30" : "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20"}`}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${cls}`}
                       >
-                        {t === "all" ? "All" : t === "booking" ? "Bookings" : "EMI"}
+                        {t === "partial" && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />}
+                        {t === "all" ? "All" : t === "booking" ? "Bookings" : t === "emi" ? "EMI" : "Partial"}
                         <span className="opacity-70">{count}</span>
                       </button>
                     );
@@ -1181,7 +1204,15 @@ function ExpenseBookingPicker({
                   <div className="px-4 py-6 text-center text-xs text-muted-foreground">No matches found</div>
                 ) : filteredInvoices.map((o) => (
                   <button key={o.id} type="button"
-                    onClick={() => { onChange(o.id); if (onContractClear) onContractClear(); setOpen(false); setSearch(""); }}
+                    onClick={() => {
+                      const remaining = isPartiallyPaid(o) && (o.remainingAmount ?? 0) > 0
+                        ? Number(o.remainingAmount)
+                        : undefined;
+                      onChange(o.id, remaining);
+                      if (onContractClear) onContractClear();
+                      setOpen(false);
+                      setSearch("");
+                    }}
                     className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
                   >
                     <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
@@ -1192,10 +1223,14 @@ function ExpenseBookingPicker({
                       {o.projectName && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
                       {o.supplierName && o.supplierName !== o.projectName && <p className="text-[10px] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
                       {o.type === "emi" && o.installmentNo && <p className="text-[10px] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
-                      {(o as any).billStatus === "Partially Paid" && (o as any).remainingAmount != null && (
-                        <p className="text-[10px] text-amber-500 font-semibold mt-0.5">
-                          Remaining: ₹{Number((o as any).remainingAmount).toLocaleString("en-IN")}
-                        </p>
+                      {isPartiallyPaid(o) && (
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/25">
+                          <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
+                          Partial
+                          {(o.remainingAmount ?? 0) > 0 && (
+                            <span className="opacity-80">· ₹{Number(o.remainingAmount).toLocaleString("en-IN")} left</span>
+                          )}
+                        </span>
                       )}
                     </div>
                     {o.amount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">₹{o.amount.toLocaleString("en-IN")}</span>}
@@ -1669,17 +1704,48 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
             </Field>
           </div>
 
-          {isPostDated && form.chequeDate && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
-              <CalendarClock size={13} />
-              Scheduled for{" "}
-              {new Date(form.chequeDate).toLocaleDateString("en-IN", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
-            </div>
-          )}
+          {isPostDated && (() => {
+            const fmtDate = (d: Date) =>
+              d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+            if (!form.chequeDate) {
+              return (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                  <Info size={13} className="shrink-0 mt-0.5" />
+                  <span>Post-dated cheques are generally valid for <strong>3 months</strong> from the cheque date. Select a date to see the validity window.</span>
+                </div>
+              );
+            }
+
+            const chequeD = new Date(form.chequeDate);
+            const validUntil = new Date(chequeD);
+            validUntil.setMonth(validUntil.getMonth() + 3);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const isExpired = validUntil < today;
+
+            if (isExpired) {
+              return (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
+                  <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold">Cheque validity expired</p>
+                    <p>This cheque (dated {fmtDate(chequeD)}) expired on <strong>{fmtDate(validUntil)}</strong> and can no longer be deposited. Please obtain a new cheque.</p>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+                <CalendarClock size={13} className="shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-semibold">PDC scheduled for {fmtDate(chequeD)}</p>
+                  <p>Valid until <strong>{fmtDate(validUntil)}</strong> · Please ensure it is deposited before this date.</p>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
@@ -2521,6 +2587,7 @@ const Payment: React.FC = () => {
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
 
   const handleModeChange = (newMode: string) => {
+    const today = new Date().toISOString().slice(0, 10);
     setForm((prev) => ({
       ...prev,
       mode: newMode,
@@ -2535,7 +2602,10 @@ const Payment: React.FC = () => {
             chequeAccountNumber: "",
             chequeIfsc: "",
           }
-        : {}),
+        : {
+            // Auto-fill cheque date to today if not already set
+            chequeDate: prev.chequeDate || today,
+          }),
       // Clear digital fields when switching away from digital modes
       ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
@@ -2793,21 +2863,12 @@ const Payment: React.FC = () => {
           setGrnGstBreakdown(null);
         }
 
-        // Fetch live payment summary to get correct remaining (excludes bounced payments)
-        // This overrides the initial amount set above with the accurate outstanding balance.
-        if (amountOverride == null) {
-          fetchPaymentSummary(expenseId)
-            .then((summary) => {
-              if (!summary) return;
-              const remaining = summary.remaining;
-              if (remaining != null && remaining >= 0) {
-                setFormLiveRemaining(remaining);
-                if (remaining > 0) {
-                  setForm((prev) => ({ ...prev, amount: remaining }));
-                }
-              }
-            })
-            .catch(() => {/* non-fatal */});
+        // When amountOverride is provided (Pay Remaining / partial invoice click),
+        // use it directly — it was computed from live chain data.
+        // Otherwise, the useEffect on formChainData handles setting formLiveRemaining
+        // once the chain loads (correct: uses ENetAmount and excludes bounce charges).
+        if (amountOverride != null) {
+          setFormLiveRemaining(amountOverride);
         }
       } catch {
         toast.error("Could not load expense booking details.");
@@ -2848,21 +2909,27 @@ const Payment: React.FC = () => {
     return () => { cancelled = true; };
   }, [form.expenseRef]);
 
-  // Once chain data loads, update amount with live remaining (excluding bounced payments)
+  // Once chain data loads, derive the live remaining from chain payments (source of truth).
+  // ENetAmount is the net payable (base + GST + adjustments). BounceCharge is excluded
+  // because it's paid to the bank, not the supplier.
   useEffect(() => {
     if (!formChainData || editingId) return;
     const inv = formChainData.invoice;
     if (!inv) return;
     const fullAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
     if (!fullAmt) return;
-    // Sum only approved, non-bounced payments (excludes Rejected, Deleted, Bounced)
     const paidExcludingBounced = formChainData.payments
       .filter((p) => p.Status === "Approved" && !p.IsBounced)
-      .reduce((sum, p) => sum + (parseFloat(String(p.PAmount ?? 0)) || 0), 0);
+      .reduce((sum, p) => {
+        const amt = parseFloat(String(p.PAmount ?? 0)) || 0;
+        const bounce = parseFloat(String(p.BounceCharge ?? 0)) || 0;
+        return sum + amt - bounce;
+      }, 0);
     const liveRemaining = Math.max(0, Math.round((fullAmt - paidExcludingBounced) * 100) / 100);
-    // Only override amount when creating a new payment and there's a partial payment
-    if (paidExcludingBounced > 0) {
-      setForm((prev) => ({ ...prev, amount: liveRemaining > 0 ? liveRemaining : prev.amount }));
+    // Always set formLiveRemaining so the partial-payment panel uses the correct outstanding.
+    setFormLiveRemaining(liveRemaining);
+    if (paidExcludingBounced > 0 && liveRemaining > 0) {
+      setForm((prev) => ({ ...prev, amount: liveRemaining }));
     }
   }, [formChainData, editingId]);
 
@@ -2945,8 +3012,18 @@ const Payment: React.FC = () => {
         return false;
       }
       if (form.mode === "Post-Dated Cheque" && !form.chequeDate) {
-        toast.error("Post-dated cheque requires a future date.");
+        toast.error("Post-dated cheque requires a cheque date.");
         return false;
+      }
+      if (form.mode === "Post-Dated Cheque" && form.chequeDate) {
+        const validUntil = new Date(form.chequeDate);
+        validUntil.setMonth(validUntil.getMonth() + 3);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (validUntil < today) {
+          toast.error("This post-dated cheque has expired. Please select a valid cheque date.");
+          return false;
+        }
       }
     }
 
@@ -3634,11 +3711,14 @@ const Payment: React.FC = () => {
                 // grn.TotalAmount stored in the DB is often the pre-tax base only.
                 const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
                 const netAmt = grnTotal > 0 ? grnTotal : (opt.amount ?? 0);
-                const paid = opt.totalPaid ?? 0;
-                const remaining = opt.remainingAmount != null
-                  ? (grnTotal > 0 ? Math.max(0, netAmt - paid) : opt.remainingAmount)
-                  : Math.max(0, netAmt - paid);
-                const bStatus = opt.billStatus ?? (paid >= netAmt && netAmt > 0 ? "Paid" : paid > 0 ? "Partially Paid" : "Payment Due");
+                // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
+                // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
+                const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
+                const paid = livePaid ?? opt.totalPaid ?? 0;
+                const remaining = formLiveRemaining ?? (opt.remainingAmount != null
+                  ? (grnTotal > 0 ? Math.max(0, netAmt - (opt.totalPaid ?? 0)) : opt.remainingAmount)
+                  : Math.max(0, netAmt - paid));
+                const bStatus = remaining <= 0 && netAmt > 0 ? "Paid" : paid > 0 ? "Partially Paid" : "Payment Due";
                 return (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -4181,7 +4261,7 @@ const Payment: React.FC = () => {
                               large
                             />
 
-                            {/* ── Real-time partial/over-payment indicator ── */}
+                            {/* ── Payment calculation chain ── */}
                             {(() => {
                               const entered = Number(form.amount ?? 0);
                               if (entered <= 0 || Math.abs(entered - net) < 0.01) return null;
@@ -4189,59 +4269,67 @@ const Payment: React.FC = () => {
                               const opt = expenseOptions.find(
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
-                              // formKnownTotalPaid is set by "Pay Remaining" from live chain data,
-                              // overriding stale ETotalPaid stored in DB (opt.totalPaid)
-                              const prevPaid = formKnownTotalPaid ?? opt?.totalPaid ?? 0;
-                              // Use the GRN breakdown total (incl. GST) when available —
-                              // opt.amount is often the pre-tax base stored in the DB.
-                              const invoiceTotal =
-                                (grnGstBreakdown?.totals?.totalInclGST ?? 0) > 0
-                                  ? grnGstBreakdown!.totals.totalInclGST
-                                  : (opt?.amount ?? net);
-                              // formLiveRemaining comes from payment-summary (excludes bounced)
-                              // and is the most accurate source. Fall back to computed value.
                               const prevOutstanding = formLiveRemaining != null
                                 ? formLiveRemaining
-                                : Math.max(0, invoiceTotal - prevPaid);
+                                : Math.max(0, net - (formKnownTotalPaid ?? opt?.totalPaid ?? 0));
+                              const alreadyPaid = Math.max(0, net - prevOutstanding);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
-                              const isPartial = entered < prevOutstanding;
-                              const isOver = entered > prevOutstanding;
+                              const isExact   = Math.abs(entered - prevOutstanding) < 0.01;
+                              const isPartial = !isExact && entered < prevOutstanding;
+                              const isOver    = !isExact && entered > prevOutstanding;
+
+                              const chainColor = isOver
+                                ? "border-amber-500/30 bg-amber-500/5"
+                                : isExact
+                                  ? "border-emerald-500/30 bg-emerald-500/5"
+                                  : "border-blue-500/30 bg-blue-500/5";
 
                               return (
-                                <div className={`mt-3 rounded-xl border px-4 py-4 space-y-2 ${
-                                  isOver
-                                    ? "border-amber-500/40 bg-amber-500/5"
-                                    : "border-blue-500/40 bg-blue-500/5"
-                                }`}>
-                                  <p className={`text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 mb-3 ${
-                                    isOver ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"
-                                  }`}>
-                                    {isOver ? <AlertTriangle size={11} /> : <TrendingUp size={11} />}
-                                    {isOver ? "Overpayment" : "Partial Payment"}
-                                  </p>
-                                  <div className="space-y-2">
-                                    <div className="flex justify-between items-center text-sm">
-                                      <span className="text-muted-foreground">You're paying</span>
-                                      <span className="font-mono font-bold text-foreground text-base">{formatINR(entered)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center text-sm">
-                                      <span className="text-muted-foreground">Outstanding balance</span>
-                                      <span className="font-mono text-muted-foreground">{formatINR(prevOutstanding)}</span>
-                                    </div>
-                                    <div className={`flex justify-between items-center text-sm font-bold border-t border-border/40 pt-2 ${
-                                      isPartial ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"
-                                    }`}>
-                                      <span>{isPartial ? "Shortfall" : "Excess"}</span>
-                                      <span className="font-mono text-base">{isPartial ? "− " : "+ "}{formatINR(Math.abs(entered - prevOutstanding))}</span>
-                                    </div>
-                                    {opt && prevOutstanding > 0 && (
-                                      <div className={`flex justify-between items-center text-sm font-bold pt-0.5 ${
-                                        afterThisPayment > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
-                                      }`}>
-                                        <span>Remaining after payment</span>
-                                        <span className="font-mono text-base">{formatINR(afterThisPayment)}</span>
+                                <div className={`mt-3 rounded-xl border px-4 py-3.5 space-y-1.5 text-sm ${chainColor}`}>
+                                  {/* Step 1: Net − Already Paid = Outstanding (only when there are prior payments) */}
+                                  {alreadyPaid > 0.01 && (
+                                    <>
+                                      <div className="flex justify-between items-center text-muted-foreground">
+                                        <span>Net payable</span>
+                                        <span className="font-mono">{formatINR(net)}</span>
                                       </div>
-                                    )}
+                                      <div className="flex justify-between items-center text-muted-foreground">
+                                        <span>Already paid</span>
+                                        <span className="font-mono text-emerald-600 dark:text-emerald-400">− {formatINR(alreadyPaid)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center font-semibold border-t border-border/30 pt-1.5">
+                                        <span>Outstanding</span>
+                                        <span className="font-mono">{formatINR(prevOutstanding)}</span>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {/* Step 2: Outstanding − This payment = Remaining */}
+                                  <div className={`flex justify-between items-center text-muted-foreground ${alreadyPaid > 0.01 ? "pt-1" : ""}`}>
+                                    <span>Outstanding{alreadyPaid <= 0.01 ? ` (full invoice)` : ""}</span>
+                                    <span className="font-mono">{formatINR(prevOutstanding)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-muted-foreground">
+                                    <span>This payment</span>
+                                    <span className="font-mono text-primary">− {formatINR(entered)}</span>
+                                  </div>
+                                  <div className={`flex justify-between items-center font-bold border-t border-border/30 pt-1.5 ${
+                                    isExact
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : isPartial
+                                        ? "text-amber-600 dark:text-amber-400"
+                                        : "text-red-500"
+                                  }`}>
+                                    <span className="flex items-center gap-1.5">
+                                      {isExact
+                                        ? <><CheckCircle2 size={12} /> Fully settled</>
+                                        : isPartial
+                                          ? "Remaining"
+                                          : <><AlertTriangle size={12} /> Overpaid by</>}
+                                    </span>
+                                    <span className="font-mono text-base">
+                                      {isOver ? `+ ${formatINR(entered - prevOutstanding)}` : formatINR(afterThisPayment)}
+                                    </span>
                                   </div>
                                 </div>
                               );
@@ -5200,11 +5288,33 @@ const Payment: React.FC = () => {
                                 <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
                                   #{rec.chequeNo}
                                 </span>
-                                {rec.isPostDated && rec.chequeDate && (
-                                  <p className="text-[10px] text-indigo-500 font-mono">
-                                    {rec.chequeDate}
-                                  </p>
-                                )}
+                                {rec.isPostDated && rec.chequeDate && (() => {
+                                  const chequeD = new Date(rec.chequeDate);
+                                  const validUntil = new Date(chequeD);
+                                  validUntil.setMonth(validUntil.getMonth() + 3);
+                                  const today = new Date(); today.setHours(0,0,0,0);
+                                  const daysLeft = Math.ceil((validUntil.getTime() - today.getTime()) / 86400000);
+                                  const isExpired = validUntil < today;
+                                  const isExpiringSoon = !isExpired && daysLeft <= 7;
+                                  return (
+                                    <div className="flex flex-col gap-0.5 mt-0.5">
+                                      <p className="text-[10px] text-indigo-500 font-mono">{rec.chequeDate}</p>
+                                      {isExpired ? (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-500/10 text-red-600 border border-red-500/20 whitespace-nowrap">
+                                          Expired {new Intl.DateTimeFormat("en-IN",{day:"2-digit",month:"short"}).format(validUntil)}
+                                        </span>
+                                      ) : isExpiringSoon ? (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20 whitespace-nowrap">
+                                          Expires in {daysLeft}d
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-indigo-500/10 text-indigo-600 border border-indigo-500/20 whitespace-nowrap">
+                                          Valid till {new Intl.DateTimeFormat("en-IN",{day:"2-digit",month:"short"}).format(validUntil)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ) : rec.neftNumber ? (
                               <span className="font-mono text-xs text-muted-foreground">
@@ -5377,7 +5487,7 @@ const Payment: React.FC = () => {
           }}
         >
           <div
-            className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl overflow-hidden"
+            className="w-full max-w-4xl rounded-xl bg-card border border-border shadow-xl overflow-hidden flex flex-col max-h-[92vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -5436,7 +5546,7 @@ const Payment: React.FC = () => {
             )}
 
             {/* Body */}
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
               {detailTab === "chain" && viewingRec.expenseRef && (
@@ -6075,34 +6185,6 @@ const Payment: React.FC = () => {
                   <Edit size={12} /> Edit
                 </button>
               )}
-              {viewingRec && viewingChain && (() => {
-                const _grnTotal = viewingGrnTotal > 0 ? viewingGrnTotal
-                  : paymentChainData?.invoice?.GrnTotalAmount
-                    ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount)) : 0;
-                const _displayNet = _grnTotal > 0 ? _grnTotal : viewingChain.netAmount;
-                const _displayTotalPaid = paymentChainData?.payments?.length
-                  ? (paymentChainData.payments)
-                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
-                      .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0)
-                  : viewingChain.totalPaid;
-                const _displayRemaining = Math.max(0, _displayNet - _displayTotalPaid);
-                return _displayRemaining > 0 &&
-                  !["Reissued", "Failed", "Cancelled"].includes(viewingRec.displayStatus) && (
-                <button
-                  onClick={() => {
-                    const rec = viewingRec;
-                    const remaining = _displayRemaining;
-                    setFormKnownTotalPaid(_displayTotalPaid);
-                    setViewingRec(null);
-                    setViewingChain(null);
-                    handlePayRemaining(rec, remaining);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                >
-                  <Plus size={12} /> Pay Remaining
-                </button>
-                );
-              })()}
               <button
                 onClick={() => {
                   setViewingRec(null);
