@@ -194,6 +194,7 @@ router.delete("/:id", authenticateToken, requirePageRight("account-group", "dele
         C: "Contractor",
         B: "Bank",
         A: "Customer",
+        BR: "Broker",
         GL: "General Ledger",
       };
       const pageLabel = typeLabels[sample.LHeadType] || "General Ledger";

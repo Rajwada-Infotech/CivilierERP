@@ -16,6 +16,7 @@ import {
 } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks } from "@/api/bankMasterApi";
+import { getContractOptions, type ContractOption } from "@/api/contractApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -233,6 +234,9 @@ interface PaymentRecord {
   sgstRate: number | null;
   igstRate: number | null;
   billingTermsData: string | null;
+  // Optional: tags this payment as an on-account advance against a
+  // Contract when no expense booking exists yet (backend/services/contractLedger.js).
+  contractId: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -561,6 +565,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     igstRate: null,
     billingTermsData: null,
     paidTo: "",
+    contractId: "",
   };
 }
 
@@ -611,6 +616,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     sgstRate: null,
     igstRate: null,
     billingTermsData: null,
+    contractId: String((item as { ContractId?: number }).ContractId ?? ""),
   };
 }
 
@@ -1841,6 +1847,12 @@ const Payment: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
+  const [contracts, setContracts] = useState<ContractOption[]>([]);
+  useEffect(() => {
+    getContractOptions()
+      .then(setContracts)
+      .catch(() => {});
+  }, []);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Re-issue (bounced cheque replacement) context
@@ -2814,6 +2826,7 @@ const Payment: React.FC = () => {
       impsReference: form.impsReference || null,
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
+      ContractId: form.contractId ? Number(form.contractId) : null,
       // Re-issue fields
       ...(reissueCtx ? {
         ReplacesPaymentId: reissueCtx.replacesPaymentId,
@@ -3238,6 +3251,33 @@ const Payment: React.FC = () => {
                               </option>
                             ));
                           })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field
+                      label="Contract (optional)"
+                      hint="Record this as an on-account advance against a contract"
+                    >
+                      <div className="relative">
+                        <FileText
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={form.contractId}
+                          onChange={(e) => set("contractId", e.target.value)}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Not linked to a contract</option>
+                          {contracts.map((c) => (
+                            <option key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </option>
+                          ))}
                         </select>
                         <ChevronDown
                           size={11}

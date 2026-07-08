@@ -279,7 +279,8 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       !LBelongsTo &&
       LHeadType !== "S" &&
       LHeadType !== "A" &&
-      LHeadType !== "C"
+      LHeadType !== "C" &&
+      LHeadType !== "BR"
     ) {
       return res.status(400).json({
         error:
@@ -683,7 +684,8 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       !LBelongsTo &&
       LHeadType !== "S" &&
       LHeadType !== "A" &&
-      LHeadType !== "C"
+      LHeadType !== "C" &&
+      LHeadType !== "BR"
     ) {
       return res.status(400).json({
         error: "Please select an Account Group before saving a Ledger Account.",

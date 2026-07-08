@@ -26,9 +26,9 @@ function getUserRole(): string | null {
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
 
-function isApprover(): boolean {
+function isApprover(allowedRoles: string[]): boolean {
   const role = getUserRole();
-  return role !== null && APPROVER_ROLES.includes(role);
+  return role !== null && allowedRoles.includes(role);
 }
 
 // ─── fetchWithAuth helper (inline — avoids import path assumptions) ───────────
@@ -66,6 +66,12 @@ interface ApprovalActionsProps {
   /** When true, only the Submit button is shown. Approve/Reject are reserved
    *  for the Admin Approval Inbox and will not render on this component. */
   submitOnly?: boolean;
+  /** Override which roles may see Approve/Reject (only relevant when this
+   *  component renders inside the Approval Inbox, i.e. submitOnly=false).
+   *  Defaults to the system-wide APPROVER_ROLES. The backend re-checks
+   *  independently via approvalService.js's MODULE_APPROVER_ROLE_OVERRIDES —
+   *  this only controls whether the buttons render. */
+  approverRoles?: string[];
 }
 
 export function ApprovalActions({
@@ -75,12 +81,13 @@ export function ApprovalActions({
   onSuccess,
   className,
   submitOnly = false,
+  approverRoles = APPROVER_ROLES,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
 
-  const approver = isApprover();
+  const approver = isApprover(approverRoles);
 
   // ── Action handler ──────────────────────────────────────────────────────────
   async function handleAction(action: "submit" | "approve" | "reject") {

@@ -21,6 +21,11 @@ export const MARKETING_HEAD_PAGES = new Set<string>([
   "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
   "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
   "sa-distribution-rules", "sa-lead-transfers", "sa-role-master",
+  "sa-channel-partners", "sa-lead-activities", "sa-lead-tasks", "sa-commissions",
+  // CRM module — all crm- prefixed pages
+  "crm-applications", "crm-bookings", "crm-welcome-calls",
+  "crm-agreements", "crm-documents", "crm-payments", "crm-loan-details",
+  "crm-handover", "crm-service-tickets", "crm-cancellations", "crm-customer-360",
   // Sales module
   "sale-order", "sale-invoice", "sales-payment",
 ]);

@@ -57,6 +57,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                     ? "⛏️ Civil Work DPR"
                     : activeModule === "sales-automation"
                       ? "📣 Sales Automation"
+                      : activeModule === "crm"
+                        ? "🏠 CRM"
                     : activeModule === "admin"
                       ? "🔧 Admin"
                       : "No Module Selected";
@@ -104,6 +106,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "records",
       "civilworkdpr",
       "sales-automation",
+      "crm",
       "admin",
     ];
 
@@ -125,6 +128,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/sales-automation")) {
       setActiveModuleState("sales-automation");
       localStorage.setItem("activeModule", "sales-automation");
+    } else if (pathname.startsWith("/crm")) {
+      setActiveModuleState("crm");
+      localStorage.setItem("activeModule", "crm");
     } else if (pathname.startsWith("/sales")) {
       setActiveModuleState("sales");
       localStorage.setItem("activeModule", "sales");
