@@ -955,10 +955,17 @@ export default function Quotation() {
   // ── Print helper ──────────────────────────────────────────────────────────────
 
   const handlePrint = (r: qtApi.Quotation) => {
-    const items = (r.items || []) as any[];
-    const suppliers = (r.suppliers || []) as any[];
+    const printItems = (r.items || []) as any[];
+    const printSuppliers = (r.suppliers || []) as any[];
+    const esc = (v: unknown) =>
+      String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<title>Quotation ${r.DocNo}</title>
+<title>Quotation ${esc(r.DocNo)}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:24px}
@@ -974,20 +981,20 @@ export default function Quotation() {
   @media print{body{padding:0}}
 </style></head><body>
 <h1>Request for Quotation</h1>
-<div class="sub">${r.DocNo} &nbsp;·&nbsp; ${r.Status}</div>
+<div class="sub">${esc(r.DocNo)} &nbsp;·&nbsp; ${esc(r.Status)}</div>
 <div class="meta">
-  <div class="meta-item"><label>Company</label><span>${r.CompanyName || '—'}</span></div>
-  <div class="meta-item"><label>Project</label><span>${r.ProjectName || '—'}</span></div>
-  <div class="meta-item"><label>Date</label><span>${fmtDate(r.DocDate)}</span></div>
-  <div class="meta-item"><label>Source MR</label><span>${r.SourceMRDocNo || '—'}</span></div>
+  <div class="meta-item"><label>Company</label><span>${esc(r.CompanyName || "—")}</span></div>
+  <div class="meta-item"><label>Project</label><span>${esc(r.ProjectName || "—")}</span></div>
+  <div class="meta-item"><label>Date</label><span>${esc(fmtDate(r.DocDate))}</span></div>
+  <div class="meta-item"><label>Source MR</label><span>${esc(r.SourceMRDocNo || "—")}</span></div>
 </div>
 <div class="section-title">Items</div>
 <table><thead><tr><th>#</th><th>Item</th><th>UOM</th><th>Qty</th></tr></thead><tbody>
-${items.map((it, i) => `<tr><td>${i + 1}</td><td>${it.ItemName || it.ItemId}</td><td>${it.UOMName || it.UOMCode || ''}</td><td>${it.Quantity}</td></tr>`).join('')}
+${printItems.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.ItemName || it.ItemId)}</td><td>${esc(it.UOMName || it.UOMCode || "")}</td><td>${esc(it.Quantity)}</td></tr>`).join("")}
 </tbody></table>
 <div class="section-title">Suppliers</div>
 <table><thead><tr><th>Supplier</th><th>Status</th><th>Invited</th></tr></thead><tbody>
-${suppliers.map(s => `<tr><td>${s.SupplierName}</td><td>${s.Status}</td><td>${fmtDate(s.InvitedAt)}</td></tr>`).join('')}
+${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status)}</td><td>${esc(fmtDate(s.InvitedAt))}</td></tr>`).join("")}
 </tbody></table>
 </body></html>`;
     const win = window.open("", "_blank");

@@ -12,6 +12,20 @@ process.env.NODE_ENV = "test";
  * plumbing.
  */
 
+// contractLedger.js imports db.js at the top level, which calls loadEnv() and
+// throws when DB env vars are absent (as in CI without a real connection).
+// Mock the db module before requiring the service so loadEnv() is never called.
+jest.mock("../db", () => ({
+  sql: {
+    Int: "Int",
+    NVarChar: "NVarChar",
+    Decimal: () => "Decimal",
+    DateTime: "DateTime",
+    Bit: "Bit",
+  },
+  getPool: jest.fn(),
+}));
+
 const {
   getContractBalance,
   recordAdvance,

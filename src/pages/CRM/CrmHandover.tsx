@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 
 const API = "/api/crm/handover";
 const BKG_API = "/api/crm/bookings";
-const SA_LEADS_API = "/api/sa/leads";
+
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
 const HO_STATUSES = ["Scheduled", "SnagInspection", "SnagPending", "Completed", "Cancelled"];
@@ -32,14 +32,7 @@ async function fetchDetail(id: number): Promise<any> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchUsers(): Promise<{ value: string; label: string }[]> {
-  try {
-    const r = await fetchWithAuth(`${SA_LEADS_API}/users`);
-    if (!r.ok) return [];
-    const d: any[] = await r.json();
-    return d.map((u) => ({ value: String(u.Id), label: u.Name }));
-  } catch { return []; }
-}
+
 
 const CrmHandover: React.FC = () => {
   const qc = useQueryClient();
@@ -58,8 +51,6 @@ const CrmHandover: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-
   const handleSchedule = async () => {
     if (!newForm.BookingId) { toast.error("Booking is required"); return; }
     setSaving(true);

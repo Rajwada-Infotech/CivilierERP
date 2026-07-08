@@ -1,4 +1,4 @@
-import { ClipboardList, BookOpen, Phone, FileText, IndianRupee, Key, Wrench, XCircle, Users, Scale, HardHat, LayoutDashboard, MessageSquare } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const crmNavItems: NavItem[] = [

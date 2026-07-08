@@ -92,11 +92,6 @@ function printRoutesSummary(results, logger = console) {
   const W = 38;
   const border = `  +${"-".repeat(W)}+`;
 
-  const pad = (str, width) => {
-    const visible = str.replace(/\x1b\[[0-9;]*m/g, "");
-    return str + " ".repeat(Math.max(0, width - visible.length));
-  };
-
   const row = (content) => {
     const visible = content.replace(/\x1b\[[0-9;]*m/g, "");
     const padding = Math.max(0, W - 2 - visible.length);

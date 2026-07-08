@@ -7,8 +7,6 @@ const { bumpCacheVersion } = require("../redis");
 const rateLimit = require("express-rate-limit");
 const {
   syncAdToPlatform,
-  fetchAdMetrics,
-  fetchLeadsFromPlatform,
   normalizeImportedLeads,
   providerLabel,
 } = require("../services/saAdPlatformService");

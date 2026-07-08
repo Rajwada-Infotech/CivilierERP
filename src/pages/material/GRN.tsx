@@ -816,18 +816,6 @@ export default function GRN() {
       .finally(() => setGrnPostingLoading(false));
   }, [viewModalTab, viewingGrn?.GRNID]);
 
-  // Match the real system-generated ledger (if it exists yet) for each GRN posting row
-  const grnPurchaseLedger = systemLedgers.find((d) =>
-    d.label.toLowerCase().includes("purchase"),
-  );
-  const grnPendingLedger = systemLedgers.find((d) =>
-    d.label.toLowerCase().includes("pending"),
-  );
-  const grnProvisionalCreditLedger = systemLedgers.find(
-    (d) =>
-      d.label.toLowerCase().includes("provisional") &&
-      d.label.toLowerCase().includes("credit"),
-  );
   const [grnPostingData, setGrnPostingData] = useState<any | null>(null);
   const [grnPostingLoading, setGrnPostingLoading] = useState(false);
   const [grnPosting, setGrnPosting] = useState(false);
