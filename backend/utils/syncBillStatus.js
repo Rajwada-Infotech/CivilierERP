@@ -35,7 +35,7 @@ async function syncBillStatus(pool, sql, expenseRef) {
       .request()
       .input("PExpenseRef", sql.NVarChar(100), expenseRef)
       .query(`
-        SELECT ISNULL(SUM(np.PAmount), 0) AS TotalPaid
+        SELECT ISNULL(SUM(np.PAmount - ISNULL(np.BounceCharge, 0)), 0) AS TotalPaid
         FROM dbo.NewPayment np
         LEFT JOIN dbo.BankReconciliation br
           ON  br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID
