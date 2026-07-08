@@ -2047,12 +2047,15 @@ const Payment: React.FC = () => {
     if (detailTab !== "posting" || !viewingRec?.id) return;
     setPmtPostingLoading(true);
     setPmtPostingData(null);
-    fetchWithAuth(`/api/new-payment/${viewingRec.id}/posting`)
+    const url = viewingRec.expenseRef
+      ? `/api/new-payment/chain-posting/${encodeURIComponent(viewingRec.expenseRef)}`
+      : `/api/new-payment/${viewingRec.id}/posting`;
+    fetchWithAuth(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setPmtPostingData(d ?? null))
       .catch(() => setPmtPostingData(null))
       .finally(() => setPmtPostingLoading(false));
-  }, [detailTab, viewingRec?.id]);
+  }, [detailTab, viewingRec?.id, viewingRec?.expenseRef]);
 
   // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
   // /payments?view=<PPaymentID>, so this payment's receipt should open
@@ -6061,115 +6064,167 @@ const Payment: React.FC = () => {
 
               {/* ── Posting Tab ── */}
               {detailTab === "posting" && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <BookOpen size={14} className="text-primary" />
-                      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                        Journal Entry — Payment Posting
-                      </span>
-                    </div>
-                    {pmtPostingLoading ? (
-                      <span className="text-[10px] text-muted-foreground">Loading…</span>
-                    ) : pmtPostingData?.isPosted ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-                        Posted · {pmtPostingData.jvNo}
-                      </span>
-                    ) : null}
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} className="text-primary" />
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                      GL Postings — Full Payment Chain
+                    </span>
                   </div>
 
                   {pmtPostingLoading ? (
                     <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">Loading posting details…</div>
                   ) : !pmtPostingData ? (
                     <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">Could not load posting data.</div>
+                  ) : !pmtPostingData.entries?.length ? (
+                    <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">No approved payments to post yet.</div>
                   ) : (() => {
-                    const { isOnAccount, amount, invoiceTotal, accounts } = pmtPostingData;
-                    const postAmt = amount;
                     const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit" };
-                    const rows: PostRow[] = [
-                      { key: "supplier", label: accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: accounts?.supplier?.code ?? null, side: "debit" },
-                      { key: "bank",     label: accounts?.bank?.label     ?? "Bank A/c",                 code: accounts?.bank?.code     ?? null, side: "credit" },
+                    const fmtDate = (d: string) => d ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(d)) : "—";
+                    type ChainEntry = {
+                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge";
+                      amount: number; mode: string; bounceReason?: string;
+                      isBounced?: boolean;
+                      accounts: any; isPosted: boolean; jvNo: string | null;
+                    };
+                    const entries: ChainEntry[] = pmtPostingData.entries;
+                    const [postingIds, setPostingIds] = [
+                      new Set<string>(),
+                      // local mutable set handled via state update on pmtPostingData
                     ];
+
                     return (
-                      <>
-                        {isOnAccount && (
-                          <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
-                            Payment on Account — not linked to a specific invoice.
-                          </div>
-                        )}
-                        <div className="rounded-xl border border-border overflow-hidden">
-                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
-                            <span>Account</span>
-                            <span className="text-right">Debit (₹)</span>
-                            <span className="text-right">Credit (₹)</span>
-                          </div>
-                          {rows.map((row) => (
-                            <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                                <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
-                                  {row.label}{row.code ? ` (${row.code})` : ""}
-                                </span>
+                      <div className="space-y-4">
+                        {entries.map((entry, idx) => {
+                          const isPayment = entry.type === "payment";
+                          const isBounce = entry.type === "bounce_charge";
+                          const isBouncedPayment = isPayment && !!entry.isBounced;
+                          const rows = isPayment
+                            ? [
+                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ]
+                            : [
+                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ];
+
+                          const entryKey = `${entry.pmtId}-${entry.type}`;
+
+                          return (
+                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
+                              {/* Entry header */}
+                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
+                                <div className="flex items-center gap-2.5 flex-wrap">
+                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
+                                    {isBounce ? "Bounce Charge" : "Payment"}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-muted-foreground">{entry.docNo}</span>
+                                  <span className="text-[10px] text-muted-foreground">{fmtDate(entry.date)}</span>
+                                  {entry.mode && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{entry.mode}</span>
+                                  )}
+                                  {isBounce && entry.bounceReason && (
+                                    <span className="text-[9px] text-rose-500 italic">{entry.bounceReason}</span>
+                                  )}
+                                  {isBouncedPayment && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-medium">
+                                      Cheque Bounced — not postable
+                                    </span>
+                                  )}
+                                </div>
+                                {isBouncedPayment ? null : entry.isPosted ? (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                                    ✓ {entry.jvNo}
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={async () => {
+                                      const url = isBounce
+                                        ? `/api/new-payment/${entry.pmtId}/post-bounce-charge-to-gl`
+                                        : `/api/new-payment/${entry.pmtId}/post-to-gl`;
+                                      setPmtPosting(true);
+                                      try {
+                                        const r = await fetchWithAuth(url, { method: "POST" });
+                                        const body = await r.json();
+                                        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+                                        setPmtPostingData((prev: any) => ({
+                                          ...prev,
+                                          entries: prev.entries.map((e: ChainEntry) =>
+                                            e.pmtId === entry.pmtId && e.type === entry.type
+                                              ? { ...e, isPosted: true, jvNo: body.jvNo }
+                                              : e
+                                          ),
+                                        }));
+                                      } catch (err: any) {
+                                        alert(err.message ?? "Posting failed");
+                                      } finally {
+                                        setPmtPosting(false);
+                                      }
+                                    }}
+                                    disabled={pmtPosting}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-50 transition-colors whitespace-nowrap ${
+                                      isBounce
+                                        ? "bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 border border-rose-500/30"
+                                        : "bg-primary text-primary-foreground hover:bg-primary/90"
+                                    }`}
+                                  >
+                                    <BookOpen size={10} /> Post to GL
+                                  </button>
+                                )}
                               </div>
-                              <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                                {row.side === "debit" ? fmtAmt(postAmt) : ""}
-                              </span>
-                              <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                                {row.side === "credit" ? fmtAmt(postAmt) : ""}
-                              </span>
+
+                              {/* Dr/Cr rows */}
+                              <div className="divide-y divide-border/50">
+                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                                  <span>Account</span>
+                                  <span className="text-right">Debit (₹)</span>
+                                  <span className="text-right">Credit (₹)</span>
+                                </div>
+                                {rows.map((row, ri) => (
+                                  <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                      <span className="text-xs text-foreground truncate">
+                                        {row.label}{row.code ? ` (${row.code})` : ""}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                      {row.side === "debit" ? fmtAmt(entry.amount) : ""}
+                                    </span>
+                                    <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                      {row.side === "credit" ? fmtAmt(entry.amount) : ""}
+                                    </span>
+                                  </div>
+                                ))}
+                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
+                                  <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                </div>
+                              </div>
                             </div>
-                          ))}
-                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                            <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
-                            <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(postAmt)}</span>
-                            <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(postAmt)}</span>
-                          </div>
-                        </div>
+                          );
+                        })}
 
-                        {!isOnAccount && invoiceTotal > amount && (
-                          <div className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-1.5">
-                            Partial payment — posting ₹{fmtAmt(amount)} of ₹{fmtAmt(invoiceTotal)} invoice total.
-                          </div>
-                        )}
-
-                        {pmtPostingData.isPosted ? (
-                          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                            <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                            <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                              Already posted to General Ledger as <span className="font-semibold">{pmtPostingData.jvNo}</span>.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-between gap-4">
-                            <p className="text-xs text-muted-foreground">
-                              Posting will create a balanced journal entry in the Trial Balance.
-                            </p>
-                            <button
-                              disabled={pmtPosting}
-                              onClick={async () => {
-                                if (!viewingRec?.id) return;
-                                setPmtPosting(true);
-                                try {
-                                  const r = await fetchWithAuth(`/api/new-payment/${viewingRec.id}/post-to-gl`, { method: "POST" });
-                                  const body = await r.json();
-                                  if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                                  setPmtPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo }));
-                                } catch (err: any) {
-                                  alert(err.message ?? "Posting failed");
-                                } finally {
-                                  setPmtPosting(false);
-                                }
-                              }}
-                              className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                            >
-                              <BookOpen size={11} />
-                              {pmtPosting ? "Posting…" : "Post to GL"}
-                            </button>
-                          </div>
-                        )}
-                      </>
+                        {/* Invoice summary */}
+                        {pmtPostingData.invoiceTotal > 0 && (() => {
+                          const totalPosted = entries
+                            .filter((e) => e.type === "payment")
+                            .reduce((s, e) => s + e.amount, 0);
+                          const remaining = Math.max(0, pmtPostingData.invoiceTotal - totalPosted);
+                          return remaining > 0.01 ? (
+                            <div className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+                              Posted ₹{fmtAmt(totalPosted)} of ₹{fmtAmt(pmtPostingData.invoiceTotal)} — ₹{fmtAmt(remaining)} outstanding.
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-emerald-600 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3 py-2">
+                              Invoice fully posted — ₹{fmtAmt(pmtPostingData.invoiceTotal)} cleared.
+                            </div>
+                          );
+                        })()}
+                      </div>
                     );
                   })()}
                 </div>
