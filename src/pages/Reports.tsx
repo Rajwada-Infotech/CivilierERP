@@ -1,6 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { exportToCsv } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -1375,52 +1381,36 @@ const ReportTable: React.FC<{
     </div>
 
     {/* ── Row detail card ── */}
-    {selectedRow && (
-      <div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-        onClick={() => setSelectedRow(null)}
-      >
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-        <div
-          className="relative w-full max-w-lg rounded-2xl bg-card border border-border shadow-2xl overflow-hidden z-10"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${report.color}18` }}>
-                <report.icon size={16} style={{ color: report.color }} />
-              </div>
-              <span className="font-semibold text-foreground text-sm">{report.label}</span>
+    <Dialog open={!!selectedRow} onOpenChange={(o) => { if (!o) setSelectedRow(null); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${report.color}18` }}>
+              <report.icon size={14} style={{ color: report.color }} />
             </div>
-            <button
-              onClick={() => setSelectedRow(null)}
-              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted/60 text-muted-foreground transition-colors"
-            >
-              <XCircle size={16} />
-            </button>
-          </div>
-
-          {/* Body */}
-          <div className="p-5 space-y-2.5 max-h-[70vh] overflow-y-auto">
+            {report.label}
+          </DialogTitle>
+        </DialogHeader>
+        {selectedRow && (
+          <div className="divide-y divide-border">
             {report.columns.map((col) => {
               const val = cell(selectedRow, col);
               if (!val || val === "—") return null;
               return (
-                <div key={col.header} className="flex items-start justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
-                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-32">
+                <div key={col.header} className="flex items-start justify-between gap-6 py-2.5">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-28 pt-0.5">
                     {col.header}
                   </span>
-                  <span className="text-sm text-foreground text-right font-mono break-all">
+                  <span className="text-sm text-foreground text-right break-all">
                     {val}
                   </span>
                 </div>
               );
             })}
           </div>
-        </div>
-      </div>
-    )}
+        )}
+      </DialogContent>
+    </Dialog>
     </>
   );
 };
