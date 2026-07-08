@@ -97,6 +97,15 @@ const MODULES = [
     bg: "rgba(245,158,11,0.22)",
     ringRgb: "245,158,11",
   },
+  {
+    id: "crm" as Module,
+    icon: Building3,
+    label: "CRM",
+    desc: "Applications, bookings & agreements",
+    color: "#0ea5e9",
+    bg: "rgba(14,165,233,0.22)",
+    ringRgb: "14,165,233",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,

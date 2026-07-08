@@ -461,6 +461,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     ReplacesPaymentId,
     // Optional bounce charge added on top of the original amount
     BounceCharge,
+    // Contract Master (Migration 176) — see services/contractLedger.js
+    ContractId,
   } = req.body;
 
   try {
@@ -593,6 +595,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       // Audit
       .input("ReplacesPaymentId", sql.Int, ReplacesPaymentId ? parseInt(ReplacesPaymentId) : null)
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -604,7 +607,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge,
+          ReplacesPaymentId, BounceCharge, ContractId,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -615,7 +618,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge,
+          @ReplacesPaymentId, @BounceCharge, @ContractId,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
@@ -672,6 +675,21 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       } catch (oaErr) {
         console.warn("[OA] On Account credit hook failed (non-fatal):", oaErr.message);
       }
+    }
+
+    // Contract Master: record as an advance ONLY when this payment isn't
+    // already tied to an Expense Booking — a payment against a real
+    // expense booking settles that document directly.
+    if (ContractId && !PExpenseRef) {
+      const { recordAdvance } = require("../services/contractLedger");
+      await recordAdvance(pool, {
+        contractId: parseInt(ContractId, 10),
+        sourceType: "NewPayment",
+        sourceId: newId,
+        sourceDocNo: finalDocNo,
+        amount: PAmount != null ? Number(PAmount) : 0,
+        createdBy: userEmail,
+      });
     }
 
     await bumpCacheVersion("new-payment");
@@ -1600,4 +1618,5 @@ router.post("/:id/post-to-gl", async (req, res) => {
 });
 
 module.exports = router;
+module.exports.syncBillStatus = syncBillStatus;
 

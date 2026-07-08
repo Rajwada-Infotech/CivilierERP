@@ -60,6 +60,7 @@ import {
 } from "@/api/receivedPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
+import { getContractOptions, type ContractOption } from "@/api/contractApi";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
   fetchDocTypes,
@@ -182,6 +183,9 @@ const EMPTY_FORM = {
   transactionId: "",
   checkNumber: "",
   remarks: "",
+  // Optional: tags this payment as an on-account advance against a
+  // Contract when no invoice exists yet (backend/services/contractLedger.js).
+  contractId: "" as string,
 };
 
 // ─── Form Field Label ──────────────────────────────────────────────────────────
@@ -380,6 +384,7 @@ export default function ReceivedPaymentPage() {
     { id: number; label: string; belongsTo: number | null }[]
   >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
+  const [contracts, setContracts] = useState<ContractOption[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   // TypeOfDocId for the RECP doc type — resolved once on mount via module filter
   const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
@@ -398,6 +403,10 @@ export default function ReceivedPaymentPage() {
 
     getBanks()
       .then((data) => setBanks(data.filter((b) => b.BStatus)))
+      .catch(() => {});
+
+    getContractOptions()
+      .then(setContracts)
       .catch(() => {});
 
     // Projects: enterprise table WHERE business_type = 'P', with belongs_to for company filter
@@ -586,6 +595,7 @@ export default function ReceivedPaymentPage() {
       transactionId: p.transactionId ?? "",
       checkNumber: p.checkNumber ?? "",
       remarks: p.remarks ?? "",
+      contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
@@ -642,6 +652,7 @@ export default function ReceivedPaymentPage() {
       RPRemarks: form.remarks || null,
       RPDepositBankId: Number(form.depositBankId) || null,
       RPDepositBankName: form.depositBankName || null,
+      ContractId: form.contractId ? Number(form.contractId) : null,
     };
 
     try {
@@ -1472,6 +1483,29 @@ export default function ReceivedPaymentPage() {
                             No active banks found for this company
                           </div>
                         )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 3b: Contract (optional) — tags this payment as an
+                    on-account advance when no invoice exists yet. */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Contract (optional)</FieldLabel>
+                    <Select
+                      value={form.contractId}
+                      onValueChange={(v) => setField("contractId", v)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Not linked to a contract" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {contracts.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

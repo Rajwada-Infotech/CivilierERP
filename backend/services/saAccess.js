@@ -37,4 +37,16 @@ function applyLeadScope(request, req, alias = "l") {
   return `${alias}.AssignedSalespersonId = @ActorUserId`;
 }
 
-module.exports = { actorId, isSaAdmin, isSaTeamLead, isSalesPerson, applyLeadScope };
+// approvalService.transition() needs the actor's email (for ApprovalAuditLog),
+// not their numeric id — mirrors the requireUserEmail() helper every other
+// module wired into the shared Approval Inbox already defines locally.
+function requireUserEmail(req, res) {
+  const email = req.user?.email;
+  if (!email) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return email;
+}
+
+module.exports = { actorId, isSaAdmin, isSaTeamLead, isSalesPerson, applyLeadScope, requireUserEmail };

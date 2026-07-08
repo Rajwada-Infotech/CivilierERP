@@ -143,6 +143,11 @@ const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
 const PaymentPlanMaster = lazy(
   () => import("./pages/followup/PaymentPlanMaster"),
 );
+const ParkingMaster = lazy(() => import("./pages/followup/ParkingMaster"));
+const ExtraChargeMaster = lazy(
+  () => import("./pages/followup/ExtraChargeMaster"),
+);
+const UnitMatrixPage = lazy(() => import("./pages/followup/UnitMatrix"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -364,6 +369,9 @@ const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialM
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
 const SaLeadManagement = lazy(() => import("./pages/SalesAutomation/SaLeadManagement"));
+const SaChannelPartners = lazy(() => import("./pages/SalesAutomation/SaChannelPartners"));
+const SaLeadActivities = lazy(() => import("./pages/SalesAutomation/SaLeadActivities"));
+const SaLeadTasks = lazy(() => import("./pages/SalesAutomation/SaLeadTasks"));
 const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDistribution"));
 const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
 const SaSiteVisits = lazy(() => import("./pages/SalesAutomation/SaSiteVisits"));
@@ -374,8 +382,36 @@ const SaTeamLeadDashboard = lazy(() => import("./pages/SalesAutomation/SaTeamLea
 const SaReports = lazy(() => import("./pages/SalesAutomation/SaReports"));
 const SaTeamManagement = lazy(() => import("./pages/SalesAutomation/SaTeamManagement"));
 const SaLeadTransfers = lazy(() => import("./pages/SalesAutomation/SaLeadTransfers"));
+const SaCommissions = lazy(() => import("./pages/SalesAutomation/SaCommissions"));
 const SaDistributionRules = lazy(() => import("./pages/SalesAutomation/SaDistributionRules"));
 const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
+// ── CRM Module ────────────────────────────────────────────────────────────────
+const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
+const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
+const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
+const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
+const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
+const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
+const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
+const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
+const CrmCustomer360       = lazy(() => import("./pages/CRM/CrmCustomer360"));
+const CrmLoanTracking      = lazy(() => import("./pages/CRM/CrmLoanTracking"));
+const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones"));
+const CrmNoc               = lazy(() => import("./pages/CRM/CrmNoc"));
+const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
+const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
+const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
+const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
+const CrmCommunication     = lazy(() => import("./pages/CRM/CrmCommunication"));
+const CrmDashboard         = lazy(() => import("./pages/CRM/CrmDashboard"));
+const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
+const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
+const CrmPaymentPlans      = lazy(() => import("./pages/CRM/CrmPaymentPlans"));
+const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
+const CrmBrokerPayments    = lazy(() => import("./pages/CRM/CrmBrokerPayments"));
+const PortalLogin          = lazy(() => import("./pages/CrmCustomerPortal/PortalLogin"));
+const PortalChangePassword = lazy(() => import("./pages/CrmCustomerPortal/PortalChangePassword"));
+const PortalDashboard      = lazy(() => import("./pages/CrmCustomerPortal/PortalDashboard"));
 const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const ApplicantsPipelinePage = lazy(() =>
   import("./pages/followup/FollowupPipelinePage").then((module) => ({
@@ -591,6 +627,11 @@ function AppRoutes() {
   const { currentUser } = useAuth();
   return (
     <Routes>
+      {/* CRM CUSTOMER PORTAL — separate token-based auth, not the staff ERP session */}
+      <Route path="/crm-client-portal/login" element={<PortalLogin />} />
+      <Route path="/crm-client-portal/change-password" element={<PortalChangePassword />} />
+      <Route path="/crm-client-portal/dashboard" element={<PortalDashboard />} />
+
       {/* AUTH */}
       <Route
         path="/login"
@@ -909,6 +950,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="payment-plan-master">
             <PaymentPlanMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/parking-master"
+        element={
+          <ProtectedRoute pageKey="followup-parking-master">
+            <ParkingMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/extra-charge-master"
+        element={
+          <ProtectedRoute pageKey="followup-extra-charge-master">
+            <ExtraChargeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/unit-matrix"
+        element={
+          <ProtectedRoute pageKey="followup-unit-matrix">
+            <UnitMatrixPage />
           </ProtectedRoute>
         }
       />
@@ -2102,10 +2167,14 @@ function AppRoutes() {
       <Route path="/sales-automation/campaigns" element={<ProtectedRoute pageKey="sa-campaigns"><SaCampaignMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/ads" element={<ProtectedRoute pageKey="sa-ads"><SaAdMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/leads" element={<ProtectedRoute pageKey="sa-leads"><SaLeadManagement /></ProtectedRoute>} />
+      <Route path="/sales-automation/channel-partners" element={<ProtectedRoute pageKey="sa-channel-partners"><SaChannelPartners /></ProtectedRoute>} />
+      <Route path="/sales-automation/lead-activities" element={<ProtectedRoute pageKey="sa-lead-activities"><SaLeadActivities /></ProtectedRoute>} />
+      <Route path="/sales-automation/lead-tasks" element={<ProtectedRoute pageKey="sa-lead-tasks"><SaLeadTasks /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaLeadDistribution /></ProtectedRoute>} />
       <Route path="/sales-automation/inquiry" element={<ProtectedRoute pageKey="sa-inquiry"><SaInquiryDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/site-visits" element={<ProtectedRoute pageKey="sa-site-visits"><SaSiteVisits /></ProtectedRoute>} />
       <Route path="/sales-automation/invoices" element={<ProtectedRoute pageKey="sa-marketing-invoices"><SaMarketingInvoices /></ProtectedRoute>} />
+      <Route path="/sales-automation/commissions" element={<ProtectedRoute pageKey="sa-commissions"><SaCommissions /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
@@ -2114,6 +2183,31 @@ function AppRoutes() {
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
       <Route path="/sales-automation/role-master" element={<ProtectedRoute pageKey="sa-role-master"><SaRoleMaster /></ProtectedRoute>} />
+      {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
+      <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
+      <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
+      <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
+      <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
+      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreement /></ProtectedRoute>} />
+      <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
+      <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
+      <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
+      <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
+      <Route path="/crm/customer-360"     element={<ProtectedRoute pageKey="crm-customer-360"><CrmCustomer360 /></ProtectedRoute>} />
+      <Route path="/crm/loan-details"     element={<ProtectedRoute pageKey="crm-loan-details"><CrmLoanTracking /></ProtectedRoute>} />
+      <Route path="/crm/dashboard"             element={<ProtectedRoute pageKey="crm-dashboard"><CrmDashboard /></ProtectedRoute>} />
+      <Route path="/crm/legal-milestones"      element={<ProtectedRoute pageKey="crm-legal-milestones"><CrmLegalMilestones /></ProtectedRoute>} />
+      <Route path="/crm/noc"                   element={<ProtectedRoute pageKey="crm-noc"><CrmNoc /></ProtectedRoute>} />
+      <Route path="/crm/sales-deed"            element={<ProtectedRoute pageKey="crm-sales-deed"><CrmSalesDeed /></ProtectedRoute>} />
+      <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />
+      <Route path="/crm/possession-notice"     element={<ProtectedRoute pageKey="crm-possession-notice"><CrmPossessionNotice /></ProtectedRoute>} />
+      <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />
+      <Route path="/crm/communication"         element={<ProtectedRoute pageKey="crm-communication"><CrmCommunication /></ProtectedRoute>} />
+      <Route path="/crm/customer-bank-details" element={<ProtectedRoute pageKey="crm-customer-bank-details"><CrmCustomerBankDetails /></ProtectedRoute>} />
+      <Route path="/crm/brokerage"             element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerage /></ProtectedRoute>} />
+      <Route path="/crm/payment-plans"         element={<ProtectedRoute pageKey="crm-payment-plans"><CrmPaymentPlans /></ProtectedRoute>} />
+      <Route path="/masters/brokers"           element={<ProtectedRoute pageKey="broker-master"><CrmBrokerMaster /></ProtectedRoute>} />
+      <Route path="/crm/broker-payments"       element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerPayments /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
