@@ -353,6 +353,36 @@ const fetchCardsByBank = async (
   }));
 };
 
+const IFSC_BANK_MAP: Record<string, string> = {
+  SBIN: "SBI", SBIM: "SBI", SBIP: "SBI",
+  HDFC: "HDFC", HDFB: "HDFC",
+  ICIC: "ICICI",
+  AXIS: "Axis", UTIB: "Axis",
+  KKBK: "Kotak", KOTAK: "Kotak",
+  PUNB: "PNB", PSIB: "PSB",
+  UBIN: "Union Bank",
+  BARB: "Bank of Baroda", BKID: "Bank of India",
+  CNRB: "Canara", CORP: "Corporation",
+  IOBA: "IOB", IDIB: "Indian Bank",
+  YESB: "Yes Bank", RATN: "RBL", DCBL: "DCB",
+  FDRL: "Federal", KVBL: "KVB", CSBK: "CSB",
+  INDB: "IndusInd", IDFC: "IDFC First",
+  CIUB: "City Union", TMBL: "Tamilnad",
+  NKGS: "NKGSB", MSNU: "Mudhol",
+  ALLA: "Allahabad", ANDB: "Andhra",
+  DENA: "Dena", VIJB: "Vijaya",
+  ORBC: "Oriental", UCBA: "UCO",
+  SCBL: "Standard Chartered", CITI: "Citi",
+  HSBC: "HSBC", DEUT: "Deutsche",
+  SIBL: "SIB", LAVB: "Lakshmi Vilas",
+};
+
+function bankNameFromIfsc(ifsc?: string | null): string | null {
+  if (!ifsc || ifsc.length < 4) return null;
+  const prefix = ifsc.slice(0, 4).toUpperCase();
+  return IFSC_BANK_MAP[prefix] ?? prefix;
+}
+
 const normaliseExpenseOptions = (items: any[]): ExpenseOption[] =>
   items.map((o: any) => ({
     ...o,
@@ -1001,38 +1031,54 @@ function ExpenseBookingPicker({
   value,
   onChange,
   loading,
+  contracts = [],
+  contractsLoading = false,
+  selectedContract = null,
+  onContractSelect,
+  onContractClear,
 }: {
   options: ExpenseOption[];
   value: string;
   onChange: (id: string) => void;
   loading?: boolean;
+  contracts?: any[];
+  contractsLoading?: boolean;
+  selectedContract?: any | null;
+  onContractSelect?: (c: any) => void;
+  onContractClear?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
-  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi">(
-    "all",
-  );
+  const [source, setSource] = React.useState<"invoice" | "contract">("invoice");
+  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi">("all");
   const ref = React.useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   React.useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   const selected = options.find((o) => o.id === value);
+  const hasSelection = !!selected || !!selectedContract;
 
-  const filtered = options.filter((o) => {
+  const filteredInvoices = options.filter((o) => {
     if (typeFilter !== "all" && o.type !== typeFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
+    return o.label.toLowerCase().includes(q) || (o.projectName ?? "").toLowerCase().includes(q);
+  });
+
+  const filteredContracts = contracts.filter((c) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
     return (
-      o.label.toLowerCase().includes(q) ||
-      (o.projectName ?? "").toLowerCase().includes(q)
+      (c.DocNo ?? "").toLowerCase().includes(q) ||
+      (c.ContactPerson ?? "").toLowerCase().includes(q) ||
+      (c.Reason ?? "").toLowerCase().includes(q) ||
+      (c.NatureOfContract ?? "").toLowerCase().includes(q)
     );
   });
 
@@ -1042,159 +1088,146 @@ function ExpenseBookingPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-        Select Invoice
+        Select Invoice or Contract
       </label>
       <p className="text-[11px] text-muted-foreground -mt-1">
-        Selecting an invoice auto-fills project, company, amount &amp; doc type.
+        Choose an invoice or contract — auto-fills project, company &amp; amount.
       </p>
       <div className="relative" ref={ref}>
         {/* Trigger */}
         <button
           type="button"
-          disabled={loading}
+          disabled={loading && contractsLoading}
           onClick={() => setOpen((v) => !v)}
           className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
         >
-          {loading ? (
+          {loading && !selectedContract ? (
             <span className="flex items-center gap-2 text-muted-foreground">
               <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              Loading bookings…
+              Loading…
+            </span>
+          ) : selectedContract ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+              <span className="font-mono text-xs text-violet-600 dark:text-violet-400 font-semibold truncate">
+                {selectedContract.DocNo} · {selectedContract.ContactPerson}
+              </span>
             </span>
           ) : selected ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span
-                className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
-              >
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
-              <span className="font-mono text-xs text-primary font-semibold truncate">
-                {selected.label}
-              </span>
+              <span className="font-mono text-xs text-primary font-semibold truncate">{selected.label}</span>
             </span>
           ) : (
-            <span className="text-muted-foreground">— Choose invoice —</span>
+            <span className="text-muted-foreground">— Choose invoice or contract —</span>
           )}
-          <ChevronDown
-            size={14}
-            className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          />
+          <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
 
         {/* Dropdown panel */}
         {open && (
           <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
-            {/* Search + filter bar */}
+            {/* Source tabs */}
+            <div className="flex border-b border-border">
+              {(["invoice", "contract"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => { setSource(s); setSearch(""); setTypeFilter("all"); }}
+                  className={`flex-1 py-2 text-xs font-semibold transition-colors ${source === s ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground border-b-2 border-transparent"}`}
+                >
+                  {s === "invoice" ? `Invoices (${options.length})` : `Contracts (${contracts.length})`}
+                </button>
+              ))}
+            </div>
+
+            {/* Search bar */}
             <div className="p-2.5 border-b border-border space-y-2">
               <div className="relative">
-                <Search
-                  size={13}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
                   autoFocus
                   type="text"
-                  placeholder="Search by ref, project…"
+                  placeholder={source === "invoice" ? "Search by ref, project…" : "Search by name, reason, doc no…"}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
-              {/* Type filter pills */}
-              <div className="flex gap-1.5">
-                {(["all", "booking", "emi"] as const).map((t) => {
-                  const count =
-                    t === "all"
-                      ? options.length
-                      : t === "booking"
-                        ? bookingCount
-                        : emiCount;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTypeFilter(t)}
-                      className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${
-                        typeFilter === t
-                          ? t === "emi"
-                            ? "bg-violet-500/15 text-violet-600 border-violet-500/30"
-                            : "bg-primary/10 text-primary border-primary/30"
-                          : "bg-muted text-muted-foreground border-border hover:border-primary/20"
-                      }`}
-                    >
-                      {t === "all"
-                        ? "All"
-                        : t === "booking"
-                          ? "Bookings"
-                          : "EMI"}
-                      <span className="opacity-70">{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Type filter pills — only for invoices */}
+              {source === "invoice" && (
+                <div className="flex gap-1.5">
+                  {(["all", "booking", "emi"] as const).map((t) => {
+                    const count = t === "all" ? options.length : t === "booking" ? bookingCount : emiCount;
+                    return (
+                      <button key={t} type="button" onClick={() => setTypeFilter(t)}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${typeFilter === t ? t === "emi" ? "bg-violet-500/15 text-violet-600 border-violet-500/30" : "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20"}`}
+                      >
+                        {t === "all" ? "All" : t === "booking" ? "Bookings" : "EMI"}
+                        <span className="opacity-70">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Options list */}
             <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
-              {filtered.length === 0 && (
-                <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-                  No matches found
-                </div>
-              )}
-              {filtered.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => {
-                    onChange(o.id);
-                    setOpen(false);
-                    setSearch("");
-                  }}
-                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
-                >
-                  <span
-                    className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
+              {source === "invoice" ? (
+                filteredInvoices.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-xs text-muted-foreground">No matches found</div>
+                ) : filteredInvoices.map((o) => (
+                  <button key={o.id} type="button"
+                    onClick={() => { onChange(o.id); if (onContractClear) onContractClear(); setOpen(false); setSearch(""); }}
+                    className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
                   >
-                    {o.type === "emi" ? "EMI" : "EXB"}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-semibold text-foreground truncate">
-                      {o.label}
-                    </p>
-                    {o.projectName && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {o.projectName}
-                      </p>
-                    )}
-                    {o.supplierName && o.supplierName !== o.projectName && (
-                      <p className="text-[10px] text-primary/60 mt-0.5 truncate">
-                        {o.supplierName}
-                      </p>
-                    )}
-                    {o.type === "emi" && o.installmentNo && (
-                      <p className="text-[10px] text-violet-500 mt-0.5">
-                        Installment #{o.installmentNo}
-                      </p>
-                    )}
-                  </div>
-                  {o.amount != null && (
-                    <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">
-                      ₹{o.amount.toLocaleString("en-IN")}
+                    <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+                      {o.type === "emi" ? "EMI" : "EXB"}
                     </span>
-                  )}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-xs font-semibold text-foreground truncate">{o.label}</p>
+                      {o.projectName && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
+                      {o.supplierName && o.supplierName !== o.projectName && <p className="text-[10px] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
+                      {o.type === "emi" && o.installmentNo && <p className="text-[10px] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
+                      {(o as any).billStatus === "Partially Paid" && (o as any).remainingAmount != null && (
+                        <p className="text-[10px] text-amber-500 font-semibold mt-0.5">
+                          Remaining: ₹{Number((o as any).remainingAmount).toLocaleString("en-IN")}
+                        </p>
+                      )}
+                    </div>
+                    {o.amount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">₹{o.amount.toLocaleString("en-IN")}</span>}
+                  </button>
+                ))
+              ) : contractsLoading ? (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                  <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> Loading contracts…
+                </div>
+              ) : filteredContracts.length === 0 ? (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground">No approved contracts found</div>
+              ) : filteredContracts.map((c: any) => (
+                <button key={c.ContractId} type="button"
+                  onClick={() => { if (onContractSelect) onContractSelect(c); onChange(""); setOpen(false); setSearch(""); }}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-violet-500/5" : ""}`}
+                >
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
+                    {c.ContactPerson && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
+                    {(c.Reason || c.NatureOfContract) && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{c.Reason || c.NatureOfContract}</p>}
+                  </div>
+                  {c.ContractAmount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
               ))}
             </div>
 
             {/* Footer clear */}
-            {value && (
+            {hasSelection && (
               <div className="border-t border-border p-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange("");
-                    setOpen(false);
-                    setSearch("");
-                  }}
+                <button type="button"
+                  onClick={() => { onChange(""); if (onContractClear) onContractClear(); setOpen(false); setSearch(""); }}
                   className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
                 >
                   Clear selection
@@ -1880,11 +1913,16 @@ const Payment: React.FC = () => {
   const [viewingGrnTotal, setViewingGrnTotal] = useState<number>(0);
   const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
-  const [detailTab, setDetailTab] = useState<"details" | "chain">("details");
+  const [detailTab, setDetailTab] = useState<"details" | "chain" | "posting">("details");
+  const [pmtPostingData, setPmtPostingData] = useState<any | null>(null);
+  const [pmtPostingLoading, setPmtPostingLoading] = useState(false);
+  const [pmtPosting, setPmtPosting] = useState(false);
   const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
   const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
+  // Live remaining from payment-summary (excludes bounced) — used in partial payment panel
+  const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
@@ -1894,6 +1932,7 @@ const Payment: React.FC = () => {
     setViewingGrnTotal(0);
     setPaymentChainData(null);
     setDetailTab("details");
+    setPmtPostingData(null);
     const matched = companyOptions.find(
       (c) => c.label === rec.company || String(c.id) === rec.company,
     );
@@ -1932,6 +1971,18 @@ const Payment: React.FC = () => {
         .finally(() => setLoadingChain(false));
     }
   };
+
+  // Fetch payment posting data when posting tab opens
+  useEffect(() => {
+    if (detailTab !== "posting" || !viewingRec?.id) return;
+    setPmtPostingLoading(true);
+    setPmtPostingData(null);
+    fetchWithAuth(`/api/new-payment/${viewingRec.id}/posting`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPmtPostingData(d ?? null))
+      .catch(() => setPmtPostingData(null))
+      .finally(() => setPmtPostingLoading(false));
+  }, [detailTab, viewingRec?.id]);
 
   // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
   // /payments?view=<PPaymentID>, so this payment's receipt should open
@@ -2231,6 +2282,7 @@ const Payment: React.FC = () => {
     };
   };
   const [loadingExpense, setLoadingExpense] = useState(false);
+  const [syncingBalances, setSyncingBalances] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
   const [grnGstBreakdown, setGrnGstBreakdown] = useState<{
     items: {
@@ -2356,6 +2408,42 @@ const Payment: React.FC = () => {
     staleTime: 0,
   });
 
+  // ── Contract source ─────────────────────────────────────────────────────────
+  const [selectedContract, setSelectedContract] = useState<any | null>(null);
+  const { data: contractOptions = [], isLoading: contractsLoading } = useQuery<any[]>({
+    queryKey: ["payment-contracts"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/contract?status=Approved");
+      return r.ok ? r.json() : [];
+    },
+    staleTime: 60_000,
+  });
+  const handleContractSelect = (contract: any) => {
+    const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
+    setSelectedContract(contract);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: purpose,
+      expenseRef: contract.DocNo || "",
+      company: contract.CompanyName || String(contract.CompanyId || ""),
+      project: contract.ProjectName || String(contract.ProjectId || ""),
+      projectSite: contract.ProjectName || String(contract.ProjectId || ""),
+      amount: contract.ContractAmount ?? prev.amount,
+    }));
+  };
+  const clearContractLink = () => {
+    setSelectedContract(null);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: "",
+      expenseRef: "",
+      company: "",
+      project: "",
+      projectSite: "",
+      amount: null,
+    }));
+  };
+
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
@@ -2377,10 +2465,15 @@ const Payment: React.FC = () => {
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setSelectedContract(null);
+    setFormLiveRemaining(null);
+    setFormKnownTotalPaid(null);
     setView("form");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const openEdit = (rec: PaymentRecord) => {
+    setSelectedContract(null);
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
@@ -2554,14 +2647,21 @@ const Payment: React.FC = () => {
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
           // If an override is provided (Pay Remaining flow), always use it.
-          // Otherwise fall back to stored ENetAmount → GRN total → EAmount.
-          amount: amountOverride != null
-            ? amountOverride
-            : detail.ENetAmount
+          // Otherwise use remainingAmount from the options list (reflects partial payments).
+          // Fall back to full invoice amount if remaining is not available.
+          amount: (() => {
+            if (amountOverride != null) return amountOverride;
+            const fullAmt = detail.ENetAmount
               ? parseFloat(String(detail.ENetAmount))
               : (detail as any).EGrnTotalAmount
                 ? parseFloat((detail as any).EGrnTotalAmount)
-                : (detail.EAmount ?? null),
+                : (detail.EAmount ?? null);
+            const remaining = selectedOption?.remainingAmount;
+            if (remaining != null && remaining > 0 && fullAmt != null && remaining < fullAmt) {
+              return remaining;
+            }
+            return fullAmt;
+          })(),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
           // GST breakdown API will override these with precise per-item values.
@@ -2692,6 +2792,23 @@ const Payment: React.FC = () => {
         } else {
           setGrnGstBreakdown(null);
         }
+
+        // Fetch live payment summary to get correct remaining (excludes bounced payments)
+        // This overrides the initial amount set above with the accurate outstanding balance.
+        if (amountOverride == null) {
+          fetchPaymentSummary(expenseId)
+            .then((summary) => {
+              if (!summary) return;
+              const remaining = summary.remaining;
+              if (remaining != null && remaining >= 0) {
+                setFormLiveRemaining(remaining);
+                if (remaining > 0) {
+                  setForm((prev) => ({ ...prev, amount: remaining }));
+                }
+              }
+            })
+            .catch(() => {/* non-fatal */});
+        }
       } catch {
         toast.error("Could not load expense booking details.");
       } finally {
@@ -2731,6 +2848,24 @@ const Payment: React.FC = () => {
     return () => { cancelled = true; };
   }, [form.expenseRef]);
 
+  // Once chain data loads, update amount with live remaining (excluding bounced payments)
+  useEffect(() => {
+    if (!formChainData || editingId) return;
+    const inv = formChainData.invoice;
+    if (!inv) return;
+    const fullAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    if (!fullAmt) return;
+    // Sum only approved, non-bounced payments (excludes Rejected, Deleted, Bounced)
+    const paidExcludingBounced = formChainData.payments
+      .filter((p) => p.Status === "Approved" && !p.IsBounced)
+      .reduce((sum, p) => sum + (parseFloat(String(p.PAmount ?? 0)) || 0), 0);
+    const liveRemaining = Math.max(0, Math.round((fullAmt - paidExcludingBounced) * 100) / 100);
+    // Only override amount when creating a new payment and there's a partial payment
+    if (paidExcludingBounced > 0) {
+      setForm((prev) => ({ ...prev, amount: liveRemaining > 0 ? liveRemaining : prev.amount }));
+    }
+  }, [formChainData, editingId]);
+
   const clearExpenseLink = () => {
     setForm((prev) => ({
       ...prev,
@@ -2750,6 +2885,8 @@ const Payment: React.FC = () => {
     }));
     setLinkedGRNs([]);
     setGrnGstBreakdown(null);
+    setFormLiveRemaining(null);
+    setFormKnownTotalPaid(null);
     setSupplierBookingFilter("");
   };
 
@@ -3168,6 +3305,8 @@ const Payment: React.FC = () => {
                 {!form.expenseRef &&
                   (() => {
                     const filteredOptions = expenseOptions.filter((o) => {
+                      // Never show fully-paid invoices in the new payment dropdown
+                      if ((o as any).billStatus === "Paid") return false;
                       if (
                         bookingFilters.company &&
                         (o.companyName ?? "") !== bookingFilters.company
@@ -3236,6 +3375,11 @@ const Payment: React.FC = () => {
                           value={form.expenseId}
                           onChange={handleExpenseSelect}
                           loading={loadingExpense}
+                          contracts={contractOptions}
+                          contractsLoading={contractsLoading}
+                          selectedContract={selectedContract}
+                          onContractSelect={handleContractSelect}
+                          onContractClear={clearContractLink}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
@@ -3243,19 +3387,24 @@ const Payment: React.FC = () => {
                           )}
                           <button
                             type="button"
-                            className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                            disabled={syncingBalances}
+                            className="flex items-center gap-1 text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity disabled:opacity-50"
                             onClick={async () => {
+                              setSyncingBalances(true);
                               try {
                                 const r = await fetchWithAuth("/api/new-payment/recalculate-balances", { method: "POST" });
                                 const d = await r.json().catch(() => ({}));
-                                toast.success(`Balances synced (${d.updated ?? 0} invoices updated). Refreshing…`);
-                                window.location.reload();
+                                await queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+                                toast.success(`Balances synced (${d.updated ?? 0} invoices updated)`);
                               } catch {
                                 toast.error("Sync failed — please try again.");
+                              } finally {
+                                setSyncingBalances(false);
                               }
                             }}
                           >
-                            Sync invoice balances
+                            {syncingBalances && <div className="w-2.5 h-2.5 border border-primary border-t-transparent rounded-full animate-spin" />}
+                            {syncingBalances ? "Syncing…" : "Sync invoice balances"}
                           </button>
                         </div>
                       </div>
@@ -3525,6 +3674,7 @@ const Payment: React.FC = () => {
                   </div>
                 );
               })()}
+
 
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
@@ -4048,7 +4198,11 @@ const Payment: React.FC = () => {
                                 (grnGstBreakdown?.totals?.totalInclGST ?? 0) > 0
                                   ? grnGstBreakdown!.totals.totalInclGST
                                   : (opt?.amount ?? net);
-                              const prevOutstanding = Math.max(0, invoiceTotal - prevPaid);
+                              // formLiveRemaining comes from payment-summary (excludes bounced)
+                              // and is the most accurate source. Fall back to computed value.
+                              const prevOutstanding = formLiveRemaining != null
+                                ? formLiveRemaining
+                                : Math.max(0, invoiceTotal - prevPaid);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
                               const isPartial = entered < prevOutstanding;
                               const isOver = entered > prevOutstanding;
@@ -4160,7 +4314,16 @@ const Payment: React.FC = () => {
                                 <span className="font-mono font-semibold text-foreground">{formatINR(p.PAmount ?? 0)}</span>
                                 <span>·</span>
                                 <span>{p.PMode ?? "—"}</span>
+                                {(() => {
+                                  const bank = p.PBankName || bankNameFromIfsc(p.PChequeIfsc);
+                                  return bank ? <><span>·</span><span className="font-medium text-foreground/70">{bank}</span></> : null;
+                                })()}
                                 {p.PChequeNo && <><span>·</span><span>Chq {p.PChequeNo}</span></>}
+                                {(p.BounceCharge ?? 0) > 0 && (
+                                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                    +{formatINR(p.BounceCharge!)} bank charge
+                                  </span>
+                                )}
                               </div>
                               {p.BounceReason && (
                                 <p className="text-[10px] text-red-600 dark:text-red-400 italic">
@@ -5248,7 +5411,7 @@ const Payment: React.FC = () => {
             {/* Tab strip */}
             {viewingRec.expenseRef && (
               <div className="flex border-b border-border px-5 bg-muted/10">
-                {(["details", "chain"] as const).map((t) => (
+                {(["details", "chain", "posting"] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => setDetailTab(t)}
@@ -5258,11 +5421,14 @@ const Payment: React.FC = () => {
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {t === "details" ? "Details" : "Payment Chain"}
+                    {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
                     {t === "chain" && paymentChainData && (
                       <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
                         {paymentChainData.payments.length}
                       </span>
+                    )}
+                    {t === "posting" && pmtPostingData?.isPosted && (
+                      <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
                     )}
                   </button>
                 ))}
@@ -5762,6 +5928,122 @@ const Payment: React.FC = () => {
                 ))}
               </div>
               </>
+              )}
+
+              {/* ── Posting Tab ── */}
+              {detailTab === "posting" && (
+                <div className="space-y-4">
+                  {/* Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={14} className="text-primary" />
+                      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Journal Entry — Payment Posting
+                      </span>
+                    </div>
+                    {pmtPostingLoading ? (
+                      <span className="text-[10px] text-muted-foreground">Loading…</span>
+                    ) : pmtPostingData?.isPosted ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                        Posted · {pmtPostingData.jvNo}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {pmtPostingLoading ? (
+                    <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">Loading posting details…</div>
+                  ) : !pmtPostingData ? (
+                    <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">Could not load posting data.</div>
+                  ) : (() => {
+                    const { isOnAccount, amount, invoiceTotal, accounts } = pmtPostingData;
+                    const postAmt = amount;
+                    const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit" };
+                    const rows: PostRow[] = [
+                      { key: "supplier", label: accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: accounts?.supplier?.code ?? null, side: "debit" },
+                      { key: "bank",     label: accounts?.bank?.label     ?? "Bank A/c",                 code: accounts?.bank?.code     ?? null, side: "credit" },
+                    ];
+                    return (
+                      <>
+                        {isOnAccount && (
+                          <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                            Payment on Account — not linked to a specific invoice.
+                          </div>
+                        )}
+                        <div className="rounded-xl border border-border overflow-hidden">
+                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                            <span>Account</span>
+                            <span className="text-right">Debit (₹)</span>
+                            <span className="text-right">Credit (₹)</span>
+                          </div>
+                          {rows.map((row) => (
+                            <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
+                                  {row.label}{row.code ? ` (${row.code})` : ""}
+                                </span>
+                              </div>
+                              <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                {row.side === "debit" ? fmtAmt(postAmt) : ""}
+                              </span>
+                              <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                {row.side === "credit" ? fmtAmt(postAmt) : ""}
+                              </span>
+                            </div>
+                          ))}
+                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                            <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                            <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(postAmt)}</span>
+                            <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(postAmt)}</span>
+                          </div>
+                        </div>
+
+                        {!isOnAccount && invoiceTotal > amount && (
+                          <div className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-1.5">
+                            Partial payment — posting ₹{fmtAmt(amount)} of ₹{fmtAmt(invoiceTotal)} invoice total.
+                          </div>
+                        )}
+
+                        {pmtPostingData.isPosted ? (
+                          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                            <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                              Already posted to General Ledger as <span className="font-semibold">{pmtPostingData.jvNo}</span>.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-4">
+                            <p className="text-xs text-muted-foreground">
+                              Posting will create a balanced journal entry in the Trial Balance.
+                            </p>
+                            <button
+                              disabled={pmtPosting}
+                              onClick={async () => {
+                                if (!viewingRec?.id) return;
+                                setPmtPosting(true);
+                                try {
+                                  const r = await fetchWithAuth(`/api/new-payment/${viewingRec.id}/post-to-gl`, { method: "POST" });
+                                  const body = await r.json();
+                                  if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+                                  setPmtPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo }));
+                                } catch (err: any) {
+                                  alert(err.message ?? "Posting failed");
+                                } finally {
+                                  setPmtPosting(false);
+                                }
+                              }}
+                              className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                            >
+                              <BookOpen size={11} />
+                              {pmtPosting ? "Posting…" : "Post to GL"}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               )}
             </div>
 

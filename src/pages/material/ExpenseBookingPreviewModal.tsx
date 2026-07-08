@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
-import { getSystemGeneratedLedgers } from "@/api/generalLedgerApi";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import {
   computeBreakdown,
@@ -83,25 +82,22 @@ export function ExpenseBookingPreviewModal({
   const [previewTab, setPreviewTab] = useState<"details" | "posting">(
     "details",
   );
-  const [systemLedgers, setSystemLedgers] = useState<
-    { id: number; label: string; code: string | null }[]
-  >([]);
+  const [invPostingData, setInvPostingData] = useState<any | null>(null);
+  const [invPostingLoading, setInvPostingLoading] = useState(false);
+  const [invPosting, setInvPosting] = useState(false);
+
+
+  // Fetch invoice posting data when posting tab opens
   useEffect(() => {
-    getSystemGeneratedLedgers()
-      .then((data) => setSystemLedgers(data))
-      .catch(() => setSystemLedgers([]));
-  }, []);
-  const ebExpenseLedger = systemLedgers.find((d) =>
-    d.label.toLowerCase().includes("expense"),
-  );
-  const ebPurchaseLedger = systemLedgers.find((d) =>
-    d.label.toLowerCase().includes("purchase"),
-  );
-  const ebSupplierLedger = systemLedgers.find(
-    (d) =>
-      d.label.toLowerCase().includes("supplier") ||
-      d.label.toLowerCase().includes("creditor"),
-  );
+    if (previewTab !== "posting" || !previewRecord?.id) return;
+    setInvPostingLoading(true);
+    setInvPostingData(null);
+    fetchWithAuth(`/api/expense-booking/${previewRecord.id}/posting`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setInvPostingData(d ?? null))
+      .catch(() => setInvPostingData(null))
+      .finally(() => setInvPostingLoading(false));
+  }, [previewTab, previewRecord?.id]);
 
   useEffect(() => {
     setGrnBreakdown(null);
@@ -393,102 +389,110 @@ export function ExpenseBookingPreviewModal({
                   Journal Entry — Invoice Posting
                 </span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
-                Coming Soon
-              </span>
+              {invPostingLoading ? (
+                <span className="text-[10px] text-muted-foreground">Loading…</span>
+              ) : invPostingData?.isPosted ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                  Posted · {invPostingData.jvNo}
+                </span>
+              ) : null}
             </div>
 
-            {/* Debit / Credit stub table */}
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
-                <span>Account</span>
-                <span className="text-center">Cost Centre</span>
-                <span className="text-right">Debit (₹)</span>
-                <span className="text-right">Credit (₹)</span>
+            {invPostingLoading ? (
+              <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">
+                Loading posting details…
               </div>
-
-              {(
-                [
-                  {
-                    key: "expense",
-                    label: "Expense / Purchase A/c",
-                    side: "debit",
-                    ledger: ebExpenseLedger ?? ebPurchaseLedger,
-                  },
-                  {
-                    key: "supplier",
-                    label: "Supplier / Creditor A/c",
-                    side: "credit",
-                    ledger: ebSupplierLedger,
-                  },
-                ] as {
-                  key: string;
-                  label: string;
-                  side: "debit" | "credit";
-                  ledger: { id: number; label: string; code: string | null } | undefined;
-                }[]
-              ).map((row) => (
-                <div
-                  key={row.key}
-                  className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"
-                      }`}
-                    />
-                    {row.ledger ? (
-                      <span
-                        className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
-                        title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
-                      >
-                        {row.ledger.label}
-                        {row.ledger.code ? ` (${row.ledger.code})` : ""}
-                      </span>
-                    ) : (
-                      <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
-                        {row.label} — not configured
-                      </span>
-                    )}
+            ) : !invPostingData ? (
+              <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">
+                Could not load posting data.
+              </div>
+            ) : (() => {
+              const { isGrnLinked, totalAmount, accounts } = invPostingData;
+              const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
+              const rows: PostRow[] = isGrnLinked
+                ? [
+                    { key: "pgrn",     label: accounts?.pgrn?.label     ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null,     side: "debit",  amount: totalAmount },
+                    { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
+                  ]
+                : [
+                    { key: "purchase", label: accounts?.purchase?.label  ?? "Purchase A/c",                  code: accounts?.purchase?.code ?? null,  side: "debit",  amount: totalAmount },
+                    { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
+                  ];
+              return (
+                <>
+                  {isGrnLinked && (
+                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                      GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
+                    </div>
+                  )}
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                      <span>Account</span>
+                      <span className="text-right">Debit (₹)</span>
+                      <span className="text-right">Credit (₹)</span>
+                    </div>
+                    {rows.map((row) => (
+                      <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                            {row.label}{row.code ? ` (${row.code})` : ""}
+                          </span>
+                        </div>
+                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          {row.side === "debit" ? fmtAmt(row.amount) : ""}
+                        </span>
+                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                          {row.side === "credit" ? fmtAmt(row.amount) : ""}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                      <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                      <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(totalAmount)}</span>
+                      <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(totalAmount)}</span>
+                    </div>
                   </div>
-                  <span className="text-xs text-muted-foreground text-center">—</span>
-                  <span className="text-xs text-right text-muted-foreground font-mono">
-                    {row.side === "debit" ? "—" : ""}
-                  </span>
-                  <span className="text-xs text-right text-muted-foreground font-mono">
-                    {row.side === "credit" ? "—" : ""}
-                  </span>
-                </div>
-              ))}
 
-              <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
-                  Total
-                </span>
-                <span />
-                <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
-                  —
-                </span>
-                <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
-                  —
-                </span>
-              </div>
-            </div>
-
-            {/* Info note */}
-            <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
-              <AlertCircle
-                size={13}
-                className="text-muted-foreground mt-0.5 flex-shrink-0"
-              />
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Posting entries will be auto-generated from the invoice's line
-                items, GST rates, and the mapped chart of accounts once the
-                accounting module is wired up. The debit / credit split shown
-                above represents the expected journal structure.
-              </p>
-            </div>
+                  {invPostingData.isPosted ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                      <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                        Already posted to General Ledger as <span className="font-semibold">{invPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="text-xs text-muted-foreground">
+                        Posting will create a balanced journal entry and update the Trial Balance immediately.
+                      </p>
+                      <button
+                        disabled={invPosting}
+                        onClick={async () => {
+                          if (!previewRecord?.id) return;
+                          setInvPosting(true);
+                          try {
+                            const r = await fetchWithAuth(`/api/expense-booking/${previewRecord.id}/post-to-gl`, { method: "POST" });
+                            const body = await r.json();
+                            if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+                            setInvPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
+                          } catch (err: any) {
+                            alert(err.message ?? "Posting failed");
+                          } finally {
+                            setInvPosting(false);
+                          }
+                        }}
+                        className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                      >
+                        <Wallet size={11} />
+                        {invPosting ? "Posting…" : "Post to GL"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
