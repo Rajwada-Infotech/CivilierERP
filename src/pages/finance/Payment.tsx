@@ -17,6 +17,7 @@ import {
 } from "@/api/newPaymentApi";
 import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getOABalanceByRef } from "@/api/onAccountApi";
 import { getBanks } from "@/api/bankMasterApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
@@ -1993,6 +1994,8 @@ const Payment: React.FC = () => {
   const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
   // Live remaining from payment-summary (excludes bounced) — used in partial payment panel
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
+  // On Account balance for the selected invoice's party
+  const [oaBalance, setOaBalance] = useState<number>(0);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
@@ -2902,6 +2905,14 @@ const Payment: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseOptions, reissueCtx]);
 
+  // Fetch On Account balance when invoice changes
+  useEffect(() => {
+    if (!form.expenseRef) { setOaBalance(0); return; }
+    getOABalanceByRef(form.expenseRef)
+      .then((d) => setOaBalance(d.balance ?? 0))
+      .catch(() => setOaBalance(0));
+  }, [form.expenseRef]);
+
   // Fetch payment chain for the form view whenever an invoice is linked
   useEffect(() => {
     if (!form.expenseRef) {
@@ -3777,6 +3788,23 @@ const Payment: React.FC = () => {
                 );
               })()}
 
+
+              {/* ── On Account Banner ── */}
+              {oaBalance > 0.01 && (
+                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                      On Account Available
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Excess credit stored against this party — will auto-adjust on payment
+                    </p>
+                  </div>
+                  <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatINR(oaBalance)}
+                  </span>
+                </div>
+              )}
 
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
@@ -6089,10 +6117,7 @@ const Payment: React.FC = () => {
                       accounts: any; isPosted: boolean; jvNo: string | null;
                     };
                     const entries: ChainEntry[] = pmtPostingData.entries;
-                    const [postingIds, setPostingIds] = [
-                      new Set<string>(),
-                      // local mutable set handled via state update on pmtPostingData
-                    ];
+                    const postingIds = new Set<string>();
 
                     return (
                       <div className="space-y-4">

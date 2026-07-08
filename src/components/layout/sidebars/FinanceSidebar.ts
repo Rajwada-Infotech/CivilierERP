@@ -19,7 +19,8 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
     label: "Query",
     icon: Judge,
     children: [
-      { label: "Trial Balance", path: "/trial-balance", pageKey: "trial-balance" },
+      { label: "Trial Balance",      path: "/trial-balance",       pageKey: "trial-balance" },
+      { label: "On Account Report",  path: "/on-account-report",   pageKey: "on-account-report" },
     ],
   },
 ];
