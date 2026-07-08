@@ -1321,20 +1321,20 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
       const bounceCharge = parseFloat(p.BounceCharge) || 0;
       const netAmt = Math.max(0, pmtAmt - bounceCharge);
 
-      if (!p.IsBounced) {
-        // Normal cleared payment: Supplier Dr / Bank Cr
-        entries.push({
-          date: toDateStr(p.PDate),
-          docNo: p.DocNo,
-          pmtId: p.PPaymentID,
-          type: "payment",
-          amount: netAmt,
-          mode: p.PMode,
-          accounts: { supplier: supplierLed, bank: bankLed },
-          isPosted: !!postedMap[p.PPaymentID],
-          jvNo: postedMap[p.PPaymentID] ?? null,
-        });
-      }
+      // Always include payment entry — isBounced flag controls frontend postability
+      entries.push({
+        date: toDateStr(p.PDate),
+        docNo: p.DocNo,
+        pmtId: p.PPaymentID,
+        type: "payment",
+        amount: netAmt,
+        mode: p.PMode,
+        isBounced: !!p.IsBounced,
+        bounceReason: p.BounceReason ?? null,
+        accounts: { supplier: supplierLed, bank: bankLed },
+        isPosted: !!postedMap[p.PPaymentID],
+        jvNo: postedMap[p.PPaymentID] ?? null,
+      });
 
       // Bounce charge: Bank Charges Dr / Bank Cr (on bounce date)
       if (bounceCharge > 0) {
