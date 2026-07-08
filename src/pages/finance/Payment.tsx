@@ -5082,7 +5082,7 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
                               {rec.displayStatus && rec.displayStatus !== rec.status ? (
-                                <span className={`inline-flex items-center gap-0.5 px-1.5 py-px rounded text-[9px] font-semibold border ${
+                                <span className={`inline-flex items-center gap-0.5 px-1.5 py-px rounded text-[9px] font-semibold border whitespace-nowrap ${
                                   rec.displayStatus === "Success" || rec.displayStatus === "Cheque Cleared"
                                     ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
                                   : rec.displayStatus === "Pending"
