@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const requireAuth = require("../middleware/auth");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 
 router.use(requireAuth);
