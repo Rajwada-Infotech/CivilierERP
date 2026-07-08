@@ -629,7 +629,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // ── On Account: detect excess payment and store as OA credit ──────────
     if (PExpenseRef) {
       try {
-        const { resolvePartyFromRef } = require("./onAccount");
+        const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
         const party = await resolvePartyFromRef(pool, PExpenseRef);
         if (party?.partyId) {
           // Get current invoice outstanding (after syncBillStatus updated it)
