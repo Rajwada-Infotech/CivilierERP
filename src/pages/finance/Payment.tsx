@@ -83,6 +83,7 @@ interface DbPayment {
   PProjectName?: string | null;
   PCompany: string | null;
   PSupplierName?: string | null;
+  PSupplierContact?: string | null;
   PExpenseRef: string | null;
   DocNo?: string | null;
   ParentDocNo?: string | null;
@@ -205,6 +206,7 @@ interface PaymentRecord {
   id: string;
   paymentName: string;
   paidTo: string;
+  supplierContact: string;
   mode: string;
   amount: number | null;
   date: string;
@@ -610,6 +612,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     igstRate: null,
     billingTermsData: null,
     paidTo: "",
+    supplierContact: "",
   };
 }
 
@@ -618,6 +621,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     id: String(item.PPaymentID),
     paymentName: item.PPaymentName || "",
     paidTo: item.PSupplierName || "",
+    supplierContact: item.PSupplierContact || "",
     mode: item.PMode || "",
     amount: item.PAmount ?? null,
     date: item.PDate?.slice(0, 10) || "",
@@ -2096,6 +2100,7 @@ const Payment: React.FC = () => {
           projectSite: data.PProjectName ?? data.PProject  ?? ri.project    ?? prev.projectSite,
           bankId:      data.PBankID      ?? ri.bankId      ?? prev.bankId,
           paidTo:      data.PSupplierName ?? prev.paidTo,
+          supplierContact: data.PSupplierContact ?? prev.supplierContact,
           docType:     data.PDocType     ?? prev.docType,
         }));
       })
@@ -2926,12 +2931,26 @@ const Payment: React.FC = () => {
         return sum + amt - bounce;
       }, 0);
     const liveRemaining = Math.max(0, Math.round((fullAmt - paidExcludingBounced) * 100) / 100);
-    // Always set formLiveRemaining so the partial-payment panel uses the correct outstanding.
+    // formLiveRemaining is always the true invoice outstanding (excludes bounced payments).
     setFormLiveRemaining(liveRemaining);
+
+    // When re-issuing a bounced cheque, pre-fill with the bounced payment's original amount
+    // (not the full outstanding) — re-issue clears only that specific bounced cheque.
+    if (reissueCtx) {
+      const bouncedPayment = formChainData.payments.find(
+        (p) => p.PPaymentID === reissueCtx.replacesPaymentId
+      );
+      if (bouncedPayment) {
+        const bouncedAmt = parseFloat(String(bouncedPayment.PAmount ?? 0)) || 0;
+        setForm((prev) => ({ ...prev, amount: bouncedAmt }));
+      }
+      return;
+    }
+
     if (paidExcludingBounced > 0 && liveRemaining > 0) {
       setForm((prev) => ({ ...prev, amount: liveRemaining }));
     }
-  }, [formChainData, editingId]);
+  }, [formChainData, editingId, reissueCtx]);
 
   const clearExpenseLink = () => {
     setForm((prev) => ({
@@ -3647,7 +3666,7 @@ const Payment: React.FC = () => {
                             expenseOptions.find((o) => o.id === form.expenseId)
                               ?.supplierName || form.paidTo || ""
                           }
-                          placeholder="From expense booking"
+                          placeholder={reissueCtx ? "—" : "From expense booking"}
                         />
                       </div>
                     </Field>
@@ -5967,7 +5986,7 @@ const Payment: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: "Payment Purpose", value: viewingRec.paymentName },
-                  { label: "Paid To", value: viewingRec.paidTo || "—" },
+                  { label: "Paid To", value: [viewingRec.supplierContact, viewingRec.paidTo].filter(Boolean).join(" · ") || "—" },
                   { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
                   { label: "Date", value: viewingRec.date || "—" },
                   { label: "Mode", value: viewingRec.mode || "—" },
