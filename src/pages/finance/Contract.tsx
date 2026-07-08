@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, X, Check, FileText, Upload, Eye,
-  ChevronDown, RefreshCw, Search, Trash2, ArrowLeft,
+  RefreshCw, Search, Trash2, ArrowLeft,
 } from "lucide-react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";

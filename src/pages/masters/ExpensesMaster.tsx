@@ -237,10 +237,8 @@ const ExpensesMaster: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
-  const [sortField, setSortField] = useState<
-    "LHeadName" | "LHeadType" | "GroupName"
-  >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
+  const sortField: "LHeadName" | "LHeadType" | "GroupName" = "LHeadName";
+  const sortAsc = true;
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 

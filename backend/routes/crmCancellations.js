@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
-const { emitNotification } = require("../services/notify");
+
 const { getNextDocNumber } = require("../services/docNumber");
 // Approve/reject is gated to admin/super_admin/marketing_head via this shared
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any

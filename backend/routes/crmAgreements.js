@@ -7,7 +7,7 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
-const { emitNotification } = require("../services/notify");
+
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve on this page.
