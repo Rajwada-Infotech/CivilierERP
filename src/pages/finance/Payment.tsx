@@ -5374,7 +5374,16 @@ const Payment: React.FC = () => {
                                 {p.OriginalDocNo && (
                                   <div className="text-[10px] text-muted-foreground flex items-center gap-1">
                                     <ArrowLeft size={9} /> Replaces {p.OriginalDocNo}
-                                    {p.BounceCharge ? ` (+${formatINR(Number(p.BounceCharge))} bounce charge)` : ""}
+                                  </div>
+                                )}
+                                {p.BounceCharge && Number(p.BounceCharge) > 0 && (
+                                  <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-dashed border-red-300 dark:border-red-800">
+                                    <span className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                      <AlertTriangle size={9} /> Bounce charge (separate)
+                                    </span>
+                                    <span className="font-mono text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                      {formatINR(Number(p.BounceCharge))}
+                                    </span>
                                   </div>
                                 )}
                                 {/* Reissue button for bounced payments with no replacement */}
