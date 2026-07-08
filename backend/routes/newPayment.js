@@ -624,7 +624,55 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newId);
 
     // Sync bill status on the referenced expense booking
-    if (PExpenseRef) await _syncBillStatus(pool,PExpenseRef);
+    if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
+
+    // ── On Account: detect excess payment and store as OA credit ──────────
+    if (PExpenseRef) {
+      try {
+        const { resolvePartyFromRef } = require("./onAccount");
+        const party = await resolvePartyFromRef(pool, PExpenseRef);
+        if (party?.partyId) {
+          // Get current invoice outstanding (after syncBillStatus updated it)
+          const ebBal = await pool.request()
+            .input("EDocNo", sql.NVarChar(100), PExpenseRef)
+            .query(`SELECT TOP 1 ERemainingAmount, ENetAmount, ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+          if (ebBal.recordset.length) {
+            const eb = ebBal.recordset[0];
+            const remaining = parseFloat(eb.ERemainingAmount ?? 0);
+            const payAmt = parseFloat(PAmount) || 0;
+            const bounceAmt = parseFloat(BounceCharge ?? 0);
+            const netPaid = payAmt - bounceAmt;
+            // If payment exceeds what was outstanding, excess → On Account credit
+            const netPayable = parseFloat(eb.ENetAmount ?? 0);
+            const excess = Math.max(0, netPaid - netPayable);
+            if (excess > 0.005) {
+              const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+              await pool.request()
+                .input("PartyId",   sql.Int,           party.partyId)
+                .input("PartyType", sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
+                .input("TxnDate",   sql.Date,          PDate ? new Date(PDate) : new Date())
+                .input("TxnType",   sql.NVarChar(10),  "CREDIT")
+                .input("Amount",    sql.Decimal(18,2), excess)
+                .input("RefType",   sql.NVarChar(30),  "Payment")
+                .input("RefDocNo",  sql.NVarChar(100), finalDocNo)
+                .input("RefId",     sql.Int,           newId)
+                .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
+                .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
+                .input("Notes",     sql.NVarChar(500), `Excess from ${finalDocNo} on invoice ${PExpenseRef}`)
+                .input("CreatedBy", sql.NVarChar(150), userEmail)
+                .query(`
+                  INSERT INTO dbo.OnAccountLedger
+                    (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+                  VALUES
+                    (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+                `);
+            }
+          }
+        }
+      } catch (oaErr) {
+        console.warn("[OA] On Account credit hook failed (non-fatal):", oaErr.message);
+      }
+    }
 
     await bumpCacheVersion("new-payment");
     res.status(201).json({

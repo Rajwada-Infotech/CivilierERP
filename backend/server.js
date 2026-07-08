@@ -144,6 +144,7 @@ const ALL_ROUTES = [
   { path: "/api/material-chain", file: "./routes/materialChain" },
   { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
+  { path: "/api/on-account", file: "./routes/onAccount" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
   { path: "/api/journal-voucher", file: "./routes/journalVoucher" },
   { path: "/api/contract", file: "./routes/contract" },
