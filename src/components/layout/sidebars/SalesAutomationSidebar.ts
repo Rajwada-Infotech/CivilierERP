@@ -31,8 +31,11 @@ export const salesAutomationNavItems: NavItem[] = [
       { label: "All Leads",    path: "/sales-automation/leads",          pageKey: "sa-leads"              },
       { label: "Inquiry",      path: "/sales-automation/inquiry",        pageKey: "sa-inquiry"            },
       { label: "Site Visits",  path: "/sales-automation/site-visits",    pageKey: "sa-site-visits"        },
+      { label: "Activities",   path: "/sales-automation/lead-activities", pageKey: "sa-lead-activities"   },
+      { label: "Tasks",        path: "/sales-automation/lead-tasks",     pageKey: "sa-lead-tasks"         },
       { label: "Distribution", path: "/sales-automation/distribution",   pageKey: "sa-lead-distribution"  },
       { label: "Transfers",    path: "/sales-automation/lead-transfers",  pageKey: "sa-lead-transfers"    },
+      { label: "Channel Partners", path: "/sales-automation/channel-partners", pageKey: "sa-channel-partners" },
     ],
   },
 
@@ -42,6 +45,7 @@ export const salesAutomationNavItems: NavItem[] = [
     icon: Receipt21,
     children: [
       { label: "Invoices", path: "/sales-automation/invoices", pageKey: "sa-marketing-invoices" },
+      { label: "Commissions", path: "/sales-automation/commissions", pageKey: "sa-commissions" },
     ],
   },
 

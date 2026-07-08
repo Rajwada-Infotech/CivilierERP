@@ -442,12 +442,16 @@ router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
     const finYear = (req.query.finYear || "").toString().trim() || null;
+    // When "Pay Remaining" navigates to a payment that's already marked Paid,
+    // include that specific invoice regardless of EBillStatus so the form can pre-fill.
+    const includeRef = (req.query.includeRef || "").toString().trim() || null;
 
     // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
     // and exclude any already linked to an active DebitNote
     const bookingsResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("IncludeRef", sql.NVarChar(100), includeRef).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -512,7 +516,10 @@ router.get("/options", async (req, res) => {
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
-          AND ISNULL(eb.EBillStatus, '') <> 'Paid'
+          AND (
+            ISNULL(eb.EBillStatus, '') <> 'Paid'
+            OR (@IncludeRef IS NOT NULL AND eb.EDocNo = @IncludeRef)
+          )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
@@ -1583,6 +1590,10 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EProjectName,
     EDocumentType,
     EDocDate,
+    EAmount: EAmountBody,
+    ENetAmount: ENetAmountBody,
+    ECgstRate: ECgstRateBody,
+    ESgstRate: ESgstRateBody,
     EDiscountData,
     EDocNo,
     EEmiPayment,
@@ -1611,6 +1622,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EGLAccount,
     EWorkDoneRef,
     PaymentTermId,
+    // Contract Master (Migration 177) — see services/contractLedger.js
+    ContractId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -1808,6 +1821,14 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
             "An expense booking already exists for this Work Done entry. Delete the existing booking before creating a new one.",
         });
       }
+    }
+
+    // For direct invoices (TOD or no linked source), amounts come from the request body
+    if (bookingAmount == null) {
+      bookingAmount = EAmountBody != null ? Number(EAmountBody) : 0;
+      bookingNetAmount = ENetAmountBody != null ? Number(ENetAmountBody) : bookingAmount;
+      bookingCgstRate = ECgstRateBody ?? 0;
+      bookingSgstRate = ESgstRateBody ?? 0;
     }
 
     if (EDocTypeId) {
@@ -2023,7 +2044,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
+
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
 
@@ -2039,7 +2062,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef
+          ECostCenter, EGLAccount, EWorkDoneRef, ContractId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
@@ -2052,7 +2075,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef
+          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
@@ -2072,6 +2095,63 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     }
 
     await transaction.commit();
+
+    // ── Contract Master: auto-allocate (FIFO) any available advance ─────────
+    // Mirror of saleInvoices.js's receivable-side logic: a real, system-
+    // generated NewPayment (routed through the existing Dummy Bank
+    // convention) is created so the booking's bill status is recomputed by
+    // the SAME syncBillStatus() every real vendor payment already uses —
+    // never a second, parallel "how much has this booking been paid"
+    // calculation that could silently drift from the real one.
+    if (ContractId && newExpenseId) {
+      const { autoAllocateFIFO } = require("../services/contractLedger");
+      const settleAmount = parseFloat(bookingNetAmount ?? bookingAmount) || 0;
+      const allocation = await autoAllocateFIFO(pool, {
+        contractId: parseInt(ContractId, 10),
+        sourceType: "ExpenseBooking",
+        sourceId: newExpenseId,
+        sourceDocNo: finalDocNo,
+        documentAmount: settleAmount,
+        createdBy: req.user?.email || req.user?.name,
+      });
+
+      if (allocation.allocatedAmount > 0) {
+        const dummyBank = await pool.request().query(
+          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
+        );
+        if (dummyBank.recordset.length) {
+          const syntheticDocNo = `CONTRACT-ADJ-${newExpenseId}`;
+          await pool
+            .request()
+            .input("PPaymentName", sql.VarChar, `Contract Advance (${finalDocNo})`)
+            .input("PMode", sql.VarChar, "Cash")
+            .input("PAmount", sql.Decimal(18, 2), allocation.allocatedAmount)
+            .input("PDocType", sql.VarChar, "Contract Adjustment")
+            .input("PDate", sql.Date, new Date())
+            .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
+            .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
+            .input("PProject", sql.VarChar, EProjectName || "")
+            .input("PCompany", sql.VarChar, "")
+            .input("PExpenseRef", sql.NVarChar(100), finalDocNo)
+            .input("DocNo", sql.NVarChar(100), syntheticDocNo)
+            .input("ContractId", sql.Int, parseInt(ContractId, 10))
+            .input("PCreatedAt", sql.DateTime, new Date())
+            .input("PCreatedBy", sql.NVarChar(100), req.user?.email || req.user?.name)
+            .input("Status", sql.NVarChar(20), "Approved").query(`
+              INSERT INTO dbo.NewPayment
+                (PPaymentName, PMode, PAmount, PDocType, PDate, PBankID, PBankName,
+                 PProject, PCompany, PExpenseRef, DocNo, ContractId,
+                 PCreatedAt, PCreatedBy, Status)
+              VALUES
+                (@PPaymentName, @PMode, @PAmount, @PDocType, @PDate, @PBankID, @PBankName,
+                 @PProject, @PCompany, @PExpenseRef, @DocNo, @ContractId,
+                 @PCreatedAt, @PCreatedBy, @Status)
+            `);
+          const { syncBillStatus } = require("./newPayment");
+          await syncBillStatus(pool, finalDocNo);
+        }
+      }
+    }
 
     if (EEmiPayment && EEmiData && newExpenseId) {
       let schedule = [];
@@ -2943,7 +3023,7 @@ router.get("/:id/payment-summary", async (req, res) => {
           eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           -- GRN info
-          grn.GRNNo, grn.GRNID,
+          grn.GRNNo, grn.GRNID, grn.TotalAmount AS GrnTotalAmount,
           -- PO info via GRN or direct
           po.PurchaseOrderNo, po.PurchaseOrderID,
           po.SourceMRDocNo, po.SupplierID,
@@ -2972,18 +3052,26 @@ router.get("/:id/payment-summary", async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const eb = ebRes.recordset[0];
-    const netAmount = parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
+    // ENetAmount is the finalized net payable (base + GST + billing terms adjustments).
+    // Never use GrnTotalAmount — it is the pre-tax GRN base, not the net payable.
+    const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0
+      ? parseFloat(eb.ENetAmount)
+      : parseFloat(eb.EAmount ?? 0) || 0;
 
-    // Fetch approved payments against this booking
+    // Fetch approved payments against this booking, joining BRS to detect bounced cheques
     const payRes = await pool
       .request()
       .input("PExpenseRef", sql.NVarChar(100), eb.EDocNo).query(`
         SELECT
-          PPaymentID, DocNo, PDate, PMode, PAmount, Status,
-          PPaymentName, PChequeNo, PNeftNumber, PUpiTransactionId
-        FROM dbo.NewPayment
-        WHERE PExpenseRef = @PExpenseRef
-        ORDER BY PPaymentID ASC
+          np.PPaymentID, np.DocNo, np.PDate, np.PMode, np.PAmount, np.Status,
+          np.PPaymentName, np.PChequeNo, np.PNeftNumber, np.PUpiTransactionId,
+          ISNULL(np.BounceCharge, 0) AS BounceCharge,
+          ISNULL(br.IsBounced, 0) AS IsBounced
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.BankReconciliation br
+          ON br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID
+        WHERE np.PExpenseRef = @PExpenseRef
+        ORDER BY np.PPaymentID ASC
       `);
 
     const payments = payRes.recordset.map((p) => ({
@@ -2992,12 +3080,19 @@ router.get("/:id/payment-summary", async (req, res) => {
       date: p.PDate ? String(p.PDate).slice(0, 10) : null,
       mode: p.PMode,
       amount: parseFloat(p.PAmount) || 0,
+      bounceCharge: parseFloat(p.BounceCharge) || 0,
       status: p.Status,
+      isBounced: !!p.IsBounced,
       ref: p.PChequeNo || p.PNeftNumber || p.PUpiTransactionId || null,
     }));
 
-    const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
-    const remaining = parseFloat(eb.ERemainingAmount ?? netAmount) || 0;
+    // Compute totalPaid live: only Approved, non-bounced payments count.
+    // Bounce charges are paid to the bank, not the supplier — exclude them from
+    // the invoice-clearing amount so remaining balance stays correct.
+    const totalPaid = payments
+      .filter((p) => p.status === 'Approved' && !p.isBounced)
+      .reduce((sum, p) => sum + p.amount - p.bounceCharge, 0);
+    const remaining = Math.max(0, Math.round((netAmount - totalPaid) * 100) / 100);
 
     res.json({
       expenseId: eb.Eid,
@@ -3111,6 +3206,212 @@ router.get("/:id/grns", async (req, res) => {
     res.json(grnResult.recordset);
   } catch (err) {
     console.error("Expense GRNs error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Invoice Posting: preview ────────────────────────────────────────────────
+router.get("/:id/posting", async (req, res) => {
+  const ebId = parseInt(req.params.id, 10);
+  if (!ebId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+
+    const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
+      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
+             eb.EName AS SupplierName
+      FROM dbo.ExpenseBooking eb
+      WHERE eb.Eid = @Eid
+    `);
+    if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const eb = ebRes.recordset[0];
+
+    // Determine if GRN-linked
+    const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0;
+
+    if (isGrnLinked) {
+      // Pull totalInclGST from GRN breakdown
+      const grnId = parseInt(eb.ESourceId, 10);
+      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
+        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
+      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+      let tBase = 0, tGST = 0;
+      if (received.length) {
+        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+        let masterMap = {};
+        if (itemIds.length) {
+          const mReq = pool.request();
+          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
+        }
+        for (const it of received) {
+          const itemId = String(it.itemId||it.ItemId||"");
+          const qty = Number(it.receivedQty||it.ReceivedQty||0);
+          const rate = Number(it.rate||it.Rate||0);
+          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+          tBase += base;
+          tGST += base*(totalGSTRate/100);
+        }
+      }
+      baseAmount = Math.round(tBase*100)/100;
+      taxAmount = Math.round(tGST*100)/100;
+      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+    } else {
+      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+      baseAmount = totalAmount;
+    }
+
+    // System ledgers
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName } : null; };
+    const accounts = {
+      purchase:  find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
+      pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
+      supplier:  find((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor")),
+    };
+
+    // Check if already posted
+    const postedRes = await pool.request().input("SrcId", sql.Int, ebId)
+      .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    const isPosted = postedRes.recordset.length > 0;
+
+    res.json({
+      isGrnLinked: !!isGrnLinked,
+      baseAmount, taxAmount, totalAmount,
+      supplierName: eb.SupplierName,
+      accounts,
+      isPosted,
+      jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+      jvId: isPosted ? postedRes.recordset[0].EntryId : null,
+    });
+  } catch (err) {
+    console.error("Invoice posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Invoice Posting: post to GL ─────────────────────────────────────────────
+router.post("/:id/post-to-gl", async (req, res) => {
+  const ebId = parseInt(req.params.id, 10);
+  if (!ebId) return res.status(400).json({ error: "Invalid id" });
+  const userEmail = req.user?.email || req.user?.upn || "system";
+  try {
+    const pool = getPool();
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const { postVoucher } = require("../services/generalLedger");
+
+    const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
+      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.ExpenseBooking eb WHERE eb.Eid = @Eid
+    `);
+    if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const eb = ebRes.recordset[0];
+
+    // Check already posted
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This invoice has already been posted to GL." });
+
+    const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0;
+
+    if (isGrnLinked) {
+      const grnId = parseInt(eb.ESourceId, 10);
+      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
+        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
+      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+      let tBase = 0, tGST = 0;
+      if (received.length) {
+        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+        let masterMap = {};
+        if (itemIds.length) {
+          const mReq = pool.request();
+          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
+        }
+        for (const it of received) {
+          const itemId = String(it.itemId||it.ItemId||"");
+          const qty = Number(it.receivedQty||it.ReceivedQty||0);
+          const rate = Number(it.rate||it.Rate||0);
+          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+          tBase += base;
+          tGST += base*(totalGSTRate/100);
+        }
+      }
+      baseAmount = Math.round(tBase*100)/100;
+      taxAmount = Math.round(tGST*100)/100;
+      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+    } else {
+      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+      baseAmount = totalAmount;
+    }
+
+    if (totalAmount <= 0) return res.status(400).json({ error: "No amount to post." });
+
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const findId = (fn) => leds.find(fn)?.LHeadId;
+    const purchaseId  = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
+    const pgrnId      = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
+    const supplierId  = findId((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor"));
+    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
+    if (!isGrnLinked && !purchaseId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+
+    const lines = isGrnLinked
+      ? [
+          { LHeadId: pgrnId,     DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal)` },
+          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+        ]
+      : [
+          { LHeadId: purchaseId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Purchase` },
+          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+        ];
+
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, eb.CompanyId, eb.ProjectId).catch(() => ({ finalDocNo: null }));
+    const insertHdr = await pool.request()
+      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
+      .input("JVDate", sql.Date, new Date())
+      .input("Narration", sql.NVarChar(500), `Invoice Posting: ${eb.EDocNo}`)
+      .input("CompanyId", sql.Int, eb.CompanyId || null)
+      .input("ProjectId", sql.Int, eb.ProjectId || null)
+      .input("DocTypeId", sql.Int, dtId || null)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
+    const jvId = insertHdr.recordset[0].JVID;
+
+    let sortOrder = 0;
+    for (const line of lines) {
+      await pool.request()
+        .input("JVID", sql.Int, jvId)
+        .input("LHeadId", sql.Int, line.LHeadId)
+        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
+        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
+        .input("Narration", sql.NVarChar(500), line.Narration)
+        .input("SortOrder", sql.Int, ++sortOrder)
+        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
+    }
+
+    await postVoucher(pool, { sourceType: "InvoicePosting", sourceId: ebId, legs: lines.map((l) => ({ lheadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })) });
+
+    res.json({ jvId, jvNo: finalDocNo, message: "Posted successfully." });
+  } catch (err) {
+    console.error("Invoice post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

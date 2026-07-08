@@ -229,7 +229,7 @@ router.get("/:id", requirePageRight("sale-invoice", "view"), async (req, res) =>
 // below now just calls this and maps thrown errors to a response; behavior
 // is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
 async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail) {
-  const { SaleOrderID, InvoiceDate, Amount, DocTypeId, RPFinYear: finYear, Remarks } = payload;
+  const { SaleOrderID, InvoiceDate, Amount, DocTypeId, RPFinYear: finYear, Remarks, ContractId } = payload;
 
   if (!SaleOrderID) {
     const err = new Error("SaleOrderID is required.");
@@ -339,16 +339,17 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
       .input("FyId", sql.Int, fyId)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("CreatedBy", sql.NVarChar(100), userEmail)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
+      .input("CreatedAt", sql.DateTime2, new Date())
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null).query(`
         INSERT INTO dbo.SaleInvoices
           (SaleInvoiceNo, InvoiceDate, SaleOrderID, CustomerID,
            CompanyId, ProjectId, Amount, AmountReceived, PaymentStatus,
-           DocTypeId, fy_id, Remarks, CreatedBy, CreatedAt)
+           DocTypeId, fy_id, Remarks, CreatedBy, CreatedAt, ContractId)
         OUTPUT INSERTED.SaleInvoiceID
         VALUES
           (@SaleInvoiceNo, @InvoiceDate, @SaleOrderID, @CustomerID,
            @CompanyId, @ProjectId, @Amount, @AmountReceived, @PaymentStatus,
-           @DocTypeId, @FyId, @Remarks, @CreatedBy, @CreatedAt)
+           @DocTypeId, @FyId, @Remarks, @CreatedBy, @CreatedAt, @ContractId)
       `);
 
     const newId = result.recordset[0].SaleInvoiceID;
@@ -356,12 +357,68 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     await transaction.commit();
     await backPatchRecordId(pool, sql, finalDocNo, "SaleInvoices", newId);
 
+    // ── Contract Master: auto-allocate (FIFO) any available advance ─────────
+    // Runs AFTER commit — the invoice itself must exist first, and this
+    // mirrors the already-established pattern where a real ReceivedPayment
+    // settles an invoice: we create a real (system-generated, Dummy-Bank)
+    // ReceivedPayment row so the invoice's PaymentStatus is recomputed by
+    // the SAME recalcInvoicePaymentStatus() every real payment uses —
+    // never a second, parallel "how much has this invoice received"
+    // calculation that could silently drift from the real one.
+    if (ContractId) {
+      const { autoAllocateFIFO } = require("../services/contractLedger");
+      const allocation = await autoAllocateFIFO(pool, {
+        contractId: parseInt(ContractId, 10),
+        sourceType: "SaleInvoice",
+        sourceId: newId,
+        sourceDocNo: finalDocNo,
+        documentAmount: invoiceAmount,
+        createdBy: userEmail,
+      });
+
+      if (allocation.allocatedAmount > 0) {
+        const dummyBank = await pool.request().query(
+          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
+        );
+        if (dummyBank.recordset.length) {
+          await pool
+            .request()
+            .input("RPCompanyName", sql.NVarChar(255), null)
+            .input("RPReceivedFrom", sql.NVarChar(255), `Contract Advance (${finalDocNo})`)
+            .input("RPProjectName", sql.NVarChar(255), "")
+            .input("RPDocDate", sql.Date, new Date())
+            .input("RPMode", sql.NVarChar(50), "Cash")
+            .input("RPAmount", sql.Decimal(18, 2), allocation.allocatedAmount)
+            .input("RPDepositBankId", sql.Int, dummyBank.recordset[0].LHeadId)
+            .input("RPDepositBankName", sql.NVarChar(255), dummyBank.recordset[0].LHeadName)
+            .input("RPRemarks", sql.NVarChar(sql.MAX), `Auto-adjusted from Contract advance against ${finalDocNo}`)
+            .input("SourceSaleInvoiceId", sql.Int, newId)
+            .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), finalDocNo)
+            .input("ContractId", sql.Int, parseInt(ContractId, 10))
+            .input("RPCreatedBy", sql.NVarChar(100), userEmail).query(`
+              INSERT INTO dbo.ReceivedPayment
+                (RPCompanyName, RPReceivedFrom, RPProjectName, RPDocDate, RPMode, RPAmount,
+                 RPDepositBankId, RPDepositBankName, RPRemarks,
+                 SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId,
+                 RPStatus, RPCreatedBy, RPCreatedAt)
+              VALUES
+                (@RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode, @RPAmount,
+                 @RPDepositBankId, @RPDepositBankName, @RPRemarks,
+                 @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId,
+                 'Approved', @RPCreatedBy, GETDATE())
+            `);
+          await recalcInvoicePaymentStatus(pool, newId);
+        }
+      }
+    }
+
     return {
       SaleInvoiceID: newId,
       DocNo: finalDocNo,
       SaleInvoiceNo: finalDocNo,
       TotalAmount: invoiceAmount,
       PaymentStatus: "Pending Payment",
+      ...(ContractId ? { ContractId: parseInt(ContractId, 10) } : {}),
     };
   } catch (err) {
     try {

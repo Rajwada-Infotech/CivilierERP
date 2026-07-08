@@ -7,7 +7,6 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, previewNextDocNumber } = require("../utils/docNumberLock");
-const { transition } = require("../services/approvalService");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -70,22 +69,15 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get("/contact-persons", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const allowed = ["S", "C", "A"];
-    const t = (req.query.type || "").toString().toUpperCase();
-    const typeFilter = allowed.includes(t)
-      ? `AND LHeadType = '${t}'`
-      : `AND LHeadType IN ('S','C','A')`;
     const result = await pool.request().query(`
-      SELECT DISTINCT
-        LTRIM(RTRIM(LHeadContactPerson)) AS name,
-        LHeadType                        AS type
+      SELECT DISTINCT LTRIM(RTRIM(LHeadContactPerson)) AS name
       FROM dbo.AccountHeadMaster
-      WHERE LHeadContactPerson IS NOT NULL
+      WHERE LHeadType IN ('S', 'C', 'A')
+        AND LHeadContactPerson IS NOT NULL
         AND LTRIM(RTRIM(LHeadContactPerson)) <> ''
-        ${typeFilter}
       ORDER BY name
     `);
-    res.json(result.recordset);
+    res.json(result.recordset.map((r) => r.name));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -169,16 +161,9 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
 
     const newId = insert.recordset[0]?.ContractId;
     await backPatchRecordId(pool, sql, docNo, "Contract", newId);
-
-    // Auto-submit: Draft → Pending immediately (same pattern as PO)
-    try {
-      await transition("contracts", newId, "Pending", email, req.user?.role);
-    } catch (submitErr) {
-      console.warn("[contract] auto-submit failed (non-fatal):", submitErr.message);
-    }
-
     await bumpCacheVersion("contracts");
-    res.json({ contractId: newId, docNo, status: "Pending" });
+
+    res.json({ contractId: newId, docNo });
   } catch (err) {
     console.error("[contract] POST /:", err.message);
     res.status(500).json({ error: err.message });
@@ -270,39 +255,64 @@ router.delete("/:id", authenticateToken, requirePageRight("finance-contracts", "
   }
 });
 
-// ── Approval routes ───────────────────────────────────────────────────────────
-router.put("/:id/submit", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+// ── GET /options — dropdown source for Payment/Invoice/Expense forms ────────
+// Only non-deleted contracts, so a payment/invoice can't be tagged against
+// a contract that's already been removed.
+router.get("/options", authenticateToken, async (req, res) => {
   try {
-    const email = requireUser(req, res); if (!email) return;
-    const result = await transition("contracts", id, "Pending", email, req.user?.role);
-    await bumpCacheVersion("contracts");
-    res.json({ message: "Contract submitted for approval", ...result });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    const pool = getPool();
+    const request = pool.request();
+    let query = `
+      SELECT c.ContractId AS id,
+             CONCAT(ISNULL(c.DocNo, 'Contract #' + CAST(c.ContractId AS NVARCHAR)),
+                    ISNULL(' — ' + c.ContactPerson, '')) AS label,
+             c.ContractAmount
+      FROM dbo.Contract c
+      WHERE c.Status <> 'Deleted'
+    `;
+    if (req.query.companyId) {
+      query += " AND c.CompanyId = @CompanyId";
+      request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));
+    }
+    if (req.query.projectId) {
+      query += " AND c.ProjectId = @ProjectId";
+      request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+    query += " ORDER BY c.CreatedAt DESC";
+    const result = await request.query(query);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put("/:id/approve", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
+// ── GET /:id/ledger — advance/adjustment history + live balance summary ─────
+// The transparency surface for the on-account adjustment feature: every
+// advance received/paid and every automatic FIFO adjustment ever applied
+// against this contract, plus the derived balance figures from
+// services/contractLedger.js — never cached, never computed a second way.
+router.get("/:id/ledger", authenticateToken, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
-    const email = requireUser(req, res); if (!email) return;
-    const result = await transition("contracts", id, "Approved", email, req.user?.role);
-    await bumpCacheVersion("contracts");
-    res.json({ message: "Contract approved", ...result });
-  } catch (err) { res.status(err.message?.includes("not authorized") ? 403 : 400).json({ error: err.message }); }
-});
+    const pool = getPool();
+    const contractCheck = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ContractId FROM dbo.Contract WHERE ContractId = @id");
+    if (!contractCheck.recordset.length) return res.status(404).json({ error: "Not found" });
 
-router.put("/:id/reject", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
-  const { note } = req.body;
-  try {
-    const email = requireUser(req, res); if (!email) return;
-    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
-    await bumpCacheVersion("contracts");
-    res.json({ message: "Contract rejected", ...result });
-  } catch (err) { res.status(err.message?.includes("not authorized") ? 403 : 400).json({ error: err.message }); }
+    const ledgerRows = await pool.request().input("id", sql.Int, id).query(`
+      SELECT LedgerId, TxnType, Amount, SourceType, SourceId, SourceDocNo, Remarks, CreatedBy, CreatedAt
+      FROM dbo.ContractLedger
+      WHERE ContractId = @id
+      ORDER BY CreatedAt ASC, LedgerId ASC
+    `);
+
+    const { getContractSummary } = require("../services/contractLedger");
+    const summary = await getContractSummary(pool, id);
+    res.json({ summary, ledger: ledgerRows.recordset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

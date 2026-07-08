@@ -2,11 +2,14 @@
 
 // Pages the marketing_head role can fully administer.
 // Uses prefix-matching for all SA pages plus explicit Sales page keys.
-const MARKETING_HEAD_SA_PREFIX = "sa-";
+const MARKETING_HEAD_SA_PREFIX  = "sa-";
+const MARKETING_HEAD_CRM_PREFIX = "crm-";
 const MARKETING_HEAD_SALES_PAGES = new Set(["sale-order", "sale-invoice", "sales-payment"]);
 
 function isMarketingHeadAllowed(pageKey) {
-  return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX) || MARKETING_HEAD_SALES_PAGES.has(pageKey);
+  return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX)
+    || pageKey.startsWith(MARKETING_HEAD_CRM_PREFIX)
+    || MARKETING_HEAD_SALES_PAGES.has(pageKey);
 }
 
 /**

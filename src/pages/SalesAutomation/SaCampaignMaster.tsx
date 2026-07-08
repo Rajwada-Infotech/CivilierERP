@@ -38,7 +38,7 @@ async function fetchManagerOptions(): Promise<{ value: string; label: string }[]
 }
 
 const fields: FieldDef[] = [
-  { name: "campaignCode", label: "Campaign Code", type: "text", required: true, uppercase: true },
+  { name: "campaignCode", label: "Campaign Code (auto-assigned if left blank)", type: "text", uppercase: true },
   { name: "name", label: "Campaign Name", type: "text", required: true },
   {
     name: "platformId",

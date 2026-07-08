@@ -38,6 +38,7 @@ import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
+import { crmNavItems } from "./sidebars/CrmSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -119,6 +120,13 @@ const MODULE_HEADER: Record<
     color: "#f59e0b",
     from: "from-amber-500/30",
     to: "to-amber-500/0",
+  },
+  crm: {
+    label: "CRM",
+    icon: Buildings2,
+    color: "#0ea5e9",
+    from: "from-sky-500/30",
+    to: "to-sky-500/0",
   },
   admin: {
     label: "Admin",
@@ -334,6 +342,9 @@ export const AppSidebar = () => {
         break;
       case "sales-automation":
         raw = salesAutomationNavItems;
+        break;
+      case "crm":
+        raw = crmNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);
