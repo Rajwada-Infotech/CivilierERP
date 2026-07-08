@@ -1090,6 +1090,7 @@ const ReportTable: React.FC<{
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
   const PAGE_SIZE = 20;
 
   // ── Godown switcher (stock-summary only) ─────────────────────────────────
@@ -1197,6 +1198,7 @@ const ReportTable: React.FC<{
   };
 
   return (
+    <>
     <div
       className="rounded-xl border border-border bg-card overflow-hidden"
       style={{ borderTopWidth: 2, borderTopColor: report.color }}
@@ -1320,7 +1322,11 @@ const ReportTable: React.FC<{
               </thead>
               <tbody className="divide-y divide-border/40">
                 {pageRows.map((row, i) => (
-                  <tr key={i} className="hover:bg-muted/20 transition-colors">
+                  <tr
+                    key={i}
+                    onClick={() => setSelectedRow(row)}
+                    className="hover:bg-muted/20 transition-colors cursor-pointer"
+                  >
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </td>
@@ -1367,6 +1373,55 @@ const ReportTable: React.FC<{
         </>
       )}
     </div>
+
+    {/* ── Row detail card ── */}
+    {selectedRow && (
+      <div
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+        onClick={() => setSelectedRow(null)}
+      >
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+        <div
+          className="relative w-full max-w-lg rounded-2xl bg-card border border-border shadow-2xl overflow-hidden z-10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${report.color}18` }}>
+                <report.icon size={16} style={{ color: report.color }} />
+              </div>
+              <span className="font-semibold text-foreground text-sm">{report.label}</span>
+            </div>
+            <button
+              onClick={() => setSelectedRow(null)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted/60 text-muted-foreground transition-colors"
+            >
+              <XCircle size={16} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-5 space-y-2.5 max-h-[70vh] overflow-y-auto">
+            {report.columns.map((col) => {
+              const val = cell(selectedRow, col);
+              if (!val || val === "—") return null;
+              return (
+                <div key={col.header} className="flex items-start justify-between gap-4 py-1.5 border-b border-border/40 last:border-0">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-32">
+                    {col.header}
+                  </span>
+                  <span className="text-sm text-foreground text-right font-mono break-all">
+                    {val}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
