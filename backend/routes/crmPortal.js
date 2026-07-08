@@ -4,7 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");
 const portalAuth = require("../middleware/crmPortalAuth");
-const { logCrmAudit } = require("../services/crmAudit");
+
 
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));

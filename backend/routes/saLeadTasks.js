@@ -102,8 +102,6 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
     const actor = actorId(req);
     const tid   = parseInt(req.params.id);
 
-    const completedAt = b.Status === "Done" ? "SYSDATETIME()" : "NULL";
-
     await pool.request()
       .input("id",    sql.Int,           tid)
       .input("title", sql.NVarChar(200), b.Title?.trim() || null)

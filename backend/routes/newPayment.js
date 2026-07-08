@@ -1598,7 +1598,6 @@ router.get("/:id/posting", async (req, res) => {
 router.post("/:id/post-to-gl", async (req, res) => {
   const pmtId = parseInt(req.params.id, 10);
   if (!pmtId) return res.status(400).json({ error: "Invalid id" });
-  const userEmail = req.user?.email || req.user?.upn || "system";
   try {
     const pool = getPool();
     const { postVoucher } = require("../services/generalLedger");

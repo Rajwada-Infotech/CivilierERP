@@ -1714,7 +1714,6 @@ router.post("/:id/post-to-gl", async (req, res) => {
   const userEmail = req.user?.email || "system";
   try {
     const pool = getPool();
-    const { postJournalVoucherApproval } = require("../services/generalLedger");
     const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 
     // Fetch posting preview (reuse endpoint logic via internal call)

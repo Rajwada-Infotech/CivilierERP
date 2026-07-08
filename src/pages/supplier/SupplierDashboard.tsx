@@ -111,10 +111,10 @@ export default function SupplierDashboard() {
                 style={{ color: isDark ? "#fff" : "#064e3b" }}>{firstName}</h1>
               <p className="text-sm mt-1"
                 style={{ color: isDark ? "rgba(209,250,229,0.60)" : "#047857" }}>
-                {pending.length > 0
-                  ? `${pending.length} pending RFQ${pending.length > 1 ? "s" : ""} waiting for your rates.`
-                  : overdue.length > 0
+                {overdue.length > 0
                   ? `${overdue.length} overdue RFQ${overdue.length > 1 ? "s" : ""} — please submit your rates.`
+                  : pending.length > 0
+                  ? `${pending.length} pending RFQ${pending.length > 1 ? "s" : ""} waiting for your rates.`
                   : "You're all caught up — no pending quotations right now."}
               </p>
             </div>

@@ -52,7 +52,7 @@ import {
   type DocType,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { Badge } from "@/components/ui/badge";
+
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { usePageRights } from "@/hooks/usePageRights";
 
@@ -145,23 +145,6 @@ const Field = ({
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
-  </div>
-);
-
-const DetailRow = ({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value?: React.ReactNode;
-  className?: string;
-}) => (
-  <div className={className}>
-    <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">
-      {label}
-    </p>
-    <div className="font-medium text-foreground">{value ?? "—"}</div>
   </div>
 );
 
