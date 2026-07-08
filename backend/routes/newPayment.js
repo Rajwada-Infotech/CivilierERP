@@ -138,6 +138,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
           ELSE grn2_sup.LHeadName
         END                                                AS PSupplierName,
+        -- Supplier contact person
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+          ELSE grn2_sup.LHeadContactPerson
+        END                                                AS PSupplierContact,
         -- Net Payable (the payment amount already on np.PAmount, but also expose EB net for reference)
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         -- Tax amount: computed as (ENetAmount - EAmount) when both are set, else 0
@@ -1019,6 +1025,11 @@ router.get("/:id", async (req, res) => {
           WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
           ELSE grn2_sup.LHeadName
         END                                                AS PSupplierName,
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+          ELSE grn2_sup.LHeadContactPerson
+        END                                                AS PSupplierContact,
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         CASE
           WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
