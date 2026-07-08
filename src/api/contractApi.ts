@@ -83,6 +83,60 @@ export const getContract = async (id: number): Promise<ContractDetail> => {
   return res.json();
 };
 
+export interface ContractOption {
+  id: number;
+  label: string;
+  ContractAmount: number | null;
+}
+
+// Dropdown source for Received Payment / New Payment / Sale Invoice /
+// Expense Booking forms — lets a payment/invoice/expense reference a
+// contract so the backend can record an advance or auto-allocate against
+// it (see backend/services/contractLedger.js).
+export const getContractOptions = async (params?: {
+  companyId?: number;
+  projectId?: number;
+}): Promise<ContractOption[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  const res = await fetchWithAuth(`${BASE}/options${qs.toString() ? `?${qs}` : ""}`);
+  if (!res.ok) await handleError(res, "Failed to fetch contract options");
+  return res.json();
+};
+
+export interface ContractLedgerEntry {
+  LedgerId: number;
+  TxnType: "Advance" | "Adjustment" | "Refund";
+  Amount: number;
+  SourceType: string;
+  SourceId: number;
+  SourceDocNo: string | null;
+  Remarks: string | null;
+  CreatedBy: string | null;
+  CreatedAt: string;
+}
+
+export interface ContractSummary {
+  ContractValue: number;
+  TotalAdvance: number;
+  TotalAllocated: number;
+  UnallocatedBalance: number;
+  TotalDocumented: number;
+  RemainingContractValue: number;
+  OverBilled: boolean;
+}
+
+// The transparency surface: every advance/adjustment ever applied against
+// a contract, plus the live derived balance summary.
+export const getContractLedger = async (
+  id: number,
+): Promise<{ summary: ContractSummary; ledger: ContractLedgerEntry[] }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/ledger`);
+  if (!res.ok) await handleError(res, "Failed to fetch contract ledger");
+  return res.json();
+};
+
 export const getContactPersons = async (): Promise<string[]> => {
   const res = await fetchWithAuth(`${BASE}/contact-persons`);
   if (!res.ok) await handleError(res, "Failed to fetch contact persons");

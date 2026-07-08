@@ -39,6 +39,8 @@ import {
   UsersRound,
   ShieldCheck,
   RotateCcw,
+  Car,
+  PlusCircle,
 } from "lucide-react";
 import {
   Crown,
@@ -118,6 +120,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
   records: "225,29,72",
   civilworkdpr: "8,145,178",
   admin: "59,130,246",
+  crm: "14,165,233",
 };
 
 // HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
@@ -131,6 +134,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   records: { h: 347, s: 77, l: 50 }, // #e11d48 rose
   civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
+  crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -323,6 +327,20 @@ const followupSetupItems = [
     color: "text-emerald-500",
   },
   {
+    icon: Car,
+    label: "Parking Master",
+    path: "/followup/setup/parking-master",
+    color: "text-blue-500",
+    pageKey: "followup-parking-master",
+  },
+  {
+    icon: PlusCircle,
+    label: "Extra Charges",
+    path: "/followup/setup/extra-charge-master",
+    color: "text-pink-500",
+    pageKey: "followup-extra-charge-master",
+  },
+  {
     icon: Activity,
     label: "Pending Tasks",
     path: "/followup/setup/pending-tasks",
@@ -386,6 +404,30 @@ const salesAutomationSetupItems = [
     path: "/sales-automation/role-master",
     color: "text-orange-500",
     pageKey: "sa-role-master",
+  },
+];
+
+const crmSetupItems = [
+  {
+    icon: HardHat,
+    label: "Broker Master",
+    path: "/masters/brokers",
+    color: "text-amber-500",
+    pageKey: "broker-master",
+  },
+  {
+    icon: ClipboardList,
+    label: "Payment Plan Master",
+    path: "/crm/payment-plans",
+    color: "text-emerald-500",
+    pageKey: "crm-payment-plans",
+  },
+  {
+    icon: CreditCard,
+    label: "Home Loan Tracking",
+    path: "/crm/loan-details",
+    color: "text-cyan-500",
+    pageKey: "crm-loan-details",
   },
 ];
 
@@ -901,6 +943,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(salesAutomationSetupItems),
         label: "Sales Automation",
         colorStyle: makeColorStyle("sales-automation"),
+        available: true,
+      };
+    if (activeModule === "crm")
+      return {
+        items: filterSetupItems(crmSetupItems),
+        label: "CRM",
+        colorStyle: makeColorStyle("crm"),
         available: true,
       };
     return {
