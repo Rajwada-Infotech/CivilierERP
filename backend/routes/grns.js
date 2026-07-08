@@ -1618,7 +1618,218 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   }
 });
 
-// ΓöÇΓöÇ GET /:id/pending-items ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// -- GET /:id/posting -- preview the GRN journal entry (base, tax, cost centre, ledgers, posted status)
+router.get("/:id/posting", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
+  try {
+    const pool = getPool();
+
+    // GRN row + linked PO cost centre
+    const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
+      SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
+             po.CompanyId, po.ProjectId, po.CostCenterId,
+             cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+      FROM dbo.GoodsReceiptNotes g
+      LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId
+      WHERE g.GRNID = @GRNID
+    `);
+    if (!grnRes.recordset.length) return res.status(404).json({ error: "GRN not found" });
+    const grn = grnRes.recordset[0];
+
+    // Compute base + tax totals (same algorithm as gst-breakdown)
+    const rawItems = parseGRNItems(grn.GRNItems);
+    const receivedItems = rawItems.filter((it) => {
+      return Number(it.receivedQty || it.ReceivedQty || 0) > 0
+        || Number(it.quantity || it.Quantity || 0) > 0
+        || Number(it.totalAmount || 0) > 0;
+    });
+
+    let totalBase = 0, totalGST = 0;
+    if (receivedItems.length > 0) {
+      const itemIds = receivedItems.map((it) => String(it.itemId || it.ItemId || "").trim()).filter(Boolean);
+      let masterMap = {};
+      if (itemIds.length > 0) {
+        const mReq = pool.request();
+        const ph = itemIds.map((id, i) => { mReq.input(`iid${i}`, sql.NVarChar(100), id); return `@iid${i}`; }).join(",");
+        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})`);
+        for (const row of mRes.recordset) masterMap[row.M_Id] = { cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0 };
+      }
+      for (const it of receivedItems) {
+        const itemId = String(it.itemId || it.ItemId || "");
+        const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
+        const rate = Number(it.rate || it.Rate || 0);
+        const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * Number(it.quantity || it.Quantity || receivedQty || 0);
+        const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0 };
+        const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
+        const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
+        totalBase += baseAmount;
+        totalGST += baseAmount * (totalGSTRate / 100);
+      }
+    }
+    totalBase = Math.round(totalBase * 100) / 100;
+    totalGST = Math.round(totalGST * 100) / 100;
+    const totalInclGST = Math.round((totalBase + totalGST) * 100) / 100;
+
+    // System-generated ledgers
+    const ledRes = await pool.request().query(`
+      SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster
+      WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1
+    `);
+    const leds = ledRes.recordset;
+    const findLed = (fn) => { const l = leds.find(fn); return l ? { id: l.LHeadId, name: l.LHeadName, code: l.LHeadCode } : null; };
+    const purchaseLed   = findLed((l) => l.LHeadName.toLowerCase().includes("purchase"));
+    const pgrnLed       = findLed((l) => l.LHeadName.toLowerCase().includes("pending"));
+    const provisionalLed = findLed((l) => l.LHeadName.toLowerCase().includes("provisional") && l.LHeadName.toLowerCase().includes("credit"));
+
+    // Check if already posted (GRNPosting source type in GL)
+    const postedRes = await pool.request().input("SrcId", sql.Int, grnId).query(`
+      SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry
+      WHERE SourceType='GRNPosting' AND SourceId=@SrcId AND IsReversed=0
+    `);
+    const existingPost = postedRes.recordset[0];
+
+    res.json({
+      grnNo: grn.GRNNo,
+      baseAmount: totalBase,
+      taxAmount: totalGST,
+      totalAmount: totalInclGST,
+      costCentre: grn.CostCenterName ? { id: grn.CostCenterId, name: grn.CostCenterName, code: grn.CostCenterCode } : null,
+      accounts: { purchase: purchaseLed, pgrn: pgrnLed, provisional: provisionalLed },
+      isPosted: !!existingPost,
+      jvNo: existingPost?.VoucherNo ?? null,
+      jvId: existingPost?.EntryId ?? null,
+    });
+  } catch (err) {
+    console.error("GRN posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -- POST /:id/post-to-gl -- create JV + post GRN journal entry to GL
+router.post("/:id/post-to-gl", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
+  const userEmail = req.user?.email || "system";
+  try {
+    const pool = getPool();
+    const { postJournalVoucherApproval } = require("../services/generalLedger");
+    const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+
+    // Fetch posting preview (reuse endpoint logic via internal call)
+    const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
+      SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
+             po.CompanyId, po.ProjectId
+      FROM dbo.GoodsReceiptNotes g
+      LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
+      WHERE g.GRNID = @GRNID
+    `);
+    if (!grnRes.recordset.length) return res.status(404).json({ error: "GRN not found" });
+    const grn = grnRes.recordset[0];
+
+    // Check if already posted
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, grnId).query(`
+      SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='GRNPosting' AND SourceId=@SrcId AND IsReversed=0
+    `);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This GRN has already been posted to GL." });
+
+    // Recompute totals
+    const rawItems = parseGRNItems(grn.GRNItems);
+    const receivedItems = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+    let totalBase = 0, totalGST = 0;
+    if (receivedItems.length > 0) {
+      const itemIds = receivedItems.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+      let masterMap = {};
+      if (itemIds.length > 0) {
+        const mReq = pool.request();
+        const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+        for (const row of mRes.recordset) masterMap[row.M_Id]={ cgstRate:parseFloat(row.M_CGST)||0, sgstRate:parseFloat(row.M_SGST)||0 };
+      }
+      for (const it of receivedItems) {
+        const itemId = String(it.itemId||it.ItemId||"");
+        const receivedQty = Number(it.receivedQty||it.ReceivedQty||0);
+        const rate = Number(it.rate||it.Rate||0);
+        const baseAmount = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||receivedQty||0);
+        const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+        const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+        const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+        totalBase += baseAmount;
+        totalGST += baseAmount*(totalGSTRate/100);
+      }
+    }
+    totalBase = Math.round(totalBase*100)/100;
+    totalGST = Math.round(totalGST*100)/100;
+    const totalInclGST = Math.round((totalBase+totalGST)*100)/100;
+
+    if (totalBase <= 0) return res.status(400).json({ error: "GRN has no receivable amount to post." });
+
+    // Get system ledger IDs
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const findId = (fn) => leds.find(fn)?.LHeadId;
+    const purchaseId   = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
+    const pgrnId       = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
+    const provisionalId = findId((l)=>l.LHeadName.toLowerCase().includes("provisional")&&l.LHeadName.toLowerCase().includes("credit"));
+    if (!purchaseId || !pgrnId || !provisionalId) return res.status(422).json({ error: "One or more required system ledgers (Purchase, PGRN, Provisional Credit) are not configured." });
+
+    // JV lines: Debit Purchase (base) + Debit Provisional Credit (tax) = Credit PGRN (total incl GST)
+    const lines = [
+      { LHeadId: purchaseId,    DebitAmount: totalBase,    CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)` },
+      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalInclGST, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
+      ...(totalGST > 0 ? [{ LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` }] : []),
+    ];
+
+    // Create JV
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, grn.CompanyId, grn.ProjectId).catch(() => ({ finalDocNo: null }));
+    const insertHdr = await pool.request()
+      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
+      .input("JVDate", sql.Date, new Date())
+      .input("Narration", sql.NVarChar(500), `GRN Posting: ${grn.GRNNo}`)
+      .input("CompanyId", sql.Int, grn.CompanyId || null)
+      .input("ProjectId", sql.Int, grn.ProjectId || null)
+      .input("DocTypeId", sql.Int, dtId || null)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
+    const jvId = insertHdr.recordset[0].JVID;
+
+    let sortOrder = 0;
+    for (const line of lines) {
+      await pool.request()
+        .input("JVID", sql.Int, jvId)
+        .input("LHeadId", sql.Int, line.LHeadId)
+        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
+        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
+        .input("Narration", sql.NVarChar(255), line.Narration)
+        .input("SortOrder", sql.Int, sortOrder++)
+        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
+    }
+    if (finalDocNo) await backPatchRecordId(pool, sql, finalDocNo, "JournalVoucher", jvId);
+
+    // Post to GL using GRNPosting source type so we can detect it later
+    const { postVoucher } = require("../services/generalLedger");
+    await postVoucher(pool, {
+      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherDate: new Date(),
+      sourceType: "GRNPosting",
+      sourceId: grnId,
+      companyId: grn.CompanyId ?? null,
+      projectId: grn.ProjectId ?? null,
+      createdBy: userEmail,
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+    });
+
+    await bumpCacheVersion("journal-voucher");
+    res.json({ jvId, jvNo: finalDocNo, message: "GRN posted to GL successfully." });
+  } catch (err) {
+    console.error("GRN post-to-gl error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -- GET /:id/pending-items --
 // Returns items from a GRN that still have remainingQty > 0.
 // These are items ordered on the linked PO but not yet fully received.
 // Used to surface "pending items" directly on the GRN ΓÇö replacing the old

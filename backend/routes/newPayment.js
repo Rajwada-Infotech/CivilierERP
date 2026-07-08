@@ -1148,6 +1148,8 @@ router.get("/chain/:expenseRef", async (req, res) => {
           np.PChequeNo,
           np.PChequeLotNumber,
           np.PChequeDate,
+          np.PChequeIfsc,
+          np.PBankName,
           np.ReplacesPaymentId,
           np.BounceCharge,
           np.PCreatedBy,
@@ -1225,6 +1227,137 @@ router.get("/chain/:expenseRef", async (req, res) => {
     });
   } catch (err) {
     console.error("[payment-chain]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Payment Posting: preview ────────────────────────────────────────────────
+router.get("/:id/posting", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+
+    // Payment row + bank ledger
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+             np.PBankID, np.PBankName,
+             bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
+             np.Status
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.AccountHeadMaster bank ON bank.LHeadId = np.PBankID
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    // Determine payment type: "on-account" if no invoice ref, else "direct"
+    const isOnAccount = !pmt.PExpenseRef;
+
+    // Invoice details (if linked)
+    let invoiceTotal = parseFloat(pmt.PAmount) || 0;
+    let supplierName = null;
+    if (!isOnAccount) {
+      const ebRes = await pool.request().input("EDocNo", sql.NVarChar(100), pmt.PExpenseRef).query(`
+        SELECT TOP 1 eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId, eb.EName,
+                     grn.TotalAmount AS GrnTotalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType='GRN' AND grn.GRNID=TRY_CAST(eb.ESourceId AS INT)
+        WHERE eb.EDocNo = @EDocNo
+      `);
+      if (ebRes.recordset.length) {
+        const eb = ebRes.recordset[0];
+        supplierName = eb.EName;
+        const grnTotal = eb.ESourceType === "GRN" && parseFloat(eb.GrnTotalAmount) > 0
+          ? parseFloat(eb.GrnTotalAmount)
+          : parseFloat(eb.ENetAmount || eb.EAmount || 0);
+        invoiceTotal = grnTotal || parseFloat(pmt.PAmount) || 0;
+      }
+    }
+
+    // System ledgers: Supplier/Creditor
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
+    const accounts = {
+      supplier: find((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor")),
+      bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
+    };
+
+    // Check if already posted
+    const postedRes = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
+    const isPosted = postedRes.recordset.length > 0;
+
+    res.json({
+      isOnAccount,
+      amount: parseFloat(pmt.PAmount) || 0,
+      invoiceTotal,
+      paymentMode: pmt.PMode,
+      expenseRef: pmt.PExpenseRef,
+      supplierName,
+      accounts,
+      isPosted,
+      jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+    });
+  } catch (err) {
+    console.error("Payment posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Payment Posting: post to GL ─────────────────────────────────────────────
+router.post("/:id/post-to-gl", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  const userEmail = req.user?.email || req.user?.upn || "system";
+  try {
+    const pool = getPool();
+    const { postVoucher } = require("../services/generalLedger");
+
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+             np.PBankID, np.PBankName,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    // Already posted?
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This payment has already been posted to GL." });
+
+    const amount = parseFloat(pmt.PAmount) || 0;
+    if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
+
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const findId = (fn) => leds.find(fn)?.LHeadId;
+    const supplierId = findId((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+
+    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    if (!bankId) return res.status(422).json({ error: "No bank account linked to this payment." });
+
+    const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
+    const legs = [
+      { lheadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
+      { lheadId: bankId,     debit: 0, credit: amount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+    ];
+
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+
+    await postVoucher(pool, { sourceType: "PaymentPosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+
+    res.json({ jvNo: finalDocNo, message: "Posted successfully." });
+  } catch (err) {
+    console.error("Payment post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

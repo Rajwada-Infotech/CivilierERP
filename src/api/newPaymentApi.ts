@@ -136,6 +136,8 @@ export interface PaymentChainItem {
   PChequeNo: string | null;
   PChequeLotNumber: string | null;
   PChequeDate: string | null;
+  PChequeIfsc: string | null;
+  PBankName: string | null;
   ReplacesPaymentId: number | null;
   BounceCharge: number | null;
   PCreatedBy: string | null;

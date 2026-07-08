@@ -804,6 +804,18 @@ export default function GRN() {
       .catch(() => setSystemLedgers([]));
   }, []);
 
+  // Fetch live posting data when the posting tab is opened
+  React.useEffect(() => {
+    if (viewModalTab !== "posting" || !viewingGrn?.GRNID) return;
+    setGrnPostingLoading(true);
+    setGrnPostingData(null);
+    fetchWithAuth(`/api/grns/${viewingGrn.GRNID}/posting`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setGrnPostingData(d ?? null))
+      .catch(() => setGrnPostingData(null))
+      .finally(() => setGrnPostingLoading(false));
+  }, [viewModalTab, viewingGrn?.GRNID]);
+
   // Match the real system-generated ledger (if it exists yet) for each GRN posting row
   const grnPurchaseLedger = systemLedgers.find((d) =>
     d.label.toLowerCase().includes("purchase"),
@@ -816,6 +828,9 @@ export default function GRN() {
       d.label.toLowerCase().includes("provisional") &&
       d.label.toLowerCase().includes("credit"),
   );
+  const [grnPostingData, setGrnPostingData] = useState<any | null>(null);
+  const [grnPostingLoading, setGrnPostingLoading] = useState(false);
+  const [grnPosting, setGrnPosting] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [grnStatusFilter, setGrnStatusFilter] = useState("All");
@@ -2867,118 +2882,111 @@ export default function GRN() {
                           Journal Entry — GRN Posting
                         </span>
                       </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
-                        Coming Soon
-                      </span>
+                      {grnPostingLoading ? (
+                        <span className="text-[10px] text-muted-foreground">Loading…</span>
+                      ) : grnPostingData?.isPosted ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                          Posted · {grnPostingData.jvNo}
+                        </span>
+                      ) : null}
                     </div>
 
-                    {/* Debit / Credit stub table */}
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      {/* Table header */}
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
-                        <span>Account</span>
-                        <span className="text-center">Cost Centre</span>
-                        <span className="text-right">Debit (₹)</span>
-                        <span className="text-right">Credit (₹)</span>
+                    {/* Debit / Credit table */}
+                    {grnPostingLoading ? (
+                      <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">
+                        Loading posting details…
                       </div>
-
-                      {/* Posting rows — shows the real system-generated ledger once it exists, no dropdown */}
-                      {(
-                        [
-                          {
-                            key: "purchase",
-                            label: "Purchase A/c",
-                            side: "debit",
-                            ledger: grnPurchaseLedger,
-                          },
-                          {
-                            key: "pgrn",
-                            label: "Provision for Pending GRN A/c",
-                            side: "credit",
-                            ledger: grnPendingLedger,
-                          },
-                          {
-                            key: "provisionalCredit",
-                            label: "Provisional Credit Available",
-                            side: "debit",
-                            ledger: grnProvisionalCreditLedger,
-                          },
-                        ] as {
-                          key: string;
-                          label: string;
-                          side: "debit" | "credit";
-                          ledger:
-                            | { id: number; label: string; code: string | null }
-                            | undefined;
-                        }[]
-                      ).map((row) => (
-                        <div
-                          key={row.key}
-                          className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span
-                              className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                row.side === "debit"
-                                  ? "bg-emerald-500"
-                                  : "bg-rose-500"
-                              }`}
-                            />
-                            {row.ledger ? (
-                              <span
-                                className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
-                                title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
-                              >
-                                {row.ledger.label}
-                                {row.ledger.code ? ` (${row.ledger.code})` : ""}
-                              </span>
-                            ) : (
-                              <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
-                                {row.label} — not configured
-                              </span>
-                            )}
+                    ) : !grnPostingData ? (
+                      <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">
+                        Could not load posting data.
+                      </div>
+                    ) : (() => {
+                      const { baseAmount, taxAmount, totalAmount, costCentre, accounts } = grnPostingData;
+                      const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
+                      const rows: PostRow[] = [
+                        { key: "purchase", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "debit", amount: baseAmount },
+                        { key: "pgrn", label: accounts?.pgrn?.label ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null, side: "credit", amount: totalAmount },
+                        ...(taxAmount > 0 ? [{ key: "provisional", label: accounts?.provisional?.label ?? "Provisional Credit Available", code: accounts?.provisional?.code ?? null, side: "debit" as const, amount: taxAmount }] : []),
+                      ];
+                      const totalDebit = rows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+                      const totalCredit = rows.filter(r => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+                      return (
+                        <div className="rounded-xl border border-border overflow-hidden">
+                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                            <span>Account</span>
+                            <span className="text-center">Cost Centre</span>
+                            <span className="text-right">Debit (₹)</span>
+                            <span className="text-right">Credit (₹)</span>
                           </div>
-                          <span className="text-xs text-muted-foreground text-center">
-                            —
-                          </span>
-                          <span className="text-xs text-right text-muted-foreground font-mono">
-                            {row.side === "debit" ? "—" : ""}
-                          </span>
-                          <span className="text-xs text-right text-muted-foreground font-mono">
-                            {row.side === "credit" ? "—" : ""}
-                          </span>
+                          {rows.map((row) => (
+                            <div
+                              key={row.key}
+                              className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                                  {row.label}{row.code ? ` (${row.code})` : ""}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre || "—"}</span>
+                              <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                {row.side === "debit" ? fmt(row.amount) : ""}
+                              </span>
+                              <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                {row.side === "credit" ? fmt(row.amount) : ""}
+                              </span>
+                            </div>
+                          ))}
+                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                            <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                            <span />
+                            <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>
+                            <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(totalCredit)}</span>
+                          </div>
                         </div>
-                      ))}
+                      );
+                    })()}
 
-                      {/* Totals footer */}
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
-                          Total
-                        </span>
-                        <span />
-                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
-                          —
-                        </span>
-                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
-                          —
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Info note */}
-                    <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
-                      <AlertCircle
-                        size={13}
-                        className="text-muted-foreground mt-0.5 flex-shrink-0"
-                      />
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Posting entries will be auto-generated from GRN line
-                        items, GST rates, and the mapped chart of accounts once
-                        the accounting module is wired up. The debit / credit
-                        split shown above represents the expected journal
-                        structure.
-                      </p>
-                    </div>
+                    {/* Post to GL / Posted status */}
+                    {!grnPostingLoading && grnPostingData && (
+                      grnPostingData.isPosted ? (
+                        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                          <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                          <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                            Already posted to General Ledger as <span className="font-semibold">{grnPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-4">
+                          <p className="text-xs text-muted-foreground">
+                            Posting will create a balanced journal entry and update the Trial Balance immediately.
+                          </p>
+                          <button
+                            disabled={grnPosting}
+                            onClick={async () => {
+                              if (!viewingGrn?.GRNID) return;
+                              setGrnPosting(true);
+                              try {
+                                const r = await fetchWithAuth(`/api/grns/${viewingGrn.GRNID}/post-to-gl`, { method: "POST" });
+                                const body = await r.json();
+                                if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+                                setGrnPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
+                              } catch (err: any) {
+                                alert(err.message ?? "Posting failed");
+                              } finally {
+                                setGrnPosting(false);
+                              }
+                            }}
+                            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                          >
+                            <BookOpen size={11} />
+                            {grnPosting ? "Posting…" : "Post to GL"}
+                          </button>
+                        </div>
+                      )
+                    )}
                   </div>
                 )}{" "}
                 {/* end posting tab */}
