@@ -387,6 +387,19 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
 
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as clear" });
+
+    // Fire-and-forget — update invoice balance after responding so UI isn't blocked
+    if (sourceType === "PAYMENT") {
+      const pool2 = getPool();
+      pool2.request()
+        .input("PPaymentID", sql.Int, parseInt(sourceId))
+        .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")
+        .then((refRes) => {
+          const expenseRef = refRes.recordset[0]?.PExpenseRef;
+          if (expenseRef) return syncBillStatus(pool2, sql, expenseRef);
+        })
+        .catch((err) => console.warn("syncBillStatus after clear failed:", err.message));
+    }
   } catch (err) {
     console.error("BRS clear error:", err);
     res.status(500).json({ error: "Failed to mark as clear" });
@@ -460,23 +473,21 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
             (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
       `);
 
-    // Sync outstanding balance on the linked invoice — bounced cheques must not count as paid
-    if (sourceType === "PAYMENT") {
-      try {
-        const pool2 = getPool();
-        const refRes = await pool2
-          .request()
-          .input("PPaymentID", sql.Int, parseInt(sourceId))
-          .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
-        const expenseRef = refRes.recordset[0]?.PExpenseRef;
-        if (expenseRef) await syncBillStatus(pool2, sql, expenseRef);
-      } catch (syncErr) {
-        console.warn("syncBillStatus after bounce failed:", syncErr.message);
-      }
-    }
-
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as bounced" });
+
+    // Fire-and-forget — bounced cheques must not count as paid, update after responding
+    if (sourceType === "PAYMENT") {
+      const pool2 = getPool();
+      pool2.request()
+        .input("PPaymentID", sql.Int, parseInt(sourceId))
+        .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")
+        .then((refRes) => {
+          const expenseRef = refRes.recordset[0]?.PExpenseRef;
+          if (expenseRef) return syncBillStatus(pool2, sql, expenseRef);
+        })
+        .catch((err) => console.warn("syncBillStatus after bounce failed:", err.message));
+    }
   } catch (err) {
     console.error("BRS bounce error:", err);
     res.status(500).json({ error: "Failed to mark as bounced" });

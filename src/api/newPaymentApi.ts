@@ -136,13 +136,13 @@ export interface PaymentChainItem {
   PChequeNo: string | null;
   PChequeLotNumber: string | null;
   PChequeDate: string | null;
+  PChequeIfsc: string | null;
+  PBankName: string | null;
   ReplacesPaymentId: number | null;
   BounceCharge: number | null;
   PCreatedBy: string | null;
   PCreatedAt: string;
   PApprovedBy: string | null;
-  PUpdatedBy: string | null;
-  PUpdatedAt: string | null;
   IsMatched: number;
   IsBounced: number;
   BounceDate: string | null;
@@ -159,6 +159,8 @@ export interface PaymentChainInvoice {
   EDocNo: string | null;
   ENetAmount: number | null;
   EAmount: number | null;
+  ESourceType: string | null;
+  GrnTotalAmount: number | null;
   ETotalPaid: number | null;
   ERemainingAmount: number | null;
   EBillStatus: string | null;

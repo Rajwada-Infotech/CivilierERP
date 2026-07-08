@@ -13,18 +13,26 @@ async function syncBillStatus(pool, sql, expenseRef) {
     const ebRes = await pool
       .request()
       .input("EDocNo", sql.NVarChar(100), expenseRef)
-      .query("SELECT Eid, ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+      .query(`
+        SELECT eb.Eid, eb.ENetAmount, eb.EAmount
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.EDocNo = @EDocNo
+      `);
     if (!ebRes.recordset.length) return;
 
     const { Eid, ENetAmount, EAmount } = ebRes.recordset[0];
-    const netAmount = parseFloat(ENetAmount ?? EAmount ?? 0) || 0;
+    // ENetAmount is the finalized net payable (base + GST + billing term adjustments).
+    // GrnTotalAmount is the pre-tax GRN base — never use it for payment calculations.
+    const netAmount = parseFloat(ENetAmount ?? 0) > 0
+      ? parseFloat(ENetAmount)
+      : parseFloat(EAmount ?? 0) || 0;
 
     // Exclude bounced payments — a bounced cheque must not reduce outstanding balance
     const payRes = await pool
       .request()
       .input("PExpenseRef", sql.NVarChar(100), expenseRef)
       .query(`
-        SELECT ISNULL(SUM(np.PAmount), 0) AS TotalPaid
+        SELECT ISNULL(SUM(np.PAmount - ISNULL(np.BounceCharge, 0)), 0) AS TotalPaid
         FROM dbo.NewPayment np
         LEFT JOIN dbo.BankReconciliation br
           ON  br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID

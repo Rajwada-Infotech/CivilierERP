@@ -477,6 +477,134 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-applications") {
+      queries.push(`
+        SELECT
+          'crm-applications'                    AS Module,
+          'CRM Application'                     AS ModuleLabel,
+          CAST(a.Id AS NVARCHAR)                AS RecordId,
+          a.ApplicationNo                       AS Reference,
+          a.CreatedAt                           AS RecordDate,
+          a.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          a.BudgetMax                           AS Amount,
+          ${NULL_EXTRA}
+          CAST(a.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ''                                    AS RejectionNote,
+          ISNULL(a.UpdatedAt, a.CreatedAt)      AS LastModified
+        FROM dbo.CrmApplication a
+        WHERE a.Status = 'Pending' AND a.IsActive = 1
+      `);
+    }
+
+    if (!module || module === "crm-agreements") {
+      queries.push(`
+        SELECT
+          'crm-agreements'                      AS Module,
+          'CRM Agreement (Senior Approval)'     AS ModuleLabel,
+          CAST(ag.Id AS NVARCHAR)               AS RecordId,
+          ag.AgreementNo                        AS Reference,
+          ag.CreatedAt                          AS RecordDate,
+          ag.SeniorApprovalStatus               AS Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          b.TotalValue                          AS Amount,
+          ${NULL_EXTRA}
+          CAST(ag.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(ag.SeniorApprovalRemarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(ag.UpdatedAt, ag.CreatedAt)    AS LastModified
+        FROM dbo.CrmAgreement ag
+        JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE ag.SeniorApprovalStatus = 'Pending'
+      `);
+    }
+
+    if (!module || module === "crm-brokerage") {
+      queries.push(`
+        SELECT
+          'crm-brokerage'                       AS Module,
+          'CRM Brokerage'                       AS ModuleLabel,
+          CAST(br.Id AS NVARCHAR)               AS RecordId,
+          b.BookingNo                           AS Reference,
+          br.CreatedAt                          AS RecordDate,
+          br.Status,
+          br.BrokerName                         AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          br.ComputedAmount                     AS Amount,
+          ${NULL_EXTRA}
+          CAST(br.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(br.Notes AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(br.UpdatedAt, br.CreatedAt)    AS LastModified
+        FROM dbo.CrmBrokerageMaster br
+        JOIN dbo.CrmBooking b     ON b.Id = br.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE br.Status = 'Pending'
+      `);
+    }
+
+    if (!module || module === "crm-cancellations") {
+      queries.push(`
+        SELECT
+          'crm-cancellations'                   AS Module,
+          'CRM Cancellation & Refund'           AS ModuleLabel,
+          CAST(c.Id AS NVARCHAR)                AS RecordId,
+          c.CancellationNo                      AS Reference,
+          c.CreatedAt                           AS RecordDate,
+          c.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          c.RefundAmount                        AS Amount,
+          ${NULL_EXTRA}
+          CAST(c.RequestedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(c.Reason AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(c.UpdatedAt, c.CreatedAt)      AS LastModified
+        FROM dbo.CrmCancellation c
+        JOIN dbo.CrmBooking b     ON b.Id = c.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE c.Status = 'Pending'
+      `);
+    }
+
+    if (!module || module === "crm-noc") {
+      queries.push(`
+        SELECT
+          'crm-noc'                             AS Module,
+          'CRM NOC'                             AS ModuleLabel,
+          CAST(n.Id AS NVARCHAR)                AS RecordId,
+          n.NocNo                               AS Reference,
+          n.CreatedAt                           AS RecordDate,
+          n.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          n.LoanAmount                          AS Amount,
+          ${NULL_EXTRA}
+          CAST(n.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(n.Reason AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(n.UpdatedAt, n.CreatedAt)      AS LastModified
+        FROM dbo.CrmNoc n
+        JOIN dbo.CrmBooking b     ON b.Id = n.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE n.Status = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -515,7 +643,12 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
+        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

@@ -170,7 +170,47 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/inter-company-transfer",
     label: "Inter-Company Transfers",
   },
+  "crm-applications": {
+    icon: ClipboardList,
+    color: "text-sky-500 bg-sky-500/10",
+    navPath: "/crm/applications",
+    apiEndpoint: "/api/crm/applications",
+    label: "CRM Applications",
+  },
+  "crm-agreements": {
+    icon: Building2,
+    color: "text-indigo-500 bg-indigo-500/10",
+    navPath: "/crm/agreements",
+    apiEndpoint: "/api/crm/agreements",
+    label: "CRM Agreements",
+  },
+  "crm-brokerage": {
+    icon: Receipt,
+    color: "text-amber-500 bg-amber-500/10",
+    navPath: "/crm/brokerage",
+    apiEndpoint: "/api/crm/brokerage",
+    label: "CRM Brokerage",
+  },
+  "crm-cancellations": {
+    icon: XCircle,
+    color: "text-rose-500 bg-rose-500/10",
+    navPath: "/crm/cancellations",
+    apiEndpoint: "/api/crm/cancellations",
+    label: "CRM Cancellations",
+  },
+  "crm-noc": {
+    icon: ClipboardCheck,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/crm/noc",
+    apiEndpoint: "/api/crm/noc",
+    label: "CRM NOC",
+  },
 };
+
+// Every CRM approval module is gated to admin/super_admin/marketing_head —
+// dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
+const CRM_MODULES = new Set(["crm-applications", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
@@ -318,6 +358,7 @@ const InboxRow: React.FC<{
         status={item.Status}
         recordId={item.RecordId}
         endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
+        approverRoles={CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES : undefined}
         onSuccess={(action) => {
           if (action === "approve" || action === "reject") {
             onOptimisticUpdate(item.RecordId, item.Module);

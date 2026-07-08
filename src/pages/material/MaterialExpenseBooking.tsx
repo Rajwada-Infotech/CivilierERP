@@ -606,6 +606,7 @@ function DocSelectorPanel({
   const [tab, setTab] = useState<SourceKind>("PO");
   const [search, setSearch] = useState("");
   const [todFetching, setTodFetching] = useState(false);
+  const [poGoodsBlocked, setPoGoodsBlocked] = useState<{ poId: number; docNo: string; goodsItems: string[] } | null>(null);
 
   const selectTod = async (tod: TodItem) => {
     setTodFetching(true);
@@ -1062,6 +1063,27 @@ function DocSelectorPanel({
         </div>
       </div>
 
+      {/* Goods-type block warning */}
+      {poGoodsBlocked && (
+        <div className="mx-3 mb-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+              <AlertCircle size={12} /> Direct invoice not allowed — Goods items detected
+            </p>
+            <button onClick={() => setPoGoodsBlocked(null)} className="text-[10px] text-muted-foreground hover:text-foreground">✕</button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">{poGoodsBlocked.docNo}</span> contains Goods-type items.
+            Direct invoices are only allowed for Service items. Use a GRN-linked invoice for goods, or split this PO into separate Service and Goods orders.
+          </p>
+          {poGoodsBlocked.goodsItems.length > 0 && (
+            <p className="text-[10px] text-destructive/80">
+              Goods items: {poGoodsBlocked.goodsItems.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="max-h-60 overflow-y-auto bg-background">
         {loading || todFetching ? (
           <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
@@ -1086,7 +1108,23 @@ function DocSelectorPanel({
                     .join(" · ")}
                   badge={po.Status}
                   amount={po.TotalAmount}
-                  onClick={() => {
+                  onClick={async () => {
+                    // Block direct invoice if PO has Goods-type items
+                    try {
+                      const check = await fetchWithAuth(`/api/purchase-orders/${po.PurchaseOrderID}/item-types`);
+                      if (check.ok) {
+                        const { hasGoods, itemTypes } = await check.json();
+                        if (hasGoods) {
+                          const goodsNames = (itemTypes as { name: string; type: string }[])
+                            .filter((it) => it.type.toLowerCase() === "goods")
+                            .map((it) => it.name);
+                          setPoGoodsBlocked({ poId: po.PurchaseOrderID, docNo, goodsItems: goodsNames });
+                          return;
+                        }
+                      }
+                    } catch {
+                      // If check fails, allow through — don't block on network error
+                    }
                     const {
                       subtotal,
                       cgstRate: dCgst,
@@ -1588,6 +1626,14 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
+  const openPreview = useCallback((rec: ExpenseRecord | null) => {
+    setPreviewRecord(rec);
+    if (!rec?.id) return;
+    // Re-fetch fresh data so totalPaid/billStatus reflect latest payment state
+    apiFetch(`${API}/${rec.id}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch(() => {/* non-fatal — stale data still shown */});
+  }, []);
   const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>(
     [],
   );
@@ -3555,7 +3601,7 @@ export default function MaterialExpenseBooking() {
                           }
                           rec={rec}
                           onEdit={() => openAmend(rec)}
-                          onPreview={() => setPreviewRecord(rec)}
+                          onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
                           canEdit={rights.canEdit}
@@ -3765,7 +3811,7 @@ export default function MaterialExpenseBooking() {
                                       <button
                                         type="button"
                                         className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                        onClick={() => setPreviewRecord(rec)}
+                                        onClick={() => openPreview(rec)}
                                         title="Preview"
                                       >
                                         <Eye size={15} />

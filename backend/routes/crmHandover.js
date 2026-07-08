@@ -1,0 +1,221 @@
+const express = require("express");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId } = require("../services/saAccess");
+const { emitNotification } = require("../services/notify");
+
+router.use(authMiddleware);
+
+const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
+
+const HANDOVER_SELECT = `
+  SELECT
+    h.Id, h.BookingId, h.ScheduledDate, h.ActualHandoverDate, h.KeyHandoverBy,
+    h.FinalDuesCleared, h.CustomerAcknowledged, h.Status, h.Notes,
+    h.CreatedAt, h.UpdatedAt,
+    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.AssignedTo,
+    a.ApplicantName, a.Mobile,
+    kh.name AS KeyHandoverByName,
+    (SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('Open','InProgress')) AS OpenSnagCount
+  FROM dbo.CrmHandover h
+  JOIN  dbo.CrmBooking b     ON b.Id = h.BookingId
+  JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.Users kh     ON kh.id = h.KeyHandoverBy
+`;
+
+// GET / — all handovers
+router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("h.Status = @st"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${HANDOVER_SELECT} ${where} ORDER BY h.ScheduledDate ASC, h.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-handover] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id — handover with snag list
+router.get("/:id", requirePageRight("crm-handover", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const [hRes, sRes] = await Promise.all([
+      pool.request().input("id", sql.Int, id).query(`${HANDOVER_SELECT} WHERE h.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT s.*, rb.name AS RaisedByName, rs.name AS ResolvedByName
+        FROM dbo.CrmSnagItem s
+        LEFT JOIN dbo.Users rb ON rb.id = s.RaisedBy
+        LEFT JOIN dbo.Users rs ON rs.id = s.ResolvedBy
+        WHERE s.HandoverId = @id ORDER BY s.CreatedAt DESC
+      `),
+    ]);
+    if (!hRes.recordset[0]) return res.status(404).json({ error: "Handover not found" });
+    res.json({ handover: hRes.recordset[0], snags: sRes.recordset });
+  } catch (e) {
+    console.error("[crm-handover] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST / — schedule handover for a booking (requires agreement executed)
+router.post("/", requirePageRight("crm-handover", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+
+    // Workflow guard: booking must have an executed/registered agreement first
+    const agr = await pool.request()
+      .input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
+    if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
+      return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
+    }
+
+    const result = await pool.request()
+      .input("bid",  sql.Int,  parseInt(b.BookingId))
+      .input("sdt",  sql.Date, b.ScheduledDate || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int,  actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmHandover (BookingId, ScheduledDate, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@bid, @sdt, 'Scheduled', @note, @cb, SYSDATETIME())
+      `);
+
+    // Notify assigned salesperson
+    const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query("SELECT AssignedTo, BookingNo FROM dbo.CrmBooking WHERE Id = @bid");
+    if (bk.recordset[0]?.AssignedTo) {
+      await emitNotification(pool, bk.recordset[0].AssignedTo, "handover_scheduled",
+        "Handover Scheduled", `Handover scheduled for booking ${bk.recordset[0].BookingNo}`,
+        result.recordset[0].Id, "handover");
+    }
+
+    res.status(201).json({ success: true, id: result.recordset[0].Id });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "A handover already exists for this booking" });
+    console.error("[crm-handover] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id — update handover (progress through Scheduled → SnagInspection → SnagPending → Completed)
+router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const id = parseInt(req.params.id);
+
+    // Guard: cannot mark Completed while open snags remain
+    if (b.Status === "Completed") {
+      const openSnags = await pool.request().input("id", sql.Int, id)
+        .query(`SELECT COUNT(*) AS cnt FROM dbo.CrmSnagItem WHERE HandoverId = @id AND Status IN ('Open','InProgress')`);
+      if (openSnags.recordset[0].cnt > 0) {
+        return res.status(400).json({ error: "Cannot complete handover — unresolved snag items remain" });
+      }
+    }
+
+    await pool.request()
+      .input("id",   sql.Int,  id)
+      .input("sdt",  sql.Date, b.ScheduledDate || null)
+      .input("adt",  sql.Date, b.ActualHandoverDate || null)
+      .input("khb",  sql.Int,  b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
+      .input("fdc",  sql.Bit,  b.FinalDuesCleared ? 1 : 0)
+      .input("ack",  sql.Bit,  b.CustomerAcknowledged ? 1 : 0)
+      .input("st",   sql.NVarChar(30), b.Status || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("ub",   sql.Int,  actorId(req))
+      .query(`
+        UPDATE dbo.CrmHandover SET
+          ScheduledDate = ISNULL(@sdt, ScheduledDate),
+          ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
+          KeyHandoverBy = ISNULL(@khb, KeyHandoverBy),
+          FinalDuesCleared = @fdc, CustomerAcknowledged = @ack,
+          Status = ISNULL(@st, Status), Notes = @note,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    // On completion, cascade booking status to Handed Over
+    if (b.Status === "Completed") {
+      const h = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
+      if (h.recordset[0]) {
+        await pool.request().input("bid", sql.Int, h.recordset[0].BookingId)
+          .query("UPDATE dbo.CrmBooking SET Status = 'Confirmed', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-handover] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/snags — raise a snag/defect item
+router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const handoverId = parseInt(req.params.id);
+    const b = req.body;
+    if (!SNAG_CATEGORIES.includes(b.Category))
+      return res.status(400).json({ error: `Invalid Category. Must be: ${SNAG_CATEGORIES.join(", ")}` });
+    if (!b.Description?.trim()) return res.status(400).json({ error: "Description is required" });
+
+    await pool.request()
+      .input("hid",  sql.Int,            handoverId)
+      .input("cat",  sql.NVarChar(50),   b.Category)
+      .input("desc", sql.NVarChar(sql.MAX), b.Description.trim())
+      .input("photo",sql.NVarChar(2000), b.PhotoUrl || null)
+      .input("rb",   sql.Int,            actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmSnagItem (HandoverId, Category, Description, PhotoUrl, Status, RaisedBy, CreatedAt)
+        VALUES (@hid, @cat, @desc, @photo, 'Open', @rb, SYSDATETIME())
+      `);
+
+    // Move handover into SnagPending if it was in inspection
+    await pool.request().input("hid", sql.Int, handoverId)
+      .query(`UPDATE dbo.CrmHandover SET Status = 'SnagPending' WHERE Id = @hid AND Status IN ('Scheduled','SnagInspection')`);
+
+    res.status(201).json({ success: true });
+  } catch (e) {
+    console.error("[crm-handover] POST snags error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/snags/:snagId — resolve/update a snag item
+router.put("/:id/snags/:snagId", requirePageRight("crm-handover", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const snagId = parseInt(req.params.snagId);
+    await pool.request()
+      .input("id", sql.Int, snagId)
+      .input("st", sql.NVarChar(30), b.Status || null)
+      .input("rb", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmSnagItem SET
+          Status = ISNULL(@st, Status),
+          ResolvedBy = CASE WHEN @st = 'Resolved' THEN @rb ELSE ResolvedBy END,
+          ResolvedAt = CASE WHEN @st = 'Resolved' THEN SYSDATETIME() ELSE ResolvedAt END
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-handover] PUT snags error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

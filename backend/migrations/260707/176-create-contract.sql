@@ -65,17 +65,13 @@ END
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'CON')
 BEGIN
   INSERT INTO dbo.TypeOfDoc
-    (DocNoPrefix, Prefix, Description, StartingDocNo, DocNoPadding, IsActive, EntryTypeId, links_to, CreatedBy, CreatedAt)
+    (DocNoPrefix, Prefix, Description, StartingDocNo, DocNoPadding, IsActive, EntryTypeId, CreatedBy, CreatedAt)
   VALUES
-    ('CON', 'CON', 'Contract', 1, 5, 1, @EId_ANY, 'Contract', 'migration', GETDATE());
+    ('CON', 'CON', 'Contract', 1, 5, 1, @EId_ANY, 'migration', GETDATE());
   PRINT 'Seeded TypeOfDoc CON';
 END
 ELSE
-BEGIN
-  -- Patch links_to on already-applied rows
-  UPDATE dbo.TypeOfDoc SET links_to = 'Contract' WHERE DocNoPrefix = 'CON' AND (links_to IS NULL OR links_to = '');
-  PRINT 'TypeOfDoc CON already exists — patched links_to';
-END
+  PRINT 'TypeOfDoc CON already exists';
 GO
 
 -- ── 3. PageDefinitions seed ──────────────────────────────────────────────────

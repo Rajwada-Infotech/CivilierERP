@@ -4,6 +4,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { getNextDocNumber } = require("../services/docNumber");
 const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
@@ -156,9 +157,6 @@ router.post(
     } = req.body;
     const createdBy = req.user?.userId || null;
 
-    if (!CampaignCode || !String(CampaignCode).trim()) {
-      return res.status(400).json({ error: "CampaignCode is required" });
-    }
     if (!Name || !String(Name).trim()) {
       return res.status(400).json({ error: "Name is required" });
     }
@@ -168,9 +166,13 @@ router.post(
 
     try {
       const pool = getPool();
+      // System-assigned unique code (PREFIX-YYYY-00001) — a user-supplied
+      // CampaignCode is honored only if given, otherwise auto-generated.
+      const campaignCode = (CampaignCode && String(CampaignCode).trim())
+        || await getNextDocNumber(pool, "CAM", "CAM");
       await pool
         .request()
-        .input("CampaignCode", sql.NVarChar(50), CampaignCode)
+        .input("CampaignCode", sql.NVarChar(50), campaignCode)
         .input("Name", sql.NVarChar(200), Name)
         .input("Objective", sql.NVarChar(sql.MAX), Objective || null)
         .input("PlatformId", sql.Int, parseInt(PlatformId, 10))
@@ -194,7 +196,7 @@ router.post(
              @Budget, @Status, @MarketingManagerId, @IsActive, @CreatedBy, @CreatedAt)
         `);
       await bumpCacheVersion("sa-campaigns");
-      res.json({ message: "Campaign added successfully" });
+      res.json({ message: "Campaign added successfully", CampaignCode: campaignCode });
     } catch (err) {
       if (err.number === 2627 || err.number === 2601) {
         return res.status(400).json({ error: "Campaign code already exists" });
