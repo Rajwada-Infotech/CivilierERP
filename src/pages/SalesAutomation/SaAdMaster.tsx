@@ -11,7 +11,7 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { LayoutList, BarChart2 } from "lucide-react";
+import { LayoutList, BarChart2, RefreshCw } from "lucide-react";
 
 const API = "/api/sa/ads";
 
@@ -46,9 +46,34 @@ const fields: FieldDef[] = [
     options: ["Image", "Video", "Carousel", "Story", "Reel", "Search", "Display", "Other"],
   },
   { name: "creativeRef", label: "Creative Reference", type: "text" },
+  { name: "headline", label: "Headline", type: "text" },
+  { name: "description", label: "Ad Copy / Description", type: "textarea", fullWidth: true },
+  { name: "ctaText", label: "CTA Text", type: "text" },
+  { name: "imageUrl", label: "Image URL", type: "text" },
+  { name: "videoUrl", label: "Video URL", type: "text" },
+  { name: "mediaUrls", label: "Media URLs", type: "textarea", fullWidth: true, placeholder: "Comma-separated or JSON array" },
+  { name: "targetAgeMin", label: "Age Min", type: "number" },
+  { name: "targetAgeMax", label: "Age Max", type: "number" },
+  { name: "targetGender", label: "Gender", type: "select", options: ["All", "Male", "Female", "Other"] },
+  { name: "targetLocations", label: "Target Locations", type: "textarea", fullWidth: true, placeholder: "Locations, pin codes, or JSON" },
+  { name: "targetRadiusKm", label: "Radius (Km)", type: "number" },
+  { name: "targetInterests", label: "Target Interests", type: "textarea", fullWidth: true },
+  { name: "targetBehaviors", label: "Target Behaviors", type: "textarea", fullWidth: true },
+  { name: "targetLanguages", label: "Target Languages", type: "text" },
+  { name: "scheduledStartAt", label: "Scheduled Start", type: "date" },
+  { name: "scheduledEndAt", label: "Scheduled End", type: "date" },
+  { name: "platformPlacement", label: "Placement", type: "text", placeholder: "Feed, Reels, Search, Display..." },
+  { name: "objective", label: "Objective", type: "select", options: ["Lead Generation", "Traffic", "Reach", "Awareness", "Engagement", "Conversions", "Sales"] },
+  { name: "optimizationGoal", label: "Optimization Goal", type: "text" },
+  { name: "bidStrategy", label: "Bid Strategy", type: "text" },
+  { name: "destinationUrl", label: "Destination URL", type: "text" },
+  { name: "utmParameters", label: "UTM Parameters", type: "textarea", fullWidth: true, placeholder: "{\"utm_source\":\"google\",\"utm_medium\":\"cpc\"}" },
   { name: "budget", label: "Budget (Rs)", type: "number" },
   { name: "dailySpend", label: "Daily Spend (Rs)", type: "number" },
   { name: "spent", label: "Fallback Spend (Rs)", type: "number" },
+  { name: "externalAdId", label: "External Ad ID", type: "text" },
+  { name: "externalAdSetId", label: "External Ad Set ID", type: "text" },
+  { name: "syncStatus", label: "Sync Status", type: "select", options: ["Pending", "Synced", "Failed"] },
   { name: "runningSince", label: "Running Since", type: "date" },
   {
     name: "status",
@@ -61,15 +86,19 @@ const fields: FieldDef[] = [
 ];
 
 const columns = [
+  { key: "adCode", label: "Ad Code" },
   { key: "name", label: "Ad Name" },
   { key: "campaignName", label: "Campaign" },
   { key: "adType", label: "Type", hideOnMobile: true },
+  { key: "platformPlacement", label: "Placement", hideOnMobile: true },
+  { key: "targetRadiusKm", label: "Radius Km", hideOnMobile: true },
   { key: "budget", label: "Budget (Rs)", hideOnMobile: true },
   { key: "costSpent", label: "Cost Spent (Rs)", hideOnMobile: true },
   { key: "totalLeadsGenerated", label: "Leads", hideOnMobile: true },
   { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
   { key: "conversionRate", label: "Conv. %", hideOnMobile: true },
   { key: "roi", label: "ROI %", hideOnMobile: true },
+  { key: "syncStatus", label: "Sync", hideOnMobile: true },
   { key: "status", label: "Status" },
   { key: "isActive", label: "Active" },
 ];
@@ -79,6 +108,14 @@ const exportColumns: ExportColumn[] = [
   { header: "Campaign", accessor: "campaignName" },
   { header: "Ad Type", accessor: "adType" },
   { header: "Creative Ref", accessor: "creativeRef" },
+  { header: "Headline", accessor: "headline" },
+  { header: "CTA", accessor: "ctaText" },
+  { header: "Placement", accessor: "platformPlacement" },
+  { header: "Objective", accessor: "objective" },
+  { header: "Target Locations", accessor: "targetLocations" },
+  { header: "Radius Km", accessor: "targetRadiusKm" },
+  { header: "External Ad ID", accessor: "externalAdId" },
+  { header: "Sync Status", accessor: "syncStatus" },
   { header: "Budget", accessor: "budget" },
   { header: "Daily Spend", accessor: "dailySpend" },
   { header: "Fallback Spend", accessor: "spent" },
@@ -114,11 +151,38 @@ const SaAdMaster: React.FC = () => {
     if (!Array.isArray(ads)) return [];
     return ads.map((item) => ({
       _id: String(item.Id),
+      adCode: item.AdCode ?? "",
       campaignId: String(item.CampaignId ?? ""),
       campaignName: item.CampaignName ?? "",
       name: item.Name ?? "",
       adType: item.AdType ?? "",
       creativeRef: item.CreativeRef ?? "",
+      headline: item.Headline ?? "",
+      description: item.Description ?? "",
+      ctaText: item.CtaText ?? "",
+      imageUrl: item.ImageUrl ?? "",
+      videoUrl: item.VideoUrl ?? "",
+      mediaUrls: item.MediaUrls ?? "",
+      targetAgeMin: item.TargetAgeMin ?? "",
+      targetAgeMax: item.TargetAgeMax ?? "",
+      targetGender: item.TargetGender ?? "",
+      targetLocations: item.TargetLocations ?? "",
+      targetRadiusKm: item.TargetRadiusKm ?? "",
+      targetInterests: item.TargetInterests ?? "",
+      targetBehaviors: item.TargetBehaviors ?? "",
+      targetLanguages: item.TargetLanguages ?? "",
+      scheduledStartAt: item.ScheduledStartAt ? String(item.ScheduledStartAt).slice(0, 10) : "",
+      scheduledEndAt: item.ScheduledEndAt ? String(item.ScheduledEndAt).slice(0, 10) : "",
+      platformPlacement: item.PlatformPlacement ?? "",
+      objective: item.Objective ?? "",
+      optimizationGoal: item.OptimizationGoal ?? "",
+      bidStrategy: item.BidStrategy ?? "",
+      destinationUrl: item.DestinationUrl ?? "",
+      utmParameters: item.UtmParameters ?? "",
+      externalAdId: item.ExternalAdId ?? "",
+      externalAdSetId: item.ExternalAdSetId ?? "",
+      syncStatus: item.SyncStatus ?? "",
+      lastSyncedAt: item.LastSyncedAt ? String(item.LastSyncedAt).slice(0, 10) : "",
       budget: item.Budget ?? 0,
       dailySpend: item.DailySpend ?? 0,
       spent: item.Spent ?? 0,
@@ -141,13 +205,54 @@ const SaAdMaster: React.FC = () => {
     Name: r.name?.trim() || null,
     AdType: r.adType || null,
     CreativeRef: r.creativeRef || null,
+    Headline: r.headline || null,
+    Description: r.description || null,
+    CtaText: r.ctaText || null,
+    ImageUrl: r.imageUrl || null,
+    VideoUrl: r.videoUrl || null,
+    MediaUrls: r.mediaUrls || null,
+    TargetAgeMin: r.targetAgeMin ? parseInt(r.targetAgeMin) : null,
+    TargetAgeMax: r.targetAgeMax ? parseInt(r.targetAgeMax) : null,
+    TargetGender: r.targetGender || null,
+    TargetLocations: r.targetLocations || null,
+    TargetRadiusKm: r.targetRadiusKm ? parseFloat(r.targetRadiusKm) : null,
+    TargetInterests: r.targetInterests || null,
+    TargetBehaviors: r.targetBehaviors || null,
+    TargetLanguages: r.targetLanguages || null,
+    ScheduledStartAt: r.scheduledStartAt || null,
+    ScheduledEndAt: r.scheduledEndAt || null,
+    PlatformPlacement: r.platformPlacement || null,
+    Objective: r.objective || null,
+    OptimizationGoal: r.optimizationGoal || null,
+    BidStrategy: r.bidStrategy || null,
+    DestinationUrl: r.destinationUrl || null,
+    UtmParameters: r.utmParameters || null,
     Budget: r.budget ? parseFloat(r.budget) : 0,
     DailySpend: r.dailySpend ? parseFloat(r.dailySpend) : 0,
     Spent: r.spent ? parseFloat(r.spent) : 0,
     RunningSince: r.runningSince || null,
     Status: r.status || "Active",
+    ExternalAdId: r.externalAdId || null,
+    ExternalAdSetId: r.externalAdSetId || null,
+    SyncStatus: r.syncStatus || null,
     IsActive: r.isActive !== false,
   });
+
+  const syncAd = async (row: RecordWithId) => {
+    try {
+      const res = await fetchWithAuth(`${API}/${row._id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Mode: "Preview" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to sync ad");
+      toast.success(data.message || "Ad sync payload prepared");
+      await queryClient.invalidateQueries({ queryKey: ["sa-ads"] });
+    } catch (err: any) {
+      toast.error(err.message || "Ad sync failed");
+    }
+  };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
@@ -285,6 +390,16 @@ const SaAdMaster: React.FC = () => {
           canDelete={canDoAction("sa-ads", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          rowActions={(row) => (
+            <button
+              type="button"
+              onClick={() => syncAd(row)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              title="Prepare external ad sync"
+            >
+              <RefreshCw size={13} />
+            </button>
+          )}
           exportConfig={{
             title: "Ad Master",
             filename: "ad-master",
@@ -297,6 +412,30 @@ const SaAdMaster: React.FC = () => {
               { key: "campaignName", label: "Campaign" },
               { key: "adType", label: "Ad Type" },
               { key: "creativeRef", label: "Creative Reference" },
+              { key: "headline", label: "Headline" },
+              { key: "description", label: "Description" },
+              { key: "ctaText", label: "CTA Text" },
+              { key: "imageUrl", label: "Image URL" },
+              { key: "videoUrl", label: "Video URL" },
+              { key: "mediaUrls", label: "Media URLs" },
+              { key: "targetAgeMin", label: "Target Age Min" },
+              { key: "targetAgeMax", label: "Target Age Max" },
+              { key: "targetGender", label: "Target Gender" },
+              { key: "targetLocations", label: "Target Locations" },
+              { key: "targetRadiusKm", label: "Target Radius Km" },
+              { key: "targetInterests", label: "Target Interests" },
+              { key: "targetBehaviors", label: "Target Behaviors" },
+              { key: "targetLanguages", label: "Target Languages" },
+              { key: "platformPlacement", label: "Placement" },
+              { key: "objective", label: "Objective" },
+              { key: "optimizationGoal", label: "Optimization Goal" },
+              { key: "bidStrategy", label: "Bid Strategy" },
+              { key: "destinationUrl", label: "Destination URL" },
+              { key: "utmParameters", label: "UTM Parameters" },
+              { key: "externalAdId", label: "External Ad ID" },
+              { key: "externalAdSetId", label: "External Ad Set ID" },
+              { key: "syncStatus", label: "Sync Status" },
+              { key: "lastSyncedAt", label: "Last Synced" },
               { key: "budget", label: "Budget (Rs)" },
               { key: "dailySpend", label: "Daily Spend (Rs)" },
               { key: "spent", label: "Fallback Spend (Rs)" },

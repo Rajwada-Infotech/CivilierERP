@@ -74,6 +74,14 @@ const MODULE_MAP = {
     pk: "ICTId",
     status: "Status",
   },
+  "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
+  // The "approval" on a CrmAgreement is specifically the senior sign-off gate
+  // (SeniorApprovalStatus) — the document's own lifecycle (Draft/Executed/
+  // Registered/Cancelled) is a separate column and not part of this workflow.
+  "crm-agreements": { table: "dbo.CrmAgreement", pk: "Id", status: "SeniorApprovalStatus" },
+  "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
+  "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
+  "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -96,9 +104,20 @@ const APPROVER_ROLES = ["admin", "super_admin", "dba"];
 // mismatches, and Inter-Company Transfer fires an entire auto-generated
 // document chain on approval — both are gated to super_admin only, unlike
 // every other module where admin/dba can also approve).
+//
+// Every CRM module is gated to admin/super_admin/marketing_head specifically —
+// marketing_head runs Sales/CRM approvals day-to-day, and dba is deliberately
+// excluded here (unlike the system default) since a DBA has no business
+// context to approve a customer-facing agreement, application, or refund.
+const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const MODULE_APPROVER_ROLE_OVERRIDES = {
   "journal-voucher": ["super_admin"],
   "inter-company-transfer": ["super_admin"],
+  "crm-applications": CRM_APPROVER_ROLES,
+  "crm-agreements": CRM_APPROVER_ROLES,
+  "crm-brokerage": CRM_APPROVER_ROLES,
+  "crm-cancellations": CRM_APPROVER_ROLES,
+  "crm-noc": CRM_APPROVER_ROLES,
 };
 
 async function validateApprovalModuleMap(log = console) {

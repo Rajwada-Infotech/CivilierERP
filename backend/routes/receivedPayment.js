@@ -123,6 +123,8 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       // ── Sale-Order workflow (Migration 111) ──
       SourceSaleInvoiceId,
       SourceSaleInvoiceDocNo,
+      // ── Contract Master (Migration 176) — see services/contractLedger.js ──
+      ContractId,
     } = payload;
     const body = { ...payload };
     let finalDocNo = null;
@@ -289,10 +291,11 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         "SourceSaleInvoiceDocNo",
         sql.NVarChar(100),
         SourceSaleInvoiceDocNo || null,
-      );
+      )
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
 
-    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo`;
-    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo`;
+    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId`;
+    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId`;
 
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
@@ -320,6 +323,21 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
     if (SourceSaleInvoiceId) {
       const { recalcInvoicePaymentStatus } = require("./saleInvoices");
       await recalcInvoicePaymentStatus(pool, parseInt(SourceSaleInvoiceId, 10));
+    }
+
+    // ── Contract Master: record as an advance ONLY when this payment isn't
+    // already tied to a specific invoice — a payment against a real invoice
+    // settles that invoice directly and has nothing to allocate later.
+    if (ContractId && !SourceSaleInvoiceId) {
+      const { recordAdvance } = require("../services/contractLedger");
+      await recordAdvance(pool, {
+        contractId: parseInt(ContractId, 10),
+        sourceType: "ReceivedPayment",
+        sourceId: row.RPPaymentID,
+        sourceDocNo: row.RPDocNo,
+        amount: Number(RPAmount) || 0,
+        createdBy,
+      });
     }
 
     return row;

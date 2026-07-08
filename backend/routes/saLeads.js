@@ -51,6 +51,8 @@ function genUid() {
   return "LEAD-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
+const { validateSourceChain } = require("../services/sourceChain");
+
 // GET / — list all leads (row-level scoped)
 router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
   try {
@@ -64,17 +66,37 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
         l.AssignedTeamLeadId, l.AssignedSalespersonId,
         l.FollowupCustomerId, l.BookingId, l.IsActive, l.CreatedAt,
         l.PlatformId, l.CampaignId, l.AdId,
+        l.ExternalLeadId, l.LeadFormName, l.SourceCampaignName, l.SourceAdName,
+        l.SourcePlacement, l.LeadCaptureUrl, l.UtmSource, l.UtmMedium,
+        l.UtmCampaign, l.UtmContent, l.UtmTerm, l.CapturedAt, l.SourcePayload,
+        -- CRM preference fields
+        l.SourceType, l.ChannelPartnerId, l.BudgetMin, l.BudgetMax,
+        l.PropertyType, l.BhkPreference, l.PreferredLocation, l.PurchaseTimeline,
+        l.LastActivityAt,
+        cp.Name AS ChannelPartnerName,
         p.Name AS PlatformName,
         c.Name AS CampaignName,
         a.Name AS AdName,
         tl.name AS TeamLeadName,
-        sp.name AS SalespersonName
+        sp.name AS SalespersonName,
+        -- Computed lead score (0–100)
+        (
+          CASE l.Classification WHEN 'Hot' THEN 30 WHEN 'Warm' THEN 20 WHEN 'Cold' THEN 5 ELSE 0 END +
+          CASE l.Status
+            WHEN 'VisitScheduled' THEN 20 WHEN 'Visited' THEN 20 WHEN 'InFollowup' THEN 20
+            WHEN 'FollowUp' THEN 20 WHEN 'Booking' THEN 30
+            WHEN 'Contacted' THEN 10 WHEN 'Assigned' THEN 5 ELSE 0 END +
+          CASE WHEN l.PurchaseTimeline IN ('Immediate','3Months') THEN 15 ELSE 0 END +
+          CASE WHEN l.BudgetMax IS NOT NULL THEN 10 ELSE 0 END +
+          CASE WHEN l.LastActivityAt >= DATEADD(DAY, -7, SYSDATETIME()) THEN 15 ELSE 0 END
+        ) AS LeadScore
       FROM dbo.SaLead l
-      LEFT JOIN dbo.SaSocialMediaPlatform p ON l.PlatformId = p.Id
-      LEFT JOIN dbo.SaCampaign c ON l.CampaignId = c.Id
-      LEFT JOIN dbo.SaAd a ON l.AdId = a.Id
-      LEFT JOIN dbo.Users tl ON l.AssignedTeamLeadId = tl.id
-      LEFT JOIN dbo.Users sp ON l.AssignedSalespersonId = sp.id
+      LEFT JOIN dbo.SaSocialMediaPlatform p  ON l.PlatformId      = p.Id
+      LEFT JOIN dbo.SaCampaign c             ON l.CampaignId      = c.Id
+      LEFT JOIN dbo.SaAd a                   ON l.AdId            = a.Id
+      LEFT JOIN dbo.Users tl                 ON l.AssignedTeamLeadId   = tl.id
+      LEFT JOIN dbo.Users sp                 ON l.AssignedSalespersonId = sp.id
+      LEFT JOIN dbo.SaChannelPartner cp      ON l.ChannelPartnerId = cp.Id
       WHERE l.IsActive = 1 AND ${scope}
       ORDER BY l.CreatedAt DESC
     `);
@@ -110,6 +132,9 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
     const pool = getPool();
     const b = req.body;
     const uid = genUid();
+    const sourceError = await validateSourceChain(pool, b);
+    if (sourceError) return res.status(400).json({ error: sourceError });
+
     await pool.request()
       .input("uid", sql.NVarChar(50), uid)
       .input("cn", sql.NVarChar(200), b.CustomerName || null)
@@ -125,16 +150,47 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
       .input("cl", sql.NVarChar(30), b.Classification || null)
       .input("tl", sql.Int, b.AssignedTeamLeadId || null)
       .input("sp", sql.Int, b.AssignedSalespersonId || null)
+      .input("srcType", sql.NVarChar(30), b.SourceType || null)
+      .input("cpid", sql.Int, b.ChannelPartnerId || null)
+      .input("bmin", sql.Decimal(18, 2), b.BudgetMin != null && b.BudgetMin !== "" ? parseFloat(b.BudgetMin) : null)
+      .input("bmax", sql.Decimal(18, 2), b.BudgetMax != null && b.BudgetMax !== "" ? parseFloat(b.BudgetMax) : null)
+      .input("ptype", sql.NVarChar(50), b.PropertyType || null)
+      .input("bhk", sql.NVarChar(30), b.BhkPreference || null)
+      .input("loc", sql.NVarChar(200), b.PreferredLocation || null)
+      .input("timeline", sql.NVarChar(30), b.PurchaseTimeline || null)
+      .input("externalLeadId", sql.NVarChar(200), b.ExternalLeadId || null)
+      .input("leadFormName", sql.NVarChar(200), b.LeadFormName || null)
+      .input("sourceCampaignName", sql.NVarChar(200), b.SourceCampaignName || null)
+      .input("sourceAdName", sql.NVarChar(200), b.SourceAdName || null)
+      .input("sourcePlacement", sql.NVarChar(200), b.SourcePlacement || null)
+      .input("leadCaptureUrl", sql.NVarChar(2000), b.LeadCaptureUrl || null)
+      .input("utmSource", sql.NVarChar(100), b.UtmSource || null)
+      .input("utmMedium", sql.NVarChar(100), b.UtmMedium || null)
+      .input("utmCampaign", sql.NVarChar(200), b.UtmCampaign || null)
+      .input("utmContent", sql.NVarChar(200), b.UtmContent || null)
+      .input("utmTerm", sql.NVarChar(200), b.UtmTerm || null)
+      .input("capturedAt", sql.DateTime2(3), b.CapturedAt || null)
+      .input("sourcePayload", sql.NVarChar(sql.MAX), b.SourcePayload ? JSON.stringify(b.SourcePayload) : null)
       .input("cb", sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.SaLead
           (LeadUid, CustomerName, Mobile, AltMobile, Email, PlatformId, CampaignId, AdId,
            DateGenerated, CustomerRemarks, Status, Classification,
-           AssignedTeamLeadId, AssignedSalespersonId, IsActive, CreatedBy, CreatedAt)
+           AssignedTeamLeadId, AssignedSalespersonId,
+           SourceType, ChannelPartnerId, BudgetMin, BudgetMax, PropertyType,
+           BhkPreference, PreferredLocation, PurchaseTimeline,
+           ExternalLeadId, LeadFormName, SourceCampaignName, SourceAdName,
+           SourcePlacement, LeadCaptureUrl, UtmSource, UtmMedium, UtmCampaign,
+           UtmContent, UtmTerm, CapturedAt, SourcePayload,
+           IsActive, CreatedBy, CreatedAt)
         VALUES
           (@uid, @cn, @mob, @alt, @em, @pid, @cid, @aid,
            ISNULL(@dg, CAST(SYSDATETIME() AS DATE)), @rem, @st, @cl,
-           @tl, @sp, 1, @cb, SYSDATETIME())
+           @tl, @sp, @srcType, @cpid, @bmin, @bmax, @ptype, @bhk, @loc, @timeline,
+           @externalLeadId, @leadFormName, @sourceCampaignName, @sourceAdName,
+           @sourcePlacement, @leadCaptureUrl, @utmSource, @utmMedium, @utmCampaign,
+           @utmContent, @utmTerm, @capturedAt, @sourcePayload,
+           1, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, LeadUid: uid });
   } catch (e) {
@@ -147,11 +203,11 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
 const STATUS_TRANSITIONS = {
   New: ["New", "Assigned", "Contacted", "Lost"],
   Assigned: ["Assigned", "Contacted", "Lost"],
-  Contacted: ["Contacted", "VisitScheduled", "Lost"],
+  Contacted: ["Contacted", "FollowUp", "VisitScheduled", "Lost"],
+  FollowUp: ["FollowUp", "VisitScheduled", "Lost"],
   VisitScheduled: ["VisitScheduled", "Visited", "Lost"],
-  Visited: ["Visited", "InFollowup", "Booked", "Lost"],
-  InFollowup: ["InFollowup", "Booked", "Lost"],
-  Booked: ["Booked"],
+  Visited: ["Visited", "FollowUp", "Booking", "Lost"],
+  Booking: ["Booking"],
   Lost: ["Lost"],
 };
 
@@ -168,7 +224,12 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       .input("id", sql.Int, leadId)
       .query(`
         SELECT LeadUid, Status, Classification,
-               AssignedTeamLeadId, AssignedSalespersonId, CustomerRemarks
+               AssignedTeamLeadId, AssignedSalespersonId, CustomerRemarks,
+               SourceType, ChannelPartnerId, BudgetMin, BudgetMax, PropertyType,
+               BhkPreference, PreferredLocation, PurchaseTimeline,
+               PlatformId, CampaignId, AdId, ExternalLeadId, LeadFormName,
+               SourceCampaignName, SourceAdName, SourcePlacement, LeadCaptureUrl,
+               UtmSource, UtmMedium, UtmCampaign, UtmContent, UtmTerm, CapturedAt
         FROM dbo.SaLead WHERE Id = @id AND IsActive = 1
       `);
     if (!currentResult.recordset.length) {
@@ -193,6 +254,13 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       }
     }
 
+    const sourceError = await validateSourceChain(pool, {
+      PlatformId: b.PlatformId,
+      CampaignId: b.CampaignId,
+      AdId: b.AdId,
+    });
+    if (sourceError) return res.status(400).json({ error: sourceError });
+
     await pool.request()
       .input("id",  sql.Int,           leadId)
       .input("cn",  sql.NVarChar(200), b.CustomerName || null)
@@ -208,6 +276,26 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       .input("cl",  sql.NVarChar(30),  b.Classification || null)
       .input("tl",  sql.Int,           b.AssignedTeamLeadId || null)
       .input("sp",  sql.Int,           b.AssignedSalespersonId || null)
+      .input("srcType", sql.NVarChar(30), b.SourceType || null)
+      .input("cpid", sql.Int, b.ChannelPartnerId || null)
+      .input("bmin", sql.Decimal(18, 2), b.BudgetMin != null && b.BudgetMin !== "" ? parseFloat(b.BudgetMin) : null)
+      .input("bmax", sql.Decimal(18, 2), b.BudgetMax != null && b.BudgetMax !== "" ? parseFloat(b.BudgetMax) : null)
+      .input("ptype", sql.NVarChar(50), b.PropertyType || null)
+      .input("bhk", sql.NVarChar(30), b.BhkPreference || null)
+      .input("loc", sql.NVarChar(200), b.PreferredLocation || null)
+      .input("timeline", sql.NVarChar(30), b.PurchaseTimeline || null)
+      .input("externalLeadId", sql.NVarChar(200), b.ExternalLeadId || null)
+      .input("leadFormName", sql.NVarChar(200), b.LeadFormName || null)
+      .input("sourceCampaignName", sql.NVarChar(200), b.SourceCampaignName || null)
+      .input("sourceAdName", sql.NVarChar(200), b.SourceAdName || null)
+      .input("sourcePlacement", sql.NVarChar(200), b.SourcePlacement || null)
+      .input("leadCaptureUrl", sql.NVarChar(2000), b.LeadCaptureUrl || null)
+      .input("utmSource", sql.NVarChar(100), b.UtmSource || null)
+      .input("utmMedium", sql.NVarChar(100), b.UtmMedium || null)
+      .input("utmCampaign", sql.NVarChar(200), b.UtmCampaign || null)
+      .input("utmContent", sql.NVarChar(200), b.UtmContent || null)
+      .input("utmTerm", sql.NVarChar(200), b.UtmTerm || null)
+      .input("capturedAt", sql.DateTime2(3), b.CapturedAt || null)
       .input("ub",  sql.Int,           actor)
       .query(`
         UPDATE dbo.SaLead SET
@@ -216,6 +304,14 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
           DateGenerated = ISNULL(@dg, DateGenerated),
           CustomerRemarks = @rem, Status = @st, Classification = @cl,
           AssignedTeamLeadId = @tl, AssignedSalespersonId = @sp,
+          SourceType = @srcType, ChannelPartnerId = @cpid,
+          BudgetMin = @bmin, BudgetMax = @bmax, PropertyType = @ptype,
+          BhkPreference = @bhk, PreferredLocation = @loc, PurchaseTimeline = @timeline,
+          ExternalLeadId = @externalLeadId, LeadFormName = @leadFormName,
+          SourceCampaignName = @sourceCampaignName, SourceAdName = @sourceAdName,
+          SourcePlacement = @sourcePlacement, LeadCaptureUrl = @leadCaptureUrl,
+          UtmSource = @utmSource, UtmMedium = @utmMedium, UtmCampaign = @utmCampaign,
+          UtmContent = @utmContent, UtmTerm = @utmTerm, CapturedAt = @capturedAt,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -227,6 +323,29 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       { field: "AssignedTeamLeadId",   oldVal: old.AssignedTeamLeadId,   newVal: b.AssignedTeamLeadId },
       { field: "AssignedSalespersonId",oldVal: old.AssignedSalespersonId,newVal: b.AssignedSalespersonId },
       { field: "CustomerRemarks",      oldVal: old.CustomerRemarks,      newVal: b.CustomerRemarks },
+      { field: "SourceType",           oldVal: old.SourceType,           newVal: b.SourceType },
+      { field: "ChannelPartnerId",     oldVal: old.ChannelPartnerId,     newVal: b.ChannelPartnerId },
+      { field: "BudgetMin",            oldVal: old.BudgetMin,            newVal: b.BudgetMin },
+      { field: "BudgetMax",            oldVal: old.BudgetMax,            newVal: b.BudgetMax },
+      { field: "PropertyType",         oldVal: old.PropertyType,         newVal: b.PropertyType },
+      { field: "BhkPreference",        oldVal: old.BhkPreference,        newVal: b.BhkPreference },
+      { field: "PreferredLocation",    oldVal: old.PreferredLocation,    newVal: b.PreferredLocation },
+      { field: "PurchaseTimeline",     oldVal: old.PurchaseTimeline,     newVal: b.PurchaseTimeline },
+      { field: "PlatformId",           oldVal: old.PlatformId,           newVal: b.PlatformId },
+      { field: "CampaignId",           oldVal: old.CampaignId,           newVal: b.CampaignId },
+      { field: "AdId",                 oldVal: old.AdId,                 newVal: b.AdId },
+      { field: "ExternalLeadId",       oldVal: old.ExternalLeadId,       newVal: b.ExternalLeadId },
+      { field: "LeadFormName",         oldVal: old.LeadFormName,         newVal: b.LeadFormName },
+      { field: "SourceCampaignName",   oldVal: old.SourceCampaignName,   newVal: b.SourceCampaignName },
+      { field: "SourceAdName",         oldVal: old.SourceAdName,         newVal: b.SourceAdName },
+      { field: "SourcePlacement",      oldVal: old.SourcePlacement,      newVal: b.SourcePlacement },
+      { field: "LeadCaptureUrl",       oldVal: old.LeadCaptureUrl,       newVal: b.LeadCaptureUrl },
+      { field: "UtmSource",            oldVal: old.UtmSource,            newVal: b.UtmSource },
+      { field: "UtmMedium",            oldVal: old.UtmMedium,            newVal: b.UtmMedium },
+      { field: "UtmCampaign",          oldVal: old.UtmCampaign,          newVal: b.UtmCampaign },
+      { field: "UtmContent",           oldVal: old.UtmContent,           newVal: b.UtmContent },
+      { field: "UtmTerm",              oldVal: old.UtmTerm,              newVal: b.UtmTerm },
+      { field: "CapturedAt",           oldVal: old.CapturedAt,           newVal: b.CapturedAt },
     ];
     for (const af of auditFields) {
       const o = af.oldVal == null ? "" : String(af.oldVal);

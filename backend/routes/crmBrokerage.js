@@ -1,0 +1,260 @@
+const express = require("express");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId, requireUserEmail } = require("../services/saAccess");
+// Approve/reject is gated to admin/super_admin/dba via this shared engine —
+// same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
+// able to self-approve brokerage on this page.
+const { transition: approvalTransition } = require("../services/approvalService");
+
+router.use(authMiddleware);
+
+const BROKERAGE_SELECT = `
+  SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
+         ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone
+  FROM dbo.CrmBrokerageMaster br
+  JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
+`;
+
+// GET / — all brokerage records. Staff/internal only — never exposed to crm-portal.
+router.get("/", requirePageRight("crm-brokerage", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${BROKERAGE_SELECT} ${where} ORDER BY br.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-brokerage] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /payments — every broker payment across all brokerage records, for the
+// dedicated Broker Payment page (distinct from Broker Master and Brokerage).
+router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`
+      SELECT p.Id, p.BrokerageId, p.Amount, p.PaidDate, p.PaymentMode, p.TransactionRef, p.Notes, p.CreatedAt,
+             br.RateType, br.RateValue, br.ComputedAmount, br.Status AS BrokerageStatus,
+             br.BrokerName, br.BrokerFirm, b.BookingNo, b.UnitNo, a.ApplicantName,
+             cu.name AS CreatedByName
+      FROM dbo.CrmBrokerPayment p
+      JOIN dbo.CrmBrokerageMaster br ON br.Id = p.BrokerageId
+      JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.Users cu ON cu.id = p.CreatedBy
+      ${where}
+      ORDER BY p.PaidDate DESC, p.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-brokerage] GET /payments error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const [brRes, payRes] = await Promise.all([
+      pool.request().input("id", sql.Int, id).query(`${BROKERAGE_SELECT} WHERE br.Id = @id`),
+      pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmBrokerPayment WHERE BrokerageId = @id ORDER BY PaidDate DESC"),
+    ]);
+    if (!brRes.recordset[0]) return res.status(404).json({ error: "Brokerage record not found" });
+    res.json({ brokerage: brRes.recordset[0], payments: payRes.recordset });
+  } catch (e) {
+    console.error("[crm-brokerage] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST / — record broker involvement for a booking. Broker must be picked
+// from the Broker Master (an AccountHeadMaster row, LHeadType='BR') — the
+// same pattern Contractors use — not free-typed.
+router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
+
+    const broker = await pool.request().input("bid", sql.Int, parseInt(b.BrokerId))
+      .query("SELECT LHeadId, LHeadName, LHeadPhone FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");
+    if (!broker.recordset.length) return res.status(400).json({ error: "Selected broker does not exist or is inactive" });
+
+    const rateType = b.RateType === "Amount" ? "Amount" : "Percentage";
+    const rateValue = parseFloat(b.RateValue);
+    if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
+
+    const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query("SELECT TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
+    const totalValue = bk.recordset[0]?.TotalValue || 0;
+    const computedAmount = rateType === "Percentage" ? Math.round(totalValue * rateValue) / 100 : rateValue;
+
+    const result = await pool.request()
+      .input("bid",   sql.Int,           parseInt(b.BookingId))
+      .input("brid",  sql.Int,           broker.recordset[0].LHeadId)
+      .input("name",  sql.NVarChar(200), broker.recordset[0].LHeadName)
+      .input("firm",  sql.NVarChar(200), b.BrokerFirm || null)
+      .input("con",   sql.NVarChar(20),  broker.recordset[0].LHeadPhone || null)
+      .input("rt",    sql.NVarChar(20),  rateType)
+      .input("rv",    sql.Decimal(18,2),rateValue)
+      .input("camt",  sql.Decimal(18,2),computedAmount)
+      .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",    sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmBrokerageMaster
+          (BookingId, BrokerId, BrokerName, BrokerFirm, BrokerContact, RateType, RateValue, ComputedAmount, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@bid, @brid, @name, @firm, @con, @rt, @rv, @camt, 'Pending', @notes, @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "Brokerage already recorded for this booking" });
+    console.error("[crm-brokerage] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id — edit brokerage terms/notes only. Status is never settable here —
+// Approved goes through /:id/approve, Paid is derived automatically from
+// payments, so this endpoint can't be used to skip either gate.
+router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body;
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmBrokerageMaster SET
+          Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-brokerage] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — admin/super_admin/dba only, enforced inside
+// approvalTransition(). Only reachable from the Admin Approval Inbox —
+// approve/reject no longer live on this page at all. A brokerage record
+// must be Approved here before any payment can be recorded against it.
+router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-brokerage", id, "Pending", userEmail, req.user?.role);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-brokerage] submit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-brokerage] approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — admin/super_admin/dba only.
+router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-brokerage", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-brokerage] reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// POST /:id/payments — record broker payout. Requires the brokerage record to
+// already be Approved (blocks paying an unapproved broker) and rejects any
+// amount that would overpay past ComputedAmount.
+router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const brokerageId = parseInt(req.params.id);
+    const b = req.body;
+    const amount = parseFloat(b.Amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const br = await pool.request().input("id", sql.Int, brokerageId).query(`
+      SELECT br.Status, br.ComputedAmount,
+             (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) AS TotalPaid
+      FROM dbo.CrmBrokerageMaster br WHERE br.Id = @id
+    `);
+    if (!br.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
+    const row = br.recordset[0];
+
+    if (row.Status !== "Approved") {
+      return res.status(400).json({ error: `This brokerage record must be Approved before a payment can be recorded (currently '${row.Status}')` });
+    }
+
+    const remaining = Number(row.ComputedAmount) - Number(row.TotalPaid);
+    if (amount > remaining + 0.01) {
+      return res.status(400).json({ error: `Amount exceeds the outstanding brokerage balance of ₹${remaining.toLocaleString("en-IN")}` });
+    }
+
+    await pool.request()
+      .input("bid",  sql.Int,           brokerageId)
+      .input("amt",  sql.Decimal(18,2), amount)
+      .input("pd",   sql.Date,          b.PaidDate || null)
+      .input("mode", sql.NVarChar(50),  b.PaymentMode || null)
+      .input("tref", sql.NVarChar(200), b.TransactionRef || null)
+      .input("notes",sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmBrokerPayment (BrokerageId, Amount, PaidDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+        VALUES (@bid, @amt, ISNULL(@pd, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @notes, @cb, SYSDATETIME())
+      `);
+
+    // Mark as Paid once total payments reach the computed amount
+    await pool.request().input("id", sql.Int, brokerageId).query(`
+      UPDATE dbo.CrmBrokerageMaster SET
+        Status = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = @id) >= ComputedAmount
+                       THEN 'Paid' ELSE Status END,
+        UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+    res.status(201).json({ success: true });
+  } catch (e) {
+    console.error("[crm-brokerage] POST /:id/payments error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

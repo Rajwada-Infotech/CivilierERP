@@ -15,6 +15,14 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/unit-master";
 
+// Fixed vocabulary shared with every page that consumes Unit Master
+// (CrmBooking, etc.) so "Type of Unit" is picked once here and auto-fetched
+// everywhere the unit itself is selected — never re-typed per transaction.
+const UNIT_TYPES = [
+  "1 BHK", "1.5 BHK", "2 BHK", "2.5 BHK", "3 BHK", "3.5 BHK", "4 BHK", "4+ BHK",
+  "Studio", "Villa", "Plot", "Commercial", "Other",
+];
+
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchUnits(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -64,6 +72,22 @@ const fields: FieldDef[] = [
     required: true,
   },
   {
+    name: "floorNo",
+    label: "Floor No.",
+    type: "number",
+  },
+  {
+    name: "unitType",
+    label: "Type of Unit",
+    type: "select",
+    options: UNIT_TYPES,
+  },
+  {
+    name: "areaSqFt",
+    label: "Area (sq ft)",
+    type: "number",
+  },
+  {
     name: "isActive",
     label: "Status",
     type: "toggle",
@@ -75,6 +99,9 @@ const columns = [
   { key: "projectName", label: "Project" },
   { key: "blockName", label: "Block" },
   { key: "unitName", label: "Unit Name" },
+  { key: "floorNo", label: "Floor No." },
+  { key: "unitType", label: "Type of Unit" },
+  { key: "areaSqFt", label: "Area (sq ft)" },
   { key: "isActive", label: "Status" },
 ];
 
@@ -82,6 +109,9 @@ const exportColumns: ExportColumn[] = [
   { header: "Project", accessor: "projectName" },
   { header: "Block", accessor: "blockName" },
   { header: "Unit Name", accessor: "unitName" },
+  { header: "Floor No.", accessor: "floorNo" },
+  { header: "Type of Unit", accessor: "unitType" },
+  { header: "Area (sq ft)", accessor: "areaSqFt" },
   { header: "Status", accessor: "isActive" },
 ];
 
@@ -122,6 +152,9 @@ const UnitMaster: React.FC = () => {
       blockId: String(item.BlockId),
       blockName: item.BlockName ?? "",
       unitName: item.UnitName ?? "",
+      floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
+      unitType: item.UnitType ?? "",
+      areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
       isActive: Boolean(item.IsActive),
     }));
   }, [units]);
@@ -136,6 +169,9 @@ const UnitMaster: React.FC = () => {
     ProjectId: parseInt(r.projectId),
     BlockId: parseInt(r.blockId),
     UnitName: r.unitName?.trim() || null,
+    FloorNo: r.floorNo !== "" && r.floorNo != null ? parseInt(r.floorNo) : null,
+    UnitType: r.unitType || null,
+    AreaSqFt: r.areaSqFt !== "" && r.areaSqFt != null ? parseFloat(r.areaSqFt) : null,
     IsActive: r.isActive !== false,
   });
 
@@ -210,6 +246,9 @@ const UnitMaster: React.FC = () => {
             { key: "projectName", label: "Project" },
             { key: "blockName", label: "Block" },
             { key: "unitName", label: "Unit Name" },
+            { key: "floorNo", label: "Floor No." },
+            { key: "unitType", label: "Type of Unit" },
+            { key: "areaSqFt", label: "Area (sq ft)" },
             { key: "isActive", label: "Status" },
           ],
         }}
@@ -223,6 +262,9 @@ const UnitMaster: React.FC = () => {
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
+              <tr><td>Floor No.</td><td>${row.floorNo || "—"}</td></tr>
+              <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
+              <tr><td>Area (sq ft)</td><td>${row.areaSqFt || "—"}</td></tr>
               <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
             </table></body></html>
           `);

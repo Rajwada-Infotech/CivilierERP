@@ -21,6 +21,9 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.BlockId,
         b.BlockName,
         u.UnitName,
+        u.FloorNo,
+        u.UnitType,
+        u.AreaSqFt,
         u.IsActive,
         u.CreatedAt,
         u.UpdatedAt
@@ -41,7 +44,7 @@ router.get("/projects", cache("unit-master-projects", 600), async (req, res) => 
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id AS Id, name AS Name
+      SELECT id AS Id, name AS Name, company_id AS CompanyId
       FROM dbo.enterprise
       WHERE business_type = 'P'
         AND ISNULL(discontinue, 0) = 0
@@ -80,7 +83,7 @@ router.get("/blocks", async (req, res) => {
 
 // POST — add unit
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { ProjectId, BlockId, UnitName, IsActive } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -89,11 +92,14 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, parseInt(BlockId))
       .input("UnitName",  sql.NVarChar(100), UnitName)
+      .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
+      .input("UnitType",  sql.NVarChar(50), UnitType || null)
+      .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, IsActive, CreatedBy, CreatedAt)
-        VALUES (@ProjectId, @BlockId, @UnitName, @IsActive, @CreatedBy, @CreatedAt)
+        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, CreatedBy, CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("unit-master");
     res.json({ message: "Unit added successfully" });
@@ -106,7 +112,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update unit
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockId, UnitName, IsActive } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -116,6 +122,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, parseInt(BlockId))
       .input("UnitName",  sql.NVarChar(100), UnitName)
+      .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
+      .input("UnitType",  sql.NVarChar(50), UnitType || null)
+      .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
@@ -123,6 +132,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           ProjectId = @ProjectId,
           BlockId   = @BlockId,
           UnitName  = @UnitName,
+          FloorNo   = @FloorNo,
+          UnitType  = @UnitType,
+          AreaSqFt  = @Area,
           IsActive  = @IsActive,
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt
