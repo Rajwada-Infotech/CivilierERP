@@ -622,7 +622,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     amount: item.PAmount ?? null,
     date: item.PDate?.slice(0, 10) || "",
     bankId: item.PBankID ?? null,
-    bankName: item.PBankName || "",
+    bankName: (item.PBankName && item.PBankName !== "N/A") ? item.PBankName : "",
     project: item.PProjectName || item.PProject || "",
     projectSite: item.PProjectName || item.PProject || "",
     company: item.PCompany || "",
