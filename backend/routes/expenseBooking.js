@@ -469,7 +469,11 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            ELSE ISNULL(eb.EName, '')
+            -- Direct/manual (TOD etc.) bookings carry no supplier link; when the
+            -- caller scopes by @PartyId (On A/C Adjustment flow) the invoice only
+            -- reached this row via that party's payment history, so label it with
+            -- the party's name rather than the generic EName.
+            ELSE ISNULL(party_opt.LHeadName, ISNULL(eb.EName, ''))
           END                             AS supplierName,
           -- Use live GRN total when available so the amount in the picker is accurate
           CASE
@@ -516,6 +520,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.WorkDone wd_supp_opt_wd
           ON eb.ESourceType = 'WORK_DONE' AND wd_supp_opt_wd.ID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wd_supp_opt ON wd_supp_opt.LHeadId = wd_supp_opt_wd.SupplierId
+        LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
@@ -532,6 +537,18 @@ router.get("/options", async (req, res) => {
             (eb.ESourceType = 'GRN' AND ahm.LHeadId = @PartyId)
             OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_opt.LHeadId = @PartyId)
             OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_opt.LHeadId = @PartyId)
+            -- Payment-history link: direct/manual invoices (TOD etc.) have no
+            -- supplier column, so treat an invoice as belonging to @PartyId when
+            -- that party has previously paid against it (OnAccountLedger -> the
+            -- payment's PExpenseRef). This is the linkage the On A/C Adjustment
+            -- flow relies on.
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
           ))
         ORDER BY eb.Eid DESC
       `);
@@ -539,7 +556,8 @@ router.get("/options", async (req, res) => {
     // EMI installments: only show Pending ones
     const emiResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("PartyId", sql.Int, partyId).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -593,6 +611,18 @@ router.get("/options", async (req, res) => {
             WHERE dn.bill_id = ei.Id AND dn.is_active = 1
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@PartyId IS NULL OR (
+            (eb.ESourceType = 'GRN' AND ahm2.LHeadId = @PartyId)
+            OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_emi.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_emi.LHeadId = @PartyId)
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
+          ))
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
