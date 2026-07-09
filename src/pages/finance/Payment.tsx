@@ -65,6 +65,7 @@ import {
   RefreshCw,
   History,
   Info,
+  Users,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -250,6 +251,10 @@ interface PaymentRecord {
   // Optional: tags this payment as an on-account advance against a
   // Contract when no expense booking exists yet (backend/services/contractLedger.js).
   contractId: string;
+  // Party (AccountHeadMaster LHeadId) for direct-invoice payments that have no
+  // linked GRN/PO/WorkDone. Stored as PPartyId on NewPayment so resolvePartyFromRef
+  // can derive it for On Account credit logic.
+  partyId: number | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -609,6 +614,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     paidTo: "",
     supplierContact: "",
     contractId: "",
+    partyId: null,
   };
 }
 
@@ -662,6 +668,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     igstRate: null,
     billingTermsData: null,
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
+    partyId: (item as any).PPartyId ?? null,
   };
 }
 
@@ -3172,6 +3179,7 @@ const Payment: React.FC = () => {
       remarks: form.paymentName || null,
       // PaymentPayloadSchema fields
       supplierId: form.expenseRef || null,
+      partyId: form.partyId ?? null,
       bankId: form.bankId ?? null,
       amount: form.amount ?? 0,
       // Extended payment fields (passed through for backend processing)
@@ -3653,6 +3661,38 @@ const Payment: React.FC = () => {
                               </option>
                             ));
                           })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field
+                      label="Payee / Party"
+                      hint="Required for On Account tracking — who this payment is being made to"
+                    >
+                      <div className="relative">
+                        <Users
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={form.partyId !== null ? String(form.partyId) : ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const opt = supplierOptions.find((s) => String(s.id) === id);
+                            set("partyId", id ? Number(id) : null);
+                            set("paidTo", opt?.label || "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select party…</option>
+                          {supplierOptions.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                              {s.label}
+                            </option>
+                          ))}
                         </select>
                         <ChevronDown
                           size={11}
@@ -5333,31 +5373,31 @@ const Payment: React.FC = () => {
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[20%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[19%]">
                           Payment Purpose
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[11%]">
                           Doc No
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[18%]">
                           Expense Ref
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%] hidden md:table-cell">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%] hidden md:table-cell">
                           Mode
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden lg:table-cell">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%] hidden lg:table-cell">
                           Cheque / Ref
                         </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%]">
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%]">
                           Amount
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%] hidden md:table-cell">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%] hidden md:table-cell">
                           Bank
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[13%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[11%]">
                           Status
                         </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[6%]">
                           Actions
                         </th>
                       </tr>
@@ -5383,7 +5423,7 @@ const Payment: React.FC = () => {
                           className="hover:bg-muted/20 transition-colors"
                         >
                           {/* Payment purpose + paid-to + date stacked */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             <p className="font-heading font-medium text-foreground text-xs truncate">
                               {rec.paymentName || "—"}
                             </p>
@@ -5399,15 +5439,15 @@ const Payment: React.FC = () => {
                               {rec.date || "—"}
                             </p>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                               {rec.docNo || "—"}
                             </span>
                           </td>
                           {/* Expense Ref + GRN stacked */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate">
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.expenseRef}
                               </span>
                             ) : (
@@ -5422,11 +5462,11 @@ const Payment: React.FC = () => {
                             </div>
                           </td>
                           {/* Mode */}
-                          <td className="px-4 py-3 hidden md:table-cell">
+                          <td className="px-4 py-4 hidden md:table-cell">
                             <ModeBadge mode={rec.mode} />
                           </td>
                           {/* Cheque / Ref */}
-                          <td className="px-4 py-3 hidden lg:table-cell">
+                          <td className="px-4 py-4 hidden lg:table-cell">
                             {rec.chequeNo ? (
                               <div className="space-y-0.5">
                                 <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
@@ -5488,15 +5528,15 @@ const Payment: React.FC = () => {
                             )}
                           </td>
                           {/* Amount */}
-                          <td className="px-4 py-3 font-mono text-xs font-semibold text-right whitespace-nowrap">
+                          <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
                           {/* Bank */}
-                          <td className="px-4 py-3 text-xs text-muted-foreground truncate hidden md:table-cell">
+                          <td className="px-4 py-4 text-xs text-muted-foreground truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
                           {/* Status */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
                               {rec.displayStatus && rec.displayStatus !== rec.status ? (
                                 <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[9px] font-semibold border whitespace-nowrap ${
@@ -5526,7 +5566,7 @@ const Payment: React.FC = () => {
                             </div>
                           </td>
                           {/* Actions */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             <div className="flex items-center gap-1.5 justify-end">
                               <ApprovalActions
                                 status={rec.status}

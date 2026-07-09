@@ -25,6 +25,8 @@ export interface BrsEntry {
   BounceDate: string | null;
   BounceReason: string | null;
   BounceRemarks: string | null;
+  // Clearing timestamp — set when IsMatched flips to 1 (UpdatedAt on BRS row)
+  ClearingDate: string | null;
   // Re-issue chain
   ReplacementDocNo: string | null;       // DocNo of payment that replaced this bounced one
   ReplacementPaymentId: number | null;
