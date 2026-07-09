@@ -2,10 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // GET /projects — project dropdown (mirrors unitMaster.js /projects)
 router.get("/projects", requirePageRight("followup-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {

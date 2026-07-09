@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { promoteLeadToFollowup } = require("../services/saHandoff");
@@ -9,6 +10,7 @@ const { promoteLeadToFollowup } = require("../services/saHandoff");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // GET / — all site visits (row-level scoped via the joined lead)
 router.get("/", requirePageRight("sa-site-visits", "view"), async (req, res) => {

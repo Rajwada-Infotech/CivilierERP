@@ -423,16 +423,6 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   return normaliseExpenseOptions(items);
 };
 
-const fetchExpenseOptionByRef = async (ref: string): Promise<ExpenseOption | null> => {
-  const res = await fetchWithAuth(
-    `/api/expense-booking/options?includeRef=${encodeURIComponent(ref)}`,
-  );
-  if (!res.ok) return null;
-  const raw = await res.json().catch(() => ({}));
-  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  const all = normaliseExpenseOptions(items);
-  return all.find((o) => o.docNo === ref) ?? all[0] ?? null;
-};
 
 const fetchExpenseDetail = async (
   id: string,
@@ -632,7 +622,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     amount: item.PAmount ?? null,
     date: item.PDate?.slice(0, 10) || "",
     bankId: item.PBankID ?? null,
-    bankName: item.PBankName || "",
+    bankName: (item.PBankName && item.PBankName !== "N/A") ? item.PBankName : "",
     project: item.PProjectName || item.PProject || "",
     projectSite: item.PProjectName || item.PProject || "",
     company: item.PCompany || "",

@@ -8,6 +8,7 @@ const jwt = require("jsonwebtoken");
 const { redisGet, redisSet, redisDel } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
@@ -180,6 +181,7 @@ router.post("/login", async (req, res) => {
 // AUTH REQUIRED BELOW THIS LINE
 // ======================
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 async function incrementLoginAttempts(attemptsKey, lockKey) {
   try {

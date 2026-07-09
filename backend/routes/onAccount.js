@@ -2,9 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const requireAuth = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 
 router.use(requireAuth);
+router.use(apiRateLimit);
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 

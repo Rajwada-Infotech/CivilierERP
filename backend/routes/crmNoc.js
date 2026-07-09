@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -11,6 +12,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { transition: approvalTransition } = require("../services/approvalService");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const NOC_TYPES = ["Organisation", "Bank"];
 

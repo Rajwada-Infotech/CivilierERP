@@ -2,6 +2,7 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const role = require("../middleware/role");
 
 const router = express.Router();
@@ -37,6 +38,7 @@ const LIST_COLUMNS = `
 `;
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;
