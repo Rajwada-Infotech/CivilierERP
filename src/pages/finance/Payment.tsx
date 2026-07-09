@@ -1991,6 +1991,7 @@ const Payment: React.FC = () => {
     useState<CompanyDetail | null>(null);
   const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
   const [viewingGrnTotal, setViewingGrnTotal] = useState<number>(0);
+  const [viewingOaBalance, setViewingOaBalance] = useState<number>(0);
   const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
   const [detailTab, setDetailTab] = useState<"details" | "chain" | "posting">("details");
@@ -2017,6 +2018,7 @@ const Payment: React.FC = () => {
     setViewingCompanyDetail(null);
     setViewingChain(null);
     setViewingGrnTotal(0);
+    setViewingOaBalance(0);
     setPaymentChainData(null);
     setDetailTab("details");
     setPmtPostingData(null);
@@ -2056,6 +2058,9 @@ const Payment: React.FC = () => {
         .then(setPaymentChainData)
         .catch(() => {})
         .finally(() => setLoadingChain(false));
+      getOABalanceByRef(rec.expenseRef)
+        .then((b) => setViewingOaBalance(b.balance ?? 0))
+        .catch(() => {});
     }
   };
 
@@ -6058,6 +6063,19 @@ const Payment: React.FC = () => {
                           {formatINR(displayRemaining)}
                         </p>
                       </div>
+                      {viewingOaBalance > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              On A/C
+                            </p>
+                            <p className="font-mono text-xs font-bold text-violet-500 dark:text-violet-400">
+                              {formatINR(viewingOaBalance)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                     );
                   })()}
