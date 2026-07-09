@@ -23,8 +23,9 @@ interface CreditEntry {
   PaymentDocNo: string;
   ExcessAmount: number;
   InvoiceRef: string | null;
-  PaidAmount: number | null;
+  PaymentAmount: number | null;
   InvoiceAmount: number | null;
+  InvoiceTotalPaid: number | null;
   InvoiceDocNo: string | null;
   AvailableBalance: number;
   Notes: string | null;
@@ -107,8 +108,9 @@ export default function OnAccountAdjustment() {
 
   function handleAdjust(entry: CreditEntry) {
     const partyBalance = balanceMap.get(entry.PartyId) ?? entry.AvailableBalance;
-    const invoiceRemaining = entry.InvoiceAmount != null && entry.PaidAmount != null
-      ? Math.max(0, entry.InvoiceAmount - entry.PaidAmount)
+    const totalPaid = entry.InvoiceTotalPaid ?? entry.PaymentAmount;
+    const invoiceRemaining = entry.InvoiceAmount != null && totalPaid != null
+      ? Math.max(0, entry.InvoiceAmount - totalPaid)
       : null;
     navigate("/payments", {
       state: {
@@ -304,15 +306,24 @@ export default function OnAccountAdjustment() {
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Invoice Ref</p>
                         <p className="font-mono text-muted-foreground truncate">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</p>
                       </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Invoice Amt</p>
-                        <p className="tabular-nums">{entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Paid</p>
-                        <p className="tabular-nums">{entry.PaidAmount != null ? formatINR(entry.PaidAmount) : "—"}</p>
-                      </div>
                     </div>
+                    {/* Net Payable / Total Paid breakdown */}
+                    {entry.InvoiceAmount != null && (
+                      <div className="rounded-xl border border-border overflow-hidden text-xs">
+                        <div className="flex items-center justify-between px-3 py-2 bg-muted/10">
+                          <p className="text-muted-foreground">Net Payable</p>
+                          <p className="font-mono font-semibold tabular-nums">{formatINR(entry.InvoiceAmount)}</p>
+                        </div>
+                        {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null && (
+                          <div className="flex items-center justify-between px-3 py-2 border-t border-border/60">
+                            <p className="text-emerald-600 dark:text-emerald-400">Total Paid</p>
+                            <p className="font-mono font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                              {formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between pt-1 border-t border-border">
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">On A/C Amt</p>
@@ -334,7 +345,7 @@ export default function OnAccountAdjustment() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
-                      {["Party", "Payment Voucher", "Date", "Invoice Ref", "Invoice Amt", "Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
+                      {["Party", "Payment Voucher", "Date", "Invoice Ref", "Net Payable", "Total Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           {h}
                         </th>
@@ -362,8 +373,10 @@ export default function OnAccountAdjustment() {
                         <td className="px-4 py-3 text-xs font-medium tabular-nums text-right">
                           {entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}
                         </td>
-                        <td className="px-4 py-3 text-xs tabular-nums text-right">
-                          {entry.PaidAmount != null ? formatINR(entry.PaidAmount) : "—"}
+                        <td className="px-4 py-3 text-xs tabular-nums text-right text-emerald-600 dark:text-emerald-400 font-medium">
+                          {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null
+                            ? formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)
+                            : "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</span>
