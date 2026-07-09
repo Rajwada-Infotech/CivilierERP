@@ -9,7 +9,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 
 router.use(authMiddleware);
 
-const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Other"];
+const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
 // SLA windows in hours, keyed by priority — used to auto-set SlaDueDate
 const SLA_HOURS = { Urgent: 24, High: 48, Normal: 96, Low: 168 };
@@ -18,7 +18,7 @@ const TICKET_SELECT = `
   SELECT
     t.Id, t.TicketNo, t.BookingId, t.Category, t.Priority, t.Subject, t.Description,
     t.Status, t.AssignedTo, t.SlaDueDate, t.ResolvedAt, t.ResolutionNotes,
-    t.CustomerRating, t.CustomerFeedback, t.CreatedAt, t.UpdatedAt,
+    t.CustomerRating, t.CustomerFeedback, t.RaisedByCustomer, t.CreatedAt, t.UpdatedAt,
     b.BookingNo, b.UnitNo, b.ProjectName,
     a.ApplicantName, a.Mobile,
     u.name  AS AssigneeName,

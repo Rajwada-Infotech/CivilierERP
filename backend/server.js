@@ -289,6 +289,8 @@ const ALL_ROUTES = [
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
   { path: "/api/crm/welcome-calls",  file: "./routes/crmWelcomeCalls"   },
+  { path: "/api/crm/co-applicants",  file: "./routes/crmCoApplicant"    },
+  { path: "/api/crm/booking-documents", file: "./routes/crmBookingDocuments" },
   { path: "/api/crm/agreements",     file: "./routes/crmAgreements"     },
   { path: "/api/crm/payments",       file: "./routes/crmPayments"       },
   { path: "/api/crm/handover",       file: "./routes/crmHandover"       },

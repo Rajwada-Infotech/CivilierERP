@@ -6,6 +6,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
+const { maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -195,10 +196,12 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
       .input("mname", sql.NVarChar(200), b.MilestoneName.trim())
       .input("due",   sql.Date,          b.DueDate || null)
       .input("amt",   sql.Decimal(18,2), b.AmountDue != null ? parseFloat(b.AmountDue) : 0)
+      .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
+      .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, Status, CreatedBy, CreatedAt)
-        VALUES (@bid, @mno, @mname, @due, @amt, 'Pending', @cb, SYSDATETIME())
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        VALUES (@bid, @mno, @mname, @due, @amt, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true });
   } catch (e) {
@@ -219,7 +222,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
 
     const paid = b.AmountPaid != null ? parseFloat(b.AmountPaid) : null;
 
-    await pool.request()
+    const result = await pool.request()
       .input("id",    sql.Int,           id)
       .input("mname", sql.NVarChar(200), b.MilestoneName || null)
       .input("due",   sql.Date,          b.DueDate || null)
@@ -228,6 +231,8 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       .input("pdate", sql.Date,          b.PaidDate || null)
       .input("pmode", sql.NVarChar(50),  b.PaymentMode || null)
       .input("tref",  sql.NVarChar(200), b.TransactionRef || null)
+      .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
+      .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("rem",   sql.NVarChar(sql.MAX), b.Remarks || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -239,6 +244,8 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
           PaidDate       = ISNULL(@pdate, PaidDate),
           PaymentMode    = ISNULL(@pmode, PaymentMode),
           TransactionRef = ISNULL(@tref,  TransactionRef),
+          RequiredDocuments = ISNULL(@rdocs, RequiredDocuments),
+          ResponsibleDepartment = ISNULL(@dept, ResponsibleDepartment),
           Status = CASE
             WHEN Status = 'Waived' THEN Status
             WHEN @paid IS NOT NULL AND @paid >= AmountDue THEN 'Paid'
@@ -246,8 +253,17 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
           END,
           Remarks   = @rem,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.BookingId, INSERTED.Status
         WHERE Id = @id
       `);
+
+    // Auto-flow: this milestone may have just been the last one outstanding —
+    // fire the auto-create check (no-op unless the agreement is also Executed).
+    const updated = result.recordset[0];
+    if (updated?.Status === "Paid") {
+      await maybeAutoCreateSalesDeed(pool, updated.BookingId, actorId(req));
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-payments] PUT error:", e.message);
@@ -271,15 +287,20 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
       return res.status(400).json({ error: "Cannot waive an already-paid milestone" });
     }
 
-    await pool.request()
+    const result = await pool.request()
       .input("id",  sql.Int, id)
       .input("rem", sql.NVarChar(sql.MAX), b.Reason)
       .input("ub",  sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmPaymentMilestone SET
           Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.BookingId
         WHERE Id = @id
       `);
+
+    // Auto-flow: a waived milestone can also be the last one outstanding.
+    await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
+
     res.json({ success: true, status: "Waived" });
   } catch (e) {
     console.error("[crm-payments] waive error:", e.message);

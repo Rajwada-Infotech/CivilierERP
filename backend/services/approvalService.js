@@ -75,6 +75,7 @@ const MODULE_MAP = {
     status: "Status",
   },
   "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
+  "crm-bookings": { table: "dbo.CrmBooking", pk: "Id", status: "Status" },
   // The "approval" on a CrmAgreement is specifically the senior sign-off gate
   // (SeniorApprovalStatus) — the document's own lifecycle (Draft/Executed/
   // Registered/Cancelled) is a separate column and not part of this workflow.
@@ -114,6 +115,7 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "journal-voucher": ["super_admin"],
   "inter-company-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
+  "crm-bookings": CRM_APPROVER_ROLES,
   "crm-agreements": CRM_APPROVER_ROLES,
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,

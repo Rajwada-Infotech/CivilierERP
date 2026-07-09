@@ -27,6 +27,7 @@ import {
   Warehouse,
   ShoppingCart,
   Building2,
+  Home,
   Car,
   ChevronDown,
   SlidersHorizontal,
@@ -177,6 +178,13 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/applications",
     label: "CRM Applications",
   },
+  "crm-bookings": {
+    icon: Home,
+    color: "text-orange-500 bg-orange-500/10",
+    navPath: "/crm/bookings",
+    apiEndpoint: "/api/crm/bookings",
+    label: "CRM Bookings",
+  },
   "crm-agreements": {
     icon: Building2,
     color: "text-indigo-500 bg-indigo-500/10",
@@ -209,7 +217,7 @@ const MODULE_CONFIG: Record<
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-applications", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);

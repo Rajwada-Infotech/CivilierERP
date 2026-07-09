@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams } from "react-router-dom";
 
 const API = "/api/crm/welcome-calls";
+const CO_API = "/api/crm/co-applicants";
+const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
 
@@ -22,79 +24,108 @@ const outcomeColor: Record<string, string> = {
 };
 
 const EMPTY_FORM = {
-  BookingId: "", CalledBy: "", CallDate: "", DurationSeconds: "",
-  Outcome: "", NextCallDate: "", Notes: "",
+  CalledBy: "", CallDate: "", DurationSeconds: "",
+  Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "",
 };
 
-async function fetchCalls(bookingId?: string): Promise<any[]> {
-  try {
-    const url = bookingId ? `${API}?bookingId=${bookingId}` : API;
-    const res = await fetchWithAuth(url);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+async function fetchQueue(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/queue`); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchBookings(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(BKG_API);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+async function fetchCalls(): Promise<any[]> {
+  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
-    const res = await fetchWithAuth(`${SA_LEADS_API}/users`);
-    if (!res.ok) return [];
-    const d: any[] = await res.json();
+    const r = await fetchWithAuth(`${SA_LEADS_API}/users`);
+    if (!r.ok) return [];
+    const d: any[] = await r.json();
     return d.map((u) => ({ value: String(u.Id), label: u.Name }));
   } catch { return []; }
 }
+async function fetchChecklist(bookingId: number): Promise<any> {
+  try { const r = await fetchWithAuth(`${API}/${bookingId}/checklist`); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function fetchDocs(bookingId: number): Promise<any> {
+  try { const r = await fetchWithAuth(`${DOC_API}/booking/${bookingId}`); return r.ok ? r.json() : { documents: [], standardTypes: [] }; } catch { return { documents: [], standardTypes: [] }; }
+}
+async function fetchCoApplicants(bookingId: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${CO_API}/booking/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchBookingById(bookingId: number): Promise<any | null> {
+  try {
+    const r = await fetchWithAuth(`${BKG_API}/${bookingId}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return { BookingId: d.Id, BookingNo: d.BookingNo, ApplicantName: d.ApplicantName, Mobile: d.Mobile, ProjectName: d.ProjectName, UnitNo: d.UnitNo };
+  } catch { return null; }
+}
 
-const CrmWelcomeCall: React.FC = () => {
+// ─── Intake dialog: log the call + work through the rest of the checklist ──
+const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
   const qc = useQueryClient();
-  const [sp] = useSearchParams();
-  const bkgFilter = sp.get("bookingId") || "";
-  const [search, setSearch] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM, BookingId: bkgFilter });
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>([]);
   const [saving, setSaving] = useState(false);
+  const [docType, setDocType] = useState("");
+  const [docUrl, setDocUrl] = useState("");
+  const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
+  const [addingCo, setAddingCo] = useState(false);
 
-  const { data: calls = [], isLoading } = useQuery({
-    queryKey: ["crm-welcome-calls", bkgFilter],
-    queryFn: () => fetchCalls(bkgFilter || undefined),
-    staleTime: 60_000,
-  });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+  const { data: checklist, refetch: refetchChecklist } = useQuery({
+    queryKey: ["crm-welcome-checklist", booking.BookingId],
+    queryFn: () => fetchChecklist(booking.BookingId),
+  });
+  const { data: docData = { documents: [], standardTypes: [] }, refetch: refetchDocs } = useQuery({
+    queryKey: ["crm-booking-documents", booking.BookingId],
+    queryFn: () => fetchDocs(booking.BookingId),
+  });
+  const { data: coApplicants = [], refetch: refetchCo } = useQuery({
+    queryKey: ["crm-co-applicants", booking.BookingId],
+    queryFn: () => fetchCoApplicants(booking.BookingId),
+  });
 
-  const filtered = useMemo(() =>
-    (calls as any[]).filter((c: any) =>
-      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
-    ), [calls, search]);
+  const invalidateQueue = () => qc.invalidateQueries({ queryKey: ["crm-welcome-queue"] });
 
-  const handleSave = async () => {
-    if (!form.BookingId) { toast.error("Booking is required"); return; }
+  const handleLogCall = async () => {
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          BookingId:       parseInt(form.BookingId),
-          CalledBy:        form.CalledBy       || null,
-          CallDate:        form.CallDate        || null,
-          DurationSeconds: form.DurationSeconds ? parseInt(form.DurationSeconds) : null,
-          Outcome:         form.Outcome         || null,
-          NextCallDate:    form.NextCallDate     || null,
-          Notes:           form.Notes           || null,
+          BookingId: booking.BookingId,
+          CalledBy: form.CalledBy || null,
+          CallDate: form.CallDate || null,
+          DurationSeconds: form.DurationSeconds || null,
+          Outcome: form.Outcome || null,
+          NextCallDate: form.NextCallDate || null,
+          Notes: form.Notes || null,
+          PreferredAgreementDate: form.PreferredAgreementDate || null,
+          CustomFields: customFields,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to log call");
-      toast.success("Welcome call logged");
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM, BookingId: bkgFilter });
-      qc.invalidateQueries({ queryKey: ["crm-welcome-calls"] });
+      setForm({ ...EMPTY_FORM });
+      setCustomFields([]);
+      refetchChecklist();
+      invalidateQueue();
+      qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
+      qc.invalidateQueries({ queryKey: ["crm-communication"] });
+
+      // Auto-flow: every logged call is seeded into the Communication Log
+      // server-side already — once the customer is actually Welcomed, hand
+      // the whole flow off to that page for ongoing follow-up/tasks instead
+      // of leaving staff sitting on this dialog.
+      if (form.Outcome === "Welcomed") {
+        toast.success("Welcome call logged — continuing in Communication Log");
+        onClose();
+        navigate(`/crm/communication?bookingId=${booking.BookingId}`);
+      } else {
+        toast.success("Welcome call logged");
+      }
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -102,144 +133,443 @@ const CrmWelcomeCall: React.FC = () => {
     }
   };
 
-  const pendingCallbacks = useMemo(() =>
-    (calls as any[]).filter((c: any) => c.NextCallDate && c.Outcome !== "Welcomed"),
-    [calls]
+  const handleAddDoc = async () => {
+    if (!docType) { toast.error("Select a document type"); return; }
+    try {
+      const res = await fetchWithAuth(`${DOC_API}/booking/${booking.BookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ DocumentType: docType, DocumentUrl: docUrl || null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setDocType(""); setDocUrl("");
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleVerifyDoc = async (id: number, verified: boolean) => {
+    try {
+      await fetchWithAuth(`${DOC_API}/${id}/verify`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ IsVerified: verified }),
+      });
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleAddCoApplicant = async () => {
+    if (!coForm.Name.trim()) { toast.error("Name is required"); return; }
+    try {
+      const res = await fetchWithAuth(`${CO_API}/booking/${booking.BookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(coForm),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setCoForm({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
+      setAddingCo(false);
+      refetchCo();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleRemoveCoApplicant = async (id: number) => {
+    try {
+      await fetchWithAuth(`${CO_API}/${id}`, { method: "DELETE" });
+      refetchCo();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-heading">
+            Welcome Call — {booking.ApplicantName} <span className="text-muted-foreground font-normal text-sm">({booking.BookingNo})</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* ── Checklist strip ── */}
+        {checklist && (
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
+            {[
+              { label: "Call", done: checklist.welcomeCall.done },
+              { label: "Docs", done: checklist.documents.total > 0 && checklist.documents.verified === checklist.documents.total },
+              { label: "Co-App.", done: checklist.coApplicants.count > 0 },
+              { label: "Bank", done: checklist.bankDetails.complete },
+              { label: "NOC", done: checklist.noc.some((n: any) => n.Status === "Issued") },
+              { label: "Agreement", done: !!checklist.agreement },
+            ].map((s) => (
+              <div key={s.label} className={`rounded-lg border p-2 text-[11px] font-medium ${s.done ? "border-green-200 bg-green-50 text-green-700" : "border-border bg-muted/30 text-muted-foreground"}`}>
+                {s.done && <Check size={11} className="inline mr-0.5 -mt-0.5" />} {s.label}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Log Call ── */}
+        <div className="rounded-xl border border-border p-4 space-y-3">
+          <h3 className="text-sm font-semibold">Log This Call</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Called By</label>
+              <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">— Self —</option>
+                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
+              <select value={form.Outcome} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">Select outcome</option>
+                {OUTCOMES.map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
+              <input type="datetime-local" value={form.CallDate}
+                onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Duration (seconds)</label>
+              <input type="number" value={form.DurationSeconds}
+                onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="e.g. 180" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Schedule Follow-up Call</label>
+              <input type="date" value={form.NextCallDate}
+                onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Preferred Agreement Date</label>
+              <input type="date" value={form.PreferredAgreementDate}
+                onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            </div>
+          </div>
+
+          {/* Dynamic custom fields */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs text-muted-foreground">Additional Fields</label>
+              <button onClick={() => setCustomFields((f) => [...f, { key: "", value: "" }])}
+                className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                <Plus size={11} /> Add Field
+              </button>
+            </div>
+            {customFields.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1.5">
+                <input placeholder="Field name" value={f.key}
+                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="Value" value={f.value}
+                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
+                  className="text-muted-foreground hover:text-red-600 shrink-0">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={handleLogCall} disabled={saving}
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+            {saving ? "Logging..." : "Log Call"}
+          </button>
+        </div>
+
+        {/* ── Document Verification ── */}
+        <div className="rounded-xl border border-border p-4 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
+          {docData.documents.map((d: any) => (
+            <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
+              <div>
+                <span className="font-medium">{d.DocumentType}</span>
+                {d.DocumentUrl && <a href={d.DocumentUrl} target="_blank" rel="noreferrer" className="ml-2 text-xs text-primary hover:underline">View</a>}
+              </div>
+              <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
+                className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                {d.IsVerified ? "Verified" : "Mark Verified"}
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            <select value={docType} onChange={(e) => setDocType(e.target.value)}
+              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <option value="">Select document type</option>
+              {docData.standardTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input placeholder="Document URL (optional)" value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
+              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            <button onClick={handleAddDoc} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0">
+              + Add
+            </button>
+          </div>
+        </div>
+
+        {/* ── Co-Applicant ── */}
+        <div className="rounded-xl border border-border p-4 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
+          {coApplicants.map((c: any) => (
+            <div key={c.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
+              <div>
+                <span className="font-medium">{c.Name}</span>
+                {c.Relation && <span className="text-xs text-muted-foreground"> · {c.Relation}</span>}
+                {c.Mobile && <span className="text-xs text-muted-foreground"> · {c.Mobile}</span>}
+              </div>
+              <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
+            </div>
+          ))}
+          {!addingCo ? (
+            <button onClick={() => setAddingCo(true)} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              <Plus size={11} /> Add Co-Applicant
+            </button>
+          ) : (
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                <input placeholder="Name *" value={coForm.Name} onChange={(e) => setCoForm((f) => ({ ...f, Name: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="Relation" value={coForm.Relation} onChange={(e) => setCoForm((f) => ({ ...f, Relation: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="Mobile" value={coForm.Mobile} onChange={(e) => setCoForm((f) => ({ ...f, Mobile: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="Email" value={coForm.Email} onChange={(e) => setCoForm((f) => ({ ...f, Email: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="PAN No." value={coForm.PanNo} onChange={(e) => setCoForm((f) => ({ ...f, PanNo: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input placeholder="Aadhaar No." value={coForm.AadhaarNo} onChange={(e) => setCoForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
+                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Save</button>
+                <button onClick={() => setAddingCo(false)} className="text-xs px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Rest of the checklist: link out, don't duplicate ── */}
+        <div className="rounded-xl border border-border overflow-hidden">
+          {[
+            { label: "Communication Log", path: `/crm/communication?bookingId=${booking.BookingId}`, done: checklist?.welcomeCall.done, sub: "further follow-ups & tasks" },
+            { label: "Nominee & Bank Details", path: `/crm/customer-bank-details?bookingId=${booking.BookingId}`, done: checklist?.bankDetails.complete },
+            { label: "NOC", path: `/crm/noc?bookingId=${booking.BookingId}`, done: checklist?.noc?.some((n: any) => n.Status === "Issued"), sub: checklist?.noc?.length ? `${checklist.noc.length} raised` : "Not raised" },
+            { label: "Agreement", path: `/crm/agreements?bookingId=${booking.BookingId}`, done: !!checklist?.agreement, sub: checklist?.agreement?.Status || "Not yet created" },
+          ].map((row) => (
+            <button key={row.label} onClick={() => navigate(row.path)}
+              className="w-full flex items-center justify-between px-4 py-2.5 border-b border-border last:border-0 hover:bg-muted/20 text-left">
+              <div className="flex items-center gap-2 text-sm">
+                <span className={`w-2 h-2 rounded-full ${row.done ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                {row.label}
+                {row.sub && <span className="text-xs text-muted-foreground">({row.sub})</span>}
+              </div>
+              <ChevronRight size={14} className="text-muted-foreground" />
+            </button>
+          ))}
+        </div>
+
+        <div className="flex justify-end pt-1">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const CrmWelcomeCall: React.FC = () => {
+  const [sp] = useSearchParams();
+  const bkgFilter = sp.get("bookingId");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<"queue" | "history">("queue");
+  const [activeBooking, setActiveBooking] = useState<any | null>(null);
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+
+  const { data: queue = [], isLoading: queueLoading } = useQuery({
+    queryKey: ["crm-welcome-queue"],
+    queryFn: fetchQueue,
+    staleTime: 30_000,
+  });
+
+  // Deep-link support: /crm/welcome-calls?bookingId=X (e.g. from the Booking
+  // list's "Welcome Call" action) opens the intake dialog for that booking
+  // directly, whether or not it's currently in the queue.
+  React.useEffect(() => {
+    if (!bkgFilter || deepLinkOpened) return;
+    setDeepLinkOpened(true);
+    const id = parseInt(bkgFilter);
+    const fromQueue = (queue as any[]).find((c: any) => c.BookingId === id);
+    if (fromQueue) {
+      setActiveBooking(fromQueue);
+    } else {
+      fetchBookingById(id).then((b) => { if (b) setActiveBooking(b); });
+    }
+  }, [bkgFilter, deepLinkOpened, queue]);
+  const { data: history = [], isLoading: historyLoading } = useQuery({
+    queryKey: ["crm-welcome-calls-history"],
+    queryFn: fetchCalls,
+    staleTime: 60_000,
+  });
+
+  const filteredQueue = useMemo(() =>
+    (queue as any[]).filter((c: any) =>
+      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
+    ), [queue, search]);
+
+  const filteredHistory = useMemo(() =>
+    (history as any[]).filter((c: any) =>
+      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
+    ), [history, search]);
+
+  const overdueCount = useMemo(() =>
+    (queue as any[]).filter((c: any) => c.NextCallDate && new Date(c.NextCallDate) <= new Date()).length,
+    [queue]
   );
 
   return (
     <SalesAutoShell
       title="CRM — Welcome Calls"
-      subtitle="Post-booking welcome calls and callback tracking"
-      action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
-          <Phone size={14} /> Log Welcome Call
-        </button>
-      }
+      subtitle="Work the call queue, then verify documents, co-applicant, bank, NOC, and agreement readiness"
     >
-      {pendingCallbacks.length > 0 && (
+      {overdueCount > 0 && (
         <div className="rounded-lg bg-orange-50 border border-orange-200 px-4 py-2.5 text-sm text-orange-700 flex items-center gap-2">
           <Phone size={14} />
-          <span><strong>{pendingCallbacks.length}</strong> pending callback{pendingCallbacks.length > 1 ? "s" : ""} scheduled</span>
+          <span><strong>{overdueCount}</strong> booking{overdueCount > 1 ? "s" : ""} due for a call today or overdue</span>
         </div>
       )}
 
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by customer or booking no..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      <div className="flex gap-3 items-center flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by customer or booking no..."
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button onClick={() => setView("queue")}
+            className={`px-3 py-2 text-xs font-medium ${view === "queue" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
+            Queue ({queue.length})
+          </button>
+          <button onClick={() => setView("history")}
+            className={`px-3 py-2 text-xs font-medium ${view === "history" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
+            Call History
+          </button>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        {isLoading ? (
-          <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground text-sm">No welcome calls logged yet</div>
-        ) : (filtered as any[]).map((c: any) => (
-          <div key={c.Id} className="rounded-xl border border-border p-4 hover:bg-muted/10 transition-colors">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-foreground">{c.ApplicantName}</span>
-                  <span className="text-xs text-muted-foreground font-mono">{c.BookingNo}</span>
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">{c.Mobile} · {c.ProjectName || c.UnitNo}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {c.Outcome && (
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.Outcome] || ""}`}>
-                    {c.Outcome}
-                  </span>
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}
-                </span>
-              </div>
-            </div>
-            {(c.Notes || c.DurationSeconds || c.NextCallDate) && (
-              <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                {c.DurationSeconds && <span>{Math.floor(c.DurationSeconds / 60)}m {c.DurationSeconds % 60}s</span>}
-                {c.CalledByName && <span>by {c.CalledByName}</span>}
-                {c.NextCallDate && <span className="text-orange-600">Callback: {String(c.NextCallDate).slice(0, 10)}</span>}
-                {c.Notes && <span className="truncate max-w-xs">{c.Notes}</span>}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); } }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Log Welcome Call</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {(bookings as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>
-                    {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
-                  </option>
+      {view === "queue" ? (
+        <div className="rounded-xl border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-muted/40 text-left">
+                {["Booking No", "Customer", "Project / Unit", "Last Outcome", "Follow-up Due", "Action"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-                <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Self —</option>
-                  {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                </select>
+              </tr>
+            </thead>
+            <tbody>
+              {queueLoading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
+              ) : filteredQueue.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Queue is clear — no calls pending</td></tr>
+              ) : filteredQueue.map((c: any) => (
+                <tr key={c.BookingId} className="border-t border-border hover:bg-muted/10 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{c.BookingNo}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{c.ApplicantName}</div>
+                    <div className="text-xs text-muted-foreground">{c.Mobile}</div>
+                  </td>
+                  <td className="px-4 py-3 text-xs">{c.ProjectName || "—"} · {c.UnitNo}</td>
+                  <td className="px-4 py-3">
+                    {c.LastOutcome ? (
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.LastOutcome] || ""}`}>{c.LastOutcome}</span>
+                    ) : <span className="text-xs text-muted-foreground">Never called</span>}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {c.NextCallDate ? (
+                      <span className={new Date(c.NextCallDate) <= new Date() ? "text-orange-600 font-medium" : "text-muted-foreground"}>
+                        {String(c.NextCallDate).slice(0, 10)}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => setActiveBooking(c)}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                      <Phone size={12} /> Call Now
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {historyLoading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">No welcome calls logged yet</div>
+          ) : (filteredHistory as any[]).map((c: any) => {
+            let custom: { key: string; value: string }[] = [];
+            try { custom = c.CustomFields ? JSON.parse(c.CustomFields) : []; } catch { /* ignore */ }
+            return (
+              <div key={c.Id} className="rounded-xl border border-border p-4 hover:bg-muted/10 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground">{c.ApplicantName}</span>
+                      <span className="text-xs text-muted-foreground font-mono">{c.BookingNo}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{c.Mobile} · {c.ProjectName || c.UnitNo}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {c.Outcome && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.Outcome] || ""}`}>
+                        {c.Outcome}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}
+                    </span>
+                  </div>
+                </div>
+                {(c.Notes || c.DurationSeconds || c.NextCallDate || c.PreferredAgreementDate || custom.length > 0) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {c.DurationSeconds && <span>{Math.floor(c.DurationSeconds / 60)}m {c.DurationSeconds % 60}s</span>}
+                    {c.CalledByName && <span>by {c.CalledByName}</span>}
+                    {c.NextCallDate && <span className="text-orange-600">Follow-up: {String(c.NextCallDate).slice(0, 10)}</span>}
+                    {c.PreferredAgreementDate && <span className="text-purple-600">Preferred agreement date: {String(c.PreferredAgreementDate).slice(0, 10)}</span>}
+                    {c.Notes && <span className="truncate max-w-xs">{c.Notes}</span>}
+                    {custom.map((f, i) => <span key={i}>{f.key}: {f.value}</span>)}
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
-                <select value={form.Outcome} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select outcome</option>
-                  {OUTCOMES.map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
-                <input type="datetime-local" value={form.CallDate}
-                  onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Duration (seconds)</label>
-                <input type="number" value={form.DurationSeconds}
-                  onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="e.g. 180" />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Schedule Next Call</label>
-                <input type="date" value={form.NextCallDate}
-                  onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-                <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Logging..." : "Log Call"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+            );
+          })}
+        </div>
+      )}
+
+      {activeBooking && (
+        <IntakeDialog booking={activeBooking} onClose={() => setActiveBooking(null)} />
+      )}
     </SalesAutoShell>
   );
 };

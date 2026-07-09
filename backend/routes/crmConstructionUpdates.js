@@ -10,10 +10,14 @@ router.use(authMiddleware);
 router.get("/", requirePageRight("crm-construction-updates", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { project } = req.query;
+    const { project, projectId } = req.query;
     const req0 = pool.request();
-    let where = "";
-    if (project) { req0.input("p", sql.NVarChar(200), project); where = "WHERE u.ProjectName = @p"; }
+    const conds = [];
+    // projectId is the real link (FK to the Unit Master project); project
+    // (a ProjectName string) is kept only for old callers/back-compat.
+    if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("u.ProjectId = @pid"); }
+    else if (project) { req0.input("p", sql.NVarChar(200), project); conds.push("u.ProjectName = @p"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
       SELECT u.*, cu.name AS CreatedByName
       FROM dbo.CrmConstructionUpdate u
@@ -32,9 +36,15 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
   try {
     const pool = getPool();
     const b = req.body;
-    if (!b.ProjectName?.trim()) return res.status(400).json({ error: "ProjectName is required" });
+    if (!b.ProjectId) return res.status(400).json({ error: "ProjectId is required — select a project from Unit Master" });
+
+    const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
+      .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
+    if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
+
     await pool.request()
-      .input("proj", sql.NVarChar(200), b.ProjectName.trim())
+      .input("pid",  sql.Int,           parseInt(b.ProjectId))
+      .input("proj", sql.NVarChar(200), proj.recordset[0].name)
       .input("dt",   sql.Date,          b.UpdateDate || null)
       .input("pct",  sql.Decimal(5,2),  b.PercentComplete != null ? parseFloat(b.PercentComplete) : null)
       .input("stage",sql.NVarChar(100), b.Stage || null)
@@ -43,8 +53,8 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
       .input("cb",   sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmConstructionUpdate
-          (ProjectName, UpdateDate, PercentComplete, Stage, Summary, PhotoUrls, CreatedBy, CreatedAt)
-        VALUES (@proj, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @pct, @stage, @sum, @photos, @cb, SYSDATETIME())
+          (ProjectId, ProjectName, UpdateDate, PercentComplete, Stage, Summary, PhotoUrls, CreatedBy, CreatedAt)
+        VALUES (@pid, @proj, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @pct, @stage, @sum, @photos, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true });
   } catch (e) {

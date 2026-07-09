@@ -3,10 +3,15 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId } = require("../services/saAccess");
+const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
+const { emitNotification } = require("../services/notify");
+// Bookings land in Pending on creation and only ever reach Approved/Rejected
+// through this shared engine — gated to admin/super_admin/marketing_head via
+// the Admin Approval Inbox, same as every other CRM approval flow.
+const { transition: approvalTransition } = require("../services/approvalService");
 
 router.use(authMiddleware);
 
@@ -103,7 +108,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
     const unitRow = unit.recordset[0];
 
     const taken = await pool.request().input("uid", sql.Int, parseInt(b.UnitId))
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status <> 'Cancelled'");
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
     // Area is a fixed physical attribute of the unit — always taken from
@@ -123,12 +128,12 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
         : tokenValue;
     }
 
-    // Status is always Confirmed on creation — never accepted from the request
-    // body. A booking row only ever exists once a real, available Unit and a
-    // token amount are locked in (checked above), so there is no meaningful
-    // "Draft" state to pick from; the only further transition is Cancelled,
-    // which happens exclusively via the CrmCancellation approval cascade
-    // (see crmCancellations.js mark-refunded/approve, not this route).
+    // Status always starts Pending on creation — never accepted from the
+    // request body. It only ever reaches Approved/Rejected via the shared
+    // approvalService.js engine from the Admin Approval Inbox (admin/
+    // super_admin/marketing_head), same as every other CRM approval flow.
+    // Cancelled is a separate terminal state reached exclusively via the
+    // CrmCancellation approval cascade (see crmCancellations.js).
     const bookingNo = await getNextDocNumber(pool, "BKG", "BKG");
     const result = await pool.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
@@ -164,7 +169,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
           (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
            @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
            ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
-           @asgn, 'Confirmed', @note, 1,
+           @asgn, 'Pending', @note, 1,
            0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME())
       `);
 
@@ -180,13 +185,13 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
       }
       if (!milestones?.length) {
         milestones = [
-          { no: 1, name: "Booking",          pct: 5  },
-          { no: 2, name: "Agreement",        pct: 10 },
-          { no: 3, name: "Foundation",       pct: 15 },
-          { no: 4, name: "Superstructure",   pct: 20 },
-          { no: 5, name: "Slab Casting",     pct: 20 },
-          { no: 6, name: "Plastering",       pct: 15 },
-          { no: 7, name: "Handover",         pct: 15 },
+          { no: 1, name: "Booking",          pct: 5,  dept: "Sales",        docs: "Booking Receipt" },
+          { no: 2, name: "Agreement",        pct: 10, dept: "Legal",        docs: "Executed Agreement" },
+          { no: 3, name: "Foundation",       pct: 15, dept: "Construction", docs: "Foundation Completion Certificate" },
+          { no: 4, name: "Superstructure",   pct: 20, dept: "Construction", docs: "Superstructure Progress Photos" },
+          { no: 5, name: "Slab Casting",     pct: 20, dept: "Construction", docs: "Slab Casting Progress Photos" },
+          { no: 6, name: "Plastering",       pct: 15, dept: "Construction", docs: "Plastering Completion Photos" },
+          { no: 7, name: "Handover",         pct: 15, dept: "Sales",        docs: "Possession Letter, Handover Checklist" },
         ];
       }
       for (const m of milestones) {
@@ -195,10 +200,12 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
           .input("mno",  sql.Int,           m.no)
           .input("mname",sql.NVarChar(200), m.name)
           .input("amt",  sql.Decimal(18,2), Math.round(total * m.pct) / 100)
+          .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
+          .input("dept", sql.NVarChar(100), m.dept || null)
           .input("cb",   sql.Int,           actorId(req))
           .query(`
-            INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, Status, CreatedBy, CreatedAt)
-            VALUES (@bid, @mno, @mname, @amt, 'Pending', @cb, SYSDATETIME())
+            INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+            VALUES (@bid, @mno, @mname, @amt, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
           `);
       }
     }
@@ -218,11 +225,12 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
   }
 });
 
-// PUT /:id — update booking. Status is never accepted here — it is fixed at
-// creation ('Confirmed') and can only become 'Cancelled' via the
-// CrmCancellation approval cascade in crmCancellations.js. UnitType and
-// AreaSqFt are also never accepted here — both are inherited once from Unit
-// Master at creation and the unit itself never changes on an existing booking.
+// PUT /:id — update booking. Status is never accepted here — it starts
+// 'Pending' at creation and only moves via /submit, /approve, /reject above,
+// or becomes 'Cancelled' via the CrmCancellation approval cascade in
+// crmCancellations.js. UnitType and AreaSqFt are also never accepted here —
+// both are inherited once from Unit Master at creation and the unit itself
+// never changes on an existing booking.
 router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -278,6 +286,173 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
   } catch (e) {
     console.error("[crm-bookings] PUT error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/change-unit — the only way UnitId can ever change on an existing
+// booking. Restricted to admin/super_admin/dba/marketing_head (this
+// re-points a real legal transaction to a different physical unit) and
+// requires a mandatory reason. Every change is permanently logged to
+// CrmUnitChangeLog — nothing here is ever silently overwritten.
+router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admin/super_admin/marketing_head can change a booking's unit" });
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body || {};
+    if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
+    if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
+
+    const booking = await pool.request().input("id", sql.Int, id)
+      .query("SELECT UnitId, Status FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+    if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (booking.recordset[0].Status === "Cancelled") {
+      return res.status(400).json({ error: "Cannot change the unit on a cancelled booking" });
+    }
+    const oldUnitId = booking.recordset[0].UnitId;
+    const newUnitId = parseInt(b.NewUnitId);
+    if (newUnitId === oldUnitId) return res.status(400).json({ error: "New unit is the same as the current unit" });
+
+    // Same lookup + availability checks as booking creation — the new unit
+    // must be real, active, and not already locked by another booking.
+    const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+             proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
+      LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+      WHERE u.Id = @uid AND u.IsActive = 1
+    `);
+    if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
+    const unitRow = unit.recordset[0];
+
+    const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+    if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
+
+    const actor = actorId(req);
+    await pool.request()
+      .input("id",    sql.Int, id)
+      .input("uid",   sql.Int, newUnitId)
+      .input("pid",   sql.Int, unitRow.ProjectId || null)
+      .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
+      .input("cid",   sql.Int, unitRow.CompanyId || null)
+      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+      .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
+      .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
+      .input("area",  sql.Decimal(18,2), unitRow.AreaSqFt || null)
+      .input("ub",    sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+          CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await pool.request()
+      .input("bid",    sql.Int, id)
+      .input("oldUid", sql.Int, oldUnitId || null)
+      .input("newUid", sql.Int, newUnitId)
+      .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
+      .input("cb",     sql.Int, actor)
+      .query(`
+        INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
+        VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())
+      `);
+
+    await logCrmAudit(pool, "Booking", id, actor, [
+      { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
+    ]);
+
+    res.json({ success: true, unitNo: unitRow.UnitName });
+  } catch (e) {
+    console.error("[crm-bookings] change-unit error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/unit-change-log — history of unit changes for a booking
+router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT l.*, ou.UnitName AS OldUnitName, nu.UnitName AS NewUnitName, u.name AS ChangedByName
+      FROM dbo.CrmUnitChangeLog l
+      LEFT JOIN dbo.UnitMaster ou ON ou.Id = l.OldUnitId
+      LEFT JOIN dbo.UnitMaster nu ON nu.Id = l.NewUnitId
+      LEFT JOIN dbo.Users u ON u.id = l.ChangedBy
+      WHERE l.BookingId = @bid
+      ORDER BY l.ChangedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-bookings] GET unit-change-log error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/submit — re-submit a Rejected booking for approval. New bookings
+// already land in Pending on creation, so this only matters for the
+// Rejected -> Pending resubmit path (ApprovalActions renders Submit there).
+router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-bookings", id, "Pending", userEmail, req.user?.role);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-bookings] submit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
+// approvalTransition(). Approve/reject only ever happen from the Admin
+// Approval Inbox, not self-service on this page.
+router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-bookings", id, "Approved", userEmail, req.user?.role);
+
+    // Auto-flow: an approved booking's very next step is the welcome call —
+    // push that to the assigned salesperson instead of waiting for them to
+    // notice the booking list changed.
+    if (result.newStatus === "Approved") {
+      const pool = getPool();
+      const row = await pool.request().input("id", sql.Int, id)
+        .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @id");
+      const booking = row.recordset[0];
+      if (booking?.AssignedTo) {
+        await emitNotification(pool, booking.AssignedTo, "crm_welcome_call_due",
+          "Welcome Call Due",
+          `Booking ${booking.BookingNo} is approved — make the welcome call to proceed.`,
+          id, "crm_booking");
+      }
+    }
+
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-bookings] approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — admin/super_admin/marketing_head only (Remarks recommended)
+router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-bookings", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-bookings] reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
   }
 });
 

@@ -501,6 +501,31 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-bookings") {
+      queries.push(`
+        SELECT
+          'crm-bookings'                        AS Module,
+          'CRM Booking'                         AS ModuleLabel,
+          CAST(b.Id AS NVARCHAR)                AS RecordId,
+          b.BookingNo                           AS Reference,
+          b.CreatedAt                           AS RecordDate,
+          b.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          b.GrandTotal                          AS Amount,
+          ${NULL_EXTRA}
+          CAST(b.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ''                                    AS RejectionNote,
+          ISNULL(b.UpdatedAt, b.CreatedAt)      AS LastModified
+        FROM dbo.CrmBooking b
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE b.Status = 'Pending' AND b.IsActive = 1
+      `);
+    }
+
     if (!module || module === "crm-agreements") {
       queries.push(`
         SELECT
@@ -645,6 +670,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
+        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
