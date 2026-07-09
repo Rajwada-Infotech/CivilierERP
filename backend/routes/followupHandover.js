@@ -1,6 +1,7 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
@@ -57,6 +58,7 @@ const CONDITION_OPTIONS = [
 ];
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 router.use(checkPermissionForMethod("Followup", "Handover"));
 
 function requireUserName(req, res) {

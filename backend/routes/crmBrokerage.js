@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 // Approve/reject is gated to admin/super_admin/dba via this shared engine —
@@ -10,6 +11,7 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { transition: approvalTransition } = require("../services/approvalService");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const BROKERAGE_SELECT = `
   SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
