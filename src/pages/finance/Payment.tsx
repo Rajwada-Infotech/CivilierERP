@@ -1998,6 +1998,10 @@ const Payment: React.FC = () => {
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
   // On Account balance for the selected invoice's party
   const [oaBalance, setOaBalance] = useState<number>(0);
+  // Context injected from the On A/C Adjustment page
+  const [oaAdjustCtx, setOaAdjustCtx] = useState<{
+    partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
+  } | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
@@ -2082,6 +2086,16 @@ const Payment: React.FC = () => {
         setSearchParams(searchParams, { replace: true });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detect On A/C Adjustment context passed from OnAccountAdjustment page
+  useEffect(() => {
+    const oa = (location.state as any)?.oaAdjust;
+    if (!oa?.partyId) return;
+    setOaAdjustCtx(oa);
+    setOaBalance(oa.availableBalance ?? 0);
+    setView("form");
+    window.history.replaceState({}, "", location.pathname);
   }, []);
 
   // Detect bounce re-issue context passed from BRS page
@@ -3794,6 +3808,35 @@ const Payment: React.FC = () => {
                 );
               })()}
 
+
+              {/* ── On A/C Adjustment context banner ── */}
+              {oaAdjustCtx && (
+                <div className="rounded-xl border border-blue-500/25 bg-blue-500/5 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-400">
+                      On A/C Adjustment — {oaAdjustCtx.partyName}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Select an invoice for this party — the On A/C balance will auto-apply on save
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Source: {oaAdjustCtx.sourceDocNo}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">
+                      {typeof formatINR === "function" ? formatINR(oaAdjustCtx.availableBalance) : `₹${oaAdjustCtx.availableBalance}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setOaAdjustCtx(null); setOaBalance(0); }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* ── On Account Banner ── */}
               {oaBalance > 0.01 && (
