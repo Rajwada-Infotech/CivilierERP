@@ -4,6 +4,8 @@ const { getPool, sql } = require("../db");
 const requireAuth = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
+const { applyBillingTermsToAmount } = require("../utils/billingTerms");
+const { buildGrnGstData }           = require("../utils/buildGrnGstData");
 
 router.use(requireAuth);
 router.use(apiRateLimit);
@@ -167,12 +169,21 @@ router.get("/adjustable", async (req, res) => {
         ahm.LHeadType  AS PartyTypeCode,
         oa.TxnDate     AS PaymentDate,
         oa.RefDocNo    AS PaymentDocNo,
-        oa.Amount      AS ExcessAmount,
-        np.PExpenseRef AS InvoiceRef,
-        np.PAmount     AS PaidAmount,
-        eb.ENetAmount  AS InvoiceAmount,
-        eb.EDocNo      AS InvoiceDocNo,
-        pb.Balance     AS AvailableBalance,
+        oa.Amount              AS ExcessAmount,
+        np.PExpenseRef         AS InvoiceRef,
+        np.PAmount             AS PaymentAmount,
+        eb.ENetAmount          AS ENetAmount,
+        eb.EAmount             AS EAmount,
+        eb.ECgstRate           AS ECgstRate,
+        eb.ESgstRate           AS ESgstRate,
+        eb.EBillingTermsData   AS EBillingTermsData,
+        eb.EDiscountData       AS EDiscountData,
+        eb.ESourceType         AS ESourceType,
+        eb.ESourceId           AS ESourceId,
+        grn.TotalAmount        AS GrnTotalAmount,
+        eb.ETotalPaid          AS InvoiceTotalPaid,
+        eb.EDocNo              AS InvoiceDocNo,
+        pb.Balance             AS AvailableBalance,
         oa.Notes
       FROM dbo.OnAccountLedger oa
       JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
@@ -180,11 +191,44 @@ router.get("/adjustable", async (req, res) => {
       LEFT JOIN dbo.NewPayment np
              ON np.DocNo = oa.RefDocNo AND oa.RefType = 'Payment'
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
       WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'Payment'
         ${partyFilter}
       ORDER BY pb.Balance DESC, oa.TxnDate DESC
     `);
-    res.json(result.recordset);
+    // For GRN-source invoices, recompute the correct GST-inclusive net payable from
+    // current GRN line items (same as the expense booking preview modal does).
+    const rows = await Promise.all(result.recordset.map(async (row) => {
+      let invoiceAmount = null;
+      if (row.ESourceType === "GRN" && row.ESourceId) {
+        try {
+          const grnData = await buildGrnGstData(pool, parseInt(row.ESourceId, 10));
+          if (grnData && grnData.totals.netAmount > 0) {
+            invoiceAmount = applyBillingTermsToAmount(
+              grnData.totals.netAmount,
+              grnData.totals.taxableAmount,
+              grnData.cgstRate,
+              grnData.sgstRate,
+              row.EBillingTermsData,
+              row.EDiscountData,
+            );
+          }
+        } catch { /* fallback below */ }
+      }
+      if (invoiceAmount == null && row.ENetAmount != null) {
+        invoiceAmount = applyBillingTermsToAmount(
+          row.ENetAmount,
+          row.EAmount,
+          row.ECgstRate,
+          row.ESgstRate,
+          row.EBillingTermsData,
+          row.EDiscountData,
+        );
+      }
+      const { ENetAmount, EAmount, ECgstRate, ESgstRate, EBillingTermsData, EDiscountData, ESourceType, ESourceId, GrnTotalAmount, ...rest } = row;
+      return { ...rest, InvoiceAmount: invoiceAmount };
+    }));
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

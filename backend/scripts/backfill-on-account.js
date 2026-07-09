@@ -14,7 +14,9 @@
 require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env") });
 
 const { connectDB, getPool, sql } = require("../db");
-const { resolvePartyFromRef }     = require("../utils/resolvePartyFromRef");
+const { resolvePartyFromRef }       = require("../utils/resolvePartyFromRef");
+const { applyBillingTermsToAmount } = require("../utils/billingTerms");
+const { buildGrnGstData }           = require("../utils/buildGrnGstData");
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
@@ -32,8 +34,16 @@ async function main() {
   // Sum only Approved, non-bounced payments (same as syncBillStatus).
   const rows = await pool.request().query(`
     SELECT
-      eb.EDocNo       AS InvoiceRef,
-      eb.ENetAmount   AS NetAmount,
+      eb.EDocNo             AS InvoiceRef,
+      eb.ENetAmount         AS ENetAmount,
+      eb.EAmount            AS EAmount,
+      eb.ECgstRate          AS ECgstRate,
+      eb.ESgstRate          AS ESgstRate,
+      eb.EBillingTermsData  AS EBillingTermsData,
+      eb.EDiscountData      AS EDiscountData,
+      eb.ESourceType        AS ESourceType,
+      eb.ESourceId          AS ESourceId,
+      grn.TotalAmount       AS GrnTotalAmount,
       eb.ECompanyId   AS CompanyId,
       TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
       ISNULL((
@@ -78,6 +88,7 @@ async function main() {
         ORDER BY np2.PCreatedAt DESC
       ) AS FallbackPartyType
     FROM dbo.ExpenseBooking eb
+    LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
     WHERE eb.EDocNo IS NOT NULL
   `);
 
@@ -86,7 +97,26 @@ async function main() {
   let skipped  = 0;
 
   for (const inv of invoices) {
-    const netAmount = parseFloat(inv.NetAmount ?? 0);
+    // Compute correct net payable: for GRN invoices recompute from current line items;
+    // fall back to stored ENetAmount for other source types.
+    let gross = inv.ENetAmount ?? 0;
+    let basicAmount = inv.EAmount;
+    let cgstRate    = inv.ECgstRate;
+    let sgstRate    = inv.ESgstRate;
+
+    if (inv.ESourceType === "GRN" && inv.ESourceId) {
+      try {
+        const grnData = await buildGrnGstData(pool, parseInt(inv.ESourceId, 10));
+        if (grnData && grnData.totals.netAmount > 0) {
+          gross       = grnData.totals.netAmount;
+          basicAmount = grnData.totals.taxableAmount;
+          cgstRate    = grnData.cgstRate;
+          sgstRate    = grnData.sgstRate;
+        }
+      } catch { /* keep stored values */ }
+    }
+
+    const netAmount = applyBillingTermsToAmount(gross, basicAmount, cgstRate, sgstRate, inv.EBillingTermsData, inv.EDiscountData);
     const totalPaid = parseFloat(inv.TotalPaid ?? 0);
     const excess    = Math.max(0, totalPaid - netAmount);
 
