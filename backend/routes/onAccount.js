@@ -142,6 +142,54 @@ router.post("/apply-adjustment", async (req, res) => {
   }
 });
 
+// ── GET /adjustable — credit entries for parties with available OA balance ──
+// Used by the On A/C Adjustment page to list excess payments available for use.
+router.get("/adjustable", async (req, res) => {
+  const { partyId } = req.query;
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const partyFilter = partyId ? "AND oa.PartyId = @PartyId" : "";
+    if (partyId) request.input("PartyId", sql.Int, parseInt(partyId));
+
+    const result = await request.query(`
+      WITH PartyBalance AS (
+        SELECT PartyId,
+          SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END) AS Balance
+        FROM dbo.OnAccountLedger
+        GROUP BY PartyId
+        HAVING SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END) > 0.005
+      )
+      SELECT
+        oa.OAId,
+        oa.PartyId,
+        ahm.LHeadName  AS PartyName,
+        ahm.LHeadType  AS PartyTypeCode,
+        oa.TxnDate     AS PaymentDate,
+        oa.RefDocNo    AS PaymentDocNo,
+        oa.Amount      AS ExcessAmount,
+        np.PExpenseRef AS InvoiceRef,
+        np.PAmount     AS PaidAmount,
+        eb.ENetAmount  AS InvoiceAmount,
+        eb.EDocNo      AS InvoiceDocNo,
+        pb.Balance     AS AvailableBalance,
+        oa.Notes
+      FROM dbo.OnAccountLedger oa
+      JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
+      LEFT JOIN dbo.NewPayment np
+             ON np.DocNo = oa.RefDocNo AND oa.RefType = 'Payment'
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'Payment'
+        ${partyFilter}
+      ORDER BY pb.Balance DESC, oa.TxnDate DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /report — On Account report ──────────────────────────────────────
 router.get("/report", async (req, res) => {
   const { companyId, projectId, partyId, partyType, dateFrom, dateTo, page = 1, pageSize = 50 } = req.query;
