@@ -4,6 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { maybeAutoCreateAgreement } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -32,7 +33,9 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
       bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
       holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
       ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
-      pan: b.PanNo || null, aadh: b.AadhaarNo || null, notes: b.Notes || null,
+      pan: b.PanNo || null, aadh: b.AadhaarNo || null,
+      occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
+      notes: b.Notes || null,
     };
 
     if (existing.recordset.length) {
@@ -44,6 +47,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
         .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
         .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
         .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
         .query(`
           UPDATE dbo.CrmCustomerBankDetail SET
@@ -54,6 +58,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
             NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
             NomineeAddress = ISNULL(@naddr, NomineeAddress),
             PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
+            Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE BookingId = @bid
         `);
@@ -66,15 +71,21 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
         .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
         .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
         .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
         .query(`
           INSERT INTO dbo.CrmCustomerBankDetail
             (BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
              NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
-             PanNo, AadhaarNo, Notes, CreatedBy, CreatedAt)
-          VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @notes, @cb, SYSDATETIME())
+             PanNo, AadhaarNo, Occupation, AnnualIncome, Notes, CreatedBy, CreatedAt)
+          VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @notes, @cb, SYSDATETIME())
         `);
     }
+
+    // Auto-flow: saved details are the other agreement-prep prerequisite —
+    // fire the auto-create check (no-op if the welcome call isn't done yet).
+    await maybeAutoCreateAgreement(pool, bid, actor);
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-customer-bank-details] PUT error:", e.message);

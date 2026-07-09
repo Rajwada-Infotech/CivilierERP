@@ -51,12 +51,33 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 Id, Status
+      FROM dbo.CrmAgreement
+      WHERE BookingId = @bid
+      ORDER BY CreatedAt DESC
+    `);
+    if (!agreement.recordset.length || agreement.recordset[0].Status !== "Executed") {
+      return res.status(400).json({ error: "Agreement must be executed before a sales deed can be prepared" });
+    }
+
+    const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT COUNT(*) AS PendingCount
+      FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
+    `);
+    if (pendingMilestones.recordset[0]?.PendingCount > 0) {
+      return res.status(400).json({ error: "All payment milestones must be paid or waived before sales deed preparation" });
+    }
+
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
 
     const result = await pool.request()
       .input("no",   sql.NVarChar(30),  deedNo)
-      .input("bid",  sql.Int,           parseInt(b.BookingId))
-      .input("agid", sql.Int,           b.AgreementId ? parseInt(b.AgreementId) : null)
+      .input("bid",  sql.Int,           bookingId)
+      .input("agid", sql.Int,           b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
       .input("val",  sql.Decimal(18,2), b.DeedValue != null ? parseFloat(b.DeedValue) : null)
       .input("stamp",sql.Decimal(18,2), b.StampDuty != null ? parseFloat(b.StampDuty) : null)
       .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
@@ -78,6 +99,48 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "A sale deed already exists for this booking" });
     console.error("[crm-sales-deed] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/send-to-customer - publish the sales deed to the portal for the
+// customer's approval. Registration still depends on the legal registration
+// fields; this only records the customer-facing approval checkpoint.
+router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const deed = await pool.request().input("id", sql.Int, id).query(`
+      SELECT d.Id, d.Status, ag.Status AS AgreementStatus
+      FROM dbo.CrmSalesDeed d
+      LEFT JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      WHERE d.Id = @id
+    `);
+    if (!deed.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    if (deed.recordset[0].AgreementStatus !== "Executed") {
+      return res.status(400).json({ error: "Agreement must be executed before sending the sales deed to the customer" });
+    }
+    if (deed.recordset[0].Status === "Registered") {
+      return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });
+    }
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmSalesDeed SET
+          SentToCustomerAt = SYSDATETIME(),
+          CustomerApprovalStatus = 'Pending',
+          CustomerApprovedAt = NULL,
+          CustomerRecheckRemarks = NULL,
+          UpdatedBy = @ub,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed] send-to-customer error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

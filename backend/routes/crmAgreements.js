@@ -8,6 +8,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve on this page.
@@ -83,6 +84,15 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const prereq = await validateAgreementPreparationPrerequisites(pool, bookingId);
+    if (!prereq.ok) {
+      return res.status(400).json({
+        error: "Agreement preparation prerequisites are incomplete",
+        details: prereq.errors,
+      });
+    }
 
     // System-assigned unique agreement number
     const agNo = await getNextDocNumber(pool, "AGR", "AGR");
@@ -111,11 +121,14 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
 
     // Parallel: auto-create the customer portal login the moment agreement
     // preparation begins, so the customer can start tracking progress.
-    const appRow = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+    const appRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
     let portalInfo = null;
     if (appRow.recordset.length) {
       portalInfo = await ensurePortalUser(pool, appRow.recordset[0].ApplicationId);
+      if (portalInfo?.error) {
+        return res.status(400).json({ error: portalInfo.error });
+      }
     }
 
     res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo, portal: portalInfo });
@@ -136,6 +149,20 @@ router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-agreements", id, "Pending", userEmail, req.user?.role);
+    const pool = getPool();
+    await pool.request()
+      .input("id", sql.Int, id)
+      .query(`
+        UPDATE dbo.CrmAgreement SET
+          SeniorApprovedBy = NULL,
+          SeniorApprovedAt = NULL,
+          SeniorApprovalRemarks = NULL,
+          SentToCustomerAt = NULL,
+          CustomerApprovalStatus = 'Pending',
+          CustomerApprovedAt = NULL,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-agreements] submit error:", e.message);
@@ -153,6 +180,21 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
     const result = await approvalTransition("crm-agreements", id, "Approved", userEmail, req.user?.role, remarks);
+    if (result.newStatus === "Approved") {
+      const pool = getPool();
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("aid", sql.Int, actorId(req))
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            SeniorApprovedBy = @aid,
+            SeniorApprovedAt = SYSDATETIME(),
+            SeniorApprovalRemarks = @rem,
+            UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+    }
 
     await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
     res.json({ success: true, status: result.newStatus });
@@ -170,6 +212,21 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
     const result = await approvalTransition("crm-agreements", id, "Rejected", userEmail, req.user?.role, remarks);
+    const pool = getPool();
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("rem", sql.NVarChar(sql.MAX), remarks)
+      .query(`
+        UPDATE dbo.CrmAgreement SET
+          SeniorApprovedBy = NULL,
+          SeniorApprovedAt = NULL,
+          SeniorApprovalRemarks = @rem,
+          SentToCustomerAt = NULL,
+          CustomerApprovalStatus = 'Pending',
+          CustomerApprovedAt = NULL,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
 
     await logApprovalHistory(id, "SeniorReject", remarks, actorId(req));
     res.json({ success: true, status: result.newStatus });
@@ -203,11 +260,33 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     const id = parseInt(req.params.id);
     const { proposedDate } = req.body;
 
-    const ag = await pool.request().input("id", sql.Int, id)
-      .query("SELECT SeniorApprovalStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    const ag = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        ag.SeniorApprovalStatus,
+        ag.BookingId,
+        (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id) AS DocumentCount
+      FROM dbo.CrmAgreement ag
+      WHERE ag.Id = @id
+    `);
     if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     if (ag.recordset[0].SeniorApprovalStatus !== "Approved") {
       return res.status(400).json({ error: "Agreement must receive senior approval before it can be sent to the customer" });
+    }
+    if (!ag.recordset[0].DocumentCount) {
+      return res.status(400).json({ error: "Upload at least one agreement document before sending it to the customer portal" });
+    }
+
+    // Preserve the prior proposed date (if any) in history before it's
+    // overwritten — nothing about the negotiation is ever lost.
+    if (proposedDate) {
+      await pool.request()
+        .input("agid", sql.Int, id)
+        .input("pd",   sql.Date, proposedDate)
+        .input("cb",   sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+        `);
     }
 
     await pool.request()
@@ -217,6 +296,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
         UPDATE dbo.CrmAgreement SET
           SentToCustomerAt = SYSDATETIME(),
           CustomerApprovalStatus = 'Pending',
+          CustomerApprovedAt = NULL,
           ProposedDateByCompany = ISNULL(@pdc, ProposedDateByCompany)
         WHERE Id = @id
       `);
@@ -232,6 +312,26 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/date-history — every proposed execution date, company and
+// customer side, in order — nothing here is ever overwritten in place.
+router.get("/:id/date-history", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("agid", sql.Int, id).query(`
+      SELECT h.*, u.name AS CreatedByName
+      FROM dbo.CrmAgreementDateHistory h
+      LEFT JOIN dbo.Users u ON u.id = h.CreatedBy
+      WHERE h.AgreementId = @agid
+      ORDER BY h.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET /:id/date-history error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -286,7 +386,7 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus
+      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus
       FROM dbo.CrmAgreement WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
@@ -316,6 +416,10 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     await logCrmAudit(pool, "Agreement", id, actor, [
       { field: "Status", oldVal: "Draft", newVal: "Executed" },
     ]);
+
+    // Auto-flow: execution is one of two sales-deed prerequisites — fire the
+    // auto-create check (no-op if milestones aren't fully settled yet).
+    await maybeAutoCreateSalesDeed(pool, row.BookingId, actor);
 
     res.json({ success: true, status: "Executed" });
   } catch (e) {

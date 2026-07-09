@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Save } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 const API = "/api/crm/customer-bank-details";
 const BKG_API = "/api/crm/bookings";
@@ -11,7 +12,7 @@ const BKG_API = "/api/crm/bookings";
 const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
   NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
-  PanNo: "", AadhaarNo: "", Notes: "",
+  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Notes: "",
 };
 
 async function fetchBookings(): Promise<any[]> {
@@ -23,7 +24,9 @@ async function fetchBankDetail(bookingId: number): Promise<any> {
 
 const CrmCustomerBankDetails: React.FC = () => {
   const qc = useQueryClient();
-  const [bookingId, setBookingId] = useState<number | null>(null);
+  const [sp] = useSearchParams();
+  const bkgFilter = sp.get("bookingId");
+  const [bookingId, setBookingId] = useState<number | null>(bkgFilter ? parseInt(bkgFilter) : null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
 
@@ -37,7 +40,9 @@ const CrmCustomerBankDetails: React.FC = () => {
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
         NomineeName: d.NomineeName || "", NomineeRelation: d.NomineeRelation || "",
         NomineeDob: d.NomineeDob ? String(d.NomineeDob).slice(0,10) : "", NomineeContact: d.NomineeContact || "",
-        NomineeAddress: d.NomineeAddress || "", PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "", Notes: d.Notes || "",
+        NomineeAddress: d.NomineeAddress || "", PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
+        Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
+        Notes: d.Notes || "",
       } : { ...EMPTY_FORM });
       return d;
     },
@@ -118,6 +123,14 @@ const CrmCustomerBankDetails: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 {field("PanNo", "PAN Number")}
                 {field("AadhaarNo", "Aadhaar Number")}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border p-4 space-y-3">
+              <h3 className="text-sm font-semibold">Occupation & Income</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {field("Occupation", "Occupation *")}
+                {field("AnnualIncome", "Annual Income (₹) — if applicable", "number")}
               </div>
             </div>
 

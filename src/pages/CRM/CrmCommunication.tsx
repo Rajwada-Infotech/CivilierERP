@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Phone, Mail, MessageSquare, MapPin, FileText } from "lucide-react";
+import { Plus, Phone, Mail, MessageSquare, MapPin, FileText, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/communication";
@@ -28,13 +29,24 @@ async function fetchApps(): Promise<any[]> {
 
 const CrmCommunication: React.FC = () => {
   const qc = useQueryClient();
+  const [sp, setSp] = useSearchParams();
+  const bkgFilter = sp.get("bookingId") || "";
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [form, setForm] = useState({ ...EMPTY_FORM, BookingId: bkgFilter });
   const [saving, setSaving] = useState(false);
 
   const { data: logs = [], isLoading } = useQuery({ queryKey: ["crm-communication"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: apps = [] } = useQuery({ queryKey: ["crm-applications"], queryFn: fetchApps, staleTime: 5 * 60_000 });
+
+  const filteredLogs = useMemo(() =>
+    bkgFilter ? (logs as any[]).filter((c: any) => String(c.BookingId) === bkgFilter) : logs,
+    [logs, bkgFilter]
+  );
+  const filterBooking = useMemo(() =>
+    bkgFilter ? (bookings as any[]).find((b: any) => String(b.Id) === bkgFilter) : null,
+    [bookings, bkgFilter]
+  );
 
   const handleCreate = async () => {
     if (!form.ApplicationId && !form.BookingId) { toast.error("Application or Booking is required"); return; }
@@ -52,7 +64,7 @@ const CrmCommunication: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Communication logged");
       setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
+      setForm({ ...EMPTY_FORM, BookingId: bkgFilter });
       qc.invalidateQueries({ queryKey: ["crm-communication"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -64,7 +76,7 @@ const CrmCommunication: React.FC = () => {
   return (
     <SalesAutoShell
       title="CRM — Communication Log"
-      subtitle="Every touchpoint with a buyer, in one timeline"
+      subtitle={filterBooking ? `Showing only ${filterBooking.BookingNo} — ${filterBooking.ApplicantName}` : "Every touchpoint with a buyer, in one timeline"}
       action={
         <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
@@ -72,12 +84,23 @@ const CrmCommunication: React.FC = () => {
         </button>
       }
     >
+      {bkgFilter && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs px-2.5 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary flex items-center gap-1.5">
+            Filtered to {filterBooking?.BookingNo || `booking #${bkgFilter}`}
+            <button onClick={() => { sp.delete("bookingId"); setSp(sp); }} className="hover:text-red-600">
+              <X size={11} />
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="space-y-2">
         {isLoading ? (
           <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-        ) : logs.length === 0 ? (
+        ) : filteredLogs.length === 0 ? (
           <div className="p-4 text-center text-muted-foreground text-sm">No communications logged</div>
-        ) : (logs as any[]).map((c: any) => {
+        ) : (filteredLogs as any[]).map((c: any) => {
           const Icon = channelIcon[c.Channel] || MessageSquare;
           return (
             <div key={c.Id} className="rounded-lg border border-border p-3 flex items-start gap-3">
@@ -96,7 +119,7 @@ const CrmCommunication: React.FC = () => {
         })}
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Log Communication</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -146,7 +169,7 @@ const CrmCommunication: React.FC = () => {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleCreate} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Logging..." : "Log"}

@@ -5,6 +5,14 @@ const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");
 const portalAuth = require("../middleware/crmPortalAuth");
 const { logCrmAudit } = require("../services/crmAudit");
+const { getNextDocNumber } = require("../services/docNumber");
+const { emitNotification } = require("../services/notify");
+
+// Categories a customer is allowed to raise themselves — same vocabulary as
+// the staff-side Service Ticket module (crmServiceTickets.js), so every
+// ticket lives in one unified queue regardless of who opened it.
+const CUSTOMER_TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
+const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal priority
 
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -86,35 +94,67 @@ router.get("/timeline", async (req, res) => {
     const appId = req.portalUser.applicationId;
 
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingAmount,
+      SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.ProjectName, b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate
       FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];
     if (!bk) return res.json({ stage: "Application", steps: [] });
 
-    const [welcomeCall, agreement, milestones, deed, handover] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, constructionUpdates] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT TOP 1
+          CASE WHEN
+            NULLIF(LTRIM(RTRIM(ISNULL(BankName, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(AccountNo, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(IfscCode, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(AccountHolderName, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(NomineeName, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(NomineeRelation, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(PanNo, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(AadhaarNo, ''))), '') IS NOT NULL AND
+            NULLIF(LTRIM(RTRIM(ISNULL(Occupation, ''))), '') IS NOT NULL
+          THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS IsComplete,
+          UpdatedAt, CreatedAt
+        FROM dbo.CrmCustomerBankDetail
+        WHERE BookingId = @bid
+      `),
+      pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
-               ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, LastRecheckRemarks, SentToCustomerAt
+               ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, LastRecheckRemarks, SentToCustomerAt,
+               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount
         FROM dbo.CrmAgreement WHERE BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
         FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
       `),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, DeedDate, RegistrationDate FROM dbo.CrmSalesDeed WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT Id, Status, DeedDate, RegistrationDate, SentToCustomerAt,
+               CustomerApprovalStatus, CustomerApprovedAt, CustomerRecheckRemarks
+        FROM dbo.CrmSalesDeed WHERE BookingId = @bid
+      `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid"),
+      // Construction progress is a project-wide broadcast (Foundation/
+      // Superstructure/etc apply to every unit in the project, not just this
+      // customer's), so it's matched on the booking's real ProjectId — the
+      // same link every other module inherits — not a free-text project name.
+      bk.ProjectId
+        ? pool.request().input("pid", sql.Int, bk.ProjectId)
+            .query("SELECT UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC")
+        : Promise.resolve({ recordset: [] }),
     ]);
 
     res.json({
       booking: bk,
       welcomeCall: welcomeCall.recordset[0] || null,
+      customerDetails: customerDetails.recordset[0] || null,
       agreement: agreement.recordset[0] || null,
       paymentMilestones: milestones.recordset,
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
+      constructionUpdates: constructionUpdates.recordset,
     });
   } catch (e) {
     console.error("[crm-portal] GET /timeline error:", e.message);
@@ -150,17 +190,37 @@ router.post("/agreement/respond", async (req, res) => {
     const appId = req.portalUser.applicationId;
     const { decision, remarks, proposedDate } = req.body; // decision: "Approve" | "Recheck"
     if (!["Approve", "Recheck"].includes(decision)) return res.status(400).json({ error: "decision must be Approve or Recheck" });
+    if (decision === "Recheck" && !String(remarks || "").trim()) {
+      return res.status(400).json({ error: "Remarks are required when requesting a recheck" });
+    }
 
     const ag = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT ag.Id, ag.RecheckCount
+      SELECT ag.Id, ag.RecheckCount, ag.CustomerApprovalStatus, ag.SeniorApprovalStatus
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement pending your response" });
+    if (ag.recordset[0].SeniorApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Agreement is not ready for customer approval" });
+    }
+    if (ag.recordset[0].CustomerApprovalStatus === "Approved") {
+      return res.status(400).json({ error: "Agreement has already been approved" });
+    }
     const agreementId = ag.recordset[0].Id;
 
     if (decision === "Approve") {
+      // Preserve the prior customer-proposed date (if any) in history before
+      // it's overwritten.
+      if (proposedDate) {
+        await pool.request()
+          .input("agid", sql.Int, agreementId)
+          .input("pd",   sql.Date, proposedDate)
+          .query(`
+            INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedAt)
+            VALUES (@agid, 'Customer', @pd, SYSDATETIME())
+          `);
+      }
       await pool.request()
         .input("id", sql.Int, agreementId)
         .input("pdc", sql.Date, proposedDate || null)
@@ -178,6 +238,7 @@ router.post("/agreement/respond", async (req, res) => {
           UPDATE dbo.CrmAgreement SET
             CustomerApprovalStatus = 'RecheckRequested',
             RecheckCount = RecheckCount + 1,
+            CustomerApprovedAt = NULL,
             LastRecheckRemarks = @rem
           WHERE Id = @id
         `);
@@ -196,6 +257,131 @@ router.post("/agreement/respond", async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /agreement/respond error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /sales-deed/respond - customer approves or requests recheck on the
+// sales deed after staff publish it to the portal.
+router.post("/sales-deed/respond", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const { decision, remarks } = req.body;
+    if (!["Approve", "Recheck"].includes(decision)) return res.status(400).json({ error: "decision must be Approve or Recheck" });
+    if (decision === "Recheck" && !String(remarks || "").trim()) {
+      return res.status(400).json({ error: "Remarks are required when requesting a recheck" });
+    }
+
+    const deed = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT d.Id, d.CustomerApprovalStatus
+      FROM dbo.CrmSalesDeed d
+      JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+      WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+    `);
+    if (!deed.recordset.length) return res.status(404).json({ error: "No sales deed pending your response" });
+    if (deed.recordset[0].CustomerApprovalStatus === "Approved") {
+      return res.status(400).json({ error: "Sales deed has already been approved" });
+    }
+
+    if (decision === "Approve") {
+      await pool.request()
+        .input("id", sql.Int, deed.recordset[0].Id)
+        .query(`
+          UPDATE dbo.CrmSalesDeed SET
+            CustomerApprovalStatus = 'Approved',
+            CustomerApprovedAt = SYSDATETIME(),
+            CustomerRecheckRemarks = NULL
+          WHERE Id = @id
+        `);
+    } else {
+      await pool.request()
+        .input("id", sql.Int, deed.recordset[0].Id)
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .query(`
+          UPDATE dbo.CrmSalesDeed SET
+            CustomerApprovalStatus = 'RecheckRequested',
+            CustomerApprovedAt = NULL,
+            CustomerRecheckRemarks = @rem
+          WHERE Id = @id
+        `);
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-portal] POST /sales-deed/respond error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /tickets — every support ticket raised against the customer's booking,
+// staff-raised or self-raised. Only customer-safe fields — no AssignedTo
+// staff identity, no internal AssigneeName, matches the "never expose
+// internal discussions" rule the same way the rest of this file does.
+router.get("/tickets", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const result = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT t.Id, t.TicketNo, t.Category, t.Priority, t.Subject, t.Description,
+             t.Status, t.ResolvedAt, t.ResolutionNotes, t.CustomerRating, t.CustomerFeedback,
+             t.RaisedByCustomer, t.CreatedAt
+      FROM dbo.CrmServiceTicket t
+      JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+      WHERE b.ApplicationId = @aid
+      ORDER BY t.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-portal] GET /tickets error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /tickets — customer raises a new support/legal/modification request.
+// Always lands as Normal priority, Open status — staff re-prioritize from
+// the regular Service Ticket queue, same as any other ticket.
+router.post("/tickets", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const { category, subject, description } = req.body;
+    if (!CUSTOMER_TICKET_CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: `category must be one of: ${CUSTOMER_TICKET_CATEGORIES.join(", ")}` });
+    }
+    if (!String(subject || "").trim()) return res.status(400).json({ error: "subject is required" });
+
+    const booking = await pool.request().input("aid", sql.Int, appId)
+      .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 AND Status <> 'Cancelled' ORDER BY CreatedAt DESC");
+    if (!booking.recordset.length) return res.status(400).json({ error: "No active booking found for your account" });
+    const bookingId = booking.recordset[0].Id;
+
+    const ticketNo = await getNextDocNumber(pool, "SVC", "SVC");
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), ticketNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("cat",  sql.NVarChar(50), category)
+      .input("subj", sql.NVarChar(300), subject.trim())
+      .input("desc", sql.NVarChar(sql.MAX), description || null)
+      .input("sla",  sql.DateTime2(3), new Date(Date.now() + TICKET_SLA_HOURS * 3600 * 1000))
+      .query(`
+        INSERT INTO dbo.CrmServiceTicket
+          (TicketNo, BookingId, Category, Priority, Subject, Description, Status, SlaDueDate, RaisedByCustomer, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @cat, 'Normal', @subj, @desc, 'Open', @sla, 1, SYSDATETIME())
+      `);
+
+    const bk = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT AssignedTo, BookingNo FROM dbo.CrmBooking WHERE Id = @bid");
+    if (bk.recordset[0]?.AssignedTo) {
+      await emitNotification(pool, bk.recordset[0].AssignedTo, "service_ticket_raised_by_customer",
+        "Customer Raised a Ticket", `${ticketNo}: ${subject.trim()} (${bk.recordset[0].BookingNo})`,
+        result.recordset[0].Id, "service_ticket");
+    }
+
+    res.status(201).json({ success: true, id: result.recordset[0].Id, TicketNo: ticketNo });
+  } catch (e) {
+    console.error("[crm-portal] POST /tickets error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

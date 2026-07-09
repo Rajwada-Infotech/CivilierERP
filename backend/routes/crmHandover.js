@@ -151,7 +151,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       const h = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
       if (h.recordset[0]) {
         await pool.request().input("bid", sql.Int, h.recordset[0].BookingId)
-          .query("UPDATE dbo.CrmBooking SET Status = 'Confirmed', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+          .query("UPDATE dbo.CrmBooking SET Status = 'Approved', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
       }
     }
 

@@ -50,7 +50,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
-  const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "" });
+  const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
 
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: milestoneData, isLoading } = useQuery({
@@ -130,12 +130,14 @@ const CrmPaymentMilestones: React.FC = () => {
           MilestoneName: addForm.MilestoneName,
           DueDate: addForm.DueDate || null,
           AmountDue: addForm.AmountDue ? parseFloat(addForm.AmountDue) : 0,
+          ResponsibleDepartment: addForm.ResponsibleDepartment || null,
+          RequiredDocuments: addForm.RequiredDocuments || null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Milestone added");
       setAddDialog(false);
-      setAddForm({ MilestoneName: "", DueDate: "", AmountDue: "" });
+      setAddForm({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -224,14 +226,14 @@ const CrmPaymentMilestones: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/40 text-left">
-                  {["#", "Milestone", "Due Date", "Amount Due", "Amount Paid", "Balance", "Status", "Payment Mode", "Ref", ""].map((h) => (
+                  {["#", "Milestone", "Dept", "Due Date", "Amount Due", "Amount Paid", "Balance", "Status", "Payment Mode", "Ref", ""].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {milestones.length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-sm">No milestones found</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground text-sm">No milestones found</td></tr>
                 ) : milestones.map((m: any) => {
                   const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
                   const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
@@ -239,7 +241,15 @@ const CrmPaymentMilestones: React.FC = () => {
                   return (
                     <tr key={m.Id} className={`border-t border-border hover:bg-muted/10 transition-colors ${isOverdue ? "bg-red-50/30" : ""}`}>
                       <td className="px-4 py-3 text-muted-foreground">{m.MilestoneNo}</td>
-                      <td className="px-4 py-3 font-medium">{m.MilestoneName}</td>
+                      <td className="px-4 py-3 font-medium">
+                        {m.MilestoneName}
+                        {m.RequiredDocuments && (
+                          <div className="text-[10px] text-muted-foreground font-normal mt-0.5" title={m.RequiredDocuments}>
+                            Docs: {m.RequiredDocuments}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{m.ResponsibleDepartment || "—"}</td>
                       <td className="px-4 py-3 text-xs">
                         {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
                         {isOverdue && <span className="ml-1 text-red-500 text-[10px]">OVERDUE</span>}
@@ -344,6 +354,20 @@ const CrmPaymentMilestones: React.FC = () => {
               <input type="number" value={addForm.AmountDue}
                 onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Responsible Department</label>
+              <input type="text" value={addForm.ResponsibleDepartment}
+                onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder="e.g. Construction, Legal, Sales" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Required Documents</label>
+              <input type="text" value={addForm.RequiredDocuments}
+                onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder="e.g. Completion Certificate" />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

@@ -43,6 +43,9 @@ async function fetchAgreementDetail(id: number): Promise<any> {
   if (!r.ok) throw new Error("Failed to load agreement");
   return r.json();
 }
+async function fetchDateHistory(id: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/${id}/date-history`); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -67,6 +70,12 @@ const CrmAgreement: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: dateHistory = [] } = useQuery({
+    queryKey: ["crm-agreement-date-history", selectedId],
+    queryFn: () => fetchDateHistory(selectedId!),
+    enabled: !!selectedId,
+    staleTime: 30_000,
+  });
 
   const filtered = useMemo(() =>
     (agreements as any[]).filter((a: any) =>
@@ -148,6 +157,7 @@ const CrmAgreement: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Agreement sent to customer portal");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -293,6 +303,22 @@ const CrmAgreement: React.FC = () => {
                   <div><span className="text-xs text-muted-foreground">Proposed Date (Company): </span>{detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0,10) : "—"}</div>
                   <div><span className="text-xs text-muted-foreground">Proposed Date (Customer): </span>{detail.agreement?.ProposedDateByCustomer ? String(detail.agreement.ProposedDateByCustomer).slice(0,10) : "—"}</div>
                 </div>
+                {dateHistory.length > 0 && (
+                  <div className="text-xs">
+                    <div className="text-muted-foreground mb-1">Reschedule History</div>
+                    <div className="space-y-1">
+                      {(dateHistory as any[]).map((h) => (
+                        <div key={h.Id} className="flex items-center gap-2 text-muted-foreground">
+                          <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
+                            {h.ProposedBy}
+                          </span>
+                          <span>proposed {String(h.ProposedDate).slice(0,10)}</span>
+                          <span className="text-[10px]">({String(h.CreatedAt).slice(0,16).replace("T"," ")}{h.CreatedByName ? ` · ${h.CreatedByName}` : ""})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {detail.agreement?.RecheckCount > 0 && (
                   <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
                     Rechecked {detail.agreement.RecheckCount}x — latest remark: {detail.agreement.LastRecheckRemarks || "—"}

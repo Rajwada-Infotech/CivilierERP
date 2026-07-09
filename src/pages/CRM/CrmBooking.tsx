@@ -6,6 +6,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Phone, ChevronRight, IndianRupee } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -13,14 +14,15 @@ const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
 const PLAN_API = "/api/crm/payment-plans";
 
-const STATUSES    = ["Draft", "Confirmed", "Cancelled"];
+const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 const TOKEN_TYPES = ["Percentage", "Amount"];
 
 const statusColor: Record<string, string> = {
-  Draft:     "text-muted-foreground bg-muted/50 border-border",
-  Confirmed: "text-green-600 bg-green-50 border-green-200",
-  Cancelled: "text-red-600 bg-red-50 border-red-200",
+  Pending:   "text-orange-600 bg-orange-50 border-orange-200",
+  Approved:  "text-green-600 bg-green-50 border-green-200",
+  Rejected:  "text-red-600 bg-red-50 border-red-200",
+  Cancelled: "text-muted-foreground bg-muted/50 border-border",
 };
 
 const EMPTY_FORM = {
@@ -331,7 +333,7 @@ const CrmBooking: React.FC = () => {
   const { data: plans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
 
   const availableUnits = useMemo(() => {
-    const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled").map((b: any) => b.UnitId));
+    const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled" && b.Status !== "Rejected").map((b: any) => b.UnitId));
     return (units as any[]).filter((u: any) => u.IsActive && (!bookedIds.has(u.Id) || String(u.Id) === form.UnitId));
   }, [units, bookings, form.UnitId]);
 
@@ -406,6 +408,34 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  // Unit change is a rare, authorized-only action (admin/super_admin/
+  // marketing_head, enforced server-side) — a lightweight prompt flow
+  // matches the other one-off actions on this page rather than a full
+  // dialog for something this infrequent.
+  const handleChangeUnit = async (b: any) => {
+    const options = (units as any[])
+      .filter((u: any) => u.IsActive && u.Id !== b.UnitId)
+      .map((u: any) => `${u.Id}: ${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`)
+      .join("\n");
+    const newUnitId = window.prompt(`Enter the new Unit ID for ${b.BookingNo}:\n\n${options}`);
+    if (!newUnitId) return;
+    const reason = window.prompt("Reason for changing the unit (required):");
+    if (!reason?.trim()) { toast.error("Reason is required"); return; }
+    try {
+      const res = await fetchWithAuth(`${API}/${b.Id}/change-unit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ NewUnitId: parseInt(newUnitId), Reason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`Unit changed to ${data.unitNo}`);
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
   return (
     <SalesAutoShell
       title="CRM — Bookings"
@@ -475,19 +505,52 @@ const CrmBooking: React.FC = () => {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{b.BookingDate ? String(b.BookingDate).slice(0, 10) : "—"}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}
-                        className="text-xs text-primary hover:underline flex items-center gap-1">
-                        Payments <ChevronRight size={12} />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* submitOnly: Approve/Reject only ever happen from the
+                          Admin Approval Inbox (admin/super_admin/marketing_head) */}
+                      <ApprovalActions
+                        status={b.Status}
+                        recordId={b.Id}
+                        endpoint={API}
+                        submitOnly
+                        onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
+                      />
+                      {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+                      {/* Ordered to match the real workflow: Welcome Call ->
+                          Bank Details -> Agreement -> Payments -> Charges.
+                          Agreement/Payments stay reachable regardless of step
+                          completion (staff can review), but the earlier steps
+                          are surfaced first so they aren't skipped in practice. */}
+                      <button onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}
+                        className="text-xs text-sky-600 hover:underline flex items-center gap-1">
+                        Welcome Call <ChevronRight size={12} />
+                      </button>
+                      <button onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}
+                        className="text-xs text-cyan-600 hover:underline flex items-center gap-1">
+                        Communication <ChevronRight size={12} />
+                      </button>
+                      <button onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}
+                        className="text-xs text-amber-600 hover:underline flex items-center gap-1">
+                        Bank Details <ChevronRight size={12} />
                       </button>
                       <button onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}
                         className="text-xs text-purple-600 hover:underline flex items-center gap-1">
                         Agreement <ChevronRight size={12} />
                       </button>
+                      <button onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}
+                        className="text-xs text-primary hover:underline flex items-center gap-1">
+                        Payments <ChevronRight size={12} />
+                      </button>
                       <button onClick={() => setChargesBooking(b)}
                         className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
                         Charges <ChevronRight size={12} />
                       </button>
+                      {b.Status !== "Cancelled" && (
+                        <button onClick={() => handleChangeUnit(b)}
+                          className="text-xs text-rose-600 hover:underline flex items-center gap-1">
+                          Change Unit
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

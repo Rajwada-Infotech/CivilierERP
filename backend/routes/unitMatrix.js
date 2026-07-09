@@ -70,7 +70,7 @@ router.get("/", requirePageRight("followup-unit-matrix", "view"), async (req, re
         a.ApplicantName, a.Mobile
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status <> 'Cancelled'
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       WHERE ${where}
       ORDER BY u.FloorNo, blk.BlockName, u.UnitName
