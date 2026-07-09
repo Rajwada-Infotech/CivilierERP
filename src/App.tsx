@@ -13,6 +13,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
@@ -661,9 +662,13 @@ function AppRoutes() {
       <Route
         path="/"
         element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
+          currentUser ? (
+            <ProtectedRoute>
+              <Home />
+            </ProtectedRoute>
+          ) : (
+            <Landing />
+          )
         }
       />
       <Route

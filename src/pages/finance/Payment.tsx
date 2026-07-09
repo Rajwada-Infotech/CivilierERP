@@ -2001,6 +2001,7 @@ const Payment: React.FC = () => {
   // Context injected from the On A/C Adjustment page
   const [oaAdjustCtx, setOaAdjustCtx] = useState<{
     partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
+    invoiceDocNo?: string | null; invoiceRemaining?: number | null;
   } | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
@@ -2095,6 +2096,11 @@ const Payment: React.FC = () => {
     setOaAdjustCtx(oa);
     setOaBalance(oa.availableBalance ?? 0);
     setView("form");
+    // Pre-fill the supplier/contractor name so the user doesn't have to type it
+    setForm((prev) => ({
+      ...prev,
+      paidTo: oa.partyName ?? prev.paidTo,
+    }));
     window.history.replaceState({}, "", location.pathname);
   }, []);
 
@@ -2496,8 +2502,17 @@ const Payment: React.FC = () => {
   );
 
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
-    queryKey: ["expense-options-payment"],
-    queryFn: fetchExpenseOptions,
+    queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
+    queryFn: async () => {
+      const url = oaAdjustCtx?.partyId
+        ? `/api/expense-booking/options?partyId=${oaAdjustCtx.partyId}`
+        : "/api/expense-booking/options";
+      const res = await fetchWithAuth(url);
+      if (!res.ok) return [];
+      const raw = await res.json().catch(() => ({}));
+      const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+      return normaliseExpenseOptions(items);
+    },
     staleTime: 0,
   });
 
@@ -2920,6 +2935,38 @@ const Payment: React.FC = () => {
     if (opt) handleExpenseSelect(opt.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseOptions, reissueCtx]);
+
+  // Auto-select the invoice + fill filters when coming from On A/C Adjustment
+  useEffect(() => {
+    if (!oaAdjustCtx?.invoiceDocNo || !expenseOptions.length || form.expenseId) return;
+    const ref = oaAdjustCtx.invoiceDocNo;
+    const opt =
+      expenseOptions.find((o) => o.docNo === ref) ??
+      expenseOptions.find((o) => o.value === ref) ??
+      expenseOptions.find((o) => o.label.startsWith(ref + " ") || o.label.startsWith(ref + " —"));
+    if (!opt) return;
+    // Fill the filter bar so it matches the invoice context
+    setBookingFilters({
+      company: opt.companyName ?? "",
+      project: opt.projectName ?? "",
+      year: opt.financialYear ?? "",
+      supplier: opt.supplierName ?? opt.partyName ?? "",
+    });
+    // Select the invoice — this fills company, project, amount in the form
+    handleExpenseSelect(opt.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseOptions, oaAdjustCtx?.invoiceDocNo]);
+
+  // When OA Adjust context is active: cap the payment amount at min(invoiceAmount, oaBalance)
+  useEffect(() => {
+    if (!oaAdjustCtx || form.amount == null || form.amount <= 0) return;
+    const oaBal = oaAdjustCtx.availableBalance;
+    const cappedAmount = Math.min(form.amount, oaBal);
+    if (cappedAmount !== form.amount) {
+      setForm((prev) => ({ ...prev, amount: cappedAmount }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.amount, oaAdjustCtx?.availableBalance]);
 
   // Fetch On Account balance when invoice changes
   useEffect(() => {
