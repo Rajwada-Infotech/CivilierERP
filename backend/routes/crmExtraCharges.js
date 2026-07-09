@@ -2,11 +2,13 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // Same re-derive-from-source pattern as crmParking.js's rollup.
 async function rollupBookingTotals(pool, bookingId) {
