@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const verifyToken = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { isSaAdmin } = require("../services/saAccess");
 const { userPermissionCache } = require("../middleware/permissions");
 const rateLimit = require("express-rate-limit");

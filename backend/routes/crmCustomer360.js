@@ -2,9 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // GET /:mobile — full customer journey across Lead → Application → Booking →
 // Agreement → Payments → Handover → Service Tickets, merged into one timeline.

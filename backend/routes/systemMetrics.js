@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
 const {
   getRedis,
@@ -15,6 +16,7 @@ const {
 } = require("../redis");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const metricsOnly = allowRoles("admin", "super_admin", "dba", "director");
 

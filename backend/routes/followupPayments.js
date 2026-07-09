@@ -2,12 +2,14 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermission } = require("../middleware/permissions");
 const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "FinancePayments";

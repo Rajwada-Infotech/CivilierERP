@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -23,6 +24,7 @@ const AGREEMENT_TRANSITIONS = {
 };
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const AGR_SELECT = `
   SELECT

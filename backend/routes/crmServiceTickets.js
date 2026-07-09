@@ -2,12 +2,14 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];

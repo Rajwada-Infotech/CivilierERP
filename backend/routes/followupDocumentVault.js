@@ -4,6 +4,7 @@ const fs = require("fs");
 const multer = require("multer");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
@@ -47,6 +48,7 @@ const upload = multer({
 });
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

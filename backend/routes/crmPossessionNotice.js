@@ -2,11 +2,13 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const PN_SELECT = `
   SELECT n.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile

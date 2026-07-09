@@ -7,8 +7,10 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 function toInt(val) {
   const n = parseInt(val, 10);

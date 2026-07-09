@@ -1,6 +1,7 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermission } = require("../middleware/permissions");
 const { logAudit } = require("../utils/auditLog");
 
@@ -14,6 +15,7 @@ const PERMISSION_SUBMODULE = "Bookings";
 const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {

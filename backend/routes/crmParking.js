@@ -2,11 +2,13 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal from the
 // live allotment/extra-charge rows — never trust an incrementally maintained
