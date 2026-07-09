@@ -23,8 +23,9 @@ interface CreditEntry {
   PaymentDocNo: string;
   ExcessAmount: number;
   InvoiceRef: string | null;
-  PaidAmount: number | null;
+  PaymentAmount: number | null;
   InvoiceAmount: number | null;
+  InvoiceTotalPaid: number | null;
   InvoiceDocNo: string | null;
   AvailableBalance: number;
   Notes: string | null;
@@ -107,8 +108,9 @@ export default function OnAccountAdjustment() {
 
   function handleAdjust(entry: CreditEntry) {
     const partyBalance = balanceMap.get(entry.PartyId) ?? entry.AvailableBalance;
-    const invoiceRemaining = entry.InvoiceAmount != null && entry.PaidAmount != null
-      ? Math.max(0, entry.InvoiceAmount - entry.PaidAmount)
+    const totalPaid = entry.InvoiceTotalPaid ?? entry.PaymentAmount;
+    const invoiceRemaining = entry.InvoiceAmount != null && totalPaid != null
+      ? Math.max(0, entry.InvoiceAmount - totalPaid)
       : null;
     navigate("/payments", {
       state: {
@@ -132,12 +134,12 @@ export default function OnAccountAdjustment() {
       <div className="space-y-6">
 
         {/* ── Top stat cards + party panel ──────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
           {/* Left: big stat cards */}
           <div className="flex flex-col gap-4">
             {/* Total Balance card */}
-            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-50 dark:bg-emerald-950/25 p-6 flex flex-col gap-2">
+            <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-500/70">Total On A/C Balance</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15">
@@ -187,7 +189,7 @@ export default function OnAccountAdjustment() {
           </div>
 
           {/* Right: party breakdown panel */}
-          <div className="lg:col-span-2 rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="sm:col-span-2 lg:col-span-2 rounded-2xl border border-border bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <TrendingUp size={15} className="text-emerald-500" />
@@ -257,82 +259,151 @@ export default function OnAccountAdjustment() {
               </p>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            {isLoading ? (
-              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-                <Loader2 size={16} className="animate-spin" />
-                Loading…
-              </div>
-            ) : filteredCredits.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-                <Wallet size={32} className="opacity-20" />
-                <p>No On Account balances available for adjustment</p>
-                {selectedPartyId !== "all" && (
-                  <button className="text-xs underline" onClick={() => setSelectedPartyId("all")}>
-                    Show all parties
-                  </button>
-                )}
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/20">
-                    {["Party", "Payment Voucher", "Date", "Invoice Ref", "Invoice Amt", "Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredCredits.map((entry) => (
-                    <tr key={entry.OAId} className="hover:bg-muted/20 transition-colors group">
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-medium text-xs">{entry.PartyName}</span>
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Loader2 size={16} className="animate-spin" />
+              Loading…
+            </div>
+          ) : filteredCredits.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Wallet size={32} className="opacity-20" />
+              <p>No On Account balances available for adjustment</p>
+              {selectedPartyId !== "all" && (
+                <button className="text-xs underline" onClick={() => setSelectedPartyId("all")}>
+                  Show all parties
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* ── Mobile cards (< md) ───────────────────────────────── */}
+              <div className="md:hidden divide-y divide-border">
+                {filteredCredits.map((entry) => (
+                  <div key={entry.OAId} className="px-4 py-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{entry.PartyName}</p>
+                        <div className="flex items-center gap-2 mt-1">
                           <PartyTypePill code={entry.PartyTypeCode} />
+                          <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
                         </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                        {fmtDate(entry.PaymentDate)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-muted-foreground">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs font-medium tabular-nums text-right">
-                        {entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums text-right">
-                        {entry.PaidAmount != null ? formatINR(entry.PaidAmount) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                        onClick={() => handleAdjust(entry)}
+                      >
+                        Adjust <ArrowRight size={11} />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Date</p>
+                        <p>{fmtDate(entry.PaymentDate)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Invoice Ref</p>
+                        <p className="font-mono text-muted-foreground truncate">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</p>
+                      </div>
+                    </div>
+                    {/* Net Payable / Total Paid breakdown */}
+                    {entry.InvoiceAmount != null && (
+                      <div className="rounded-xl border border-border overflow-hidden text-xs">
+                        <div className="flex items-center justify-between px-3 py-2 bg-muted/10">
+                          <p className="text-muted-foreground">Net Payable</p>
+                          <p className="font-mono font-semibold tabular-nums">{formatINR(entry.InvoiceAmount)}</p>
+                        </div>
+                        {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null && (
+                          <div className="flex items-center justify-between px-3 py-2 border-t border-border/60">
+                            <p className="text-emerald-600 dark:text-emerald-400">Total Paid</p>
+                            <p className="font-mono font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                              {formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between pt-1 border-t border-border">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">On A/C Amt</p>
+                        <p className="font-mono text-sm font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Party Balance</p>
+                        <p className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
                           {formatINR(balanceMap.get(entry.PartyId) ?? entry.AvailableBalance)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => handleAdjust(entry)}
-                        >
-                          Adjust
-                          <ArrowRight size={12} />
-                        </Button>
-                      </td>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Desktop table (md+) ──────────────────────────────── */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      {["Party", "Payment Voucher", "Date", "Invoice Ref", "Net Payable", "Total Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredCredits.map((entry) => (
+                      <tr key={entry.OAId} className="hover:bg-muted/20 transition-colors group">
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium text-xs">{entry.PartyName}</span>
+                            <PartyTypePill code={entry.PartyTypeCode} />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {fmtDate(entry.PaymentDate)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-xs text-muted-foreground">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</span>
+                        </td>
+                        <td className="px-4 py-3 text-xs font-medium tabular-nums text-right">
+                          {entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-xs tabular-nums text-right text-emerald-600 dark:text-emerald-400 font-medium">
+                          {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null
+                            ? formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatINR(balanceMap.get(entry.PartyId) ?? entry.AvailableBalance)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => handleAdjust(entry)}
+                          >
+                            Adjust
+                            <ArrowRight size={12} />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </FinanceShell>

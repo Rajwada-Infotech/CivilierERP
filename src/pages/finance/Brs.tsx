@@ -64,6 +64,14 @@ function fmt(d: string | null | undefined): string {
   try { return format(parseISO(d), "dd MMM yyyy"); } catch { return d; }
 }
 
+function fmtDT(d: string | null | undefined): { date: string; time: string } {
+  if (!d) return { date: "—", time: "" };
+  try {
+    const parsed = parseISO(d);
+    return { date: format(parsed, "dd MMM yyyy"), time: format(parsed, "hh:mm a") };
+  } catch { return { date: d, time: "" }; }
+}
+
 function isCleared(e: BrsEntry): boolean {
   return e.IsMatched === true || e.IsMatched === 1;
 }
@@ -90,6 +98,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     if ((r as unknown as BrsEntry).IsBounced === 1 || (r as unknown as BrsEntry).IsBounced === true) return "Bounced";
     return (r as unknown as BrsEntry).IsMatched === 1 || (r as unknown as BrsEntry).IsMatched === true ? "Clear" : "Unclear";
   }},
+  { header: "Clearing Date", accessor: (r) => fmt((r as unknown as BrsEntry).ClearingDate) },
   { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
   { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
   { header: "Bounce Remarks",accessor: (r) => (r as unknown as BrsEntry).BounceRemarks ?? "—" },
@@ -877,6 +886,15 @@ export default function Brs() {
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} />
                         {bounced && <BounceDetailPanel entry={entry} />}
+                        {cleared && entry.ClearingDate && (() => {
+                          const { date, time } = fmtDT(entry.ClearingDate);
+                          return (
+                            <div className="text-right">
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
+                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -932,6 +950,7 @@ export default function Brs() {
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared On</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
@@ -939,7 +958,7 @@ export default function Brs() {
               <tbody className="divide-y divide-border">
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       No entries match your filters.
                     </td>
                   </tr>
@@ -947,7 +966,7 @@ export default function Brs() {
 
                 {loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       <RotateCw size={18} className="animate-spin mx-auto mb-2 opacity-40" />
                       Loading…
                     </td>
@@ -1032,6 +1051,19 @@ export default function Brs() {
                           <ClearBadge cleared={cleared} bounced={bounced} />
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
+                      </td>
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearingDate ? (() => {
+                          const { date, time } = fmtDT(entry.ClearingDate);
+                          return (
+                            <div>
+                              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
+                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
+                            </div>
+                          );
+                        })() : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="px-3 py-4 align-middle">
                         {bounced ? (
