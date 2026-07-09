@@ -13,6 +13,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
@@ -129,6 +130,7 @@ const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
 const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
+const OnAccountAdjustment = lazy(() => import("./pages/finance/OnAccountAdjustment"));
 
 // Task Detail
 const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
@@ -660,9 +662,13 @@ function AppRoutes() {
       <Route
         path="/"
         element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
+          currentUser ? (
+            <ProtectedRoute>
+              <Home />
+            </ProtectedRoute>
+          ) : (
+            <Landing />
+          )
         }
       />
       <Route
@@ -694,6 +700,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="on-account-report">
             <OnAccountReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/on-account-adjustment"
+        element={
+          <ProtectedRoute pageKey="on-account-adjustment">
+            <OnAccountAdjustment />
           </ProtectedRoute>
         }
       />

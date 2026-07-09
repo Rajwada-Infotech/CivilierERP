@@ -1998,6 +1998,11 @@ const Payment: React.FC = () => {
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
   // On Account balance for the selected invoice's party
   const [oaBalance, setOaBalance] = useState<number>(0);
+  // Context injected from the On A/C Adjustment page
+  const [oaAdjustCtx, setOaAdjustCtx] = useState<{
+    partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
+    invoiceDocNo?: string | null; invoiceRemaining?: number | null;
+  } | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
@@ -2082,6 +2087,21 @@ const Payment: React.FC = () => {
         setSearchParams(searchParams, { replace: true });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detect On A/C Adjustment context passed from OnAccountAdjustment page
+  useEffect(() => {
+    const oa = (location.state as any)?.oaAdjust;
+    if (!oa?.partyId) return;
+    setOaAdjustCtx(oa);
+    setOaBalance(oa.availableBalance ?? 0);
+    setView("form");
+    // Pre-fill the supplier/contractor name so the user doesn't have to type it
+    setForm((prev) => ({
+      ...prev,
+      paidTo: oa.partyName ?? prev.paidTo,
+    }));
+    window.history.replaceState({}, "", location.pathname);
   }, []);
 
   // Detect bounce re-issue context passed from BRS page
@@ -2482,8 +2502,17 @@ const Payment: React.FC = () => {
   );
 
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
-    queryKey: ["expense-options-payment"],
-    queryFn: fetchExpenseOptions,
+    queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
+    queryFn: async () => {
+      const url = oaAdjustCtx?.partyId
+        ? `/api/expense-booking/options?partyId=${oaAdjustCtx.partyId}`
+        : "/api/expense-booking/options";
+      const res = await fetchWithAuth(url);
+      if (!res.ok) return [];
+      const raw = await res.json().catch(() => ({}));
+      const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+      return normaliseExpenseOptions(items);
+    },
     staleTime: 0,
   });
 
@@ -2906,6 +2935,38 @@ const Payment: React.FC = () => {
     if (opt) handleExpenseSelect(opt.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseOptions, reissueCtx]);
+
+  // Auto-select the invoice + fill filters when coming from On A/C Adjustment
+  useEffect(() => {
+    if (!oaAdjustCtx?.invoiceDocNo || !expenseOptions.length || form.expenseId) return;
+    const ref = oaAdjustCtx.invoiceDocNo;
+    const opt =
+      expenseOptions.find((o) => o.docNo === ref) ??
+      expenseOptions.find((o) => o.value === ref) ??
+      expenseOptions.find((o) => o.label.startsWith(ref + " ") || o.label.startsWith(ref + " —"));
+    if (!opt) return;
+    // Fill the filter bar so it matches the invoice context
+    setBookingFilters({
+      company: opt.companyName ?? "",
+      project: opt.projectName ?? "",
+      year: opt.financialYear ?? "",
+      supplier: opt.supplierName ?? opt.partyName ?? "",
+    });
+    // Select the invoice — this fills company, project, amount in the form
+    handleExpenseSelect(opt.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseOptions, oaAdjustCtx?.invoiceDocNo]);
+
+  // When OA Adjust context is active: cap the payment amount at min(invoiceAmount, oaBalance)
+  useEffect(() => {
+    if (!oaAdjustCtx || form.amount == null || form.amount <= 0) return;
+    const oaBal = oaAdjustCtx.availableBalance;
+    const cappedAmount = Math.min(form.amount, oaBal);
+    if (cappedAmount !== form.amount) {
+      setForm((prev) => ({ ...prev, amount: cappedAmount }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.amount, oaAdjustCtx?.availableBalance]);
 
   // Fetch On Account balance when invoice changes
   useEffect(() => {
@@ -3794,6 +3855,35 @@ const Payment: React.FC = () => {
                 );
               })()}
 
+
+              {/* ── On A/C Adjustment context banner ── */}
+              {oaAdjustCtx && (
+                <div className="rounded-xl border border-blue-500/25 bg-blue-500/5 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-400">
+                      On A/C Adjustment — {oaAdjustCtx.partyName}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Select an invoice for this party — the On A/C balance will auto-apply on save
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Source: {oaAdjustCtx.sourceDocNo}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">
+                      {typeof formatINR === "function" ? formatINR(oaAdjustCtx.availableBalance) : `₹${oaAdjustCtx.availableBalance}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setOaAdjustCtx(null); setOaBalance(0); }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* ── On Account Banner ── */}
               {oaBalance > 0.01 && (
