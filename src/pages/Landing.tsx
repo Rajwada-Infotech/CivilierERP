@@ -138,14 +138,6 @@ export default function Landing() {
             style={{ border: "1.5px solid rgba(167,139,250,0.45)", color: "#c4b5fd", background: "transparent" }}>
             Enter CivilierERP →
           </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.02, borderColor: "rgba(167,139,250,0.25)" }}
-            whileTap={{ scale: 0.96 }}
-            onClick={() => document.getElementById("modules-row")?.scrollIntoView({ behavior: "smooth" })}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ border: "1.5px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.40)", background: "transparent" }}>
-            See Modules
-          </motion.button>
         </motion.div>
 
         {/* Module pills */}
