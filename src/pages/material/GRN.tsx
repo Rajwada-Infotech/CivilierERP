@@ -793,16 +793,6 @@ export default function GRN() {
   const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
     "details",
   );
-  const [systemLedgers, setSystemLedgers] = useState<
-    { id: number; label: string; code: string | null }[]
-  >([]);
-
-  // Fetch system-generated ledgers for GRN posting rows
-  React.useEffect(() => {
-    getSystemGeneratedLedgers()
-      .then((data) => setSystemLedgers(data))
-      .catch(() => setSystemLedgers([]));
-  }, []);
 
   // Fetch live posting data when the posting tab is opened
   React.useEffect(() => {
