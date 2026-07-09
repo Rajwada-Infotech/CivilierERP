@@ -445,13 +445,16 @@ router.get("/options", async (req, res) => {
     // When "Pay Remaining" navigates to a payment that's already marked Paid,
     // include that specific invoice regardless of EBillStatus so the form can pre-fill.
     const includeRef = (req.query.includeRef || "").toString().trim() || null;
+    // When navigating from On A/C Adjustment, filter invoices to the selected party only.
+    const partyId = parseInt(req.query.partyId || "", 10) || null;
 
     // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
     // and exclude any already linked to an active DebitNote
     const bookingsResult = await pool
       .request()
       .input("FinYear", sql.NVarChar(20), finYear)
-      .input("IncludeRef", sql.NVarChar(100), includeRef).query(`
+      .input("IncludeRef", sql.NVarChar(100), includeRef)
+      .input("PartyId", sql.Int, partyId).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -525,6 +528,11 @@ router.get("/options", async (req, res) => {
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@PartyId IS NULL OR (
+            (eb.ESourceType = 'GRN' AND ahm.LHeadId = @PartyId)
+            OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_opt.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_opt.LHeadId = @PartyId)
+          ))
         ORDER BY eb.Eid DESC
       `);
 
