@@ -139,7 +139,7 @@ export default function OnAccountAdjustment() {
           {/* Left: big stat cards */}
           <div className="flex flex-col gap-4">
             {/* Total Balance card */}
-            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-50 dark:bg-emerald-950/25 p-6 flex flex-col gap-2">
+            <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-500/70">Total On A/C Balance</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15">
