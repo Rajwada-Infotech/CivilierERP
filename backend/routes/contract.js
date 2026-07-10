@@ -331,6 +331,58 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
   }
 });
 
+// ── PUT /:id/submit ───────────────────────────────────────────────────────────
+// Not used by the normal create flow (contracts auto-submit on POST /), but
+// kept so a Rejected contract can be manually resubmitted, matching every
+// other approval-gated module's endpoint set.
+router.put("/:id/submit", authenticateToken, requirePageRight("finance-contracts", "edit"), async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition("contracts", id, "Pending", email, req.user?.role);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Submitted for approval", ...result });
+  } catch (err) {
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve ─────────────────────────────────────────────────────────
+router.put("/:id/approve", authenticateToken, async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition("contracts", id, "Approved", email, req.user?.role);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Contract approved", ...result });
+  } catch (err) {
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject ──────────────────────────────────────────────────────────
+router.put("/:id/reject", authenticateToken, async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const { note } = req.body;
+    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
+    await bumpCacheVersion("contracts");
+    res.json({ message: "Contract rejected", ...result });
+  } catch (err) {
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+  }
+});
+
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 router.delete("/:id", authenticateToken, requirePageRight("finance-contracts", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);

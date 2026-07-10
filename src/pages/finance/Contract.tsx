@@ -463,9 +463,12 @@ export default function Contract() {
       header: "Status",
       size: 160,
       cell: ({ getValue, row }: any) => (
-        <div className="flex flex-col gap-1 items-start">
-          <StatusBadge status={getValue() as string} />
-          <ApprovalStatusChain table="Contract" recordId={(row.original as ContractListItem).ContractId} />
+        <div className="flex items-center">
+          <ApprovalStatusChain
+            table="Contract"
+            recordId={(row.original as ContractListItem).ContractId}
+            fallback={<StatusBadge status={getValue() as string} />}
+          />
         </div>
       ),
     },
@@ -1036,10 +1039,12 @@ export default function Contract() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 ["Status", (
-                  <div key="s" className="flex flex-col gap-1 items-start">
-                    <StatusBadge status={c.Status} />
-                    <ApprovalStatusChain table="Contract" recordId={c.ContractId} />
-                  </div>
+                  <ApprovalStatusChain
+                    key="s"
+                    table="Contract"
+                    recordId={c.ContractId}
+                    fallback={<StatusBadge status={c.Status} />}
+                  />
                 )],
                 ["Doc Date", fmtDate(c.DocDate)],
                 ["Contract Date", fmtDate(c.ContractDate)],
