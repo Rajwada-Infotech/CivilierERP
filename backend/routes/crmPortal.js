@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const multer = require("multer");
 const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -149,7 +150,7 @@ router.get("/timeline", async (req, res) => {
         FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
-        SELECT Id, Status, DeedDate, RegistrationDate, SentToCustomerAt,
+        SELECT Id, DeedNo, Status, DeedValue, SubRegistrarOffice, RegistrationNo, DeedDate, RegistrationDate, SentToCustomerAt,
                CustomerApprovalStatus, CustomerApprovedAt, CustomerRecheckRemarks
         FROM dbo.CrmSalesDeed WHERE BookingId = @bid
       `),
@@ -188,14 +189,21 @@ router.get("/agreement", async (req, res) => {
     const appId = req.portalUser.applicationId;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.AgreementNo, ag.Status, ag.AgreementDate, ag.LegalName, ag.LegalAddress,
-             ag.CustomerApprovalStatus, ag.ProposedDateByCompany, ag.ProposedDateByCustomer,
-             ag.SentToCustomerAt, ag.LastRecheckRemarks, b.BookingNo, b.UnitNo, b.TotalValue
+             ag.PanNo, ag.AadhaarNo, ag.VersionNo, ag.CreatedAt,
+             ag.SeniorApprovalStatus, ag.SeniorApprovedAt,
+             ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
+             ag.ProposedDateByCompany, ag.ProposedDateByCustomer,
+             ag.SentToCustomerAt, ag.LastRecheckRemarks,
+             b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingDate
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
-    if (!result.recordset.length) return res.status(404).json({ error: "No agreement has been shared yet" });
-    res.json(result.recordset[0]);
+    // Not having an agreement shared yet is a normal, expected state for a
+    // customer early in their journey — not an error — so this returns 200
+    // with a null body instead of 404, same as every other "nothing yet"
+    // lookup in this file (loan detail, bank detail, etc.).
+    res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-portal] GET /agreement error:", e.message);
     res.status(500).json({ error: e.message });
@@ -203,16 +211,21 @@ router.get("/agreement", async (req, res) => {
 });
 
 const AGREEMENT_UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
+if (!fs.existsSync(AGREEMENT_UPLOAD_DIR)) fs.mkdirSync(AGREEMENT_UPLOAD_DIR, { recursive: true });
 
 // GET /agreement/documents — every document attached to the customer's own
 // agreement, once it's been shared. Scoped strictly to their own
 // ApplicationId — a customer can never see another buyer's documents.
+// Includes documents staff has *requested* but the customer hasn't uploaded
+// yet (Status='Requested', no file) so the portal can prompt for them.
 router.get("/agreement/documents", async (req, res) => {
   try {
     const pool = getPool();
     const appId = req.portalUser.applicationId;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT d.Id, d.DocumentType, d.FileName, d.FileSize, d.MimeType, d.Status, d.VersionNo, d.CreatedAt
+      SELECT d.Id, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
+             d.FileName, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
+             d.RequestedAt, d.UploadedAt, d.CreatedAt
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
@@ -224,6 +237,87 @@ router.get("/agreement/documents", async (req, res) => {
     console.error("[crm-portal] GET /agreement/documents error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+const portalDocStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, AGREEMENT_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
+  },
+});
+const portalDocUpload = multer({
+  storage: portalDocStorage,
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = [
+      "application/pdf", "image/jpeg", "image/png", "image/webp",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("File type not allowed — please upload a PDF, Word document, or image"));
+  },
+});
+
+// POST /agreement/documents/:docId/upload — the customer fulfils a document
+// staff requested (or re-submits after a rejection). Only ever allowed
+// against their own agreement's document rows, and only while that row is
+// still open for submission — a document already Verified (or one that was
+// never requested from them, i.e. a staff-attached exhibit) can't be
+// touched from this endpoint.
+router.post("/agreement/documents/:docId/upload", (req, res) => {
+  portalDocUpload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    try {
+      const pool = getPool();
+      const appId = req.portalUser.applicationId;
+      const docId = parseInt(req.params.docId, 10);
+
+      const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
+        SELECT d.Id, d.Status, d.DocumentType, ag.AgreementNo, b.AssignedTo, b.BookingNo, a.ApplicantName
+        FROM dbo.CrmAgreementDocument d
+        JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+        JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
+      `);
+      if (!check.recordset.length) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(404).json({ error: "Document not found" });
+      }
+      const doc = check.recordset[0];
+      if (!["Requested", "Rejected"].includes(doc.Status)) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: "This document isn't open for upload" });
+      }
+
+      await pool.request()
+        .input("id", sql.Int, docId)
+        .input("fname", sql.NVarChar(300), req.file.originalname)
+        .input("fp", sql.NVarChar(500), req.file.path)
+        .input("fs", sql.BigInt, req.file.size)
+        .input("mt", sql.NVarChar(150), req.file.mimetype)
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            FileName = @fname, FilePath = @fp, FileSize = @fs, MimeType = @mt,
+            Status = 'Submitted', Remarks = NULL, UploadedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      if (doc.AssignedTo) {
+        await emitNotification(pool, doc.AssignedTo, "crm_document_submitted", "Document Submitted by Customer",
+          `${doc.ApplicantName} uploaded ${doc.DocumentType.replace(/([A-Z])/g, " $1").trim()} for ${doc.AgreementNo} (${doc.BookingNo}).`,
+          docId, "crm_agreement_document");
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      console.error("[crm-portal] POST /agreement/documents/:docId/upload error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
 });
 
 // GET /agreement/documents/file/:docId — stream a document's file, but only
@@ -268,9 +362,11 @@ router.post("/agreement/respond", async (req, res) => {
     }
 
     const ag = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT ag.Id, ag.RecheckCount, ag.CustomerApprovalStatus, ag.SeniorApprovalStatus
+      SELECT ag.Id, ag.RecheckCount, ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
+             ag.AgreementNo, b.AssignedTo, b.BookingNo, a.ApplicantName
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement pending your response" });
@@ -280,7 +376,8 @@ router.post("/agreement/respond", async (req, res) => {
     if (ag.recordset[0].CustomerApprovalStatus === "Approved") {
       return res.status(400).json({ error: "Agreement has already been approved" });
     }
-    const agreementId = ag.recordset[0].Id;
+    const agreementRow = ag.recordset[0];
+    const agreementId = agreementRow.Id;
 
     if (decision === "Approve") {
       // Preserve the prior customer-proposed date (if any) in history before
@@ -331,6 +428,18 @@ router.post("/agreement/respond", async (req, res) => {
         VALUES (@agid, @act, @rem, 'Customer', NULL, @aname, SYSDATETIME())
       `);
 
+    // Staff never otherwise learns the customer acted — this is the
+    // connection back from portal to CRM that closes the loop.
+    if (agreementRow.AssignedTo) {
+      await emitNotification(pool, agreementRow.AssignedTo,
+        decision === "Approve" ? "crm_agreement_customer_approved" : "crm_agreement_recheck_requested",
+        decision === "Approve" ? "Agreement Approved by Customer" : "Agreement Recheck Requested",
+        decision === "Approve"
+          ? `${agreementRow.ApplicantName} approved agreement ${agreementRow.AgreementNo} (${agreementRow.BookingNo}).`
+          : `${agreementRow.ApplicantName} requested a recheck on agreement ${agreementRow.AgreementNo} (${agreementRow.BookingNo}): ${remarks}`,
+        agreementId, "crm_agreement");
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /agreement/respond error:", e.message);
@@ -351,19 +460,21 @@ router.post("/sales-deed/respond", async (req, res) => {
     }
 
     const deed = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT d.Id, d.CustomerApprovalStatus
+      SELECT d.Id, d.CustomerApprovalStatus, d.DeedNo, b.AssignedTo, b.BookingNo, a.ApplicantName
       FROM dbo.CrmSalesDeed d
       JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
     `);
     if (!deed.recordset.length) return res.status(404).json({ error: "No sales deed pending your response" });
     if (deed.recordset[0].CustomerApprovalStatus === "Approved") {
       return res.status(400).json({ error: "Sales deed has already been approved" });
     }
+    const deedRow = deed.recordset[0];
 
     if (decision === "Approve") {
       await pool.request()
-        .input("id", sql.Int, deed.recordset[0].Id)
+        .input("id", sql.Int, deedRow.Id)
         .query(`
           UPDATE dbo.CrmSalesDeed SET
             CustomerApprovalStatus = 'Approved',
@@ -373,7 +484,7 @@ router.post("/sales-deed/respond", async (req, res) => {
         `);
     } else {
       await pool.request()
-        .input("id", sql.Int, deed.recordset[0].Id)
+        .input("id", sql.Int, deedRow.Id)
         .input("rem", sql.NVarChar(sql.MAX), remarks)
         .query(`
           UPDATE dbo.CrmSalesDeed SET
@@ -382,6 +493,16 @@ router.post("/sales-deed/respond", async (req, res) => {
             CustomerRecheckRemarks = @rem
           WHERE Id = @id
         `);
+    }
+
+    if (deedRow.AssignedTo) {
+      await emitNotification(pool, deedRow.AssignedTo,
+        decision === "Approve" ? "crm_sales_deed_customer_approved" : "crm_sales_deed_recheck_requested",
+        decision === "Approve" ? "Sales Deed Approved by Customer" : "Sales Deed Recheck Requested",
+        decision === "Approve"
+          ? `${deedRow.ApplicantName} approved sale deed ${deedRow.DeedNo} (${deedRow.BookingNo}).`
+          : `${deedRow.ApplicantName} requested a recheck on sale deed ${deedRow.DeedNo} (${deedRow.BookingNo}): ${remarks}`,
+        deedRow.Id, "crm_sales_deed");
     }
 
     res.json({ success: true });

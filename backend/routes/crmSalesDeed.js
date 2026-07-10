@@ -188,6 +188,21 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // Auto-flow: "LAST MILESTONE -> SALES DEED -> CUSTOMER APPROVAL" — the
+    // moment the deed becomes legally Executed (ExecutedBy just filled in),
+    // it's ready to show the customer. No separate manual "send" click
+    // needed, same as the agreement's auto-send on senior approval.
+    if (newStatus === "Executed") {
+      const sent = await pool.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmSalesDeed WHERE Id = @id");
+      if (!sent.recordset[0].SentToCustomerAt) {
+        await pool.request().input("id", sql.Int, id).query(`
+          UPDATE dbo.CrmSalesDeed SET SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL
+          WHERE Id = @id
+        `);
+      }
+    }
+
     res.json({ success: true, status: newStatus });
   } catch (e) {
     console.error("[crm-sales-deed] PUT error:", e.message);

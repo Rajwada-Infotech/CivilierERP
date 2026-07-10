@@ -22,6 +22,19 @@ export const fetchTickets = () => get("/tickets");
 export const fetchAgreement = () => get("/agreement").catch(() => null);
 export const fetchAgreementDocuments = () => get("/agreement/documents").catch(() => []);
 
+export async function uploadAgreementDocument(docId: number, file: File) {
+  const token = localStorage.getItem("crm_portal_token");
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API}/agreement/documents/${docId}/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Upload failed");
+  return res.json();
+}
+
 export const TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 
 export function fmtMoney(n: number | null | undefined) {
@@ -36,4 +49,14 @@ export function fmtBytes(n: number | null | undefined) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+export function maskAadhaar(v: string | null | undefined) {
+  if (!v) return null;
+  const digits = v.replace(/\D/g, "");
+  if (digits.length < 4) return v;
+  return `XXXX XXXX ${digits.slice(-4)}`;
+}
+export function fmtDateTime(v: string | null | undefined) {
+  if (!v) return "—";
+  return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }

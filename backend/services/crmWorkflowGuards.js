@@ -107,20 +107,30 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
     .query("SELECT PanNo, AadhaarNo FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
   const customerDetails = detail.recordset[0] || {};
 
+  // Legal Name was never being seeded even though the applicant's real name
+  // is already on file — pulled in here the same way PAN/Aadhaar already
+  // were, so a Draft agreement never opens with a blank identity a customer
+  // would see reflected back at them as "—".
+  const applicant = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT a.ApplicantName FROM dbo.CrmApplication a JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id WHERE b.Id = @bid
+  `);
+  const legalName = applicant.recordset[0]?.ApplicantName || null;
+
   const agNo = await getNextDocNumber(pool, "AGR", "AGR");
   let result;
   try {
     result = await pool.request()
       .input("agno", sql.NVarChar(50), agNo)
       .input("bid",  sql.Int, bookingId)
+      .input("lname",sql.NVarChar(200), legalName)
       .input("pan",  sql.NVarChar(20), customerDetails.PanNo || null)
       .input("aadh", sql.NVarChar(20), customerDetails.AadhaarNo || null)
       .input("cb",   sql.Int, actorUserId || null)
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
       `);
   } catch (e) {
     // Race: welcome-call logging and bank-detail saving can both complete
@@ -132,6 +142,21 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
     throw e;
   }
   const agreementId = result.recordset[0].Id;
+
+  // Standing document request: an executable agreement needs the customer's
+  // own identity proof on file, not just the PAN/Aadhaar numbers typed in
+  // during the welcome call. Requested here (Status='Requested', no file
+  // yet) so it's waiting the moment the agreement is later shared with the
+  // customer — same "->" chain the workflow spec describes between bank
+  // details and agreement preparation.
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .input("cb", sql.Int, actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmAgreementDocument
+        (AgreementId, DocumentType, Label, IsMandatory, Status, UploadedByType, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+      VALUES (@agid, 'IdentityProof', 'Identity Proof (PAN / Aadhaar copy)', 1, 'Requested', 'Customer', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+    `);
 
   const portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
 
