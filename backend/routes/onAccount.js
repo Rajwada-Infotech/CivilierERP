@@ -118,12 +118,20 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
       LEFT JOIN dbo.WorkOrderHeader wo
         ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
       WHERE (
-        grn.SupplierID    = @PartyId
-        OR po.SupplierID  = @PartyId
-        OR wd.SupplierId  = @PartyId
-        OR wo.SupplierId  = @PartyId
+        grn.SupplierID     = @PartyId
+        OR po.SupplierID   = @PartyId
+        OR wd.SupplierId   = @PartyId
+        OR wo.SupplierId   = @PartyId
         OR wo.ContractorId = @PartyId
-        OR eb.LHeadId     = @PartyId
+        OR eb.LHeadId      = @PartyId
+        -- Covers INV/, PAY/, CON/, DPO/, ICT/, QPO/, WD/, etc.
+        -- where LHeadId may be NULL but a payment with PPartyId exists
+        OR EXISTS (
+          SELECT 1 FROM dbo.NewPayment np
+          WHERE np.PExpenseRef = eb.EDocNo
+            AND np.PPartyId    = @PartyId
+            AND np.Status      = 'Approved'
+        )
       )
       AND eb.EDocNo IS NOT NULL
       AND eb.EStatus = 'Approved'
