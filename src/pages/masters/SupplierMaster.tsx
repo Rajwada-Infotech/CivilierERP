@@ -517,18 +517,25 @@ const SupplierMaster: React.FC = () => {
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
-    // Omitted (not sent as an empty string) when blank, so editing a
-    // supplier without changing their password leaves it untouched —
-    // required on create, optional on edit (see accountHeadMaster.js).
+    // Omitted (not sent as an empty string) when blank — on create the
+    // backend defaults the login password to "123456"; on edit, blank
+    // leaves the existing password untouched (see accountHeadMaster.js).
     ...(f.SupplierPassword ? { SupplierPassword: f.SupplierPassword } : {}),
   });
 
   const createMut = useMutation({
     mutationFn: (f: SupplierForm) => addRecord(buildPayload(f), SUPPLIER_TYPE),
-    onSuccess: (res: { SupplierLoginEmail?: string }) => {
+    onSuccess: (res: {
+      SupplierLoginEmail?: string;
+      SupplierPasswordDefaulted?: boolean;
+      SupplierDefaultPassword?: string;
+    }) => {
+      const passwordNote = res?.SupplierPasswordDefaulted
+        ? ` — password defaulted to "${res.SupplierDefaultPassword}"`
+        : "";
       toast.success(
         res?.SupplierLoginEmail
-          ? `Supplier created — login email: ${res.SupplierLoginEmail}`
+          ? `Supplier created — login email: ${res.SupplierLoginEmail}${passwordNote}`
           : "Supplier created",
       );
       invalidate();
@@ -629,8 +636,10 @@ const SupplierMaster: React.FC = () => {
 
           if (!name) throw new Error("Supplier Name is required");
           if (!pan) throw new Error("PAN Number is required");
-          if (!password || password.length < 6)
-            throw new Error("Password is required and must be at least 6 characters");
+          // Password is optional on import — left blank, the backend defaults
+          // the login to "123456" (changeable later from the Edit form).
+          if (password && password.length < 6)
+            throw new Error("Password must be at least 6 characters");
 
           // Category is optional — validate against the known list when given.
           const category = categoryRaw
@@ -756,9 +765,11 @@ const SupplierMaster: React.FC = () => {
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
     (form.LGSTType !== "Registered" || form.LGST.trim() !== "") &&
-    // Password is mandatory on create; on edit, leaving it blank keeps the
-    // supplier's existing login credentials unchanged.
-    (editingId !== null || form.SupplierPassword.trim().length >= 6);
+    // Password is optional — left blank on create, the backend defaults the
+    // login to "123456" (changeable later from this form); on edit, blank
+    // keeps the supplier's existing login credentials unchanged. Only
+    // blocks save when something was typed but it's too short.
+    (form.SupplierPassword.trim() === "" || form.SupplierPassword.trim().length >= 6);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const normalizeGSTType = (t: string | null): string => {
@@ -804,8 +815,9 @@ const SupplierMaster: React.FC = () => {
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LBelongsTo) e.LBelongsTo = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
-    // Mandatory on create only — blank on edit means "keep current password".
-    if (editingId === null && form.SupplierPassword.trim().length < 6)
+    // Optional on both create (defaults to "123456" server-side) and edit
+    // (blank keeps the current password) — only flagged when typed but short.
+    if (form.SupplierPassword.trim() !== "" && form.SupplierPassword.trim().length < 6)
       e.SupplierPassword = true;
     if (Object.keys(e).length) {
       setErrors(e);
@@ -1340,8 +1352,7 @@ const SupplierMaster: React.FC = () => {
                 {/* Password */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Password{" "}
-                    {!editingId && <span className="text-destructive">*</span>}
+                    Password
                   </label>
                   <input
                     type="password"
@@ -1356,7 +1367,7 @@ const SupplierMaster: React.FC = () => {
                     placeholder={
                       editingId
                         ? "Leave blank to keep current password"
-                        : "Min 6 characters"
+                        : "Leave blank to default to 123456"
                     }
                     className={`${inputCls} ${errors.SupplierPassword ? "border-red-400" : ""}`}
                   />
