@@ -244,6 +244,45 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
             UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
+
+      // Auto-flow: "SENIOR APPROVAL -> SHOW AGREEMENT TO THE CUSTOMER" is
+      // meant to happen the instant senior approval lands, not wait on
+      // staff remembering a separate "Send to Customer Portal" click. Only
+      // gated on at least one document already being attached — there's
+      // nothing to show the customer otherwise, and staff can still use the
+      // manual send button once they've uploaded one.
+      const docCount = await pool.request().input("id", sql.Int, id)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmAgreementDocument WHERE AgreementId = @id");
+      if (docCount.recordset[0].Cnt > 0) {
+        const already = await pool.request().input("id", sql.Int, id)
+          .query("SELECT SentToCustomerAt FROM dbo.CrmAgreement WHERE Id = @id");
+        if (!already.recordset[0].SentToCustomerAt) {
+          await pool.request().input("id", sql.Int, id).query(`
+            UPDATE dbo.CrmAgreement SET
+              SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL
+            WHERE Id = @id
+          `);
+          await pool.request().input("agid", sql.Int, id).query(`
+            INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
+            VALUES (@agid, 'SendToCustomer', 'System', SYSDATETIME())
+          `);
+
+          const info = await pool.request().input("id", sql.Int, id).query(`
+            SELECT ag.AgreementNo, b.AssignedTo, b.BookingNo, a.ApplicantName
+            FROM dbo.CrmAgreement ag
+            JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+            JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+            WHERE ag.Id = @id
+          `);
+          const row = info.recordset[0];
+          if (row?.AssignedTo) {
+            await emitNotification(pool, row.AssignedTo, "crm_agreement_sent_to_customer",
+              "Agreement Sent to Customer",
+              `${row.AgreementNo} (${row.BookingNo}) is now visible to ${row.ApplicantName} in their portal, awaiting their approval.`,
+              id, "crm_agreement");
+          }
+        }
+      }
     }
 
     await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
@@ -371,6 +410,42 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     res.json({ success: true, agreementDateConfirmed: confirmedDate });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/propose-date — set/update the company's proposed agreement date
+// on an already-sent agreement, without re-triggering the send itself (now
+// that sending happens automatically on senior approval, this is the only
+// remaining way for staff to propose or renegotiate a date).
+router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const { proposedDate } = req.body;
+    if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
+
+    const ag = await pool.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    if (!ag.recordset[0].SentToCustomerAt) return res.status(400).json({ error: "Agreement hasn't been sent to the customer yet" });
+
+    await pool.request()
+      .input("agid", sql.Int, id)
+      .input("pd",   sql.Date, proposedDate)
+      .input("cb",   sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+        VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+      `);
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("pdc", sql.Date, proposedDate)
+      .query("UPDATE dbo.CrmAgreement SET ProposedDateByCompany = @pdc WHERE Id = @id");
+
+    const confirmedDate = await maybeResolveAgreementDate(pool, id);
+    res.json({ success: true, agreementDateConfirmed: confirmedDate });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/propose-date error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -630,6 +705,43 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
   }
 });
 
+// POST /:id/documents/request — ask the customer for a document via their
+// portal, without a file yet. Shows up there as an open request; the
+// customer's upload (crmPortal.js POST /agreement/documents/:docId/upload)
+// fills in the file and flips Status to 'Submitted' for staff review.
+router.post("/:id/documents/request", requirePageRight("crm-documents", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const agreementId = parseInt(req.params.id);
+    const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+    if (!DOC_TYPES.includes(b.DocumentType))
+      return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+
+    const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+    const nextVersion = ver.recordset[0].N;
+
+    const result = await pool.request()
+      .input("agid",  sql.Int, agreementId)
+      .input("dtype", sql.NVarChar(100), b.DocumentType)
+      .input("label", sql.NVarChar(200), b.Label || null)
+      .input("mand",  sql.Bit, !!b.IsMandatory)
+      .input("ver",   sql.Int, nextVersion)
+      .input("rb",    sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmAgreementDocument
+          (AgreementId, DocumentType, Label, IsMandatory, Status, UploadedByType, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@agid, @dtype, @label, @mand, 'Requested', 'Customer', @rb, SYSDATETIME(), @ver, @rb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id });
+  } catch (e) {
+    console.error("[crm-agreements] POST documents/request error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/documents/upload — actual multi-file upload (up to 10 files in
 // one request). One row per file, all sharing the same DocumentType, each
 // versioned sequentially so a re-upload never overwrites a prior file.
@@ -680,6 +792,43 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       res.status(500).json({ error: e.message });
     }
   });
+});
+
+// GET /documents/all — cross-agreement document register, for the dedicated
+// "Agreement Papers" document-center view (crm-documents permission scope,
+// distinct from crm-agreements: a documents clerk can be granted this
+// without full agreement CRUD rights). Every other /documents endpoint in
+// this file is scoped to a single agreement; this is the one place staff
+// can see requested/submitted/verified/rejected documents across every
+// agreement in one register, without opening each agreement individually.
+router.get("/documents/all", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, documentType } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("d.Status = @st"); }
+    if (documentType) { req0.input("dt", sql.NVarChar(100), documentType); conds.push("d.DocumentType = @dt"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`
+      SELECT
+        d.Id, d.AgreementId, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
+        d.FileName, d.FilePath, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
+        d.RequestedAt, d.UploadedAt, d.CreatedAt,
+        ag.AgreementNo, ag.Status AS AgreementStatus,
+        b.BookingNo, b.UnitNo, a.ApplicantName
+      FROM dbo.CrmAgreementDocument d
+      JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      ${where}
+      ORDER BY d.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET documents/all error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /documents/file/:docId — stream a document's file for inline preview/download

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { toast } from "sonner";
+import { INK, VIOLET_DEEP, VIOLET, GOLD, PORCELAIN, serif } from "./portalTheme";
 
 const API = "/api/crm-portal";
 
@@ -47,19 +48,19 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
           y: focused || has ? "0%" : "-50%",
           fontSize: focused || has ? "9px" : "13px",
           letterSpacing: focused || has ? "0.08em" : "0",
-          color: focused ? "#7c3aed" : "rgba(100,116,139,0.8)",
+          color: focused ? GOLD : "rgba(100,116,139,0.8)",
           textTransform: focused || has ? "uppercase" as const : "none" as const,
         }}
         transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}>
         {label}
       </motion.label>
       <motion.div className="absolute inset-0 rounded-xl pointer-events-none"
-        animate={{ boxShadow: focused ? "0 0 0 2px rgba(124,58,237,0.35), 0 0 16px rgba(124,58,237,0.10)" : "0 0 0 1.5px rgba(203,213,225,0.8)" }}
+        animate={{ boxShadow: focused ? "0 0 0 2px rgba(201,162,39,0.35), 0 0 16px rgba(201,162,39,0.10)" : "0 0 0 1.5px rgba(203,213,225,0.8)" }}
         transition={{ duration: 0.2 }} />
       <AnimatePresence>
         {focused && (
           <motion.div className="absolute bottom-0 left-4 right-4 h-px rounded-full pointer-events-none"
-            style={{ background: "linear-gradient(90deg, transparent, rgba(124,58,237,0.8), transparent)" }}
+            style={{ background: `linear-gradient(90deg, transparent, ${GOLD}, transparent)` }}
             initial={{ scaleX: 0, opacity: 0 }} animate={{ scaleX: 1, opacity: 1 }}
             exit={{ scaleX: 0, opacity: 0 }} transition={{ duration: 0.3 }} />
         )}
@@ -94,8 +95,8 @@ function ShimmerButton({ children, disabled, type = "button" }: {
       whileTap={disabled ? {} : { scale: 0.97 }}
       className="relative w-full overflow-hidden rounded-xl py-3.5 font-semibold text-sm text-white disabled:opacity-60 disabled:cursor-not-allowed"
       style={{
-        background: "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)",
-        boxShadow: hovered && !disabled ? "0 8px 30px rgba(124,58,237,0.45)" : "0 4px 16px rgba(124,58,237,0.30)",
+        background: `linear-gradient(135deg, ${INK} 0%, ${VIOLET_DEEP} 100%)`,
+        boxShadow: hovered && !disabled ? "0 8px 30px rgba(30,11,66,0.45)" : "0 4px 16px rgba(30,11,66,0.30)",
         transition: "box-shadow 0.3s ease",
       }}>
       {hovered && !disabled && (
@@ -114,23 +115,23 @@ function WelcomeCard() {
       style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)" }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.3 } }}>
       <motion.div className="flex flex-col items-center gap-4 px-10 py-8 rounded-3xl text-center"
-        style={{ background: "white", border: "1px solid rgba(124,58,237,0.15)", boxShadow: "0 24px 64px rgba(124,58,237,0.15), 0 4px 20px rgba(0,0,0,0.06)" }}
+        style={{ background: "white", border: `1px solid rgba(201,162,39,0.25)`, boxShadow: "0 24px 64px rgba(30,11,66,0.15), 0 4px 20px rgba(0,0,0,0.06)" }}
         initial={{ y: 40, scale: 0.92, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 300, damping: 24 }}>
         <motion.div className="w-14 h-14 rounded-full flex items-center justify-center"
-          style={{ background: "linear-gradient(135deg, #7c3aed, #6d28d9)" }}
+          style={{ background: `linear-gradient(135deg, ${INK}, ${VIOLET_DEEP})` }}
           initial={{ scale: 0 }} animate={{ scale: 1 }}
           transition={{ type: "spring", stiffness: 420, damping: 18, delay: 0.1 }}>
-          <motion.svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <motion.svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <motion.path d="M5 13l4 4L19 7" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.4, delay: 0.2 }} />
           </motion.svg>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <p className="text-xl font-bold text-slate-800">Welcome back!</p>
+          <p className="text-xl font-semibold" style={{ ...serif, color: INK }}>Welcome back!</p>
           <p className="text-sm text-slate-400 mt-1">Taking you to your dashboard…</p>
         </motion.div>
         <div className="w-48 h-1 rounded-full bg-slate-100 overflow-hidden">
-          <motion.div className="h-full rounded-full bg-violet-500"
+          <motion.div className="h-full rounded-full" style={{ background: GOLD }}
             initial={{ width: "0%" }} animate={{ width: "100%" }}
             transition={{ duration: 1.2, delay: 0.3, ease: "easeInOut" }} />
         </div>
@@ -175,18 +176,17 @@ export default function PortalLogin() {
   };
 
   return (
-    <div className="min-h-screen w-full flex relative overflow-hidden"
-      style={{ background: "linear-gradient(160deg, #faf5ff 0%, #f5f3ff 30%, #ffffff 65%, #fdf9ff 100%)" }}>
+    <div className="min-h-screen w-full flex relative overflow-hidden" style={{ background: PORCELAIN }}>
 
       {/* Left panel — brand */}
       <div className="hidden lg:flex flex-col justify-between w-[45%] p-12 relative overflow-hidden"
-        style={{ background: "linear-gradient(160deg, #2e1065 0%, #4c1d95 50%, #6d28d9 100%)" }}>
+        style={{ background: `linear-gradient(160deg, ${INK} 0%, ${VIOLET_DEEP} 50%, ${VIOLET} 100%)` }}>
         {/* Dot grid */}
         <div className="absolute inset-0 pointer-events-none"
           style={{ backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)", backgroundSize: "22px 22px" }} />
         {/* Glow */}
         <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full pointer-events-none"
-          style={{ background: "radial-gradient(circle, rgba(196,181,253,0.20) 0%, transparent 70%)", filter: "blur(40px)" }} />
+          style={{ background: "radial-gradient(circle, rgba(201,162,39,0.16) 0%, transparent 70%)", filter: "blur(40px)" }} />
 
         <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
           <button onClick={() => navigate("/login")} className="flex items-center gap-2 text-white/60 hover:text-white text-sm transition-colors">
@@ -196,10 +196,11 @@ export default function PortalLogin() {
         </motion.div>
 
         <motion.div className="relative z-10" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-6 overflow-hidden">
+          <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center mb-6 overflow-hidden" style={{ border: `1px solid rgba(201,162,39,0.35)` }}>
             <img src="/Civilier.png" alt="" className="w-10 h-10 object-contain" />
           </div>
-          <h1 className="text-3xl font-bold text-white leading-tight mb-3">
+          <p className="text-[11px] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Customer Record</p>
+          <h1 className="text-3xl font-semibold text-white leading-tight mb-3" style={serif}>
             Customer Portal
           </h1>
           <p className="text-violet-200/70 text-sm leading-relaxed max-w-xs">
@@ -225,8 +226,9 @@ export default function PortalLogin() {
 
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
           <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-            <div className="w-9 h-9 rounded-full bg-violet-400/20 flex items-center justify-center text-sm font-bold text-violet-200">CE</div>
+            style={{ background: "rgba(255,255,255,0.06)", border: `1px solid rgba(201,162,39,0.25)` }}>
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{ background: "rgba(201,162,39,0.14)", color: GOLD }}>CE</div>
             <div>
               <p className="text-xs font-semibold text-white">Your journey, one place</p>
               <p className="text-[10px] text-white/40 mt-0.5">CivilierERP · Customer Experience</p>
@@ -249,16 +251,17 @@ export default function PortalLogin() {
             <TiltCard>
               {/* Corner accents */}
               {["top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl", "top-0 right-0 border-t-2 border-r-2 rounded-tr-2xl", "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-2xl", "bottom-0 right-0 border-b-2 border-r-2 rounded-br-2xl"].map((cls, i) => (
-                <motion.div key={i} className={`absolute w-5 h-5 border-violet-400/40 z-20 ${cls}`}
+                <motion.div key={i} className={`absolute w-5 h-5 z-20 ${cls}`}
+                  style={{ borderColor: "rgba(201,162,39,0.55)" }}
                   initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.4 + i * 0.08, ease: "backOut" }} />
               ))}
 
               <div className="p-7 sm:p-9 rounded-2xl"
                 style={{
-                  background: "rgba(255,255,255,0.92)",
-                  border: "1px solid rgba(124,58,237,0.12)",
-                  boxShadow: "0 20px 60px rgba(124,58,237,0.08), 0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+                  background: "rgba(255,255,255,0.94)",
+                  border: `1px solid rgba(201,162,39,0.18)`,
+                  boxShadow: "0 20px 60px rgba(30,11,66,0.10), 0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
                   backdropFilter: "blur(24px)",
                 }}>
 
@@ -271,19 +274,19 @@ export default function PortalLogin() {
                       {/* Pulse rings */}
                       {[1, 2].map((i) => (
                         <motion.div key={i} className="absolute inset-0 rounded-full"
-                          style={{ border: "1px solid rgba(124,58,237,0.25)" }}
+                          style={{ border: "1px solid rgba(201,162,39,0.30)" }}
                           animate={{ scale: [1, 1.4 + i * 0.2], opacity: [0.5, 0] }}
                           transition={{ duration: 2.5, delay: i * 0.7, repeat: Infinity, ease: "easeOut" }} />
                       ))}
                       <motion.div className="absolute inset-0 rounded-full"
-                        style={{ border: "1.5px dashed rgba(124,58,237,0.25)" }}
+                        style={{ border: "1.5px dashed rgba(201,162,39,0.30)" }}
                         animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }} />
                       <div className="w-16 h-16 rounded-full bg-white border border-slate-100 shadow-md flex items-center justify-center overflow-hidden">
                         <img src="/Civilier.png" alt="CivilierERP" className="w-12 h-12 object-contain" />
                       </div>
                     </div>
-                    <motion.h1 className="text-2xl font-bold tracking-tight"
-                      style={{ background: "linear-gradient(135deg,#4c1d95,#7c3aed,#c4b5fd)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
+                    <motion.h1 className="text-2xl font-semibold tracking-tight"
+                      style={{ ...serif, background: `linear-gradient(135deg,${INK},${VIOLET_DEEP},${GOLD})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
                       initial={{ letterSpacing: "0.15em", opacity: 0 }} animate={{ letterSpacing: "-0.01em", opacity: 1 }}
                       transition={{ delay: 0.35, duration: 0.7 }}>
                       Customer Portal
@@ -304,7 +307,9 @@ export default function PortalLogin() {
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
                     placeholder="••••••••">
                     <motion.button type="button" onClick={() => setShowPass(!showPass)}
-                      className="absolute right-3 bottom-2.5 text-slate-400 hover:text-violet-600 transition-colors p-1"
+                      className="absolute right-3 bottom-2.5 text-slate-400 transition-colors p-1"
+                      onMouseEnter={(e) => (e.currentTarget.style.color = GOLD)}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "")}
                       whileTap={{ scale: 0.85 }}>
                       <AnimatePresence mode="wait">
                         <motion.span key={showPass ? "off" : "on"}
@@ -348,7 +353,7 @@ export default function PortalLogin() {
                 <div className="mt-5 text-center">
                   <p className="text-[11px] text-slate-400">
                     Are you our staff?{" "}
-                    <button onClick={() => navigate("/login")} className="text-violet-600 font-medium hover:text-violet-700 transition-colors">
+                    <button onClick={() => navigate("/login")} className="font-medium hover:underline transition-colors" style={{ color: VIOLET }}>
                       Go to main login
                     </button>
                   </p>

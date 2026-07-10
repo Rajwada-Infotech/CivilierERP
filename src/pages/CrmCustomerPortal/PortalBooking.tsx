@@ -2,29 +2,9 @@ import React from "react";
 import { useOutletContext } from "react-router-dom";
 import { Building2, Phone, CheckCircle2, Circle, User, Landmark } from "lucide-react";
 import { fmtMoney, fmtDate } from "./portalApi";
+import { PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState } from "./portalTheme";
 
 type Ctx = { me: any; timeline: any };
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-[11px] text-slate-400">{label}</p>
-      <p className="text-sm font-medium text-slate-800 mt-0.5">{value ?? "—"}</p>
-    </div>
-  );
-}
-
-function SectionCard({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm space-y-4">
-      <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-        <span className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center"><Icon size={14} /></span>
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
 
 const PortalBooking: React.FC = () => {
   const { timeline } = useOutletContext<Ctx>();
@@ -32,68 +12,90 @@ const PortalBooking: React.FC = () => {
 
   if (!booking) {
     return (
-      <div className="rounded-2xl border border-violet-100 bg-white p-8 text-center text-sm text-slate-500">
-        You don't have an active booking yet. Once your unit is confirmed, it'll show up here.
+      <div className="space-y-6">
+        <PageHeader eyebrow="My Property" title="My Booking" />
+        <Card className="p-8 text-center text-sm text-slate-500">
+          You don't have an active booking yet. Once your unit is confirmed, it'll show up here.
+        </Card>
       </div>
     );
   }
 
   const cd = timeline.customerDetails;
+  const callDone = timeline.welcomeCall?.Outcome === "Welcomed";
+  const detailsDone = !!cd?.IsComplete;
+  const agreementStarted = !!timeline.agreement;
+
+  const bookingSteps: { label: string; state: StepState; note?: string }[] = [
+    { label: "Booking Confirmed", state: "done", note: fmtDate(booking.BookingDate) },
+    { label: "Welcome Call", state: callDone ? "done" : "current", note: timeline.welcomeCall?.Outcome || "Pending" },
+    { label: "Details on File", state: detailsDone ? "done" : callDone ? "current" : "upcoming", note: detailsDone ? "Complete" : "Pending" },
+    { label: "Agreement Prep", state: agreementStarted ? "done" : detailsDone ? "current" : "upcoming" },
+  ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold font-heading text-slate-800">My Booking</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Everything about your unit, in one place.</p>
-      </div>
+      <PageHeader eyebrow="My Property" title="My Booking" subtitle="Everything about your unit, in one place." />
 
-      <SectionCard icon={Building2} title="Unit & Booking Details">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <InfoRow label="Booking No." value={booking.BookingNo} />
-          <InfoRow label="Status" value={<span className="text-emerald-600 font-semibold">{booking.BookingStatus}</span>} />
-          <InfoRow label="Project" value={booking.ProjectName} />
-          <InfoRow label="Unit No." value={booking.UnitNo} />
-          <InfoRow label="Token Type" value={booking.TokenType} />
-          <InfoRow label="Token Value" value={booking.TokenType === "Amount" ? fmtMoney(booking.TokenValue) : `${booking.TokenValue ?? "—"}%`} />
-          <InfoRow label="Total Value" value={fmtMoney(booking.TotalValue)} />
-          <InfoRow label="Booking Amount" value={fmtMoney(booking.BookingAmount)} />
-          <InfoRow label="Booking Date" value={fmtDate(booking.BookingDate)} />
+      <Card className="p-5">
+        <Stepper steps={bookingSteps} />
+      </Card>
+
+      <Card>
+        <CardHeader icon={Building2} title="Unit & Booking Details" action={<StatusPill status={booking.BookingStatus} />} />
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-5">
+          <InfoField label="Booking No." value={booking.BookingNo} mono />
+          <InfoField label="Project" value={booking.ProjectName} />
+          <InfoField label="Unit No." value={booking.UnitNo} />
+          <InfoField label="Token Type" value={booking.TokenType} />
+          <InfoField label="Token Value" value={booking.TokenType === "Amount" ? fmtMoney(booking.TokenValue) : `${booking.TokenValue ?? "—"}%`} />
+          <InfoField label="Total Value" value={fmtMoney(booking.TotalValue)} />
+          <InfoField label="Booking Amount" value={fmtMoney(booking.BookingAmount)} />
+          <InfoField label="Booking Date" value={fmtDate(booking.BookingDate)} />
         </div>
-      </SectionCard>
+      </Card>
 
-      <SectionCard icon={Phone} title="Welcome Call">
-        {timeline.welcomeCall ? (
-          <div className="flex items-center gap-2">
-            {timeline.welcomeCall.Outcome === "Welcomed" ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Circle size={16} className="text-amber-500" />}
-            <span className="text-sm font-medium text-slate-700">{timeline.welcomeCall.Outcome || "Pending"}</span>
+      <Card>
+        <CardHeader icon={Phone} title="Welcome Call" />
+        <div className="p-5">
+          {timeline.welcomeCall ? (
+            <div className="flex items-center gap-2">
+              {callDone ? <CheckCircle2 size={16} style={{ color: "#0F7A44" }} /> : <Circle size={16} className="text-amber-500" />}
+              <span className="text-sm font-medium text-slate-700">{timeline.welcomeCall.Outcome || "Pending"}</span>
+              {timeline.welcomeCall.CallDate && <span className="text-xs text-slate-400">· {fmtDate(timeline.welcomeCall.CallDate)}</span>}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Our team will reach out to you shortly for your welcome call.</p>
+          )}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader icon={User} title="Your Details on File" />
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-1">
+            {detailsDone ? <CheckCircle2 size={16} style={{ color: "#0F7A44" }} /> : <Circle size={16} className="text-amber-500" />}
+            <span className="text-sm font-medium text-slate-700">
+              {detailsDone ? "Complete — thank you!" : "Being completed by our team"}
+            </span>
           </div>
-        ) : (
-          <p className="text-sm text-slate-500">Our team will reach out to you shortly for your welcome call.</p>
-        )}
-      </SectionCard>
-
-      <SectionCard icon={User} title="Your Details on File">
-        <div className="flex items-center gap-2 mb-1">
-          {cd?.IsComplete ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Circle size={16} className="text-amber-500" />}
-          <span className="text-sm font-medium text-slate-700">
-            {cd?.IsComplete ? "Complete — thank you!" : "Being completed by our team"}
-          </span>
+          <p className="text-xs text-slate-500">
+            Bank account, nominee, PAN and Aadhaar details are collected by our sales team before agreement preparation.
+            {!detailsDone && " Please have these ready when they call."}
+          </p>
         </div>
-        <p className="text-xs text-slate-500">
-          Bank account, nominee, PAN and Aadhaar details are collected by our sales team before agreement preparation.
-          {!cd?.IsComplete && " Please have these ready when they call."}
-        </p>
-      </SectionCard>
+      </Card>
 
       {(booking.ParkingTotal > 0 || booking.ExtraChargesTotal > 0) && (
-        <SectionCard icon={Landmark} title="Additional Charges">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <InfoRow label="Unit Value" value={fmtMoney(booking.TotalValue)} />
-            {booking.ParkingTotal > 0 && <InfoRow label="Parking" value={fmtMoney(booking.ParkingTotal)} />}
-            {booking.ExtraChargesTotal > 0 && <InfoRow label="Extra Charges" value={fmtMoney(booking.ExtraChargesTotal)} />}
-            <InfoRow label="Grand Total" value={<span className="text-violet-600 font-bold">{fmtMoney(booking.GrandTotal)}</span>} />
+        <Card>
+          <CardHeader icon={Landmark} title="Additional Charges" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-5">
+            <InfoField label="Unit Value" value={fmtMoney(booking.TotalValue)} />
+            {booking.ParkingTotal > 0 && <InfoField label="Parking" value={fmtMoney(booking.ParkingTotal)} />}
+            {booking.ExtraChargesTotal > 0 && <InfoField label="Extra Charges" value={fmtMoney(booking.ExtraChargesTotal)} />}
+            <InfoField label="Grand Total" value={fmtMoney(booking.GrandTotal)} />
           </div>
-        </SectionCard>
+        </Card>
       )}
     </div>
   );

@@ -393,6 +393,7 @@ const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
+const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
@@ -638,9 +639,9 @@ function AppRoutes() {
   return (
     <Routes>
       {/* CRM CUSTOMER PORTAL — separate token-based auth, not the staff ERP session */}
-      <Route path="/crm-client-portal/login" element={<PortalLogin />} />
-      <Route path="/crm-client-portal/change-password" element={<PortalChangePassword />} />
-      <Route path="/crm-client-portal" element={<PortalLayout />}>
+      <Route path="/crm-client-portal/login" element={<Suspense fallback={<PageSkeleton />}><PortalLogin /></Suspense>} />
+      <Route path="/crm-client-portal/change-password" element={<Suspense fallback={<PageSkeleton />}><PortalChangePassword /></Suspense>} />
+      <Route path="/crm-client-portal" element={<Suspense fallback={<PageSkeleton />}><PortalLayout /></Suspense>}>
         <Route path="dashboard" element={<PortalOverview />} />
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />
@@ -2198,7 +2199,7 @@ function AppRoutes() {
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
-      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreement /></ProtectedRoute>} />
+      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />

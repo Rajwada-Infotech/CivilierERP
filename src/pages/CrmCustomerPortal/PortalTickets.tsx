@@ -1,23 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { LifeBuoy, Plus } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { API, authHeaders, fetchTickets, TICKET_CATEGORIES, fmtDate } from "./portalApi";
+import {
+  PageHeader, Card, StatusPill,
+  PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
+  INK, GOLD, GOLD_SOFT, HAIRLINE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT,
+} from "./portalTheme";
 
-const STATUS_STYLE: Record<string, string> = {
-  Resolved: "bg-emerald-100 text-emerald-700",
-  Closed: "bg-emerald-100 text-emerald-700",
-  InProgress: "bg-sky-100 text-sky-700",
-  Open: "bg-amber-100 text-amber-700",
-};
+const FILTERS = ["All", "Open", "Resolved"] as const;
 
 const PortalTickets: React.FC = () => {
   const qc = useQueryClient();
   const { data: tickets = [], isLoading } = useQuery({ queryKey: ["portal-tickets"], queryFn: fetchTickets });
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [form, setForm] = useState({ category: "ServiceRequest", subject: "", description: "" });
   const [saving, setSaving] = useState(false);
+
+  const filtered = useMemo(() => {
+    const list = tickets as any[];
+    if (filter === "Open") return list.filter((t) => t.Status !== "Resolved" && t.Status !== "Closed");
+    if (filter === "Resolved") return list.filter((t) => t.Status === "Resolved" || t.Status === "Closed");
+    return list;
+  }, [tickets, filter]);
 
   const handleSubmit = async () => {
     if (!form.subject.trim()) { toast.error("Subject is required"); return; }
@@ -40,43 +48,53 @@ const PortalTickets: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold font-heading text-slate-800">Support</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Raise a request and track it through to resolution.</p>
-        </div>
+        <PageHeader eyebrow="Support" title="Support" subtitle="Raise a request and track it through to resolution." />
         <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700">
+          className="flex items-center gap-1.5 px-4 py-2 text-white text-sm font-semibold rounded-lg h-fit" style={{ background: INK }}>
           <Plus size={14} /> Raise a Ticket
         </button>
       </div>
 
-      <div className="rounded-2xl border border-violet-100 bg-white overflow-hidden shadow-sm">
-        {isLoading ? (
-          <div className="p-8 text-center text-sm text-slate-400">Loading…</div>
-        ) : tickets.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500 flex flex-col items-center gap-2">
-            <LifeBuoy size={28} className="text-violet-200" />
-            No support tickets yet — anything you raise will show up here.
-          </div>
-        ) : (tickets as any[]).map((t) => (
-          <div key={t.Id} className="px-5 py-4 border-b border-violet-50 last:border-0">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-800 truncate">{t.Subject}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{t.TicketNo} · {t.Category.replace(/([A-Z])/g, " $1").trim()} · {fmtDate(t.CreatedAt)}</p>
-              </div>
-              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold shrink-0 ${STATUS_STYLE[t.Status] || "bg-slate-100 text-slate-600"}`}>{t.Status}</span>
-            </div>
-            {t.ResolutionNotes && (
-              <p className="text-xs text-slate-500 mt-2 bg-slate-50 rounded-lg p-2.5">Resolution: {t.ResolutionNotes}</p>
-            )}
-          </div>
+      <div className="flex items-center gap-1.5">
+        {FILTERS.map((f) => (
+          <button key={f} onClick={() => setFilter(f)}
+            className="px-3 py-1.5 text-xs font-semibold rounded-full transition-colors"
+            style={filter === f ? { background: INK, color: "#fff" } : { background: GOLD_SOFT, color: "#8A6D14" }}>
+            {f}{f !== "All" ? ` (${(tickets as any[]).filter((t) => f === "Open" ? (t.Status !== "Resolved" && t.Status !== "Closed") : (t.Status === "Resolved" || t.Status === "Closed")).length})` : ` (${tickets.length})`}
+          </button>
         ))}
       </div>
 
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="p-8 text-center text-sm" style={{ color: TEXT_FAINT }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-8 text-center text-sm flex flex-col items-center gap-2" style={{ color: TEXT_MUTED }}>
+            <LifeBuoy size={28} style={{ color: GOLD, opacity: 0.5 }} />
+            {tickets.length === 0 ? "No support tickets yet — anything you raise will show up here." : `No ${filter.toLowerCase()} tickets.`}
+          </div>
+        ) : filtered.map((t) => (
+          <div key={t.Id} className="px-5 py-4 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate" style={{ color: TEXT }}>{t.Subject}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {t.Category.replace(/([A-Z])/g, " $1").trim()} · {fmtDate(t.CreatedAt)}</p>
+              </div>
+              <StatusPill status={t.Status} />
+            </div>
+            {t.ResolutionNotes && (
+              <p className="text-xs mt-2 rounded-lg p-2.5" style={{ color: TEXT_MUTED, background: SURFACE_ALT }}>Resolution: {t.ResolutionNotes}</p>
+            )}
+          </div>
+        ))}
+      </Card>
+
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && setDialogOpen(false)}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Raise a Ticket</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Raise a Ticket</DialogTitle>
+            <DialogDescription>Tell us what's going on — your assigned team will follow up here.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-slate-500 block mb-1">Category</label>
@@ -99,7 +117,7 @@ const PortalTickets: React.FC = () => {
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDialogOpen(false)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">Cancel</button>
             <button onClick={handleSubmit} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
               {saving ? "Submitting..." : "Submit"}
             </button>
           </div>
