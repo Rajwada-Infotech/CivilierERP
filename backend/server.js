@@ -277,7 +277,6 @@ const ALL_ROUTES = [
   { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
   { path: "/api/boq", file: "./routes/boq" },
   { path: "/api/engineering/dpr", file: "./routes/dpr" },
-  { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
   { path: "/api/inter-company-transfer", file: "./routes/interCompanyTransfer" },
@@ -475,6 +474,9 @@ async function createApp() {
   app.use("/health", require("./routes/health"));
   app.use("/api/users", require("./routes/users"));
   app.use("/api/public-stats", require("./routes/publicStats"));
+  // Version number is not sensitive — served publicly so the Login/Landing
+  // footers (pre-auth) can show the real DB-driven version, not "…".
+  app.use("/api/app-version", require("./routes/appVersion"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {

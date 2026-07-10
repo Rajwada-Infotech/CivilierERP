@@ -61,6 +61,31 @@ async function canAccessTicket(ticketId, user) {
   return result.recordset.length > 0;
 }
 
+// Staff with Material module access can see any PO's chat; a supplier user
+// may only join the room for a PO addressed to their own AccountHeadMaster
+// link (dbo.users.LinkedLHeadId === PurchaseOrders.SupplierID).
+async function canAccessPO(poId, user) {
+  if (!user?.userId && !user?.id) return false;
+  const role = normalizeRole(user.role);
+  if (role !== "supplier") return true; // staff — page-right already gated the REST endpoints
+
+  const userId = Number(user.userId ?? user.id);
+  if (!Number.isInteger(userId) || userId <= 0) return false;
+
+  const pool = getPool();
+  const result = await pool
+    .request()
+    .input("poId", sql.Int, poId)
+    .input("userId", sql.Int, userId).query(`
+      SELECT TOP 1 po.PurchaseOrderID
+      FROM dbo.PurchaseOrders po
+      JOIN dbo.users u ON u.LinkedLHeadId = po.SupplierID
+      WHERE po.PurchaseOrderID = @poId AND u.id = @userId
+    `);
+
+  return result.recordset.length > 0;
+}
+
 /**
  * Attach socket.io to an existing http.Server.
  * Must be called before startServer resolves.
@@ -180,6 +205,62 @@ function initSocket(httpServer) {
             err,
           },
           "Ticket typing broadcast failed",
+        );
+      }
+    });
+
+    socket.on("po:join", async (poId, ack) => {
+      const id = Number(poId);
+      if (!Number.isInteger(id) || id <= 0) {
+        if (typeof ack === "function") ack({ ok: false, error: "Invalid order id" });
+        return;
+      }
+
+      try {
+        const allowed = await canAccessPO(id, socket.data.user);
+        if (!allowed) {
+          if (typeof ack === "function") ack({ ok: false, error: "Access denied" });
+          return;
+        }
+
+        socket.join(`po:${id}`);
+        if (typeof ack === "function") ack({ ok: true });
+      } catch (err) {
+        logger.warn(
+          { event: "SOCKET_PO_JOIN_ERROR", socketId: socket.id, poId: id, err },
+          "PO room join failed",
+        );
+        if (typeof ack === "function") ack({ ok: false, error: "Join failed" });
+      }
+    });
+
+    socket.on("po:leave", (poId) => {
+      const id = Number(poId);
+      if (Number.isInteger(id) && id > 0) {
+        socket.leave(`po:${id}`);
+      }
+    });
+
+    socket.on("po:typing", async (payload = {}) => {
+      const id = Number(payload.poId);
+      if (!Number.isInteger(id) || id <= 0) return;
+
+      try {
+        const allowed = await canAccessPO(id, socket.data.user);
+        if (!allowed) return;
+
+        const authedUser = socket.data.user || {};
+        socket.to(`po:${id}`).emit("po:typing", {
+          poId: id,
+          userId: Number(authedUser.userId ?? authedUser.id ?? null) || null,
+          name: String(authedUser.name ?? authedUser.username ?? "Unknown"),
+          role: String(authedUser.role ?? "user"),
+          isTyping: Boolean(payload.isTyping),
+        });
+      } catch (err) {
+        logger.warn(
+          { event: "SOCKET_PO_TYPING_ERROR", socketId: socket.id, poId: id, err },
+          "PO typing broadcast failed",
         );
       }
     });

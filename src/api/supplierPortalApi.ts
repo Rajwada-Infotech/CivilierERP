@@ -87,6 +87,52 @@ export interface SupplierCatalogPayloadItem {
   Quality?: string;
 }
 
+export interface SupplierOrderSummary {
+  PurchaseOrderID: number;
+  PurchaseOrderNo: string | null;
+  DocNo: string | null;
+  PODate: string | null;
+  ExpectedDeliveryDate: string | null;
+  ItemDescription: string | null;
+  Quantity: number | null;
+  Unit: string | null;
+  TotalAmount: number | null;
+  Status: string;
+  Remarks: string | null;
+  SupplierAcknowledged: boolean;
+  SupplierAcknowledgedAt: string | null;
+  SuppliedDate: string | null;
+  ChallanNumber: string | null;
+  POType: string | null;
+  SourceMRDocNo: string | null;
+  SourceQTDocNo: string | null;
+  SourceWDDocNo: string | null;
+  SourceLabel: "Direct" | "Material Request" | "Quotation" | "Work Done" | "Work Order";
+  CompanyName: string | null;
+  ProjectName: string | null;
+  CommentCount: number;
+}
+
+export interface SupplierOrderDetail extends Omit<SupplierOrderSummary, "CommentCount"> {
+  Rate: number | null;
+  SubtotalAmount: number | null;
+  HsnCode: string | null;
+  GstType: string | null;
+  GstRate: number | null;
+  PaymentTerms: string | null;
+  POItems: any[];
+}
+
+export interface OrderChatMessage {
+  Id: number;
+  PurchaseOrderId: number;
+  comment: string;
+  author_name: string;
+  author_id: number | null;
+  author_role: string | null;
+  created_at: string;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 async function handleResponse<T = any>(res: Response): Promise<T> {
@@ -139,3 +185,30 @@ export const updateSupplierCatalog = (items: SupplierCatalogPayloadItem[]) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   }).then((r) => handleResponse(r));
+
+export const getSupplierOrders = () =>
+  fetchWithAuth(`${BASE}/orders`).then((r) => handleResponse<SupplierOrderSummary[]>(r));
+
+export const getSupplierOrderDetail = (id: number | string) =>
+  fetchWithAuth(`${BASE}/orders/${id}`).then((r) => handleResponse<SupplierOrderDetail>(r));
+
+export const acknowledgeSupplierOrder = (
+  id: number | string,
+  acknowledged: boolean,
+  challanNumber?: string,
+) =>
+  fetchWithAuth(`${BASE}/orders/${id}/acknowledge`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ acknowledged, challanNumber }),
+  }).then((r) => handleResponse<{ ok: boolean; acknowledged: boolean }>(r));
+
+export const getSupplierOrderComments = (id: number | string) =>
+  fetchWithAuth(`${BASE}/orders/${id}/comments`).then((r) => handleResponse<OrderChatMessage[]>(r));
+
+export const postSupplierOrderComment = (id: number | string, comment: string) =>
+  fetchWithAuth(`${BASE}/orders/${id}/comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  }).then((r) => handleResponse<{ comment: OrderChatMessage }>(r));

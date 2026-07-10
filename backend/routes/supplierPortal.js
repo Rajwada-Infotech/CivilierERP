@@ -323,4 +323,213 @@ router.put("/catalog", async (req, res) => {
   }
 });
 
+// ── Lazy Socket.IO handle (mirrors purchaseOrders.js's pattern) ─────────────
+let _getIo = null;
+function getIo() {
+  if (!_getIo) _getIo = require("../socket").getIo;
+  return _getIo();
+}
+function emitPOMessage(poId, comment) {
+  try {
+    getIo().to(`po:${poId}`).emit("po:message", { poId, comment });
+  } catch (err) {
+    console.warn(`[supplierPortal] Socket emit failed for poId="${poId}": ${err?.message || err}`);
+  }
+}
+
+// ── GET /orders — Purchase Orders addressed to me ────────────────────────────
+// Intentionally source-agnostic: no filter on POType/SourceXxxId, so this
+// returns every PO with SupplierID = me regardless of how it was created —
+// Direct entry, from a Material Request, or from the Quotation/L1-Chart
+// flow (POType='QPO'). SourceLabel below is just a display hint.
+router.get("/orders", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("supplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate,
+          po.ExpectedDeliveryDate, po.ItemDescription, po.Quantity, po.Unit,
+          po.TotalAmount, po.Status, po.Remarks,
+          po.SupplierAcknowledged, po.SupplierAcknowledgedAt,
+          po.SuppliedDate, po.ChallanNumber,
+          po.POType,
+          po.SourceMRDocNo, po.SourceQTDocNo, po.SourceWDDocNo,
+          CASE
+            WHEN po.POType = 'QPO'        THEN 'Quotation'
+            WHEN po.SourceMRId IS NOT NULL THEN 'Material Request'
+            WHEN po.SourceWDId IS NOT NULL THEN 'Work Done'
+            WHEN po.POType = 'WO_PO'      THEN 'Work Order'
+            ELSE 'Direct'
+          END AS SourceLabel,
+          co.name AS CompanyName, pr.name AS ProjectName,
+          (SELECT COUNT(*) FROM dbo.PurchaseOrderComments c WHERE c.PurchaseOrderId = po.PurchaseOrderID) AS CommentCount
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.enterprise co ON co.id = po.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = po.ProjectId
+        WHERE po.SupplierID = @supplierId
+          AND po.Status NOT IN ('Draft', 'Rejected')
+        ORDER BY po.PODate DESC, po.PurchaseOrderID DESC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /orders/:id — PO detail (only if addressed to me) ───────────────────
+router.get("/orders/:id", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("supplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate,
+          po.ExpectedDeliveryDate, po.ItemDescription, po.Quantity, po.Unit,
+          po.Rate, po.SubtotalAmount, po.TotalAmount, po.HsnCode, po.GstType, po.GstRate,
+          po.PaymentTerms, po.Remarks, po.Status, po.POItems,
+          po.SupplierAcknowledged, po.SupplierAcknowledgedAt,
+          po.SuppliedDate, po.ChallanNumber,
+          po.POType,
+          po.SourceMRDocNo, po.SourceQTDocNo, po.SourceWDDocNo,
+          CASE
+            WHEN po.POType = 'QPO'        THEN 'Quotation'
+            WHEN po.SourceMRId IS NOT NULL THEN 'Material Request'
+            WHEN po.SourceWDId IS NOT NULL THEN 'Work Done'
+            WHEN po.POType = 'WO_PO'      THEN 'Work Order'
+            ELSE 'Direct'
+          END AS SourceLabel,
+          co.name AS CompanyName, pr.name AS ProjectName
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.enterprise co ON co.id = po.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = po.ProjectId
+        WHERE po.PurchaseOrderID = @id AND po.SupplierID = @supplierId
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Order not found" });
+
+    const row = result.recordset[0];
+    let items = [];
+    try { items = row.POItems ? JSON.parse(row.POItems) : []; } catch { /* ignore */ }
+
+    res.json({ ...row, POItems: items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /orders/:id/acknowledge — mark supplies dispatched ("tick box") ─────
+// SuppliedDate is stamped with today whenever the box is ticked on (never
+// backdated/edited by the client) so "days to deliver" stays trustworthy.
+// ChallanNumber is optional, prompted client-side at the same moment.
+router.put("/orders/:id/acknowledge", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const acknowledged = !!req.body?.acknowledged;
+    const challanNumber = (req.body?.challanNumber || "").toString().trim() || null;
+
+    const owned = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("supplierId", sql.Int, req.supplierLHeadId)
+      .query("SELECT 1 FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id AND SupplierID = @supplierId");
+    if (!owned.recordset.length) return res.status(404).json({ error: "Order not found" });
+
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("Acknowledged", sql.Bit, acknowledged ? 1 : 0)
+      .input("AcknowledgedAt", sql.DateTime2, acknowledged ? new Date() : null)
+      .input("SuppliedDate", sql.Date, acknowledged ? new Date() : null)
+      .input("ChallanNumber", sql.NVarChar(100), acknowledged ? challanNumber : null)
+      .query(`
+        UPDATE dbo.PurchaseOrders
+        SET SupplierAcknowledged = @Acknowledged,
+            SupplierAcknowledgedAt = @AcknowledgedAt,
+            SuppliedDate = @SuppliedDate,
+            ChallanNumber = @ChallanNumber
+        WHERE PurchaseOrderID = @id
+      `);
+
+    res.json({ ok: true, acknowledged });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /orders/:id/comments — chat thread for a PO I own ───────────────────
+router.get("/orders/:id/comments", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const owned = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("supplierId", sql.Int, req.supplierLHeadId)
+      .query("SELECT 1 FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id AND SupplierID = @supplierId");
+    if (!owned.recordset.length) return res.status(404).json({ error: "Order not found" });
+
+    const result = await pool.request().input("POID", sql.Int, id).query(`
+      SELECT Id, PurchaseOrderId, Comment AS comment, AuthorName AS author_name,
+             AuthorId AS author_id, AuthorRole AS author_role, CreatedAt AS created_at
+      FROM dbo.PurchaseOrderComments
+      WHERE PurchaseOrderId = @POID
+      ORDER BY CreatedAt ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /orders/:id/comment — reply in the chat thread ──────────────────────
+router.post("/orders/:id/comment", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const comment = (req.body?.comment || "").trim();
+    if (!comment) return res.status(400).json({ error: "Comment is required" });
+
+    const owned = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("supplierId", sql.Int, req.supplierLHeadId)
+      .query("SELECT 1 FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id AND SupplierID = @supplierId");
+    if (!owned.recordset.length) return res.status(404).json({ error: "Order not found" });
+
+    const authorName = req.user?.name ?? req.user?.username ?? "Supplier";
+    const authorId = req.user?.userId ?? req.user?.id ?? null;
+
+    const insert = await pool.request()
+      .input("POID",       sql.Int,           id)
+      .input("Comment",    sql.NVarChar(sql.MAX), comment)
+      .input("AuthorName", sql.NVarChar(200), authorName)
+      .input("AuthorId",   sql.Int,           authorId)
+      .input("AuthorRole", sql.NVarChar(50),  "supplier")
+      .query(`
+        INSERT INTO dbo.PurchaseOrderComments (PurchaseOrderId, Comment, AuthorName, AuthorId, AuthorRole)
+        OUTPUT INSERTED.Id, INSERTED.PurchaseOrderId, INSERTED.Comment AS comment,
+               INSERTED.AuthorName AS author_name, INSERTED.AuthorId AS author_id,
+               INSERTED.AuthorRole AS author_role, INSERTED.CreatedAt AS created_at
+        VALUES (@POID, @Comment, @AuthorName, @AuthorId, @AuthorRole)
+      `);
+
+    const saved = insert.recordset[0];
+    res.json({ comment: saved });
+    emitPOMessage(id, saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

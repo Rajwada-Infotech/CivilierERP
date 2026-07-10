@@ -470,8 +470,21 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WORK_DONE'                              THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WO'                                     THEN ISNULL(wo_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            ELSE ISNULL(eb.EName, '')
+            -- Direct/manual (TOD etc.) bookings carry no supplier link; when the
+            -- caller scopes by @PartyId (On A/C Adjustment flow) the invoice only
+            -- reached this row via that party's payment history, so label it with
+            -- the party's name rather than the generic EName.
+            ELSE ISNULL(party_opt.LHeadName, ISNULL(eb.EName, ''))
           END                             AS supplierName,
+          -- Party/supplier LHeadId behind supplierName above — lets the
+          -- frontend auto-select the Payee/Party dropdown on invoice pick.
+          CASE
+            WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ahm.LHeadId
+            WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN po_supp_opt.LHeadId
+            WHEN eb.ESourceType = 'WORK_DONE'                              THEN wd_supp_opt.LHeadId
+            WHEN eb.ESourceType = 'WO'                                     THEN wo_supp_opt.LHeadId
+            ELSE eb.LHeadId
+          END                             AS supplierId,
           -- Use live GRN total when available so the amount in the picker is accurate
           CASE
             WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
@@ -521,6 +534,7 @@ router.get("/options", async (req, res) => {
           ON eb.ESourceType = 'WO' AND wo_supp_opt_wo.Id = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wo_supp_opt
           ON wo_supp_opt.LHeadId = COALESCE(wo_supp_opt_wo.SupplierId, wo_supp_opt_wo.ContractorId)
+        LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
@@ -539,6 +553,18 @@ router.get("/options", async (req, res) => {
             OR (eb.ESourceType = 'WORK_DONE'     AND wd_supp_opt.LHeadId = @PartyId)
             OR (eb.ESourceType = 'WO'            AND wo_supp_opt.LHeadId = @PartyId)
             OR eb.LHeadId = @PartyId
+            -- Payment-history link: direct/manual invoices (TOD etc.) have no
+            -- supplier column, so treat an invoice as belonging to @PartyId when
+            -- that party has previously paid against it (OnAccountLedger -> the
+            -- payment's PExpenseRef). This is the linkage the On A/C Adjustment
+            -- flow relies on.
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
             OR EXISTS (
               SELECT 1 FROM dbo.NewPayment np
               WHERE np.PExpenseRef = eb.EDocNo
@@ -552,7 +578,8 @@ router.get("/options", async (req, res) => {
     // EMI installments: only show Pending ones
     const emiResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("PartyId", sql.Int, partyId).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -571,6 +598,14 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_emi.LHeadName, ISNULL(eb.EName, ''))
             ELSE ISNULL(eb.EName, '')
           END                          AS supplierName,
+          -- Party/supplier LHeadId behind supplierName above — lets the
+          -- frontend auto-select the Payee/Party dropdown on invoice pick.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ahm2.LHeadId
+            WHEN eb.ESourceType IN ('PO','WO_PO') THEN po_supp_emi.LHeadId
+            WHEN eb.ESourceType = 'WORK_DONE' THEN wd_supp_emi.LHeadId
+            ELSE eb.LHeadId
+          END                          AS supplierId,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
           ISNULL(eb.EFinYear, '')      AS financialYear,
@@ -606,6 +641,18 @@ router.get("/options", async (req, res) => {
             WHERE dn.bill_id = ei.Id AND dn.is_active = 1
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@PartyId IS NULL OR (
+            (eb.ESourceType = 'GRN' AND ahm2.LHeadId = @PartyId)
+            OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_emi.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_emi.LHeadId = @PartyId)
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
+          ))
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
@@ -619,6 +666,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       partyName: r.partyName || "",
       supplierName: r.supplierName || "",
+      partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
@@ -638,6 +686,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       partyName: r.partyName || "",
       supplierName: r.supplierName || "",
+      partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
@@ -805,11 +854,14 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
+      // One-and-done: any non-Deleted booking (including Draft — e.g. one whose
+      // auto-submit-to-Pending transition failed) still counts as "invoiced"
+      // and must keep the source document out of the picker. Only a hard
+      // delete of the booking reopens the source.
       const result = await pool.request().query(`
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
         WHERE EStatus != 'Deleted'
-          AND EStatus != 'Draft'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
 
@@ -872,7 +924,7 @@ router.get("/by-source", async (req, res) => {
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = @ESourceType
           AND eb.ESourceId = @ESourceId
-          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND ISNULL(eb.EStatus, '') <> 'Deleted'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid ASC
       `);
@@ -890,6 +942,21 @@ router.get("/:id/can-delete", async (req, res) => {
 
   try {
     const pool = getPool();
+
+    // ── 0. EMI guard ──────────────────────────────────────────────────────────
+    // EMI-enabled bookings cannot be deleted at all — deleting one would both
+    // orphan its EmiInstallments schedule and silently reopen the source
+    // document (GRN/PO/Work Done) for re-invoicing, breaking one-and-done.
+    const emiCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT EEmiPayment FROM dbo.ExpenseBooking WHERE Eid = @Eid
+    `);
+    if (emiCheck.recordset[0]?.EEmiPayment) {
+      return res.json({
+        deletable: false,
+        reason:
+          "This is an EMI booking and cannot be deleted. EMI entries are permanent once created.",
+      });
+    }
 
     // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const dnCheck = await pool.request().input("Eid", sql.Int, id).query(`
@@ -1296,9 +1363,11 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         throw err;
       }
 
-      // Enforce: only one active expense booking per GRN at a time.
+      // Enforce: only one active expense booking per GRN, ever — one-and-done.
       // If the previous booking was deleted (hard-deleted), no row remains, so
-      // this check passes and a fresh booking is allowed.
+      // this check passes and a fresh booking is allowed. A Draft booking
+      // (e.g. one whose auto-submit-to-Pending transition failed) still
+      // counts — it must be deleted, not silently bypassed, before rebooking.
       const dupCheck = await transaction
         .request()
         .input("DupGRNId", sql.Int, grnId).query(`
@@ -1306,7 +1375,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'GRN'
             AND ESourceId = @DupGRNId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {
         const err = new Error(
@@ -1705,9 +1774,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per GRN at a time.
+      // Enforce: only one active expense booking per GRN, ever — one-and-done.
       // If the previous booking was deleted (hard-deleted), no row remains, so
-      // this check passes and a fresh booking is allowed.
+      // this check passes and a fresh booking is allowed. A Draft booking
+      // (e.g. one whose auto-submit-to-Pending transition failed) still
+      // counts — it must be deleted, not silently bypassed, before rebooking.
       const dupCheck = await transaction
         .request()
         .input("DupGRNId", sql.Int, grnId).query(`
@@ -1715,7 +1786,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'GRN'
             AND ESourceId = @DupGRNId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -1778,7 +1849,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per PO at a time.
+      // Enforce: only one active expense booking per PO, ever — one-and-done.
       const poDupCheck = await transaction
         .request()
         .input("DupPOId", sql.Int, poId)
@@ -1787,7 +1858,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = @DupPOSourceType
             AND ESourceId = @DupPOId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(poDupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -1825,7 +1896,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per Work Done entry at a time.
+      // Enforce: only one active expense booking per Work Done entry, ever — one-and-done.
       const wdDupCheck = await transaction
         .request()
         .input("DupWDId", sql.BigInt, workDoneId).query(`
@@ -1833,7 +1904,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'WORK_DONE'
             AND ESourceId = @DupWDId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(wdDupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -2880,6 +2951,19 @@ router.delete("/:id", requirePageRight("expense-booking", "delete"), async (req,
 
   try {
     const pool = getPool();
+
+    // ── 0. EMI guard ──────────────────────────────────────────────────────────
+    // EMI-enabled bookings are permanent — deleting one would orphan its
+    // EmiInstallments schedule and silently reopen the source document for
+    // re-invoicing, breaking the one-and-done policy.
+    const emiCheck = await pool.request().input("Eid", sql.Int, numericId).query(`
+      SELECT EEmiPayment FROM dbo.ExpenseBooking WHERE Eid = @Eid
+    `);
+    if (emiCheck.recordset[0]?.EEmiPayment) {
+      const message =
+        "This is an EMI booking and cannot be deleted. EMI entries are permanent once created.";
+      return res.status(409).json({ error: message, message });
+    }
 
     // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const refCheck = await pool.request().input("Eid", sql.Int, numericId)
