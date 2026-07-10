@@ -4,7 +4,6 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
@@ -71,14 +70,90 @@ router.get("/contact-persons", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT DISTINCT LTRIM(RTRIM(LHeadContactPerson)) AS name
+      SELECT
+        LTRIM(RTRIM(LHeadContactPerson)) AS name,
+        LHeadType                        AS type,
+        LHeadId                          AS partyId,
+        LHeadName                        AS partyName,
+        LHeadCode                        AS partyCode,
+        LHeadPhone                       AS phone,
+        LHeadEmail                       AS email,
+        LHeadAddress                     AS address,
+        LGST                             AS gst,
+        LHeadPan                         AS pan
       FROM dbo.AccountHeadMaster
       WHERE LHeadType IN ('S', 'C', 'A')
         AND LHeadContactPerson IS NOT NULL
         AND LTRIM(RTRIM(LHeadContactPerson)) <> ''
-      ORDER BY name
+      ORDER BY LHeadType, LHeadContactPerson
     `);
-    res.json(result.recordset.map((r) => r.name));
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /meta/suppliers — party pill source ────────────────────────────────
+router.get("/meta/suppliers", authenticateToken, async (req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT LHeadId AS id, LHeadName AS name, LHeadCode AS code
+      FROM dbo.AccountHeadMaster WHERE LHeadType = 'S' AND Status IN ('Active', 'Approved')
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /meta/contractors — party pill source ──────────────────────────────
+router.get("/meta/contractors", authenticateToken, async (req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT LHeadId AS id, LHeadName AS name, LHeadCode AS code
+      FROM dbo.AccountHeadMaster WHERE LHeadType = 'C' AND Status IN ('Active', 'Approved')
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /meta/customers — party pill source ───────────────────────────────
+router.get("/meta/customers", authenticateToken, async (req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT LHeadId AS id, LHeadName AS name, LHeadCode AS code
+      FROM dbo.AccountHeadMaster WHERE LHeadType = 'A' AND Status IN ('Active', 'Approved')
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /options — dropdown source for Payment/Invoice/Expense forms ────────
+// Must be before /:id so "options" isn't matched as an id param.
+router.get("/options", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    let query = `
+      SELECT c.ContractId AS id,
+             CONCAT(ISNULL(c.DocNo, 'Contract #' + CAST(c.ContractId AS NVARCHAR)),
+                    ISNULL(' — ' + c.ContactPerson, '')) AS label,
+             c.ContractAmount
+      FROM dbo.Contract c
+      WHERE c.Status <> 'Deleted'
+    `;
+    if (req.query.companyId) {
+      query += " AND c.CompanyId = @CompanyId";
+      request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));
+    }
+    if (req.query.projectId) {
+      query += " AND c.ProjectId = @ProjectId";
+      request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+    query += " ORDER BY c.CreatedAt DESC";
+    const result = await request.query(query);
+    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -114,8 +189,8 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
     const pool = getPool();
     const {
       docTypeId, docDate, contractDate, companyId, projectId, finYear,
-      contactPerson, reason, natureOfContract, contractAmount,
-      contractStartDate, contractEndDate, attachments, termsAndConditions, remarks,
+      contactPerson, contactPartyId, reason, natureOfContract, contractAmount,
+      contractStartDate, contractEndDate, attachments, termsAndConditions, remarks, parties,
     } = req.body;
 
     if (!docTypeId) return res.status(400).json({ error: "docTypeId is required" });
@@ -136,6 +211,7 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
       .input("ProjectId",         sql.Int,           projectId ? parseInt(projectId, 10) : null)
       .input("FinYear",           sql.NVarChar(20),  finYear || null)
       .input("ContactPerson",     sql.NVarChar(200), contactPerson || null)
+      .input("ContactPartyId",    sql.Int,           contactPartyId ? parseInt(contactPartyId, 10) : null)
       .input("Reason",            sql.NVarChar(sql.MAX), reason || null)
       .input("NatureOfContract",  sql.NVarChar(500), natureOfContract || null)
       .input("ContractAmount",    sql.Decimal(18, 2), contractAmount ? parseFloat(contractAmount) : null)
@@ -144,19 +220,20 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
       .input("Attachments",       sql.NVarChar(sql.MAX), attachments ? JSON.stringify(attachments) : null)
       .input("TermsAndConditions",sql.NVarChar(sql.MAX), termsAndConditions || null)
       .input("Remarks",           sql.NVarChar(sql.MAX), remarks || null)
+      .input("Parties",           sql.NVarChar(sql.MAX), parties ? JSON.stringify(parties) : null)
       .input("Status",            sql.NVarChar(30),  "Draft")
       .input("CreatedBy",         sql.NVarChar(200), email)
       .query(`
         INSERT INTO dbo.Contract
           (DocNo, DocTypeId, DocDate, ContractDate, CompanyId, ProjectId, FinYear,
-           ContactPerson, Reason, NatureOfContract, ContractAmount,
+           ContactPerson, ContactPartyId, Reason, NatureOfContract, ContractAmount,
            ContractStartDate, ContractEndDate, Attachments, TermsAndConditions,
-           Remarks, Status, CreatedBy, CreatedAt)
+           Remarks, Parties, Status, CreatedBy, CreatedAt)
         VALUES
           (@DocNo, @DocTypeId, @DocDate, @ContractDate, @CompanyId, @ProjectId, @FinYear,
-           @ContactPerson, @Reason, @NatureOfContract, @ContractAmount,
+           @ContactPerson, @ContactPartyId, @Reason, @NatureOfContract, @ContractAmount,
            @ContractStartDate, @ContractEndDate, @Attachments, @TermsAndConditions,
-           @Remarks, @Status, @CreatedBy, GETDATE());
+           @Remarks, @Parties, @Status, @CreatedBy, GETDATE());
         SELECT SCOPE_IDENTITY() AS ContractId;
       `);
 
@@ -181,8 +258,8 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
     const pool = getPool();
     const {
       docDate, contractDate, companyId, projectId, finYear,
-      contactPerson, reason, natureOfContract, contractAmount,
-      contractStartDate, contractEndDate, attachments, termsAndConditions, remarks, status,
+      contactPerson, contactPartyId, reason, natureOfContract, contractAmount,
+      contractStartDate, contractEndDate, attachments, termsAndConditions, remarks, parties, status,
     } = req.body;
 
     await pool.request()
@@ -193,6 +270,7 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
       .input("ProjectId",         sql.Int,           projectId ? parseInt(projectId, 10) : null)
       .input("FinYear",           sql.NVarChar(20),  finYear || null)
       .input("ContactPerson",     sql.NVarChar(200), contactPerson || null)
+      .input("ContactPartyId",    sql.Int,           contactPartyId ? parseInt(contactPartyId, 10) : null)
       .input("Reason",            sql.NVarChar(sql.MAX), reason || null)
       .input("NatureOfContract",  sql.NVarChar(500), natureOfContract || null)
       .input("ContractAmount",    sql.Decimal(18, 2), contractAmount ? parseFloat(contractAmount) : null)
@@ -201,6 +279,7 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
       .input("Attachments",       sql.NVarChar(sql.MAX), attachments ? JSON.stringify(attachments) : null)
       .input("TermsAndConditions",sql.NVarChar(sql.MAX), termsAndConditions || null)
       .input("Remarks",           sql.NVarChar(sql.MAX), remarks || null)
+      .input("Parties",           sql.NVarChar(sql.MAX), parties ? JSON.stringify(parties) : null)
       .input("Status",            sql.NVarChar(30),  status || "Draft")
       .input("UpdatedBy",         sql.NVarChar(200), email)
       .query(`
@@ -211,6 +290,7 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
           ProjectId         = @ProjectId,
           FinYear           = @FinYear,
           ContactPerson     = @ContactPerson,
+          ContactPartyId    = @ContactPartyId,
           Reason            = @Reason,
           NatureOfContract  = @NatureOfContract,
           ContractAmount    = @ContractAmount,
@@ -219,6 +299,7 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
           Attachments       = @Attachments,
           TermsAndConditions= @TermsAndConditions,
           Remarks           = @Remarks,
+          Parties           = @Parties,
           Status            = @Status,
           UpdatedBy         = @UpdatedBy,
           UpdatedAt         = GETDATE()
@@ -251,37 +332,6 @@ router.delete("/:id", authenticateToken, requirePageRight("finance-contracts", "
       `);
     await bumpCacheVersion("contracts");
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /options — dropdown source for Payment/Invoice/Expense forms ────────
-// Only non-deleted contracts, so a payment/invoice can't be tagged against
-// a contract that's already been removed.
-router.get("/options", authenticateToken, async (req, res) => {
-  try {
-    const pool = getPool();
-    const request = pool.request();
-    let query = `
-      SELECT c.ContractId AS id,
-             CONCAT(ISNULL(c.DocNo, 'Contract #' + CAST(c.ContractId AS NVARCHAR)),
-                    ISNULL(' — ' + c.ContactPerson, '')) AS label,
-             c.ContractAmount
-      FROM dbo.Contract c
-      WHERE c.Status <> 'Deleted'
-    `;
-    if (req.query.companyId) {
-      query += " AND c.CompanyId = @CompanyId";
-      request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));
-    }
-    if (req.query.projectId) {
-      query += " AND c.ProjectId = @ProjectId";
-      request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));
-    }
-    query += " ORDER BY c.CreatedAt DESC";
-    const result = await request.query(query);
-    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

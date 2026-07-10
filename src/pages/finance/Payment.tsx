@@ -420,13 +420,6 @@ const normaliseExpenseOptions = (items: any[]): ExpenseOption[] =>
       null,
   }));
 
-const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
-  const res = await fetchWithAuth("/api/expense-booking/options");
-  if (!res.ok) return [];
-  const raw = await res.json().catch(() => ({}));
-  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  return normaliseExpenseOptions(items);
-};
 
 
 const fetchExpenseDetail = async (

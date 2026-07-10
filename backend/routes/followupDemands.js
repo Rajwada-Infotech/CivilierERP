@@ -234,7 +234,8 @@ router.patch(
       const termRowId = parseId(req.params.id);
       if (!termRowId) return res.status(400).json({ error: "Invalid ID" });
 
-      getUserName(req, res);
+      const userName = getUserName(req, res);
+      if (!userName) return;
 
       const existing = await pool.request().input("Id", sql.Int, termRowId)
         .query(`
