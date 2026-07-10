@@ -80,6 +80,21 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
     }
 
+    // Workflow guard: the sales deed itself must exist and be customer-
+    // approved before handover — matching the spec's SALES DEED -> CUSTOMER
+    // APPROVAL -> TICKETS/POSSESSION ordering. An Executed agreement alone
+    // used to be enough to schedule a handover, which let staff skip past
+    // the sales deed step entirely.
+    const deed = await pool.request()
+      .input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 CustomerApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!deed.recordset.length) {
+      return res.status(400).json({ error: "Handover requires the sales deed to be created first" });
+    }
+    if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
+    }
+
     const result = await pool.request()
       .input("bid",  sql.Int,  parseInt(b.BookingId))
       .input("sdt",  sql.Date, b.ScheduledDate || null)
@@ -145,15 +160,6 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-
-    // On completion, cascade booking status to Handed Over
-    if (b.Status === "Completed") {
-      const h = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
-      if (h.recordset[0]) {
-        await pool.request().input("bid", sql.Int, h.recordset[0].BookingId)
-          .query("UPDATE dbo.CrmBooking SET Status = 'Approved', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
-      }
-    }
 
     res.json({ success: true });
   } catch (e) {

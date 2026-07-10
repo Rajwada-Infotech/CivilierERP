@@ -1,4 +1,4 @@
-import { ClipboardList, BookOpen, Phone, FileText, IndianRupee, Key, Wrench, XCircle, Users, Scale, HardHat, LayoutDashboard, MessageSquare } from "lucide-react";
+import { ClipboardList, BookOpen, Phone, FileText, IndianRupee, Key, Wrench, XCircle, Users, Scale, HardHat, LayoutDashboard, MessageSquare, Grid3x3 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const crmNavItems: NavItem[] = [
@@ -14,6 +14,16 @@ export const crmNavItems: NavItem[] = [
       { label: "Welcome Calls",  path: "/crm/welcome-calls",  pageKey: "crm-welcome-calls" },
       { label: "Communication Log", path: "/crm/communication", pageKey: "crm-communication" },
       { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
+    ],
+  },
+
+  // ── CRM Inventory Matrix ────────────────────────────────────────────────────
+  {
+    label: "Matrix",
+    icon: Grid3x3,
+    children: [
+      { label: "Unit Matrix",    path: "/crm/unit-matrix",    pageKey: "crm-unit-matrix"    },
+      { label: "Parking Matrix", path: "/crm/parking-matrix", pageKey: "crm-parking-matrix" },
     ],
   },
 

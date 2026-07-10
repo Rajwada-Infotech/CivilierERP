@@ -108,18 +108,29 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   const customerDetails = detail.recordset[0] || {};
 
   const agNo = await getNextDocNumber(pool, "AGR", "AGR");
-  const result = await pool.request()
-    .input("agno", sql.NVarChar(50), agNo)
-    .input("bid",  sql.Int, bookingId)
-    .input("pan",  sql.NVarChar(20), customerDetails.PanNo || null)
-    .input("aadh", sql.NVarChar(20), customerDetails.AadhaarNo || null)
-    .input("cb",   sql.Int, actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmAgreement
-        (AgreementNo, BookingId, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@agno, @bid, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
-    `);
+  let result;
+  try {
+    result = await pool.request()
+      .input("agno", sql.NVarChar(50), agNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("pan",  sql.NVarChar(20), customerDetails.PanNo || null)
+      .input("aadh", sql.NVarChar(20), customerDetails.AadhaarNo || null)
+      .input("cb",   sql.Int, actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmAgreement
+          (AgreementNo, BookingId, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@agno, @bid, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
+      `);
+  } catch (e) {
+    // Race: welcome-call logging and bank-detail saving can both complete
+    // the last prerequisite at nearly the same time and both reach here.
+    // The loser hits the UNIQUE(BookingId) constraint — that's expected and
+    // fine (the winner already created the agreement), not a real failure
+    // of whatever the caller was actually trying to save.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
   const agreementId = result.recordset[0].Id;
 
   const portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
@@ -187,8 +198,56 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   return { id: deedId, DeedNo: deedNo };
 }
 
+// The real "agreement date" is only ever finalized once both sides land on
+// the SAME date — company proposes one, customer proposes one (defaulting
+// to accepting the company's if they don't override), and the moment those
+// two values agree, AgreementDate itself gets set automatically. Called
+// after every point that can touch either proposed-date column (company
+// send-to-customer, customer approve) so the match is caught the instant
+// it happens, from either side.
+async function maybeResolveAgreementDate(pool, agreementId) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT BookingId, AgreementDate, ProposedDateByCompany, ProposedDateByCustomer
+    FROM dbo.CrmAgreement WHERE Id = @id
+  `);
+  const ag = row.recordset[0];
+  if (!ag || ag.AgreementDate) return null; // already finalized, never overwritten
+  if (!ag.ProposedDateByCompany || !ag.ProposedDateByCustomer) return null;
+
+  const company = new Date(ag.ProposedDateByCompany).toDateString();
+  const customer = new Date(ag.ProposedDateByCustomer).toDateString();
+  if (company !== customer) return null; // still negotiating
+
+  await pool.request()
+    .input("id", sql.Int, agreementId)
+    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .query("UPDATE dbo.CrmAgreement SET AgreementDate = @adt WHERE Id = @id");
+
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .query(`
+      INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
+      VALUES (@agid, 'AgreementDateConfirmed', 'System', SYSDATETIME())
+    `);
+
+  // The "Agreement" payment milestone had no fixed due date until now — it
+  // becomes due the moment both sides actually agree on the agreement date,
+  // completing the spec's APPROVAL FROM BOTH END -> DATE OF AGREEMENT ->
+  // MILESTONE chain instead of leaving it perpetually undated.
+  await pool.request()
+    .input("bid", sql.Int, ag.BookingId)
+    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .query(`
+      UPDATE dbo.CrmPaymentMilestone SET DueDate = @adt
+      WHERE BookingId = @bid AND MilestoneName = 'Agreement' AND DueDate IS NULL AND Status = 'Pending'
+    `);
+
+  return ag.ProposedDateByCompany;
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateSalesDeed,
+  maybeResolveAgreementDate,
 };

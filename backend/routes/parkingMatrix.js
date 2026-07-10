@@ -7,8 +7,8 @@ const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
 
-// GET /projects — project dropdown (mirrors unitMaster.js /projects)
-router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {
+// GET /projects — mirrors unitMatrix.js
+router.get("/projects", requirePageRight("crm-parking-matrix", "view"), cache("parking-matrix-projects", 600), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -19,13 +19,13 @@ router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit
     `);
     res.json(result.recordset);
   } catch (err) {
-    console.error("[unit-matrix] GET /projects error:", err.message);
+    console.error("[parking-matrix] GET /projects error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /blocks?projectId= — block dropdown for the selected project
-router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, res) => {
+// GET /blocks?projectId=
+router.get("/blocks", requirePageRight("crm-parking-matrix", "view"), async (req, res) => {
   const projectId = parseInt(req.query.projectId, 10);
   try {
     const pool = getPool();
@@ -39,17 +39,18 @@ router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, r
     const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
-    console.error("[unit-matrix] GET /blocks error:", err.message);
+    console.error("[parking-matrix] GET /blocks error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET / — the matrix itself. Status is always derived live from CrmBooking,
-// never stored on UnitMaster, so it can never drift out of sync with the
-// actual booking record: an administratively deactivated unit is Blocked,
-// one with a live (non-cancelled) booking is Booked, everything else is
-// Available.
-router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) => {
+// GET / — the parking matrix. Status is always derived live from
+// CrmParkingAllotment (joined by ParkingSlotId), never stored on the slot
+// itself — same pattern as unitMatrix.js. A slot is Booked whether it was
+// sold alongside a unit booking (BookingId set) or standalone against just
+// an Application (BookingId NULL) — either way an active allotment row
+// against this slot means it's taken.
+router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
@@ -57,36 +58,38 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
-    let where = "u.ProjectId = @pid";
+    let where = "s.ProjectId = @pid";
     if (Number.isFinite(blockId)) {
       request.input("bid", sql.Int, blockId);
-      where += " AND u.BlockId = @bid";
+      where += " AND s.BlockId = @bid";
     }
 
     const result = await request.query(`
       SELECT
-        u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
-        bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus,
+        s.Id, s.SlotNo, s.ParkingType, s.BlockId, blk.BlockName, s.IsActive AS SlotIsActive,
+        pa.Id AS AllotmentId, pa.BookingId, b.BookingNo,
         a.ApplicantName, a.Mobile,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
         ha.ApplicantName AS HoldApplicantName, ha.Mobile AS HoldMobile
-      FROM dbo.UnitMaster u
-      LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
-      LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
-      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      FROM dbo.ParkingSlot s
+      LEFT JOIN dbo.BlockMaster blk ON blk.Id = s.BlockId
+      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
+      LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
+      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       LEFT JOIN dbo.CrmApplication ha ON ha.Id = h.ApplicationId
       WHERE ${where}
-      ORDER BY u.FloorNo, blk.BlockName, u.UnitName
+      ORDER BY s.SlotNo
     `);
 
-    const units = result.recordset.map((r) => ({
+    const slots = result.recordset.map((r) => ({
       Id: r.Id,
-      UnitName: r.UnitName,
-      FloorNo: r.FloorNo,
+      SlotNo: r.SlotNo,
+      ParkingType: r.ParkingType,
       BlockId: r.BlockId,
       BlockName: r.BlockName,
-      Status: !r.UnitIsActive ? "Blocked" : r.BookingId ? "Booked" : r.HoldId ? "OnHold" : "Available",
+      Status: !r.SlotIsActive ? "Blocked" : r.AllotmentId ? "Booked" : r.HoldId ? "OnHold" : "Available",
+      AllotmentId: r.AllotmentId || null,
       BookingId: r.BookingId || null,
       BookingNo: r.BookingNo || null,
       ApplicantName: r.ApplicantName || null,
@@ -98,9 +101,9 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       HoldMobile: r.HoldMobile || null,
     }));
 
-    res.json(units);
+    res.json(slots);
   } catch (err) {
-    console.error("[unit-matrix] GET error:", err.message);
+    console.error("[parking-matrix] GET error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

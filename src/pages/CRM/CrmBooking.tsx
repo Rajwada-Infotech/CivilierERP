@@ -3,8 +3,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, ChevronRight, IndianRupee } from "lucide-react";
+import { Plus, Search, Phone, ChevronRight, IndianRupee, MoreHorizontal, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 
@@ -78,6 +84,14 @@ async function fetchExtraCharges(bookingId: number): Promise<any[]> {
 async function fetchParkingRates(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/parking-master"); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchAvailableParkingSlots(projectId: number, blockId: number | null): Promise<any[]> {
+  try {
+    const params = new URLSearchParams({ projectId: String(projectId) });
+    if (blockId) params.set("blockId", String(blockId));
+    const r = await fetchWithAuth(`/api/parking-matrix?${params}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 async function fetchExtraChargeTypes(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/extra-charge-master"); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -87,7 +101,7 @@ async function fetchExtraChargeTypes(): Promise<any[]> {
 // masters); this dialog only allots/removes them against this booking.
 const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
   const qc = useQueryClient();
-  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotNo: "", Quantity: "1" });
+  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
   const [saving, setSaving] = useState(false);
 
@@ -104,6 +118,12 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
     queryFn: fetchParkingRates,
     staleTime: 5 * 60_000,
   });
+  const { data: parkingSlots = [] } = useQuery({
+    queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId],
+    queryFn: () => fetchAvailableParkingSlots(booking.ProjectId, booking.BlockId),
+    enabled: !!booking.ProjectId,
+    staleTime: 30_000,
+  });
   const { data: chargeTypes = [] } = useQuery({
     queryKey: ["extra-charge-master-all"],
     queryFn: fetchExtraChargeTypes,
@@ -112,6 +132,10 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
 
   const applicableRates = (parkingRates as any[]).filter(
     (r: any) => r.IsActive && r.ProjectId === booking.ProjectId && (!r.BlockId || r.BlockId === booking.BlockId)
+  );
+  const selectedRate = applicableRates.find((r: any) => String(r.Id) === parkingForm.ParkingMasterId);
+  const availableSlots = (parkingSlots as any[]).filter(
+    (s: any) => s.Status === "Available" && (!selectedRate || s.ParkingType === selectedRate.ParkingType)
   );
 
   const invalidate = () => {
@@ -127,12 +151,18 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
       const res = await fetchWithAuth(`/api/crm/parking/${booking.Id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...parkingForm, Quantity: parseInt(parkingForm.Quantity) || 1 }),
+        body: JSON.stringify({
+          ParkingMasterId: parkingForm.ParkingMasterId,
+          ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
+          ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
+          Quantity: parseInt(parkingForm.Quantity) || 1,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`Parking allotted — ${inr(data.TotalAmount)}`);
-      setParkingForm({ ParkingMasterId: "", ParkingSlotNo: "", Quantity: "1" });
+      setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+      qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId] });
       invalidate();
     } catch (e: any) {
       toast.error(e.message);
@@ -228,16 +258,27 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
             </div>
           )}
           <div className="grid grid-cols-4 gap-2">
-            <select value={parkingForm.ParkingMasterId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value }))}
+            <select value={parkingForm.ParkingMasterId}
+              onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
               className="col-span-2 text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select parking rate</option>
               {applicableRates.map((r: any) => (
                 <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — {inr(r.Charge)} (+{r.GstRate}% GST)</option>
               ))}
             </select>
-            <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
-              onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            {availableSlots.length > 0 ? (
+              <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                className="text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">Select slot (optional)</option>
+                {availableSlots.map((s: any) => (
+                  <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
+                ))}
+              </select>
+            ) : (
+              <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
+                onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
+                className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            )}
             <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
               onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
               className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
@@ -248,6 +289,9 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
           </button>
           {applicableRates.length === 0 && (
             <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
+          )}
+          {applicableRates.length > 0 && availableSlots.length === 0 && (
+            <p className="text-xs text-muted-foreground">No numbered slot inventory set up for this project/block yet — enter a slot number manually, or add slots in Setup → Parking Slot Master.</p>
           )}
         </div>
 
@@ -308,6 +352,22 @@ const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ bookin
     </Dialog>
   );
 };
+
+// The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
+// approvals) -> Payments. Only ever surface the ONE step the booking is
+// actually sitting at right now — never let staff jump ahead to a later
+// step a record hasn't reached yet.
+type NextStep = { label: string; color: string; path: string } | null;
+function getNextStep(b: any): NextStep {
+  if (b.Status !== "Approved") return null; // Pending/Rejected/Cancelled have no forward step
+  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
+  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
+    return { label: "Agreement", color: "text-purple-600 border-purple-200 bg-purple-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-primary border-primary/20 bg-primary/5", path: `/crm/payments?bookingId=${b.Id}` };
+  return null; // every gated step is complete
+}
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
@@ -516,41 +576,48 @@ const CrmBooking: React.FC = () => {
                         onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
                       />
                       {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-                      {/* Ordered to match the real workflow: Welcome Call ->
-                          Bank Details -> Agreement -> Payments -> Charges.
-                          Agreement/Payments stay reachable regardless of step
-                          completion (staff can review), but the earlier steps
-                          are surfaced first so they aren't skipped in practice. */}
-                      <button onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}
-                        className="text-xs text-sky-600 hover:underline flex items-center gap-1">
-                        Welcome Call <ChevronRight size={12} />
-                      </button>
-                      <button onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}
-                        className="text-xs text-cyan-600 hover:underline flex items-center gap-1">
-                        Communication <ChevronRight size={12} />
-                      </button>
-                      <button onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}
-                        className="text-xs text-amber-600 hover:underline flex items-center gap-1">
-                        Bank Details <ChevronRight size={12} />
-                      </button>
-                      <button onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}
-                        className="text-xs text-purple-600 hover:underline flex items-center gap-1">
-                        Agreement <ChevronRight size={12} />
-                      </button>
-                      <button onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}
-                        className="text-xs text-primary hover:underline flex items-center gap-1">
-                        Payments <ChevronRight size={12} />
-                      </button>
-                      <button onClick={() => setChargesBooking(b)}
-                        className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
-                        Charges <ChevronRight size={12} />
-                      </button>
-                      {b.Status !== "Cancelled" && (
-                        <button onClick={() => handleChangeUnit(b)}
-                          className="text-xs text-rose-600 hover:underline flex items-center gap-1">
-                          Change Unit
-                        </button>
-                      )}
+                      {(() => {
+                        const step = getNextStep(b);
+                        if (step) {
+                          return (
+                            <button onClick={() => navigate(step.path)}
+                              className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
+                              {step.label} <ChevronRight size={12} />
+                            </button>
+                          );
+                        }
+                        if (b.Status === "Approved") {
+                          return (
+                            <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
+                              <CheckCircle2 size={12} /> All Steps Complete
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                      {/* Non-sequential utility actions — not part of the
+                          linear flow, so they live in an overflow menu
+                          instead of competing with the one active step. */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
+                            <MoreHorizontal size={16} />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setChargesBooking(b)}>Charges</DropdownMenuItem>
+                          {b.Status !== "Cancelled" && (
+                            <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
+                              Change Unit
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </td>
                 </tr>

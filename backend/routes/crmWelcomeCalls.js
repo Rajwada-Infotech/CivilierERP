@@ -205,4 +205,67 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
   }
 });
 
+// PUT /:id — edit an already-logged call (correcting outcome, notes, dates, etc.)
+router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body;
+    if (b.Outcome && !OUTCOMES.includes(b.Outcome))
+      return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
+
+    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmWelcomeCall WHERE Id = @id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Call log not found" });
+
+    let customFieldsJson;
+    if (Array.isArray(b.CustomFields)) {
+      const cleaned = b.CustomFields
+        .filter((f) => f && String(f.key || "").trim())
+        .map((f) => ({ key: String(f.key).trim(), value: String(f.value ?? "").trim() }));
+      customFieldsJson = cleaned.length ? JSON.stringify(cleaned) : null;
+    }
+
+    await pool.request()
+      .input("id",   sql.Int, id)
+      .input("cb",   sql.Int, b.CalledBy ? parseInt(b.CalledBy) : null)
+      .input("dt",   sql.DateTime2(3), b.CallDate || null)
+      .input("dur",  sql.Int, b.DurationSeconds != null ? parseInt(b.DurationSeconds) : null)
+      .input("out",  sql.NVarChar(50), b.Outcome || null)
+      .input("ncd",  sql.Date, b.NextCallDate || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson ?? null)
+      .input("pad",  sql.Date, b.PreferredAgreementDate || null)
+      .query(`
+        UPDATE dbo.CrmWelcomeCall SET
+          CalledBy = ISNULL(@cb, CalledBy),
+          CallDate = ISNULL(@dt, CallDate),
+          DurationSeconds = @dur,
+          Outcome = ISNULL(@out, Outcome),
+          NextCallDate = @ncd,
+          Notes = @note,
+          CustomFields = @cf,
+          PreferredAgreementDate = @pad
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-welcome-calls] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id — remove a mis-logged call entry
+router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCall WHERE Id = @id");
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Call log not found" });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-welcome-calls] DELETE error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

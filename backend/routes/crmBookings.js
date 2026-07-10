@@ -8,6 +8,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { emitNotification } = require("../services/notify");
+const { guardAndConvertHold } = require("../services/crmHoldService");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -15,6 +16,9 @@ const { transition: approvalTransition } = require("../services/approvalService"
 
 router.use(authMiddleware);
 
+// Flow-progress flags (HasWelcomeCall / BankDetailsComplete / Agreement*)
+// drive the list page's single "next step" action — the UI is never allowed
+// to jump ahead to a later step than the record has actually reached.
 const BOOKING_SELECT = `
   SELECT
     b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId, b.ProjectName, b.CompanyId,
@@ -28,7 +32,22 @@ const BOOKING_SELECT = `
     u.name  AS AssigneeName,
     cu.name AS CreatedByName,
     pp.PlanName AS PaymentPlanName,
-    comp.name AS CompanyName
+    comp.name AS CompanyName,
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wc WHERE wc.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS HasWelcomeCall,
+    CAST(CASE WHEN EXISTS (
+      SELECT 1 FROM dbo.CrmCustomerBankDetail bd WHERE bd.BookingId = b.Id
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.BankName, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountNo, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.IfscCode, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountHolderName, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeName, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeRelation, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.PanNo, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AadhaarNo, ''))), '') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
+    ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
+    ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
@@ -36,6 +55,7 @@ const BOOKING_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
   LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
   LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
+  LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
 `;
 
 // GET / — all bookings
@@ -110,6 +130,11 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
     const taken = await pool.request().input("uid", sql.Int, parseInt(b.UnitId))
       .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
+
+    // A unit on hold for a different applicant can't be booked out from
+    // under them; a hold for this same applicant is closed out (Converted)
+    // once the real booking exists.
+    await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
     // Area is a fixed physical attribute of the unit — always taken from
     // Unit Master, never re-typed per booking (same as UnitType above).
@@ -194,18 +219,27 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
           { no: 7, name: "Handover",         pct: 15, dept: "Sales",        docs: "Possession Letter, Handover Checklist" },
         ];
       }
+      // The very first milestone (the booking/token amount) is due the day
+      // the booking itself was made — every later stage is either
+      // construction-linked (no fixed calendar date until that stage is
+      // actually reached) or the Agreement milestone, whose due date gets
+      // set automatically once both sides confirm the same agreement date
+      // (see maybeResolveAgreementDate). Without this, DueDate stayed NULL
+      // forever and the overdue-payment SLA check/dashboard silently never
+      // fired for any auto-generated milestone.
       for (const m of milestones) {
         await pool.request()
           .input("bid",  sql.Int,           bookingId)
           .input("mno",  sql.Int,           m.no)
           .input("mname",sql.NVarChar(200), m.name)
           .input("amt",  sql.Decimal(18,2), Math.round(total * m.pct) / 100)
+          .input("due",  sql.Date,          m.no === 1 ? (b.BookingDate || new Date()) : null)
           .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
           .input("dept", sql.NVarChar(100), m.dept || null)
           .input("cb",   sql.Int,           actorId(req))
           .query(`
-            INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
-            VALUES (@bid, @mno, @mname, @amt, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+            INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+            VALUES (@bid, @mno, @mname, @amt, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
           `);
       }
     }
@@ -221,7 +255,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
     res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo });
   } catch (e) {
     console.error("[crm-bookings] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -330,6 +364,10 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
+    const bookingAppId = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @id");
+    await guardAndConvertHold(pool, "Unit", newUnitId, bookingAppId.recordset[0].ApplicationId);
+
     const actor = actorId(req);
     await pool.request()
       .input("id",    sql.Int, id)
@@ -368,7 +406,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     res.json({ success: true, unitNo: unitRow.UnitName });
   } catch (e) {
     console.error("[crm-bookings] change-unit error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

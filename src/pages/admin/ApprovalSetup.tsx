@@ -110,6 +110,12 @@ const MODULE_OPTIONS = [
     icon: "🏭",
     desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
   },
+  {
+    id: "crm-agreements",
+    label: "CRM Agreement (Senior Approval)",
+    icon: "📝",
+    desc: "Before an agreement is sent to the customer portal — approver roles here are always restricted to admin/super_admin/marketing_head regardless of who's assigned",
+  },
 ] as const;
 
 type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -145,6 +151,12 @@ const MODULE_GROUPS = [
     label: "Sales",
     icon: "🛍️",
     modules: ["SaleOrder"],
+  },
+  {
+    id: "crm",
+    label: "CRM",
+    icon: "🏠",
+    modules: ["crm-agreements"],
   },
 ] as const;
 
