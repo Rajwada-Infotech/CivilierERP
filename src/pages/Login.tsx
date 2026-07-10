@@ -10,6 +10,7 @@ import {
   useSpring,
 } from "framer-motion";
 import { toast } from "sonner";
+import { useAppVersion } from "@/hooks/useAppVersion";
 
 // ── Typewriter ────────────────────────────────────────────────────────────────
 function useTypewriter(words: string[], speed = 80, pause = 2400) {
@@ -516,6 +517,7 @@ interface PublicStats {
 }
 
 export default function Login() {
+  const { appVersion } = useAppVersion();
   const [showPass, setShowPass] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -833,7 +835,7 @@ export default function Login() {
                 </motion.form>
 
                 <p className="text-center text-[10px] text-white/20 mt-5">
-                  Secure access · Role-based permissions · v1.0.0
+                  Secure access · Role-based permissions · v{appVersion}
                 </p>
                 <p className="text-center text-[11px] text-white/30 mt-2">
                   Are you a supplier?{" "}

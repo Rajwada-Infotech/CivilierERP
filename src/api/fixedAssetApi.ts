@@ -14,6 +14,7 @@ export interface FixedAssetListItem {
   Model: string | null;
   SerialNumber: string | null;
   PurchaseDate: string | null;
+  ActivationDate: string | null;
   PurchaseCost: number;
   Quantity: number;
   Location: string | null;
@@ -56,6 +57,7 @@ export interface FixedAssetPayload {
   model?: string;
   serialNumber?: string;
   purchaseDate?: string;
+  activationDate?: string;
   purchaseInvoiceRef?: string;
   supplierId?: number | null;
   purchaseCost?: number;
