@@ -2,13 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const requireAuth = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 const { buildGrnGstData }           = require("../utils/buildGrnGstData");
 
 router.use(requireAuth);
-router.use(apiRateLimit);
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
@@ -115,13 +113,18 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
         ON eb.ESourceType IN ('PO','WO_PO') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.WorkDone wd
         ON eb.ESourceType = 'WORK_DONE' AND wd.ID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.WorkOrderHeader wo
+        ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
       WHERE (
-        grn.SupplierID = @PartyId
-        OR po.SupplierID = @PartyId
-        OR wd.SupplierId = @PartyId
-        OR eb.LHeadId = @PartyId
+        grn.SupplierID    = @PartyId
+        OR po.SupplierID  = @PartyId
+        OR wd.SupplierId  = @PartyId
+        OR wo.SupplierId  = @PartyId
+        OR wo.ContractorId = @PartyId
+        OR eb.LHeadId     = @PartyId
       )
       AND eb.EDocNo IS NOT NULL
+      AND eb.EStatus = 'Approved'
       ORDER BY ECreatedAt DESC
     `);
     const rows = await Promise.all(r.recordset.map(async (row) => {
