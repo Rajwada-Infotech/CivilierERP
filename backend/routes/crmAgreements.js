@@ -1,4 +1,7 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -8,7 +11,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeResolveAgreementDate } = require("../services/crmWorkflowGuards");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve on this page.
@@ -25,10 +28,35 @@ const AGREEMENT_TRANSITIONS = {
 
 router.use(authMiddleware);
 
+const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = [
+      "application/pdf", "image/jpeg", "image/png", "image/webp",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("File type not allowed"));
+  },
+});
+
 const AGR_SELECT = `
   SELECT
     ag.Id, ag.AgreementNo, ag.BookingId, ag.AgreementDate,
-    ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo,
+    ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo, ag.VersionNo,
     ag.Status, ag.Notes, ag.CreatedAt, ag.UpdatedAt,
     ag.SeniorApprovalStatus, ag.SeniorApprovedAt, ag.SeniorApprovalRemarks,
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
@@ -36,11 +64,13 @@ const AGR_SELECT = `
     ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.SentToCustomerAt,
     b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue,
     a.ApplicantName, a.Mobile, a.Email,
-    cu.name AS CreatedByName
+    cu.name AS CreatedByName,
+    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
+  LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
 `;
 
 // GET / — all agreements
@@ -74,6 +104,26 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
     res.json({ agreement: agRes.recordset[0], documents: docRes.recordset });
   } catch (e) {
     console.error("[crm-agreements] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/revisions — prior versions of the agreement's legal content,
+// newest first. Each row is what was superseded, with the reason.
+router.get("/:id/revisions", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT r.*, cu.name AS CreatedByName
+      FROM dbo.CrmAgreementRevision r
+      LEFT JOIN dbo.Users cu ON cu.id = r.CreatedBy
+      WHERE r.AgreementId = @id
+      ORDER BY r.VersionNo DESC, r.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET /:id/revisions error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -179,7 +229,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-agreements", id, "Approved", userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-agreements", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
     if (result.newStatus === "Approved") {
       const pool = getPool();
       await pool.request()
@@ -197,7 +247,11 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     }
 
     await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
-    res.json({ success: true, status: result.newStatus });
+    // Forward the full transition() result (not just `status`) — when this
+    // is one level of several (see migration 169's 2-level workflow),
+    // newStatus/level/totalLevels are what ApprovalActions.tsx reads to show
+    // "Level 1 of 2 approved" instead of misleadingly saying fully approved.
+    res.json({ success: true, status: result.newStatus, ...result });
   } catch (e) {
     console.error("[crm-agreements] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
@@ -309,7 +363,12 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
         VALUES (@agid, 'SendToCustomer', 'Staff', @aid, SYSDATETIME())
       `);
 
-    res.json({ success: true });
+    // If the customer already proposed a date on a prior round (e.g. after
+    // a recheck), the company's date here might now match it — catch that
+    // immediately instead of waiting on the customer to act again.
+    const confirmedDate = await maybeResolveAgreementDate(pool, id);
+
+    res.json({ success: true, agreementDateConfirmed: confirmedDate });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
     res.status(500).json({ error: e.message });
@@ -348,8 +407,33 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
+      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id");
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const oldRow = old.recordset[0];
+
+    // Versioning: any edit to the actual legal content snapshots the prior
+    // values first — nothing is silently overwritten. A PUT that only
+    // touches unrelated things (or nothing) doesn't bump the version.
+    const touchesLegalContent = b.AgreementDate != null || b.LegalName != null
+      || b.LegalAddress != null || b.PanNo != null || b.AadhaarNo != null;
+    if (touchesLegalContent) {
+      await pool.request()
+        .input("agid", sql.Int, id)
+        .input("ver",  sql.Int, oldRow.VersionNo)
+        .input("adt",  sql.Date, oldRow.AgreementDate)
+        .input("lname",sql.NVarChar(300), oldRow.LegalName)
+        .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+        .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+        .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+        .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+        .input("reason", sql.NVarChar(200), b.RevisionReason || "Staff correction")
+        .input("cb",   sql.Int, actor)
+        .query(`
+          INSERT INTO dbo.CrmAgreementRevision
+            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+        `);
+    }
 
     await pool.request()
       .input("id",    sql.Int,           id)
@@ -359,16 +443,17 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
       .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
       .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
       .input("ub",    sql.Int,           actor)
       .query(`
         UPDATE dbo.CrmAgreement SET
           AgreementDate = ISNULL(@adt, AgreementDate), LegalName = ISNULL(@lname, LegalName),
           LegalAddress = @laddr, PanNo = @pan, AadhaarNo = @aadh,
-          Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          Notes = @note, VersionNo = VersionNo + @bump, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
-    res.json({ success: true });
+    res.json({ success: true, versionBumped: touchesLegalContent });
   } catch (e) {
     console.error("[crm-agreements] PUT error:", e.message);
     res.status(500).json({ error: e.message });
@@ -505,7 +590,10 @@ router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req
   }
 });
 
-// POST /:id/documents — add a document to an agreement
+// POST /:id/documents — add a document to an agreement. Re-uploading the
+// same DocumentType (e.g. a corrected SaleAgreement PDF) never overwrites
+// the prior row — it inserts a new one with the next VersionNo for that
+// type, so every prior document stays reachable via GET /:id.
 router.post("/:id/documents", requirePageRight("crm-documents", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -514,6 +602,11 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
     const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+
+    const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+    const nextVersion = ver.recordset[0].N;
+
     await pool.request()
       .input("agid",  sql.Int,            agreementId)
       .input("dtype", sql.NVarChar(100),  b.DocumentType)
@@ -523,20 +616,98 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
       .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
       .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
       .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
+      .input("ver",   sql.Int,            nextVersion)
       .input("cb",    sql.Int,            actorId(req))
       .query(`
         INSERT INTO dbo.CrmAgreementDocument
-          (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, CreatedBy, CreatedAt)
-        VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @cb, SYSDATETIME())
+          (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+        VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @ver, @cb, SYSDATETIME())
       `);
-    res.status(201).json({ success: true });
+    res.status(201).json({ success: true, version: nextVersion });
   } catch (e) {
     console.error("[crm-agreements] POST documents error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// PUT /:id/documents/:docId — update document status
+// POST /:id/documents/upload — actual multi-file upload (up to 10 files in
+// one request). One row per file, all sharing the same DocumentType, each
+// versioned sequentially so a re-upload never overwrites a prior file.
+router.post("/:id/documents/upload", requirePageRight("crm-documents", "create"), (req, res) => {
+  upload.array("files", 10)(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docType = req.body?.DocumentType;
+      const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+      if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+      if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+
+      const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType)
+        .query("SELECT ISNULL(MAX(VersionNo), 0) AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+      let nextVersion = ver.recordset[0].N;
+
+      const inserted = [];
+      for (const file of req.files) {
+        nextVersion += 1;
+        const result = await pool.request()
+          .input("agid",  sql.Int, agreementId)
+          .input("dtype", sql.NVarChar(100), docType)
+          .input("fname", sql.NVarChar(300), file.originalname)
+          .input("fp",    sql.NVarChar(500), file.path)
+          .input("fs",    sql.BigInt, file.size)
+          .input("mt",    sql.NVarChar(150), file.mimetype)
+          .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
+          .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
+          .input("ver",   sql.Int, nextVersion)
+          .input("cb",    sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementDocument
+              (AgreementId, DocumentType, FileName, FilePath, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.Id
+            VALUES (@agid, @dtype, @fname, @fp, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
+          `);
+        inserted.push(result.recordset[0].Id);
+      }
+      res.status(201).json({ success: true, ids: inserted, count: inserted.length });
+    } catch (e) {
+      for (const file of req.files || []) {
+        const resolved = path.resolve(file.path);
+        if (resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolved, () => {});
+      }
+      console.error("[crm-agreements] upload documents error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// GET /documents/file/:docId — stream a document's file for inline preview/download
+router.get("/documents/file/:docId", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.docId);
+    const result = await getPool().request().input("id", sql.Int, id)
+      .query("SELECT FileName, FilePath, MimeType FROM dbo.CrmAgreementDocument WHERE Id = @id");
+    if (!result.recordset.length || !result.recordset[0].FilePath) return res.status(404).json({ error: "File not found" });
+    const doc = result.recordset[0];
+
+    const resolvedPath = path.resolve(doc.FilePath);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
+
+    res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (e) {
+    console.error("[crm-agreements] file GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/documents/:docId — review metadata only (Status/Remarks). The
+// file itself can never be replaced in place — a corrected file always goes
+// through POST /:id/documents as a new version instead ("nothing should be
+// overwritten").
 router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -545,10 +716,9 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
       .input("id",  sql.Int,          parseInt(req.params.docId))
       .input("st",  sql.NVarChar(30), b.Status || null)
       .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .input("url", sql.NVarChar(2000), b.DocumentUrl || null)
       .query(`
         UPDATE dbo.CrmAgreementDocument SET
-          Status = ISNULL(@st, Status), Remarks = @rem, DocumentUrl = ISNULL(@url, DocumentUrl)
+          Status = ISNULL(@st, Status), Remarks = @rem
         WHERE Id = @id
       `);
     res.json({ success: true });

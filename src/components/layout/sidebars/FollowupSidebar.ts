@@ -11,7 +11,6 @@ export const followupNavItems: NavItem[] = [
       { label: "Applications",           path: "/followup/sales/applications",           pageKey: "followup-applications" },
       { label: "Applicants Pipeline",    path: "/followup/sales/pipeline/applicants",    pageKey: "followup-applicants" },
       { label: "Bookings",               path: "/followup/sales/bookings",               pageKey: "followup-bookings" },
-      { label: "Unit Matrix",            path: "/followup/sales/unit-matrix",             pageKey: "followup-unit-matrix" },
       { label: "Unit Selection",         path: "/followup/sales/unit-selection",         pageKey: "followup-unit-selections" },
       { label: "Unit Selection Pipeline",path: "/followup/sales/pipeline/unit-selections",pageKey: "followup-unit-selections" },
       { label: "Welcome Calls",          path: "/followup/sales/welcome-calls",          pageKey: "followup-welcome-calls" },

@@ -842,6 +842,13 @@ export default function Login() {
                     Sign in to Supplier Portal
                   </button>
                 </p>
+                <p className="text-center text-[11px] text-white/30 mt-1.5">
+                  Are you a customer?{" "}
+                  <button onClick={() => navigate("/crm-client-portal/login")}
+                    className="text-violet-400 hover:text-violet-300 font-medium transition-colors underline underline-offset-2">
+                    Sign in to Customer Portal
+                  </button>
+                </p>
               </div>
             </TiltCard>
           </div>

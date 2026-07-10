@@ -1,4 +1,6 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -7,6 +9,7 @@ const portalAuth = require("../middleware/crmPortalAuth");
 const { logCrmAudit } = require("../services/crmAudit");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
+const { maybeResolveAgreementDate } = require("../services/crmWorkflowGuards");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -95,11 +98,26 @@ router.get("/timeline", async (req, res) => {
 
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.ProjectName, b.TotalValue, b.BookingAmount,
-             b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate
+             b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
+             b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal
       FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];
-    if (!bk) return res.json({ stage: "Application", steps: [] });
+
+    // Active holds are surfaced regardless of whether a booking exists yet —
+    // a customer can have a unit or parking slot on hold before booking
+    // anything at all (e.g. parking-only, or still deciding on a unit).
+    const holds = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT h.Id, h.EntityType, h.EntityId, h.HoldUntil, h.Reason,
+             u.UnitName, s.SlotNo
+      FROM dbo.CrmInventoryHold h
+      LEFT JOIN dbo.UnitMaster u ON h.EntityType = 'Unit' AND u.Id = h.EntityId
+      LEFT JOIN dbo.ParkingSlot s ON h.EntityType = 'Parking' AND s.Id = h.EntityId
+      WHERE h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      ORDER BY h.HoldUntil
+    `);
+
+    if (!bk) return res.json({ stage: "Application", steps: [], holds: holds.recordset });
 
     const [welcomeCall, customerDetails, agreement, milestones, deed, handover, constructionUpdates] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
@@ -155,6 +173,7 @@ router.get("/timeline", async (req, res) => {
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
       constructionUpdates: constructionUpdates.recordset,
+      holds: holds.recordset,
     });
   } catch (e) {
     console.error("[crm-portal] GET /timeline error:", e.message);
@@ -179,6 +198,60 @@ router.get("/agreement", async (req, res) => {
     res.json(result.recordset[0]);
   } catch (e) {
     console.error("[crm-portal] GET /agreement error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const AGREEMENT_UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
+
+// GET /agreement/documents — every document attached to the customer's own
+// agreement, once it's been shared. Scoped strictly to their own
+// ApplicationId — a customer can never see another buyer's documents.
+router.get("/agreement/documents", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const result = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT d.Id, d.DocumentType, d.FileName, d.FileSize, d.MimeType, d.Status, d.VersionNo, d.CreatedAt
+      FROM dbo.CrmAgreementDocument d
+      JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      ORDER BY d.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-portal] GET /agreement/documents error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /agreement/documents/file/:docId — stream a document's file, but only
+// if it genuinely belongs to this customer's own sent agreement.
+router.get("/agreement/documents/file/:docId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const docId = parseInt(req.params.docId);
+    const result = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
+      SELECT d.FileName, d.FilePath, d.MimeType
+      FROM dbo.CrmAgreementDocument d
+      JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
+    `);
+    if (!result.recordset.length || !result.recordset[0].FilePath) return res.status(404).json({ error: "File not found" });
+    const doc = result.recordset[0];
+
+    const resolvedPath = path.resolve(doc.FilePath);
+    if (!resolvedPath.startsWith(path.resolve(AGREEMENT_UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
+
+    res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (e) {
+    console.error("[crm-portal] GET /agreement/documents/file error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -230,6 +303,10 @@ router.post("/agreement/respond", async (req, res) => {
             ProposedDateByCustomer = ISNULL(@pdc, ProposedDateByCustomer)
           WHERE Id = @id
         `);
+      // The customer just approved and (optionally) proposed a date — if it
+      // now matches the company's proposed date, the agreement date is
+      // finalized right here, immediately, from the customer's own action.
+      await maybeResolveAgreementDate(pool, agreementId);
     } else {
       await pool.request()
         .input("id",  sql.Int, agreementId)

@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/welcome-calls";
@@ -60,6 +60,66 @@ async function fetchBookingById(bookingId: number): Promise<any | null> {
   } catch { return null; }
 }
 
+function mimeIcon(mime: string | null | undefined) {
+  if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
+  if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
+  if (mime === "application/pdf") return <FileCheck size={16} className="text-red-500 shrink-0" />;
+  if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={16} className="text-emerald-500 shrink-0" />;
+  return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
+}
+function fmtBytes(n: number | null | undefined) {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ─── Preview dialog for a single uploaded document ──────────────────────────
+const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    fetchWithAuth(`${DOC_API}/file/${doc.Id}`)
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch(() => setBlobUrl(null));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [doc.Id]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-heading flex items-center gap-2">
+            {mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/30 rounded-lg overflow-hidden">
+          {!blobUrl ? (
+            <span className="text-sm text-muted-foreground">Loading preview…</span>
+          ) : doc.MimeType?.startsWith("image/") ? (
+            <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
+          ) : doc.MimeType === "application/pdf" ? (
+            <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
+              {mimeIcon(doc.MimeType)}
+              Preview not available for this file type.
+            </div>
+          )}
+        </div>
+        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
+          <span>{fmtBytes(doc.FileSize)}</span>
+          {blobUrl && (
+            <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline">Download</a>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // ─── Intake dialog: log the call + work through the rest of the checklist ──
 const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
   const qc = useQueryClient();
@@ -69,6 +129,9 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const [saving, setSaving] = useState(false);
   const [docType, setDocType] = useState("");
   const [docUrl, setDocUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
 
@@ -135,6 +198,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
 
   const handleAddDoc = async () => {
     if (!docType) { toast.error("Select a document type"); return; }
+    if (!docUrl.trim()) { toast.error("Enter a URL, or use the upload button to attach a file"); return; }
     try {
       const res = await fetchWithAuth(`${DOC_API}/booking/${booking.BookingId}`, {
         method: "POST",
@@ -143,6 +207,41 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       });
       if (!res.ok) throw new Error((await res.json()).error);
       setDocType(""); setDocUrl("");
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleUploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    if (!docType) { toast.error("Select a document type before uploading"); return; }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("DocumentType", docType);
+      Array.from(files).forEach((f) => formData.append("files", f));
+      const res = await fetchWithAuth(`${DOC_API}/booking/${booking.BookingId}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success(`${data.count} file(s) uploaded`);
+      setDocType("");
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveDoc = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`${DOC_API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
       refetchDocs();
     } catch (e: any) {
       toast.error(e.message);
@@ -189,6 +288,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   };
 
   return (
+    <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -300,30 +400,56 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         {/* ── Document Verification ── */}
         <div className="rounded-xl border border-border p-4 space-y-2">
           <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
+
           {docData.documents.map((d: any) => (
-            <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
-              <div>
-                <span className="font-medium">{d.DocumentType}</span>
-                {d.DocumentUrl && <a href={d.DocumentUrl} target="_blank" rel="noreferrer" className="ml-2 text-xs text-primary hover:underline">View</a>}
-              </div>
-              <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
-                className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                {d.IsVerified ? "Verified" : "Mark Verified"}
+            <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0 gap-2">
+              <button
+                onClick={() => (d.FilePath ? setPreviewDoc(d) : d.DocumentUrl && window.open(d.DocumentUrl, "_blank"))}
+                disabled={!d.FilePath && !d.DocumentUrl}
+                className="flex items-center gap-2 min-w-0 text-left disabled:cursor-default"
+              >
+                {mimeIcon(d.MimeType)}
+                <span className="min-w-0">
+                  <span className="font-medium">{d.DocumentType}</span>
+                  {d.FileName && <span className="block text-[11px] text-muted-foreground truncate max-w-[220px]">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</span>}
+                </span>
+                {(d.FilePath || d.DocumentUrl) && <Eye size={13} className="text-muted-foreground shrink-0" />}
               </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
+                  className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                  {d.IsVerified ? "Verified" : "Mark Verified"}
+                </button>
+                <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600">
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </div>
           ))}
+
           <div className="flex items-center gap-2 pt-1">
             <select value={docType} onChange={(e) => setDocType(e.target.value)}
               className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select document type</option>
               {docData.standardTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <input placeholder="Document URL (optional)" value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
-              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <button onClick={handleAddDoc} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0">
-              + Add
+            <input type="file" multiple ref={fileInputRef}
+              onChange={(e) => handleUploadFiles(e.target.files)}
+              className="hidden" />
+            <button onClick={() => { if (!docType) { toast.error("Select a document type first"); return; } fileInputRef.current?.click(); }}
+              disabled={uploading}
+              className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0 flex items-center gap-1 disabled:opacity-40">
+              <Upload size={13} /> {uploading ? "Uploading..." : "Upload File(s)"}
             </button>
           </div>
+          <div className="flex items-center gap-2">
+            <input placeholder="...or paste an external document URL instead" value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
+              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            <button onClick={handleAddDoc} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0">
+              + Add Link
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
         </div>
 
         {/* ── Co-Applicant ── */}
@@ -392,6 +518,215 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         </div>
       </DialogContent>
     </Dialog>
+
+    {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+    </>
+  );
+};
+
+// ─── Edit dialog: correct a previously-logged call from Call History ───────
+const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => void }> = ({ call, onClose, onSaved }) => {
+  const [form, setForm] = useState({
+    CalledBy: call.CalledBy ? String(call.CalledBy) : "",
+    CallDate: call.CallDate ? String(call.CallDate).slice(0, 16) : "",
+    DurationSeconds: call.DurationSeconds != null ? String(call.DurationSeconds) : "",
+    Outcome: call.Outcome || "",
+    NextCallDate: call.NextCallDate ? String(call.NextCallDate).slice(0, 10) : "",
+    Notes: call.Notes || "",
+    PreferredAgreementDate: call.PreferredAgreementDate ? String(call.PreferredAgreementDate).slice(0, 10) : "",
+  });
+  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(() => {
+    try { return call.CustomFields ? JSON.parse(call.CustomFields) : []; } catch { return []; }
+  });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${call.Id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          CalledBy: form.CalledBy || null,
+          CallDate: form.CallDate || null,
+          DurationSeconds: form.DurationSeconds || null,
+          Outcome: form.Outcome || null,
+          NextCallDate: form.NextCallDate || null,
+          Notes: form.Notes || null,
+          PreferredAgreementDate: form.PreferredAgreementDate || null,
+          CustomFields: customFields,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Call updated");
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${call.Id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Call log removed");
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const selectedOutcomeStyle = form.Outcome ? outcomeColor[form.Outcome] : "";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-heading flex items-center gap-2">
+            <Phone size={16} className="text-primary" /> Edit Welcome Call
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* ── Customer / booking context ── */}
+        <div className="rounded-xl border border-border bg-muted/20 p-3.5 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground">{call.ApplicantName}</span>
+              <span className="text-xs font-mono text-muted-foreground">{call.BookingNo}</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {call.Mobile} · {call.ProjectName || "—"}{call.UnitNo ? ` · Unit ${call.UnitNo}` : ""}
+            </div>
+            {call.CalledByName && (
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Originally logged by <span className="font-medium">{call.CalledByName}</span>
+                {call.CreatedAt && <> on {new Date(call.CreatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</>}
+              </div>
+            )}
+          </div>
+          {call.Outcome && (
+            <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold whitespace-nowrap ${outcomeColor[call.Outcome] || ""}`}>
+              {call.Outcome}
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          {/* ── Call details ── */}
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Phone size={14} /> Call Details</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Called By</label>
+                <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">—</option>
+                  {users.map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Call Date/Time</label>
+                <input type="datetime-local" value={form.CallDate} onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
+                <select value={form.Outcome} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
+                  className={`w-full text-sm border rounded-lg px-2.5 py-2 font-medium ${selectedOutcomeStyle || "bg-background border-border"}`}>
+                  <option value="">—</option>
+                  {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Duration</label>
+                <div className="relative">
+                  <input type="number" min={0} value={form.DurationSeconds} onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background pr-16" placeholder="seconds" />
+                  {form.DurationSeconds && Number(form.DurationSeconds) > 0 && (
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
+                      {Math.floor(Number(form.DurationSeconds) / 60)}m {Number(form.DurationSeconds) % 60}s
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Follow-up & agreement scheduling ── */}
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Check size={14} /> Follow-up & Agreement</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Next Call Date</label>
+                <input type="date" value={form.NextCallDate} onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Preferred Agreement Date</label>
+                <input type="date" value={form.PreferredAgreementDate} onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Notes ── */}
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><FileCheck size={14} /> Notes</h3>
+            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+              rows={3} placeholder="What was discussed on this call..."
+              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" />
+          </div>
+
+          {/* ── Custom fields ── */}
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Users size={14} /> Custom Fields</h3>
+            {customFields.length === 0 && <p className="text-xs text-muted-foreground">No custom fields added for this call.</p>}
+            {customFields.map((f, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input placeholder="Field name" value={f.key}
+                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                  className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                <input placeholder="Value" value={f.value}
+                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                  className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
+                  className="text-muted-foreground hover:text-red-600 shrink-0">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            <button onClick={() => setCustomFields((cf) => [...cf, { key: "", value: "" }])}
+              className="text-xs text-primary hover:underline font-medium">+ Add field</button>
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center pt-3 border-t border-border">
+          <button onClick={handleDelete} disabled={deleting}
+            className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-40">
+            {deleting ? "Removing..." : "Delete Call"}
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -401,6 +736,7 @@ const CrmWelcomeCall: React.FC = () => {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"queue" | "history">("queue");
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
+  const [editingCall, setEditingCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
   const { data: queue = [], isLoading: queueLoading } = useQuery({
@@ -423,7 +759,7 @@ const CrmWelcomeCall: React.FC = () => {
       fetchBookingById(id).then((b) => { if (b) setActiveBooking(b); });
     }
   }, [bkgFilter, deepLinkOpened, queue]);
-  const { data: history = [], isLoading: historyLoading } = useQuery({
+  const { data: history = [], isLoading: historyLoading, refetch: refetchHistory } = useQuery({
     queryKey: ["crm-welcome-calls-history"],
     queryFn: fetchCalls,
     staleTime: 60_000,
@@ -531,7 +867,11 @@ const CrmWelcomeCall: React.FC = () => {
             let custom: { key: string; value: string }[] = [];
             try { custom = c.CustomFields ? JSON.parse(c.CustomFields) : []; } catch { /* ignore */ }
             return (
-              <div key={c.Id} className="rounded-xl border border-border p-4 hover:bg-muted/10 transition-colors">
+              <button
+                key={c.Id}
+                onClick={() => setEditingCall(c)}
+                className="w-full text-left rounded-xl border border-border p-4 hover:bg-muted/10 hover:border-primary/40 transition-colors cursor-pointer"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
@@ -549,6 +889,7 @@ const CrmWelcomeCall: React.FC = () => {
                     <span className="text-xs text-muted-foreground">
                       {c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}
                     </span>
+                    <ChevronRight size={14} className="text-muted-foreground" />
                   </div>
                 </div>
                 {(c.Notes || c.DurationSeconds || c.NextCallDate || c.PreferredAgreementDate || custom.length > 0) && (
@@ -561,7 +902,7 @@ const CrmWelcomeCall: React.FC = () => {
                     {custom.map((f, i) => <span key={i}>{f.key}: {f.value}</span>)}
                   </div>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -569,6 +910,9 @@ const CrmWelcomeCall: React.FC = () => {
 
       {activeBooking && (
         <IntakeDialog booking={activeBooking} onClose={() => setActiveBooking(null)} />
+      )}
+      {editingCall && (
+        <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />
       )}
     </SalesAutoShell>
   );

@@ -8,6 +8,45 @@ const { maybeAutoCreateAgreement } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
+// GET / — every Approved booking with its live KYC-completeness status, so
+// the list page can group by Pending/Complete without a per-row fetch.
+// A booking with no CrmCustomerBankDetail row at all is naturally "Pending"
+// via the LEFT JOIN (every completeness column is NULL).
+router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.Status AS BookingStatus,
+        a.ApplicantName, a.Mobile,
+        wc.Outcome AS LastCallOutcome,
+        CASE WHEN
+          NULLIF(LTRIM(RTRIM(ISNULL(d.BankName, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.AccountNo, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.IfscCode, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.AccountHolderName, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeName, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeRelation, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.PanNo, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.AadhaarNo, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(d.Occupation, ''))), '') IS NOT NULL
+        THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsComplete
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmCustomerBankDetail d ON d.BookingId = b.Id
+      OUTER APPLY (
+        SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC
+      ) wc
+      WHERE b.IsActive = 1 AND b.Status = 'Approved'
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-customer-bank-details] GET / error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();

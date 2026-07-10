@@ -208,9 +208,17 @@ async function getWorkflow(module) {
   } catch {
     levels = [];
   }
+  const levelDefs = Array.isArray(levels) ? levels : [];
   return {
     Id: row.Id,
-    Levels: (Array.isArray(levels) ? levels.length : Number(levels)) || 1,
+    Levels: levelDefs.length || Number(levels) || 1,
+    // Per-level definitions, e.g. [{ id, label, roles?: string[], userIds?: number[] }].
+    // Both fields are optional per level — a level with neither is treated as
+    // open to anyone who already passed the module's coarse role gate above.
+    // This lets modules like CRM Agreements start with a single super_admin-only
+    // level and grow into a real named hierarchy purely via data (Approval
+    // Setup UI), with no code change needed to add levels or name approvers.
+    LevelDefs: levelDefs,
   };
 }
 
@@ -406,6 +414,7 @@ async function transition(
   userEmail,
   userRole,
   note = null,
+  userId = null,
 ) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
@@ -478,6 +487,35 @@ async function transition(
       const totalLevels = workflow?.Levels ?? 1;
       const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
       const nextLevel = approvedSoFar + 1;
+
+      // -- Per-level gate --
+      // The coarse role check above only confirms the user is *some* kind of
+      // approver for this module. If this specific level names roles and/or
+      // specific users, narrow to that -- this is what lets a workflow grow
+      // into a real hierarchy (different approver per level) purely by
+      // editing ApprovalWorkflows.LevelsData, with no code change.
+      // A level with neither `roles` nor `userIds` set falls through to the
+      // module-wide coarse check only (today's existing behaviour), so this
+      // is fully backward compatible with workflows that don't use it yet.
+      const levelDef = workflow?.LevelDefs?.[nextLevel - 1];
+      if (levelDef) {
+        const roleOk =
+          !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
+          levelDef.roles.map((r) => String(r).toLowerCase()).includes((userRole || "").toLowerCase());
+        // userIds is only enforced when the caller actually passed a userId --
+        // callers that don't pass one (older call sites) skip this check
+        // rather than being denied, so this can't regress any existing module.
+        const userOk =
+          !Array.isArray(levelDef.userIds) || levelDef.userIds.length === 0 ||
+          userId == null || levelDef.userIds.includes(userId);
+        if (!roleOk || !userOk) {
+          const levelErr = new Error(
+            `You are not authorized to approve level ${nextLevel}${levelDef.label ? ` (${levelDef.label})` : ""} of this workflow.`,
+          );
+          levelErr.status = 403;
+          throw levelErr;
+        }
+      }
 
       await writeAuditLog(
         tableName,
