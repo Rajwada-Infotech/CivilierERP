@@ -1017,7 +1017,6 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               const bounceAmt  = parseFloat(approvedRow.BounceCharge ?? 0);
               const netPaid    = payAmt - bounceAmt;
               const afterApproval = parseFloat(eb.ERemainingAmount ?? 0); // remaining AFTER this approval
-              const userEmail = approvedRow?.createdBy || req.user?.email || "system";
               const finalDocNo = approvedRow.DocNo || "";
 
               // DEBIT: if invoice still has remaining balance, apply existing OA
