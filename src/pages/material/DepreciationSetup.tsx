@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, Pencil, Trash2, X, Check, Percent, AlertCircle, Search,
+  Laptop, Monitor, Smartphone, Printer, ScanLine, Armchair, Car, Settings2, Package,
+  Boxes, CheckCircle2, Layers,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -28,6 +31,35 @@ const STATUS_COLORS: Record<string, string> = {
   Inactive: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
 };
 
+const TYPE_COLORS: Record<string, string> = {
+  SLM: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  WDV: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+};
+
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  Laptop:         Laptop,
+  Desktop:        Monitor,
+  "Mobile Phone": Smartphone,
+  Printer:        Printer,
+  Scanner:        ScanLine,
+  Furniture:      Armchair,
+  Vehicle:        Car,
+  Machinery:      Settings2,
+  Other:          Package,
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Laptop:         "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  Desktop:        "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  "Mobile Phone": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  Printer:        "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  Scanner:        "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+  Furniture:      "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  Vehicle:        "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  Machinery:      "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  Other:          "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+};
+
 const emptyForm = (): DepreciationPayload => ({
   assetCategory:    "",
   depreciationType: "SLM",
@@ -35,6 +67,36 @@ const emptyForm = (): DepreciationPayload => ({
   effectiveFrom:    new Date().toISOString().slice(0, 10),
   status:           "Active",
 });
+
+// ── shared style tokens ────────────────────────────────────────────────────
+const inputCls  = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
+const filterCls = "h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 shrink-0";
+const labelCls  = "block text-xs font-medium text-muted-foreground mb-1";
+
+function StatCard({ icon: Icon, label, value, sub, accent }: { icon: React.ElementType; label: string; value: string; sub?: string; accent: string }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+      <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${accent}`}>
+        <Icon size={18} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground truncate">{label}</p>
+        <p className="text-lg font-bold tabular-nums leading-tight truncate">{value}</p>
+        {sub && <p className="text-[11px] text-muted-foreground truncate">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  const Icon = CATEGORY_ICONS[category] || Package;
+  const color = CATEGORY_COLORS[category] || "bg-muted text-muted-foreground";
+  return (
+    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg shrink-0 ${color}`}>
+      <Icon size={15} />
+    </span>
+  );
+}
 
 export default function DepreciationSetupPage() {
   const rights = usePageRights("depreciation-setup");
@@ -51,6 +113,20 @@ export default function DepreciationSetupPage() {
     queryKey: ["depreciation-setups"],
     queryFn:  () => getDepreciationSetups(),
   });
+
+  const stats = useMemo(() => {
+    const active = records.filter((r) => r.Status === "Active");
+    const avgRate = active.length
+      ? active.reduce((sum, r) => sum + (r.DepreciationRate || 0), 0) / active.length
+      : 0;
+    const categoriesCovered = new Set(records.map((r) => r.AssetCategory)).size;
+    return {
+      total: records.length,
+      active: active.length,
+      avgRate,
+      categoriesCovered,
+    };
+  }, [records]);
 
   const filtered = useMemo(() => {
     let r = records;
@@ -95,16 +171,15 @@ export default function DepreciationSetupPage() {
   const closeDrawer = () => { setDrawerOpen(false); setEditingId(null); };
 
   const handleSave = () => {
-    if (!form.assetCategory)  return toast.error("Asset category is required");
+    if (!form.assetCategory)    return toast.error("Asset category is required");
     if (!form.depreciationRate) return toast.error("Depreciation rate is required");
-    if (!form.effectiveFrom)  return toast.error("Effective from date is required");
+    if (!form.effectiveFrom)    return toast.error("Effective from date is required");
     if (editingId) updateMut.mutate({ id: editingId, data: form });
     else           createMut.mutate(form);
   };
 
-  const inputCls = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
-  const labelCls = "block text-xs font-medium text-muted-foreground mb-1";
-  const saving   = createMut.isPending || updateMut.isPending;
+  const saving = createMut.isPending || updateMut.isPending;
+  const selectedCategoryIcon = CATEGORY_ICONS[form.assetCategory] || Percent;
 
   return (
     <MaterialShell
@@ -120,22 +195,48 @@ export default function DepreciationSetupPage() {
         )
       }
     >
+      {/* ── stat strip ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <StatCard icon={Boxes} label="Configured Rates" value={String(stats.total)}
+          sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400" />
+        <StatCard icon={CheckCircle2} label="Active Rates" value={String(stats.active)}
+          sub={`${stats.total - stats.active} inactive`} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
+        <StatCard icon={Percent} label="Average Rate" value={`${stats.avgRate.toFixed(1)}%`}
+          sub="across active rates" accent="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
+        <StatCard icon={Layers} label="Categories Covered" value={String(stats.categoriesCovered)}
+          sub={`of ${ASSET_CATEGORIES.length} total`} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+      </div>
+
       {/* ── filters ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
+      <div className="flex flex-nowrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3 overflow-x-auto">
+        <div className="relative flex-1 min-w-[160px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search category…"
-            className={`${inputCls} pl-8`}
+            className={`${inputCls} pl-8 bg-background`}
           />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X size={13} />
+            </button>
+          )}
         </div>
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as "" | "Active" | "Inactive")}
-          className={`${inputCls} w-36`}>
+          className={`${filterCls} w-32 bg-background`}>
           <option value="">All Status</option>
           <option value="Active">Active</option>
           <option value="Inactive">Inactive</option>
         </select>
+        {(filterStatus || search) && (
+          <button
+            onClick={() => { setFilterStatus(""); setSearch(""); }}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
+          >
+            Clear
+          </button>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground shrink-0 hidden sm:inline">{filtered.length} of {records.length} rates</span>
       </div>
 
       {/* ── table ── */}
@@ -143,7 +244,9 @@ export default function DepreciationSetupPage() {
         <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
-          <Percent size={40} className="opacity-30" />
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
+            <Percent size={26} className="opacity-40" />
+          </span>
           <p className="text-sm">No depreciation rates found</p>
           {rights.canCreate && (
             <button onClick={openCreate}
@@ -159,7 +262,7 @@ export default function DepreciationSetupPage() {
               <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Asset Category</th>
                 <th className="px-4 py-3 text-left">Depreciation Type</th>
-                <th className="px-4 py-3 text-right">Rate (%)</th>
+                <th className="px-4 py-3 text-right">Rate</th>
                 <th className="px-4 py-3 text-left">Effective From</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
@@ -168,9 +271,18 @@ export default function DepreciationSetupPage() {
             <tbody className="divide-y divide-border">
               {filtered.map((r) => (
                 <tr key={r.SetupId} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-medium">{r.AssetCategory}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{r.DepreciationType}</td>
-                  <td className="px-4 py-3 text-right font-mono font-semibold">{r.DepreciationRate}%</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <CategoryBadge category={r.AssetCategory} />
+                      <span className="font-medium">{r.AssetCategory}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${TYPE_COLORS[r.DepreciationType] ?? "bg-muted text-muted-foreground"}`}>
+                      {r.DepreciationType}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums">{r.DepreciationRate}%</td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {r.EffectiveFrom ? new Date(r.EffectiveFrom).toLocaleDateString("en-IN") : "—"}
                   </td>
@@ -203,13 +315,18 @@ export default function DepreciationSetupPage() {
       )}
 
       {/* ── drawer ── */}
-      {drawerOpen && (
+      {drawerOpen && createPortal(
         <div className="fixed inset-0 z-50 flex">
           <div className="flex-1 bg-black/40" onClick={closeDrawer} />
           <div className="w-full max-w-sm bg-card border-l border-border flex flex-col shadow-2xl">
             {/* header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h2 className="text-base font-semibold">{editingId ? "Edit" : "New"} Depreciation Rate</h2>
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                  {React.createElement(selectedCategoryIcon, { size: 15 })}
+                </span>
+                <h2 className="text-base font-semibold">{editingId ? "Edit" : "New"} Depreciation Rate</h2>
+              </div>
               <button onClick={closeDrawer} className="p-1.5 rounded hover:bg-muted transition-colors">
                 <X size={16} />
               </button>
@@ -219,11 +336,18 @@ export default function DepreciationSetupPage() {
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <div>
                 <label className={labelCls}>Asset Category *</label>
-                <select value={form.assetCategory} onChange={(e) => setForm((p) => ({ ...p, assetCategory: e.target.value }))}
-                  className={inputCls}>
-                  <option value="">Select category…</option>
-                  {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="relative">
+                  <select value={form.assetCategory} onChange={(e) => setForm((p) => ({ ...p, assetCategory: e.target.value }))}
+                    className={`${inputCls} ${form.assetCategory ? "pl-9" : ""}`}>
+                    <option value="">Select category…</option>
+                    {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  {form.assetCategory && (
+                    <span className={`absolute left-2 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded ${CATEGORY_COLORS[form.assetCategory] || ""}`}>
+                      {React.createElement(CATEGORY_ICONS[form.assetCategory] || Package, { size: 11 })}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -266,16 +390,17 @@ export default function DepreciationSetupPage() {
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving}
-                className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1.5">
+                className="h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
                 {saving ? "Saving…" : <><Check size={14} /> Save</>}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── delete confirm ── */}
-      {deleteId && (
+      {deleteId && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
@@ -298,7 +423,8 @@ export default function DepreciationSetupPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </MaterialShell>
   );
