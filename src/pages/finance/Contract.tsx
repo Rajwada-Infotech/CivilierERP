@@ -216,10 +216,17 @@ export default function Contract() {
       .filter((e) => e.company_id === Number(form.companyId));
   }, [allProjects, form.companyId]);
 
-  const tcRecords = useMemo(
-    () => ensureArray<TCRecord>(tcRaw).filter((t) => (t as { isActive?: boolean }).isActive !== false),
-    [tcRaw]
-  );
+  const tcRecords = useMemo(() => {
+    // Backend returns PascalCase columns: Id, Name, TermsAndCondition, isActive
+    type RawTC = { Id?: number; id?: number; Name?: string; name?: string; TermsAndCondition?: string; terms?: string; isActive?: boolean };
+    return ensureArray<RawTC>(tcRaw)
+      .filter((t) => t.isActive !== false)
+      .map((t): TCRecord => ({
+        id:    (t.Id    ?? t.id    ?? 0),
+        name:  (t.Name  ?? t.name  ?? ""),
+        terms: (t.TermsAndCondition ?? t.terms ?? ""),
+      }));
+  }, [tcRaw]);
 
   const selectedContactDetail = useMemo(
     () => contactPersonsRaw.find((p) => p.name === form.contactPerson) ?? null,
@@ -326,8 +333,7 @@ export default function Contract() {
     try { existingAttachments = detail.Attachments ? JSON.parse(detail.Attachments) : []; } catch { /* */ }
     let existingTCs: TCRecord[] = [];
     if (detail.TermsAndConditions) {
-      const allTCs = ensureArray<TCRecord>(tcRaw);
-      existingTCs = allTCs.filter((t) => detail.TermsAndConditions!.includes(t.name));
+      existingTCs = tcRecords.filter((t) => detail.TermsAndConditions!.includes(t.name));
     }
     setForm({
       docTypeId: null,
@@ -351,7 +357,7 @@ export default function Contract() {
     setSelectedTCs(existingTCs);
     setSelectedParties(existingParties);
     setViewMode("form");
-  }, [tcRaw]);
+  }, [tcRecords]);
 
   const openDetail = async (c: ContractListItem) => {
     const detail = await getContract(c.ContractId);
