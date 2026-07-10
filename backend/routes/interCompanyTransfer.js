@@ -13,7 +13,6 @@ router.use(
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");

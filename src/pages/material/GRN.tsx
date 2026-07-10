@@ -69,7 +69,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
-import { getSystemGeneratedLedgers } from "@/api/generalLedgerApi";
 import { getProjects, getCompanies } from "@/api/grnApi";
 import { getGodowns } from "@/api/godownsApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";

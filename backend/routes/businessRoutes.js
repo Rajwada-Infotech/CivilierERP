@@ -36,7 +36,7 @@ router.get("/dropdown", async (req, res) => {
       projects: projects.recordset,
     });
   } catch (err) {
-    console.log(err);
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch dropdown data" });
   }
 });

@@ -27,6 +27,8 @@ export interface ContractDetail extends ContractListItem {
   Attachments: string | null;
   TermsAndConditions: string | null;
   Remarks: string | null;
+  Parties: string | null;
+  ContactPartyId: number | null;
 }
 
 export interface ContractPayload {
@@ -37,6 +39,7 @@ export interface ContractPayload {
   projectId?: number | null;
   finYear?: string;
   contactPerson?: string;
+  contactPartyId?: number | null;
   reason?: string;
   natureOfContract?: string;
   contractAmount?: number | null;

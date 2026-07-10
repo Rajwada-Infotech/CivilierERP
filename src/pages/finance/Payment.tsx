@@ -65,6 +65,7 @@ import {
   RefreshCw,
   History,
   Info,
+  Users,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -250,6 +251,10 @@ interface PaymentRecord {
   // Optional: tags this payment as an on-account advance against a
   // Contract when no expense booking exists yet (backend/services/contractLedger.js).
   contractId: string;
+  // Party (AccountHeadMaster LHeadId) for direct-invoice payments that have no
+  // linked GRN/PO/WorkDone. Stored as PPartyId on NewPayment so resolvePartyFromRef
+  // can derive it for On Account credit logic.
+  partyId: number | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -415,13 +420,6 @@ const normaliseExpenseOptions = (items: any[]): ExpenseOption[] =>
       null,
   }));
 
-const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
-  const res = await fetchWithAuth("/api/expense-booking/options");
-  if (!res.ok) return [];
-  const raw = await res.json().catch(() => ({}));
-  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  return normaliseExpenseOptions(items);
-};
 
 
 const fetchExpenseDetail = async (
@@ -609,6 +607,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     paidTo: "",
     supplierContact: "",
     contractId: "",
+    partyId: null,
   };
 }
 
@@ -662,6 +661,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     igstRate: null,
     billingTermsData: null,
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
+    partyId: (item as any).PPartyId ?? null,
   };
 }
 
@@ -1984,6 +1984,7 @@ const Payment: React.FC = () => {
     useState<CompanyDetail | null>(null);
   const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
   const [viewingGrnTotal, setViewingGrnTotal] = useState<number>(0);
+  const [viewingOaBalance, setViewingOaBalance] = useState<number>(0);
   const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
   const [detailTab, setDetailTab] = useState<"details" | "chain" | "posting">("details");
@@ -2010,6 +2011,7 @@ const Payment: React.FC = () => {
     setViewingCompanyDetail(null);
     setViewingChain(null);
     setViewingGrnTotal(0);
+    setViewingOaBalance(0);
     setPaymentChainData(null);
     setDetailTab("details");
     setPmtPostingData(null);
@@ -2049,6 +2051,9 @@ const Payment: React.FC = () => {
         .then(setPaymentChainData)
         .catch(() => {})
         .finally(() => setLoadingChain(false));
+      getOABalanceByRef(rec.expenseRef)
+        .then((b) => setViewingOaBalance(b.balance ?? 0))
+        .catch(() => {});
     }
   };
 
@@ -3172,6 +3177,7 @@ const Payment: React.FC = () => {
       remarks: form.paymentName || null,
       // PaymentPayloadSchema fields
       supplierId: form.expenseRef || null,
+      partyId: form.partyId ?? null,
       bankId: form.bankId ?? null,
       amount: form.amount ?? 0,
       // Extended payment fields (passed through for backend processing)
@@ -3653,6 +3659,38 @@ const Payment: React.FC = () => {
                               </option>
                             ));
                           })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field
+                      label="Payee / Party"
+                      hint="Required for On Account tracking — who this payment is being made to"
+                    >
+                      <div className="relative">
+                        <Users
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={form.partyId !== null ? String(form.partyId) : ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const opt = supplierOptions.find((s) => String(s.id) === id);
+                            set("partyId", id ? Number(id) : null);
+                            set("paidTo", opt?.label || "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select party…</option>
+                          {supplierOptions.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                              {s.label}
+                            </option>
+                          ))}
                         </select>
                         <ChevronDown
                           size={11}
@@ -5333,31 +5371,22 @@ const Payment: React.FC = () => {
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[20%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Payment Purpose
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Doc No
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Expense Ref
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%] hidden md:table-cell">
-                          Mode
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden lg:table-cell">
-                          Cheque / Ref
-                        </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%]">
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
                           Amount
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[9%] hidden md:table-cell">
-                          Bank
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[13%]">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
                           Status
                         </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Actions
                         </th>
                       </tr>
@@ -5366,7 +5395,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={9}
+                            colSpan={6}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -5382,8 +5411,8 @@ const Payment: React.FC = () => {
                           key={rec.id}
                           className="hover:bg-muted/20 transition-colors"
                         >
-                          {/* Payment purpose + paid-to + date stacked */}
-                          <td className="px-4 py-3">
+                          {/* Payment purpose + paid-to + date + bank stacked */}
+                          <td className="px-4 py-4">
                             <p className="font-heading font-medium text-foreground text-xs truncate">
                               {rec.paymentName || "—"}
                             </p>
@@ -5398,16 +5427,28 @@ const Payment: React.FC = () => {
                             <p className="text-[10px] text-muted-foreground mt-0.5">
                               {rec.date || "—"}
                             </p>
+                            {rec.bankName && (
+                              <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{rec.bankName}</p>
+                            )}
                           </td>
-                          <td className="px-4 py-3">
+                          {/* Doc No + Mode + Cheque/Ref stacked */}
+                          <td className="px-4 py-4">
                             <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                               {rec.docNo || "—"}
                             </span>
+                            <div className="mt-1">
+                              <ModeBadge mode={rec.mode} />
+                            </div>
+                            {(rec.chequeNo || rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference) && (
+                              <p className="font-mono text-[10px] text-blue-500 mt-0.5 truncate">
+                                {rec.chequeNo ? `#${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference}
+                              </p>
+                            )}
                           </td>
                           {/* Expense Ref + GRN stacked */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate">
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.expenseRef}
                               </span>
                             ) : (
@@ -5421,82 +5462,12 @@ const Payment: React.FC = () => {
                               />
                             </div>
                           </td>
-                          {/* Mode */}
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <ModeBadge mode={rec.mode} />
-                          </td>
-                          {/* Cheque / Ref */}
-                          <td className="px-4 py-3 hidden lg:table-cell">
-                            {rec.chequeNo ? (
-                              <div className="space-y-0.5">
-                                <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
-                                  #{rec.chequeNo}
-                                </span>
-                                {rec.isPostDated && rec.chequeDate && (() => {
-                                  const chequeD = new Date(rec.chequeDate);
-                                  const validUntil = new Date(chequeD);
-                                  validUntil.setMonth(validUntil.getMonth() + 3);
-                                  const today = new Date(); today.setHours(0,0,0,0);
-                                  const daysLeft = Math.ceil((validUntil.getTime() - today.getTime()) / 86400000);
-                                  const isExpired = validUntil < today;
-                                  const isExpiringSoon = !isExpired && daysLeft <= 7;
-                                  return (
-                                    <div className="flex flex-col gap-0.5 mt-0.5">
-                                      <p className="text-[10px] text-indigo-500 font-mono">{rec.chequeDate}</p>
-                                      {isExpired ? (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-500/10 text-red-600 border border-red-500/20 whitespace-nowrap">
-                                          Expired {new Intl.DateTimeFormat("en-IN",{day:"2-digit",month:"short"}).format(validUntil)}
-                                        </span>
-                                      ) : isExpiringSoon ? (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20 whitespace-nowrap">
-                                          Expires in {daysLeft}d
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-indigo-500/10 text-indigo-600 border border-indigo-500/20 whitespace-nowrap">
-                                          Valid till {new Intl.DateTimeFormat("en-IN",{day:"2-digit",month:"short"}).format(validUntil)}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-                              </div>
-                            ) : rec.neftNumber ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {rec.neftNumber}
-                              </span>
-                            ) : rec.upiTransactionId ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {rec.upiTransactionId}
-                              </span>
-                            ) : rec.rtgsReference ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {rec.rtgsReference}
-                              </span>
-                            ) : rec.impsReference ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {rec.impsReference}
-                              </span>
-                            ) : rec.cardReference ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {rec.cardDisplay ? `${rec.cardDisplay} · ` : ""}
-                                {rec.cardReference}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-xs">
-                                —
-                              </span>
-                            )}
-                          </td>
                           {/* Amount */}
-                          <td className="px-4 py-3 font-mono text-xs font-semibold text-right whitespace-nowrap">
+                          <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
-                          {/* Bank */}
-                          <td className="px-4 py-3 text-xs text-muted-foreground truncate hidden md:table-cell">
-                            {rec.bankName || "—"}
-                          </td>
                           {/* Status */}
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
                               {rec.displayStatus && rec.displayStatus !== rec.status ? (
                                 <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[9px] font-semibold border whitespace-nowrap ${
@@ -5526,8 +5497,8 @@ const Payment: React.FC = () => {
                             </div>
                           </td>
                           {/* Actions */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5 justify-end">
+                          <td className="px-3 py-4">
+                            <div className="flex items-center gap-1.5 justify-end flex-wrap">
                               <ApprovalActions
                                 status={rec.status}
                                 recordId={Number(rec.id)}
@@ -6085,6 +6056,19 @@ const Payment: React.FC = () => {
                           {formatINR(displayRemaining)}
                         </p>
                       </div>
+                      {viewingOaBalance > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              On A/C
+                            </p>
+                            <p className="font-mono text-xs font-bold text-violet-500 dark:text-violet-400">
+                              {formatINR(viewingOaBalance)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                     );
                   })()}

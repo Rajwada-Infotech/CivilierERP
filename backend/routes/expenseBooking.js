@@ -466,9 +466,10 @@ router.get("/options", async (req, res) => {
           -- booking/item label) is only ever a last-resort fallback — it
           -- must never stand in for an actual supplier/contractor.
           CASE
-            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName,        ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WORK_DONE'                              THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WO'                                     THEN ISNULL(wo_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             -- Direct/manual (TOD etc.) bookings carry no supplier link; when the
             -- caller scopes by @PartyId (On A/C Adjustment flow) the invoice only
             -- reached this row via that party's payment history, so label it with
@@ -520,6 +521,10 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.WorkDone wd_supp_opt_wd
           ON eb.ESourceType = 'WORK_DONE' AND wd_supp_opt_wd.ID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wd_supp_opt ON wd_supp_opt.LHeadId = wd_supp_opt_wd.SupplierId
+        LEFT JOIN dbo.WorkOrderHeader wo_supp_opt_wo
+          ON eb.ESourceType = 'WO' AND wo_supp_opt_wo.Id = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wo_supp_opt
+          ON wo_supp_opt.LHeadId = COALESCE(wo_supp_opt_wo.SupplierId, wo_supp_opt_wo.ContractorId)
         LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
@@ -534,9 +539,11 @@ router.get("/options", async (req, res) => {
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
           AND (@PartyId IS NULL OR (
-            (eb.ESourceType = 'GRN' AND ahm.LHeadId = @PartyId)
+            (eb.ESourceType = 'GRN'       AND ahm.LHeadId        = @PartyId)
             OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_opt.LHeadId = @PartyId)
-            OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_opt.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE'     AND wd_supp_opt.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WO'            AND wo_supp_opt.LHeadId = @PartyId)
+            OR eb.LHeadId = @PartyId
             -- Payment-history link: direct/manual invoices (TOD etc.) have no
             -- supplier column, so treat an invoice as belonging to @PartyId when
             -- that party has previously paid against it (OnAccountLedger -> the
@@ -548,6 +555,12 @@ router.get("/options", async (req, res) => {
               JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
               WHERE oal.PartyId = @PartyId
                 AND np_hist.PExpenseRef = eb.EDocNo
+            )
+            OR EXISTS (
+              SELECT 1 FROM dbo.NewPayment np
+              WHERE np.PExpenseRef = eb.EDocNo
+                AND np.PPartyId    = @PartyId
+                AND np.Status      = 'Approved'
             )
           ))
         ORDER BY eb.Eid DESC

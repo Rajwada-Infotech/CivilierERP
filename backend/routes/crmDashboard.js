@@ -1,12 +1,12 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // GET / — CRM-wide pipeline stats: application/booking funnel, payment
 // collection health, ticket/cancellation load, legal & closure progress.
