@@ -1343,6 +1343,78 @@ router.get("/:id/item-types", async (req, res) => {
   }
 });
 
+// ── Lazy Socket.IO handle (mirrors ticketRoutes.js's pattern) ───────────────
+let _getIo = null;
+function getIo() {
+  if (!_getIo) _getIo = require("../socket").getIo;
+  return _getIo();
+}
+function emitPOMessage(poId, comment) {
+  try {
+    getIo().to(`po:${poId}`).emit("po:message", { poId, comment });
+  } catch (err) {
+    console.warn(`[purchaseOrders] Socket emit failed for poId="${poId}": ${err?.message || err}`);
+  }
+}
+
+// ── GET /:id/comments — PO<->supplier chat thread (staff side) ──────────────
+router.get("/:id/comments", async (req, res) => {
+  const poId = parseInt(req.params.id, 10);
+  if (!poId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("POID", sql.Int, poId).query(`
+      SELECT Id, PurchaseOrderId, Comment AS comment, AuthorName AS author_name,
+             AuthorId AS author_id, AuthorRole AS author_role, CreatedAt AS created_at
+      FROM dbo.PurchaseOrderComments
+      WHERE PurchaseOrderId = @POID
+      ORDER BY CreatedAt ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/comment — reply in the PO<->supplier chat (staff side) ────────
+router.post("/:id/comment", async (req, res) => {
+  const poId = parseInt(req.params.id, 10);
+  if (!poId) return res.status(400).json({ error: "Invalid id" });
+  const comment = (req.body?.comment || "").trim();
+  if (!comment) return res.status(400).json({ error: "Comment is required" });
+
+  try {
+    const pool = getPool();
+    const exists = await pool.request().input("POID", sql.Int, poId)
+      .query(`SELECT 1 FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID`);
+    if (!exists.recordset.length) return res.status(404).json({ error: "PO not found" });
+
+    const authorName = req.user?.name ?? req.user?.username ?? "Staff";
+    const authorId = req.user?.userId ?? req.user?.id ?? null;
+    const authorRole = req.user?.role ?? "staff";
+
+    const insert = await pool.request()
+      .input("POID",       sql.Int,           poId)
+      .input("Comment",    sql.NVarChar(sql.MAX), comment)
+      .input("AuthorName", sql.NVarChar(200), authorName)
+      .input("AuthorId",   sql.Int,           authorId)
+      .input("AuthorRole", sql.NVarChar(50),  authorRole)
+      .query(`
+        INSERT INTO dbo.PurchaseOrderComments (PurchaseOrderId, Comment, AuthorName, AuthorId, AuthorRole)
+        OUTPUT INSERTED.Id, INSERTED.PurchaseOrderId, INSERTED.Comment AS comment,
+               INSERTED.AuthorName AS author_name, INSERTED.AuthorId AS author_id,
+               INSERTED.AuthorRole AS author_role, INSERTED.CreatedAt AS created_at
+        VALUES (@POID, @Comment, @AuthorName, @AuthorId, @AuthorRole)
+      `);
+
+    const saved = insert.recordset[0];
+    res.json({ comment: saved });
+    emitPOMessage(poId, saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
 

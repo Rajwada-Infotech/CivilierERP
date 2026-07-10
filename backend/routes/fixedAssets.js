@@ -64,7 +64,7 @@ router.get("/", async (req, res) => {
         fa.AssetId, fa.DocNo, fa.DocDate, fa.FinYear,
         fa.AssetName, fa.AssetCategory, fa.AssetCode,
         fa.Brand, fa.Model, fa.SerialNumber,
-        fa.PurchaseDate, fa.PurchaseCost, fa.Quantity,
+        fa.PurchaseDate, fa.ActivationDate, fa.PurchaseCost, fa.Quantity,
         fa.Location, fa.Department, fa.Custodian,
         fa.DepreciationSetupId, fa.DepreciationType, fa.DepreciationRate, fa.UsefulLife,
         fa.AssetStatus, fa.SellingPrice, fa.SaleDate, fa.BuyerName,
@@ -120,7 +120,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
     const {
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
-      purchaseDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
+      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
       location, department, custodian,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       remarks,
@@ -148,6 +148,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       .input("Model",               sql.NVarChar(100), model || null)
       .input("SerialNumber",        sql.NVarChar(100), serialNumber || null)
       .input("PurchaseDate",        sql.Date,          purchaseDate || null)
+      .input("ActivationDate",      sql.Date,          activationDate || null)
       .input("PurchaseInvoiceRef",  sql.NVarChar(100), purchaseInvoiceRef || null)
       .input("SupplierId",          sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
       .input("PurchaseCost",        sql.Decimal(18,2), purchaseCost ? parseFloat(purchaseCost) : 0)
@@ -165,14 +166,14 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         INSERT INTO dbo.FixedAssetRecord
           (DocNo, DocDate, CompanyId, ProjectId, FinYear,
            AssetName, AssetCategory, AssetCode, Brand, Model, SerialNumber,
-           PurchaseDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
+           PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
            Location, Department, Custodian,
            DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
            AssetStatus, Status, Remarks, CreatedBy, CreatedAt)
         VALUES
           (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
            @AssetName, @AssetCategory, @AssetCode, @Brand, @Model, @SerialNumber,
-           @PurchaseDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
+           @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
            @Location, @Department, @Custodian,
            @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
            'Active', 'Draft', @Remarks, @CreatedBy, SYSDATETIME());
@@ -200,7 +201,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
     const {
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
-      purchaseDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
+      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
       location, department, custodian,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       assetStatus, sellingPrice, saleDate, buyerName, saleRemarks,
@@ -219,6 +220,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("Model",              sql.NVarChar(100), model || null)
       .input("SerialNumber",       sql.NVarChar(100), serialNumber || null)
       .input("PurchaseDate",       sql.Date,          purchaseDate || null)
+      .input("ActivationDate",     sql.Date,          activationDate || null)
       .input("PurchaseInvoiceRef", sql.NVarChar(100), purchaseInvoiceRef || null)
       .input("SupplierId",         sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
       .input("PurchaseCost",       sql.Decimal(18,2), purchaseCost != null ? parseFloat(purchaseCost) : null)
@@ -250,6 +252,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
           Model              = @Model,
           SerialNumber       = @SerialNumber,
           PurchaseDate       = @PurchaseDate,
+          ActivationDate     = @ActivationDate,
           PurchaseInvoiceRef = @PurchaseInvoiceRef,
           SupplierId         = @SupplierId,
           PurchaseCost       = ISNULL(@PurchaseCost,       PurchaseCost),
