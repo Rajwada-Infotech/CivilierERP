@@ -110,6 +110,12 @@ const MODULE_OPTIONS = [
     icon: "🏭",
     desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
   },
+  {
+    id: "Contract",
+    label: "Contract",
+    icon: "📄",
+    desc: "Auto-submitted for approval as soon as it's created — no Draft step",
+  },
 ] as const;
 
 type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -132,7 +138,7 @@ const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "JournalVoucher"],
+    modules: ["NewPayment", "JournalVoucher", "Contract"],
   },
   {
     id: "engineering",

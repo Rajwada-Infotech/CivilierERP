@@ -7,6 +7,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
+const { transition, guardEdit } = require("../services/approvalService");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -241,7 +242,18 @@ router.post("/", authenticateToken, requirePageRight("finance-contracts", "creat
     await backPatchRecordId(pool, sql, docNo, "Contract", newId);
     await bumpCacheVersion("contracts");
 
-    res.json({ contractId: newId, docNo });
+    // Auto-submit: transition Draft → Pending immediately so no manual
+    // "Submit" step is required after creation — a contract goes straight
+    // to the approval chain.
+    let finalStatus = "Draft";
+    try {
+      const result = await transition("contracts", newId, "Pending", email, req.user?.role);
+      finalStatus = result.newStatus;
+    } catch (submitErr) {
+      console.warn("Contract auto-submit failed (non-fatal):", submitErr.message);
+    }
+
+    res.json({ contractId: newId, docNo, status: finalStatus });
   } catch (err) {
     console.error("[contract] POST /:", err.message);
     res.status(500).json({ error: err.message });
@@ -254,6 +266,11 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
+  try {
+    await guardEdit("contracts", id);
+  } catch (err) {
+    return res.status(409).json({ error: err.message });
+  }
   try {
     const pool = getPool();
     const {
