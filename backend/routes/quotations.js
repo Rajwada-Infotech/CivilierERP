@@ -24,7 +24,6 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,

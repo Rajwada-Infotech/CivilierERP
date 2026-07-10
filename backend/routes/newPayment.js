@@ -338,6 +338,7 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
         LEFT JOIN dbo.BankReconciliation brc
           ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
         WHERE np.PChequeLotId = @PChequeLotId AND np.PChequeNo IS NOT NULL
+          AND np.Status NOT IN ('Rejected', 'Deleted')
       `);
     const usedSet    = new Set(usedRes.recordset.map((r) => String(r.PChequeNo)));
     const bouncedSet = new Set(
@@ -395,6 +396,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
       .input("PChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
         SELECT COUNT(*) AS cnt FROM dbo.NewPayment
         WHERE PChequeLotId = @PChequeLotId AND PChequeNo = @PChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
       `);
 
     if (dupRes.recordset[0].cnt > 0) {
@@ -403,11 +405,12 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in another payment" });
     }
 
-    // Count remaining available cheques
+    // Count remaining available cheques (exclude Rejected/Deleted)
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
       .query(`
       SELECT COUNT(*) AS usedCount FROM dbo.NewPayment
       WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
+        AND Status NOT IN ('Rejected', 'Deleted')
     `);
     const totalCheques = lot.ChequeEndNumber - lot.ChequeStartNumber + 1;
     const usedCount = usedRes.recordset[0].usedCount;
@@ -463,6 +466,9 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     BounceCharge,
     // Contract Master (Migration 176) — see services/contractLedger.js
     ContractId,
+    // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
+    // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
+    partyId,
   } = req.body;
 
   try {
@@ -596,6 +602,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("ReplacesPaymentId", sql.Int, ReplacesPaymentId ? parseInt(ReplacesPaymentId) : null)
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
+      .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -607,7 +614,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -618,7 +625,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
@@ -629,86 +636,9 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Sync bill status on the referenced expense booking
     if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
 
-    // ── On Account hooks (non-fatal) ──────────────────────────────────────
-    if (PExpenseRef) {
-      try {
-        const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
-        const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
-        const party = await resolvePartyFromRef(pool, PExpenseRef);
-        if (party?.partyId) {
-          const ebBal = await pool.request()
-            .input("EDocNo", sql.NVarChar(100), PExpenseRef)
-            .query(`SELECT TOP 1 ERemainingAmount, ENetAmount, ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
-          if (ebBal.recordset.length) {
-            const eb = ebBal.recordset[0];
-            const netPayable  = parseFloat(eb.ENetAmount ?? 0);
-            const payAmt      = parseFloat(PAmount) || 0;
-            const bounceAmt   = parseFloat(BounceCharge ?? 0);
-            const netPaid     = payAmt - bounceAmt;
-            const afterCash   = parseFloat(eb.ERemainingAmount ?? 0); // remaining after this cash payment
-
-            // ── DEBIT: apply existing OA balance to settle remaining invoice ──
-            if (afterCash > 0.005) {
-              const oaBalRes = await pool.request()
-                .input("PartyId", sql.Int, party.partyId)
-                .query(`SELECT ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END),0) AS bal FROM dbo.OnAccountLedger WHERE PartyId=@PartyId`);
-              const oaBal = parseFloat(oaBalRes.recordset[0]?.bal ?? 0);
-              if (oaBal > 0.005) {
-                const applyAmt = Math.min(oaBal, afterCash);
-                await pool.request()
-                  .input("PartyId",     sql.Int,           party.partyId)
-                  .input("PartyType",   sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
-                  .input("TxnDate",     sql.Date,          PDate ? new Date(PDate) : new Date())
-                  .input("TxnType",     sql.NVarChar(10),  "DEBIT")
-                  .input("Amount",      sql.Decimal(18,2), applyAmt)
-                  .input("RefType",     sql.NVarChar(30),  "Invoice")
-                  .input("RefDocNo",    sql.NVarChar(100), PExpenseRef)
-                  .input("RefId",       sql.Int,           newId)
-                  .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
-                  .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
-                  .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
-                  .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${PExpenseRef} via ${finalDocNo}`)
-                  .input("CreatedBy",   sql.NVarChar(150), userEmail)
-                  .query(`
-                    INSERT INTO dbo.OnAccountLedger
-                      (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
-                    VALUES
-                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy)
-                  `);
-                // Re-sync bill status so the invoice reflects OA settlement
-                await _syncBillStatus(pool, PExpenseRef);
-              }
-            }
-
-            // ── CREDIT: if cash paid exceeds net payable, store excess as OA ──
-            const excess = Math.max(0, netPaid - netPayable);
-            if (excess > 0.005) {
-              await pool.request()
-                .input("PartyId",   sql.Int,           party.partyId)
-                .input("PartyType", sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
-                .input("TxnDate",   sql.Date,          PDate ? new Date(PDate) : new Date())
-                .input("TxnType",   sql.NVarChar(10),  "CREDIT")
-                .input("Amount",    sql.Decimal(18,2), excess)
-                .input("RefType",   sql.NVarChar(30),  "Payment")
-                .input("RefDocNo",  sql.NVarChar(100), finalDocNo)
-                .input("RefId",     sql.Int,           newId)
-                .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
-                .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
-                .input("Notes",     sql.NVarChar(500), `Excess from ${finalDocNo} on invoice ${PExpenseRef}`)
-                .input("CreatedBy", sql.NVarChar(150), userEmail)
-                .query(`
-                  INSERT INTO dbo.OnAccountLedger
-                    (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
-                  VALUES
-                    (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy)
-                `);
-            }
-          }
-        }
-      } catch (oaErr) {
-        console.warn("[OA] On Account hook failed (non-fatal):", oaErr.message);
-      }
-    }
+    // NOTE: On Account hooks (excess credit / OA debit) fire on APPROVE, not here.
+    // A Pending payment has not moved funds yet, so recording OA at creation would
+    // create balances that may never materialise (if the payment is rejected).
 
     // Contract Master: record as an advance ONLY when this payment isn't
     // already tied to an Expense Booking — a payment against a real
@@ -1051,21 +981,106 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       bumpCacheVersion("brs"),
     ]);
 
-    // Sync bill status on approval — fetch PExpenseRef and recalculate
+    // Sync bill status on approval — fetch full payment record and recalculate
     try {
       const approvedPayRec = await pool
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
-      const approvedRef = approvedPayRec.recordset[0]?.PExpenseRef;
-      if (approvedRef && !/-EMI-\d+$/.test(approvedRef)) {
-        await _syncBillStatus(pool,approvedRef);
-      } else if (approvedRef && /-EMI-\d+$/.test(approvedRef)) {
-        // For EMI payments, sync the parent booking by matching EDocNo prefix
-        const parentRef = approvedRef.replace(/-EMI-\d+$/, "");
-        await _syncBillStatus(pool,parentRef);
+      const approvedRow = approvedPayRec.recordset[0];
+      const approvedRef = approvedRow?.PExpenseRef;
+      const effectiveRef = approvedRef && /-EMI-\d+$/.test(approvedRef)
+        ? approvedRef.replace(/-EMI-\d+$/, "")
+        : approvedRef;
+
+      if (effectiveRef) {
+        await _syncBillStatus(pool, effectiveRef);
+      }
+
+      // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
+      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
+        try {
+          const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
+          const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+          const party = await resolvePartyFromRef(pool, approvedRef);
+          if (party?.partyId) {
+            // Read invoice AFTER syncBillStatus so ERemainingAmount is current
+            const ebRes = await pool.request()
+              .input("EDocNo", sql.NVarChar(100), effectiveRef || approvedRef)
+              .query(`SELECT TOP 1 ERemainingAmount, ENetAmount, ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+            if (ebRes.recordset.length) {
+              const eb = ebRes.recordset[0];
+              const netPayable = parseFloat(eb.ENetAmount ?? 0);
+              const payAmt     = parseFloat(approvedRow.PAmount) || 0;
+              const bounceAmt  = parseFloat(approvedRow.BounceCharge ?? 0);
+              const netPaid    = payAmt - bounceAmt;
+              const afterApproval = parseFloat(eb.ERemainingAmount ?? 0); // remaining AFTER this approval
+              const finalDocNo = approvedRow.DocNo || "";
+
+              // DEBIT: if invoice still has remaining balance, apply existing OA
+              if (afterApproval > 0.005) {
+                const oaBalRes = await pool.request()
+                  .input("PartyId", sql.Int, party.partyId)
+                  .query(`SELECT ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END),0) AS bal FROM dbo.OnAccountLedger WHERE PartyId=@PartyId`);
+                const oaBal = parseFloat(oaBalRes.recordset[0]?.bal ?? 0);
+                if (oaBal > 0.005) {
+                  const applyAmt = Math.min(oaBal, afterApproval);
+                  await pool.request()
+                    .input("PartyId",     sql.Int,           party.partyId)
+                    .input("PartyType",   sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
+                    .input("TxnDate",     sql.Date,          approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+                    .input("TxnType",     sql.NVarChar(10),  "DEBIT")
+                    .input("Amount",      sql.Decimal(18,2), applyAmt)
+                    .input("RefType",     sql.NVarChar(30),  "Invoice")
+                    .input("RefDocNo",    sql.NVarChar(100), approvedRef)
+                    .input("RefId",       sql.Int,           id)
+                    .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
+                    .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
+                    .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
+                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${approvedRef} via ${finalDocNo}`)
+                    .input("CreatedBy",   sql.NVarChar(150), req.user?.email || "system")
+                    .query(`
+                      INSERT INTO dbo.OnAccountLedger
+                        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
+                      VALUES
+                        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+                    `);
+                  await _syncBillStatus(pool, effectiveRef || approvedRef);
+                }
+              }
+
+              // CREDIT: if paid amount exceeds net payable, store excess as OA balance
+              // pre_remaining = what was owed before this payment = afterApproval + netPaid (capped at netPayable)
+              const preRemaining = Math.min(netPayable, afterApproval + netPaid);
+              const excess = Math.max(0, netPaid - preRemaining);
+              if (excess > 0.005) {
+                await pool.request()
+                  .input("PartyId",   sql.Int,           party.partyId)
+                  .input("PartyType", sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
+                  .input("TxnDate",   sql.Date,          approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+                  .input("TxnType",   sql.NVarChar(10),  "CREDIT")
+                  .input("Amount",    sql.Decimal(18,2), excess)
+                  .input("RefType",   sql.NVarChar(30),  "Payment")
+                  .input("RefDocNo",  sql.NVarChar(100), finalDocNo)
+                  .input("RefId",     sql.Int,           id)
+                  .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
+                  .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
+                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess} from ${finalDocNo} on invoice ${approvedRef}`)
+                  .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
+                  .query(`
+                    INSERT INTO dbo.OnAccountLedger
+                      (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+                    VALUES
+                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+                  `);
+              }
+            }
+          }
+        } catch (oaErr) {
+          console.warn("[OA] On Account hook on approve failed (non-fatal):", oaErr.message);
+        }
       }
     } catch (syncErr) {
       console.warn("Bill status sync after approve failed:", syncErr.message);
@@ -1200,8 +1215,8 @@ router.post("/recalculate-balances", async (req, res) => {
   }
 });
 
-// ── GET /:id — single payment by PPaymentID (used by ApprovalActions) ─────────
-router.get("/:id", async (req, res) => {
+// ── GET /detail/:id — single payment by PPaymentID (used by ApprovalActions) ──
+router.get("/detail/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(404).json({ error: "Not found" });
   try {

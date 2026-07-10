@@ -14,6 +14,7 @@ import {
   Landmark,
   TrendingUp,
   ClipboardList,
+  Cpu,
   Grip,
   Home,
   Settings,
@@ -316,6 +317,12 @@ const materialSetupItems: SetupItem[] = [
     label: "Inventory",
     path: "/material/inventory-master",
     color: "text-teal-400",
+  },
+  {
+    icon: Cpu,
+    label: "Depreciation",
+    path: "/material/setup/depreciation",
+    color: "text-violet-500",
   },
 ];
 

@@ -66,36 +66,63 @@ const {
 // ─── Banner ──────────────────────────────────────────────────────────────────
 function printBanner(port) {
   if (!isDev) return;
-  const env  = process.env.NODE_ENV || "development";
-  const node = process.version;
-  const time = new Date().toLocaleTimeString();
 
-  const W      = 42;
-  const top    = `+${"-".repeat(W + 2)}+`;
-  const spacer = `|${" ".repeat(W + 2)}|`;
-  const mid    = `+${"-".repeat(W + 2)}+`;
-  const wrap   = (s) => `|  ${s.padEnd(W)}|`;
-  const leader = (label, value) => {
-    const dots = ".".repeat(Math.max(3, W - label.length - value.length - 2));
-    return `  ${label} ${dots} ${value}`;
+  // ANSI helpers — raw codes work even when chalk/picocolors suppress colour
+  const R  = "\x1b[0m";
+  const b  = (s) => `\x1b[1m${s}${R}`;
+  const dim = (s) => `\x1b[2m${s}${R}`;
+  const violet = (s) => `\x1b[38;5;135m${s}${R}`;
+  const indigo = (s) => `\x1b[38;5;105m${s}${R}`;
+  const cyan   = (s) => `\x1b[38;5;87m${s}${R}`;
+  const green  = (s) => `\x1b[38;5;120m${s}${R}`;
+  const amber  = (s) => `\x1b[38;5;221m${s}${R}`;
+  const slate  = (s) => `\x1b[38;5;246m${s}${R}`;
+
+  const env     = process.env.NODE_ENV || "development";
+  const node    = process.version;
+  const time    = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+  const memMB   = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+  const pid     = process.pid;
+  const routes  = ALL_ROUTES.length;
+  const envColor = env === "production" ? amber : green;
+
+  // Visual width (printable chars only, not ANSI escapes)
+  const W = 52;
+  const pad = (s, len) => {
+    // strip ANSI for length calc
+    const plain = s.replace(/\x1b\[[0-9;]*m/g, "");
+    return s + " ".repeat(Math.max(0, len - plain.length));
   };
 
+  const border = indigo("╭" + "─".repeat(W) + "╮");
+  const sep    = indigo("├" + "─".repeat(W) + "┤");
+  const foot   = indigo("╰" + "─".repeat(W) + "╯");
+  const bar    = (content) => `${indigo("│")} ${pad(content, W - 2)} ${indigo("│")}`;
+  const kv     = (icon, label, val) =>
+    bar(`${slate(icon)}  ${dim(label.padEnd(6))}  ${val}`);
+
   const lines = [
-    top,
-    spacer,
-    wrap(`  CivilierERP  >>  API Server`),
-    spacer,
-    mid,
-    spacer,
-    wrap(leader("URL",  `http://localhost:${port}`)),
-    wrap(leader("ENV",  env)),
-    wrap(leader("NODE", node)),
-    wrap(leader("TIME", time)),
-    spacer,
-    top,
+    "",
+    border,
+    bar(""),
+    bar(`  ${b(violet("◆  CivilierERP"))}  ${slate("API Server")}`),
+    bar(`     ${dim("Rajwada Infotech  ·  v1.0.0")}`),
+    bar(""),
+    sep,
+    bar(""),
+    kv("→", "URL",  cyan(`http://localhost:${port}`)),
+    kv("⬡", "ENV",  envColor(env)),
+    kv("◎", "NODE", slate(node)),
+    kv("⊙", "PID",  slate(String(pid))),
+    kv("◈", "MEM",  slate(`${memMB} MB`)),
+    kv("⏱", "TIME", slate(time)),
+    kv("⊞", "ROUTES", slate(`${routes} registered`)),
+    bar(""),
+    foot,
+    "",
   ];
 
-  process.stdout.write(`\n${lines.join("\n")}\n\n`);
+  process.stdout.write(lines.join("\n") + "\n");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -149,7 +176,6 @@ const ALL_ROUTES = [
   { path: "/api/journal-voucher", file: "./routes/journalVoucher" },
   { path: "/api/contract", file: "./routes/contract" },
   { path: "/api/reports/journal-voucher", file: "./routes/journalVoucherReports" },
-  { path: "/api/contract", file: "./routes/contract" },
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
   { path: "/api/customer-sale-orders", file: "./routes/customerSaleOrders" },
   { path: "/api/sale-invoices", file: "./routes/saleInvoices" },
@@ -181,6 +207,8 @@ const ALL_ROUTES = [
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
   { path: "/api/contractor-category", file: "./routes/contractorCategory" },
   { path: "/api/dependency", file: "./routes/dependency" },
+  { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
+  { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },

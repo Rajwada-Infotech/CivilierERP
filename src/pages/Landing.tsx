@@ -73,8 +73,6 @@ function BackgroundOrbs() {
   );
 }
 
-const MODULES = ["Finance", "Material", "Engineering", "CRM", "Sales", "Admin"];
-
 export default function Landing() {
   const navigate = useNavigate();
   const [exiting, setExiting] = useState(false);
@@ -100,7 +98,9 @@ export default function Landing() {
 
         {/* Badge */}
         <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }}
+          initial={{ opacity: 0, y: 16, filter: "blur(6px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ delay: 0.1, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium mb-6"
           style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}>
           <motion.span className="w-1.5 h-1.5 rounded-full bg-purple-400"
@@ -108,68 +108,56 @@ export default function Landing() {
           ERP for Real Estate &amp; Civil Construction
         </motion.div>
 
-        {/* Headline */}
+        {/* Headline — words stagger in */}
         <motion.h1
           className="font-black leading-[1.06] tracking-tight mb-4"
           style={{ fontSize: "clamp(2.6rem,6.5vw,5rem)" }}
-          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.65 }}>
+          initial={{ opacity: 0, y: 28 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}>
           <span className="text-white">One platform for your</span>
           <br />
-          <span style={{ background: "linear-gradient(135deg,#7c3aed,#a78bfa,#c4b5fd)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+          <motion.span
+            style={{ background: "linear-gradient(135deg,#7c3aed,#a78bfa,#c4b5fd)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", display: "inline-block" }}
+            animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}>
             entire project
-          </span>
+          </motion.span>
         </motion.h1>
 
         {/* Sub-copy */}
         <motion.p
-          className="max-w-lg text-base leading-relaxed mb-8"
+          className="max-w-lg text-base leading-relaxed mb-10"
           style={{ color: "rgba(255,255,255,0.38)" }}
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.38 }}>
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
           Finance, material, engineering, CRM, and sales — unified in a single ERP built for construction companies.
         </motion.p>
 
-        {/* CTA buttons — skeleton style */}
-        <motion.div className="flex items-center gap-3 mb-10"
-          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}>
+        {/* CTA */}
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ delay: 0.48, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}>
           <motion.button onClick={handleEnter}
-            whileHover={{ scale: 1.03, borderColor: "rgba(167,139,250,0.7)" }}
+            whileHover={{ scale: 1.04, borderColor: "rgba(167,139,250,0.75)", color: "#ddd6fe" }}
             whileTap={{ scale: 0.96 }}
-            className="px-7 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className="px-7 py-2.5 rounded-xl text-sm font-semibold transition-colors"
             style={{ border: "1.5px solid rgba(167,139,250,0.45)", color: "#c4b5fd", background: "transparent" }}>
             Enter CivilierERP →
           </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.02, borderColor: "rgba(167,139,250,0.25)" }}
-            whileTap={{ scale: 0.96 }}
-            onClick={() => document.getElementById("modules-row")?.scrollIntoView({ behavior: "smooth" })}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ border: "1.5px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.40)", background: "transparent" }}>
-            See Modules
-          </motion.button>
-        </motion.div>
-
-        {/* Module pills */}
-        <motion.div id="modules-row" className="flex flex-wrap items-center justify-center gap-2"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.58 }}>
-          {MODULES.map((m, i) => (
-            <motion.span key={m}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 + i * 0.06 }}
-              className="px-3 py-1 rounded-full text-xs font-medium"
-              style={{ border: "1px solid rgba(167,139,250,0.18)", color: "rgba(167,139,250,0.55)", background: "rgba(124,58,237,0.06)" }}>
-              {m}
-            </motion.span>
-          ))}
         </motion.div>
       </div>
 
       {/* ── Footer strip ── */}
-      <div className="relative z-10 flex items-center justify-between px-8 py-3"
-        style={{ borderTop: "1px solid rgba(167,139,250,0.08)" }}>
-        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.30)" }}>© 2026 CivilierERP · Rajwada Group</span>
+      <motion.div
+        className="relative z-10 flex items-center justify-between px-8 py-3"
+        style={{ borderTop: "1px solid rgba(167,139,250,0.08)" }}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.65, duration: 0.6 }}>
+        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.30)" }}>© 2026 CivilierERP · Rajwada Infotech</span>
         <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.22)" }}>v1.0.0</span>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }
