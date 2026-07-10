@@ -539,6 +539,12 @@ router.get("/options", async (req, res) => {
             OR (eb.ESourceType = 'WORK_DONE'     AND wd_supp_opt.LHeadId = @PartyId)
             OR (eb.ESourceType = 'WO'            AND wo_supp_opt.LHeadId = @PartyId)
             OR eb.LHeadId = @PartyId
+            OR EXISTS (
+              SELECT 1 FROM dbo.NewPayment np
+              WHERE np.PExpenseRef = eb.EDocNo
+                AND np.PPartyId    = @PartyId
+                AND np.Status      = 'Approved'
+            )
           ))
         ORDER BY eb.Eid DESC
       `);
