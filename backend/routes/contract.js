@@ -84,6 +84,36 @@ router.get("/contact-persons", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /options — dropdown source for Payment/Invoice/Expense forms ────────
+// Must be before /:id so "options" isn't matched as an id param.
+router.get("/options", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    let query = `
+      SELECT c.ContractId AS id,
+             CONCAT(ISNULL(c.DocNo, 'Contract #' + CAST(c.ContractId AS NVARCHAR)),
+                    ISNULL(' — ' + c.ContactPerson, '')) AS label,
+             c.ContractAmount
+      FROM dbo.Contract c
+      WHERE c.Status <> 'Deleted'
+    `;
+    if (req.query.companyId) {
+      query += " AND c.CompanyId = @CompanyId";
+      request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));
+    }
+    if (req.query.projectId) {
+      query += " AND c.ProjectId = @ProjectId";
+      request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+    query += " ORDER BY c.CreatedAt DESC";
+    const result = await request.query(query);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id — single contract ────────────────────────────────────────────────
 router.get("/:id", authenticateToken, async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -251,37 +281,6 @@ router.delete("/:id", authenticateToken, requirePageRight("finance-contracts", "
       `);
     await bumpCacheVersion("contracts");
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /options — dropdown source for Payment/Invoice/Expense forms ────────
-// Only non-deleted contracts, so a payment/invoice can't be tagged against
-// a contract that's already been removed.
-router.get("/options", authenticateToken, async (req, res) => {
-  try {
-    const pool = getPool();
-    const request = pool.request();
-    let query = `
-      SELECT c.ContractId AS id,
-             CONCAT(ISNULL(c.DocNo, 'Contract #' + CAST(c.ContractId AS NVARCHAR)),
-                    ISNULL(' — ' + c.ContactPerson, '')) AS label,
-             c.ContractAmount
-      FROM dbo.Contract c
-      WHERE c.Status <> 'Deleted'
-    `;
-    if (req.query.companyId) {
-      query += " AND c.CompanyId = @CompanyId";
-      request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));
-    }
-    if (req.query.projectId) {
-      query += " AND c.ProjectId = @ProjectId";
-      request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));
-    }
-    query += " ORDER BY c.CreatedAt DESC";
-    const result = await request.query(query);
-    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
