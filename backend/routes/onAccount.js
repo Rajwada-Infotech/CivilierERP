@@ -1,14 +1,14 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const requireAuth = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 const { buildGrnGstData }           = require("../utils/buildGrnGstData");
 
 router.use(requireAuth);
-router.use(apiRateLimit);
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
@@ -88,17 +88,111 @@ router.post("/record", async (req, res) => {
   }
 });
 
+// ── GET /invoices-for-party/:partyId — invoices linked to a specific supplier/contractor
+router.get("/invoices-for-party/:partyId", async (req, res) => {
+  const partyId = parseInt(req.params.partyId, 10);
+  if (!partyId) return res.status(400).json({ error: "Invalid partyId" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("PartyId", sql.Int, partyId).query(`
+      SELECT DISTINCT
+        eb.EDocNo,
+        eb.ENetAmount,
+        eb.EAmount,
+        eb.ECgstRate,
+        eb.ESgstRate,
+        eb.EBillingTermsData,
+        eb.EDiscountData,
+        eb.ESourceType,
+        eb.ESourceId,
+        eb.ETotalPaid,
+        eb.EBillStatus,
+        ISNULL(eb.ECreatedAt, GETDATE()) AS ECreatedAt
+      FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.GoodsReceiptNotes grn
+        ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.PurchaseOrders po
+        ON eb.ESourceType IN ('PO','WO_PO') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.WorkDone wd
+        ON eb.ESourceType = 'WORK_DONE' AND wd.ID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.WorkOrderHeader wo
+        ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
+      WHERE (
+        grn.SupplierID     = @PartyId
+        OR po.SupplierID   = @PartyId
+        OR wd.SupplierId   = @PartyId
+        OR wo.SupplierId   = @PartyId
+        OR wo.ContractorId = @PartyId
+        OR eb.LHeadId      = @PartyId
+        -- Covers INV/, PAY/, CON/, DPO/, ICT/, QPO/, WD/, etc.
+        -- where LHeadId may be NULL but a payment with PPartyId exists
+        OR EXISTS (
+          SELECT 1 FROM dbo.NewPayment np
+          WHERE np.PExpenseRef = eb.EDocNo
+            AND np.PPartyId    = @PartyId
+            AND np.Status      = 'Approved'
+        )
+      )
+      AND eb.EDocNo IS NOT NULL
+      AND eb.EStatus = 'Approved'
+      ORDER BY ECreatedAt DESC
+    `);
+    const rows = await Promise.all(r.recordset.map(async (row) => {
+      let invoiceAmount = null;
+      if (row.ESourceType === "GRN" && row.ESourceId) {
+        try {
+          const grnData = await buildGrnGstData(pool, parseInt(row.ESourceId, 10));
+          if (grnData && grnData.totals.netAmount > 0) {
+            invoiceAmount = applyBillingTermsToAmount(
+              grnData.totals.netAmount, grnData.totals.taxableAmount,
+              grnData.cgstRate, grnData.sgstRate,
+              row.EBillingTermsData, row.EDiscountData,
+            );
+          }
+        } catch { /* fallback */ }
+      }
+      if (invoiceAmount == null && row.ENetAmount != null) {
+        invoiceAmount = applyBillingTermsToAmount(
+          parseFloat(row.ENetAmount), parseFloat(row.EAmount ?? 0),
+          parseFloat(row.ECgstRate ?? 0), parseFloat(row.ESgstRate ?? 0),
+          row.EBillingTermsData, row.EDiscountData,
+        );
+      }
+      const totalPaid = parseFloat(row.ETotalPaid ?? 0);
+      return {
+        docNo: row.EDocNo,
+        invoiceAmount,
+        totalPaid,
+        remaining: Math.max(0, (invoiceAmount ?? 0) - totalPaid),
+        billStatus: row.EBillStatus,
+      };
+    }));
+    res.json(rows.filter((r) => r.invoiceAmount != null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /apply-adjustment — apply OA balance to an invoice ───────────────
-// Body: { expenseRef, amount (to apply), paymentId?, createdBy? }
+// Body: { expenseRef, amount (to apply), partyId? (override), paymentId?, paymentDocNo? }
 router.post("/apply-adjustment", async (req, res) => {
-  const { expenseRef, amount, paymentDocNo, paymentId } = req.body;
+  const { expenseRef, amount, paymentDocNo, paymentId, partyId: bodyPartyId } = req.body;
   const createdBy = req.user?.email || "system";
   if (!expenseRef || !amount || amount <= 0) return res.status(400).json({ error: "expenseRef and amount required" });
   try {
     const pool = getPool();
 
-    // Resolve party
-    const party = await resolvePartyFromRef(pool, expenseRef);
+    // Resolve party — prefer explicitly supplied partyId (known from OA entry)
+    let party = null;
+    if (bodyPartyId) {
+      const typeRes = await pool.request().input("PId", sql.Int, parseInt(bodyPartyId)).query(
+        `SELECT TOP 1 LHeadId, LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PId`
+      );
+      if (typeRes.recordset.length) {
+        party = { partyId: typeRes.recordset[0].LHeadId, partyType: typeRes.recordset[0].LHeadType };
+      }
+    }
+    if (!party) party = await resolvePartyFromRef(pool, expenseRef);
     if (!party) return res.status(404).json({ error: "Party not found for this invoice" });
 
     // Check current OA balance
@@ -240,14 +334,44 @@ router.get("/report", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
+    const countRequest = pool.request();
     const conditions = [];
 
-    if (companyId) { conditions.push("oa.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
-    if (projectId) { conditions.push("oa.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
-    if (partyId)   { conditions.push("oa.PartyId = @PartyId");   request.input("PartyId",   sql.Int, parseInt(partyId)); }
-    if (partyType) { conditions.push("oa.PartyType = @PartyType"); request.input("PartyType", sql.NVarChar(20), partyType); }
-    if (dateFrom)  { conditions.push("oa.TxnDate >= @DateFrom"); request.input("DateFrom", sql.Date, new Date(dateFrom)); }
-    if (dateTo)    { conditions.push("oa.TxnDate <= @DateTo");   request.input("DateTo",   sql.Date, new Date(dateTo)); }
+    if (companyId) {
+      conditions.push("oa.CompanyId = @CompanyId");
+      const v = parseInt(companyId);
+      request.input("CompanyId", sql.Int, v);
+      countRequest.input("CompanyId", sql.Int, v);
+    }
+    if (projectId) {
+      conditions.push("oa.ProjectId = @ProjectId");
+      const v = parseInt(projectId);
+      request.input("ProjectId", sql.Int, v);
+      countRequest.input("ProjectId", sql.Int, v);
+    }
+    if (partyId) {
+      conditions.push("oa.PartyId = @PartyId");
+      const v = parseInt(partyId);
+      request.input("PartyId", sql.Int, v);
+      countRequest.input("PartyId", sql.Int, v);
+    }
+    if (partyType) {
+      conditions.push("oa.PartyType = @PartyType");
+      request.input("PartyType", sql.NVarChar(20), partyType);
+      countRequest.input("PartyType", sql.NVarChar(20), partyType);
+    }
+    if (dateFrom) {
+      conditions.push("oa.TxnDate >= @DateFrom");
+      const v = new Date(dateFrom);
+      request.input("DateFrom", sql.Date, v);
+      countRequest.input("DateFrom", sql.Date, v);
+    }
+    if (dateTo) {
+      conditions.push("oa.TxnDate <= @DateTo");
+      const v = new Date(dateTo);
+      request.input("DateTo", sql.Date, v);
+      countRequest.input("DateTo", sql.Date, v);
+    }
 
     const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
 

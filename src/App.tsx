@@ -160,6 +160,8 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
+const FixedAssetRecord = lazy(() => import("./pages/material/FixedAssetRecord"));
+const DepreciationSetup = lazy(() => import("./pages/material/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
@@ -1315,6 +1317,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="vehicle-in-out">
             <VehicleInOut />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/fixed-asset-record"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-record">
+            <FixedAssetRecord />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/setup/depreciation"
+        element={
+          <ProtectedRoute pageKey="depreciation-setup">
+            <DepreciationSetup />
           </ProtectedRoute>
         }
       />

@@ -4,7 +4,8 @@ const { sql } = require("../db");
 
 /**
  * Resolve the AccountHeadMaster partyId + partyType for a given ExpenseBooking doc ref.
- * Handles GRN, PO, WO_PO, WORK_DONE, and direct-invoice fallbacks (migration 179/180).
+ * Handles GRN, PO, WO_PO, WO (WorkOrderHeader), WORK_DONE, and direct-invoice
+ * fallbacks (migration 179/180).
  * Returns { partyId, partyType } or null.
  */
 async function resolvePartyFromRef(pool, expenseRef) {
@@ -16,7 +17,8 @@ async function resolvePartyFromRef(pool, expenseRef) {
       eb.EName,
       grn_sup.LHeadId   AS GrnSupId,   grn_sup.LHeadType   AS GrnSupType,
       po_sup.LHeadId    AS PoSupId,    po_sup.LHeadType    AS PoSupType,
-      wd_sup.LHeadId    AS WdSupId,    wd_sup.LHeadType    AS WdSupType
+      wd_sup.LHeadId    AS WdSupId,    wd_sup.LHeadType    AS WdSupType,
+      wo_sup.LHeadId    AS WoSupId,    wo_sup.LHeadType    AS WoSupType
     FROM dbo.ExpenseBooking eb
     LEFT JOIN dbo.GoodsReceiptNotes grn_eb
       ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
@@ -27,6 +29,10 @@ async function resolvePartyFromRef(pool, expenseRef) {
     LEFT JOIN dbo.WorkDone wd
       ON eb.ESourceType = 'WORK_DONE' AND wd.ID = TRY_CAST(eb.ESourceId AS INT)
     LEFT JOIN dbo.AccountHeadMaster wd_sup ON wd_sup.LHeadId = wd.SupplierId
+    LEFT JOIN dbo.WorkOrderHeader wo
+      ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster wo_sup
+      ON wo_sup.LHeadId = COALESCE(wo.SupplierId, wo.ContractorId)
     WHERE eb.EDocNo = @EDocNo
   `);
   if (!r.recordset.length) return null;
@@ -39,6 +45,7 @@ async function resolvePartyFromRef(pool, expenseRef) {
     if (row.PoSupId) return { partyId: row.PoSupId, partyType: row.PoSupType };
   }
   if (src === 'WORK_DONE'              && row.WdSupId)  return { partyId: row.WdSupId,  partyType: row.WdSupType  };
+  if (src === 'WO'                     && row.WoSupId)  return { partyId: row.WoSupId,  partyType: row.WoSupType  };
 
   // Fallback 1: LHeadId stored on ExpenseBooking (migration 179) — separate query so
   // the main query doesn't break if the column doesn't exist yet.

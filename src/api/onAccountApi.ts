@@ -50,9 +50,24 @@ export async function getOABalance(partyId: number): Promise<OABalance> {
   return r.json();
 }
 
+export interface OAInvoice {
+  docNo: string;
+  invoiceAmount: number;
+  totalPaid: number;
+  remaining: number;
+  billStatus: string | null;
+}
+
+export async function getInvoicesForParty(partyId: number): Promise<OAInvoice[]> {
+  const r = await fetchWithAuth(`${BASE}/invoices-for-party/${partyId}`);
+  if (!r.ok) return [];
+  return r.json();
+}
+
 export async function applyOAAdjustment(payload: {
   expenseRef: string;
   amount: number;
+  partyId?: number;
   paymentDocNo?: string;
   paymentId?: number;
 }): Promise<{ applied: number; remainingBalance: number }> {
