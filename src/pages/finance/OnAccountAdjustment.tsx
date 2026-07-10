@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown } from "lucide-react";
+import { ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown, BadgeDollarSign } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { Button } from "@/components/ui/button";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { FinanceShell, FinanceGlassCard } from "@/components/finance/FinanceShell";
 import { getInvoicesForParty, applyOAAdjustment } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
 import { toast } from "sonner";
@@ -120,8 +121,8 @@ function AdjustDialog({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl overflow-hidden"
@@ -285,7 +286,8 @@ function AdjustDialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -370,50 +372,35 @@ export default function OnAccountAdjustment() {
         {/* ── Top stat cards + party panel ──────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-          {/* Left: big stat cards */}
-          <div className="flex flex-col gap-4">
-            {/* Total Balance card */}
-            <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-500/70">Total On A/C Balance</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15">
-                  <Wallet size={16} className="text-emerald-600 dark:text-emerald-500" />
-                </div>
-              </div>
-              <div className="mt-1">
-                {partiesLoading ? (
-                  <div className="h-10 w-40 rounded bg-muted/40 animate-pulse" />
-                ) : (
-                  <span className="text-4xl font-black tabular-nums tracking-tight text-emerald-600 dark:text-emerald-400">
-                    {formatINR(totalBalance)}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Across {parties.length} {parties.length === 1 ? "party" : "parties"}
-              </p>
-            </div>
+          {/* Left: stat cards */}
+          <div className="flex flex-col gap-3">
+            <FinanceGlassCard
+              label="Total On A/C Balance"
+              icon={Wallet}
+              accentColor="#10b981"
+              value={
+                partiesLoading
+                  ? <div className="h-8 w-32 rounded bg-muted/40 animate-pulse mt-1" />
+                  : <span className="tabular-nums">{formatINR(totalBalance)}</span>
+              }
+              sub={`Across ${parties.length} ${parties.length === 1 ? "party" : "parties"}`}
+            />
 
-            {/* Party count card */}
-            <div className="rounded-2xl border border-border bg-card p-6 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Parties with Balance</span>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
-                  <Users size={16} className="text-blue-500" />
-                </div>
-              </div>
-              <span className="text-3xl font-black tabular-nums text-foreground">
-                {partiesLoading ? "—" : parties.length}
-              </span>
-              <div className="flex gap-3 mt-1">
-                <span className="text-xs text-muted-foreground">
-                  {parties.filter((p) => p.PartyType === "Supplier" || p.PartyType === "S").length} Suppliers
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {parties.filter((p) => p.PartyType === "Contractor" || p.PartyType === "C").length} Contractors
-                </span>
-              </div>
-            </div>
+            <FinanceGlassCard
+              label="Parties with Balance"
+              icon={Users}
+              accentColor="#6366f1"
+              value={partiesLoading ? "—" : String(parties.length)}
+              sub={`${parties.filter((p) => p.PartyType === "Supplier" || p.PartyType === "S").length} Suppliers · ${parties.filter((p) => p.PartyType === "Contractor" || p.PartyType === "C").length} Contractors`}
+            />
+
+            <FinanceGlassCard
+              label="Credit Entries"
+              icon={BadgeDollarSign}
+              accentColor="#f59e0b"
+              value={creditsLoading ? "—" : String(filteredCredits.length)}
+              sub={selectedPartyId === "all" ? "All parties" : `Filtered · ${selectedParty?.PartyName ?? ""}`}
+            />
 
             <Button variant="outline" size="sm" onClick={() => { refetchParties(); refetchCredits(); }} disabled={isLoading} className="w-fit gap-1.5">
               {isLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
