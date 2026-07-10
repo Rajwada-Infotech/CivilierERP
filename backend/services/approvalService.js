@@ -82,6 +82,7 @@ const MODULE_MAP = {
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
+  contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -179,6 +180,7 @@ const WORKFLOW_ID_MAP = {
   "vehicle-in-out": "VehicleInOut",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
+  contracts: "Contract",
 };
 
 /**
