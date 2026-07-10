@@ -19,6 +19,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -460,8 +461,13 @@ export default function Contract() {
       id: "status",
       accessorKey: "Status",
       header: "Status",
-      size: 100,
-      cell: ({ getValue }: any) => <StatusBadge status={getValue() as string} />,
+      size: 160,
+      cell: ({ getValue, row }: any) => (
+        <div className="flex flex-col gap-1 items-start">
+          <StatusBadge status={getValue() as string} />
+          <ApprovalStatusChain table="Contract" recordId={(row.original as ContractListItem).ContractId} />
+        </div>
+      ),
     },
     {
       id: "actions",
@@ -1011,10 +1017,12 @@ export default function Contract() {
                 className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
                 <ArrowLeft size={14} /> Back
               </button>
-              <button onClick={() => goToEdit(c)}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
-                Edit
-              </button>
+              {c.Status !== "Pending" && c.Status !== "Approved" && (
+                <button onClick={() => goToEdit(c)}
+                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
+                  Edit
+                </button>
+              )}
               <button
                 onClick={() => setDeleteConfirmId(c.ContractId)}
                 className="h-9 px-4 rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition">
@@ -1027,7 +1035,12 @@ export default function Contract() {
             {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                ["Status", <StatusBadge key="s" status={c.Status} />],
+                ["Status", (
+                  <div key="s" className="flex flex-col gap-1 items-start">
+                    <StatusBadge status={c.Status} />
+                    <ApprovalStatusChain table="Contract" recordId={c.ContractId} />
+                  </div>
+                )],
                 ["Doc Date", fmtDate(c.DocDate)],
                 ["Contract Date", fmtDate(c.ContractDate)],
                 ["Financial Year", c.FinYear || "—"],
