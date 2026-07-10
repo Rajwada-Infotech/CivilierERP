@@ -1000,7 +1000,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       }
 
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
-      if (approvedRef && !/^EMI-/.test(approvedRef) && approvedRow) {
+      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
           const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
@@ -1215,8 +1215,8 @@ router.post("/recalculate-balances", async (req, res) => {
   }
 });
 
-// ── GET /:id — single payment by PPaymentID (used by ApprovalActions) ─────────
-router.get("/:id", async (req, res) => {
+// ── GET /detail/:id — single payment by PPaymentID (used by ApprovalActions) ──
+router.get("/detail/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(404).json({ error: "Not found" });
   try {

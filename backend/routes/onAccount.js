@@ -324,14 +324,44 @@ router.get("/report", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
+    const countRequest = pool.request();
     const conditions = [];
 
-    if (companyId) { conditions.push("oa.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
-    if (projectId) { conditions.push("oa.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
-    if (partyId)   { conditions.push("oa.PartyId = @PartyId");   request.input("PartyId",   sql.Int, parseInt(partyId)); }
-    if (partyType) { conditions.push("oa.PartyType = @PartyType"); request.input("PartyType", sql.NVarChar(20), partyType); }
-    if (dateFrom)  { conditions.push("oa.TxnDate >= @DateFrom"); request.input("DateFrom", sql.Date, new Date(dateFrom)); }
-    if (dateTo)    { conditions.push("oa.TxnDate <= @DateTo");   request.input("DateTo",   sql.Date, new Date(dateTo)); }
+    if (companyId) {
+      conditions.push("oa.CompanyId = @CompanyId");
+      const v = parseInt(companyId);
+      request.input("CompanyId", sql.Int, v);
+      countRequest.input("CompanyId", sql.Int, v);
+    }
+    if (projectId) {
+      conditions.push("oa.ProjectId = @ProjectId");
+      const v = parseInt(projectId);
+      request.input("ProjectId", sql.Int, v);
+      countRequest.input("ProjectId", sql.Int, v);
+    }
+    if (partyId) {
+      conditions.push("oa.PartyId = @PartyId");
+      const v = parseInt(partyId);
+      request.input("PartyId", sql.Int, v);
+      countRequest.input("PartyId", sql.Int, v);
+    }
+    if (partyType) {
+      conditions.push("oa.PartyType = @PartyType");
+      request.input("PartyType", sql.NVarChar(20), partyType);
+      countRequest.input("PartyType", sql.NVarChar(20), partyType);
+    }
+    if (dateFrom) {
+      conditions.push("oa.TxnDate >= @DateFrom");
+      const v = new Date(dateFrom);
+      request.input("DateFrom", sql.Date, v);
+      countRequest.input("DateFrom", sql.Date, v);
+    }
+    if (dateTo) {
+      conditions.push("oa.TxnDate <= @DateTo");
+      const v = new Date(dateTo);
+      request.input("DateTo", sql.Date, v);
+      countRequest.input("DateTo", sql.Date, v);
+    }
 
     const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
 
