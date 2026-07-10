@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, Pencil, Trash2, X, Check, Percent, AlertCircle, Search,
-  Laptop, Monitor, Smartphone, Printer, ScanLine, Armchair, Car, Settings2, Package,
+  Package,
   Boxes, CheckCircle2, Layers,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -13,11 +13,7 @@ import {
   getDepreciationSetups, createDepreciationSetup, updateDepreciationSetup, deleteDepreciationSetup,
   type DepreciationSetup, type DepreciationPayload,
 } from "@/api/depreciationApi";
-
-const ASSET_CATEGORIES = [
-  "Laptop", "Desktop", "Mobile Phone", "Printer", "Scanner",
-  "Furniture", "Vehicle", "Machinery", "Other",
-];
+import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 
 const DEPRECIATION_TYPES = [
   { value: "SLM", label: "SLM — Straight Line Method" },
@@ -34,30 +30,6 @@ const STATUS_COLORS: Record<string, string> = {
 const TYPE_COLORS: Record<string, string> = {
   SLM: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   WDV: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
-};
-
-const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  Laptop:         Laptop,
-  Desktop:        Monitor,
-  "Mobile Phone": Smartphone,
-  Printer:        Printer,
-  Scanner:        ScanLine,
-  Furniture:      Armchair,
-  Vehicle:        Car,
-  Machinery:      Settings2,
-  Other:          Package,
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Laptop:         "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Desktop:        "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  "Mobile Phone": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Printer:        "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  Scanner:        "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Furniture:      "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  Vehicle:        "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  Machinery:      "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-  Other:          "bg-violet-500/10 text-violet-600 dark:text-violet-400",
 };
 
 const emptyForm = (): DepreciationPayload => ({
@@ -208,7 +180,7 @@ export default function DepreciationSetupPage() {
       </div>
 
       {/* ── filters ── */}
-      <div className="flex flex-nowrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3 overflow-x-auto">
+      <div className="flex flex-wrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3">
         <div className="relative flex-1 min-w-[160px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -223,7 +195,7 @@ export default function DepreciationSetupPage() {
           )}
         </div>
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as "" | "Active" | "Inactive")}
-          className={`${filterCls} w-32 bg-background`}>
+          className={`${filterCls} w-full sm:w-32 bg-background`}>
           <option value="">All Status</option>
           <option value="Active">Active</option>
           <option value="Inactive">Inactive</option>
@@ -236,7 +208,7 @@ export default function DepreciationSetupPage() {
             Clear
           </button>
         )}
-        <span className="ml-auto text-xs text-muted-foreground shrink-0 hidden sm:inline">{filtered.length} of {records.length} rates</span>
+        <span className="w-full sm:w-auto sm:ml-auto text-xs text-muted-foreground shrink-0">{filtered.length} of {records.length} rates</span>
       </div>
 
       {/* ── table ── */}
@@ -256,8 +228,8 @@ export default function DepreciationSetupPage() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Asset Category</th>

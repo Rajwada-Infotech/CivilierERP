@@ -6,8 +6,7 @@ import {
   Plus, ArrowLeft, Eye, Pencil, Trash2, AlertCircle, Search,
   Building2, Package, TrendingDown, TrendingUp, IndianRupee, Calendar, User,
   FileText, MapPin, Hash, Cpu, Check, X,
-  Laptop, Monitor, Smartphone, Printer, ScanLine, Armchair, Car, Settings2,
-  Boxes, Wallet, PackageCheck, Circle, CheckCircle2,
+  Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -19,13 +18,9 @@ import {
   getFixedAssets, getFixedAsset, createFixedAsset, updateFixedAsset, deleteFixedAsset,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
+import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const ASSET_CATEGORIES = [
-  "Laptop", "Desktop", "Mobile Phone", "Printer", "Scanner",
-  "Furniture", "Vehicle", "Machinery", "Other",
-];
-
 const ASSET_STATUS_OPTIONS = ["Active", "Sold", "Scrapped", "Under Maintenance"] as const;
 
 const STATUS_COLORS: Record<string, string> = {
@@ -33,30 +28,6 @@ const STATUS_COLORS: Record<string, string> = {
   Sold:                "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   Scrapped:            "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   "Under Maintenance": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-};
-
-const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  Laptop:         Laptop,
-  Desktop:        Monitor,
-  "Mobile Phone": Smartphone,
-  Printer:        Printer,
-  Scanner:        ScanLine,
-  Furniture:      Armchair,
-  Vehicle:        Car,
-  Machinery:      Settings2,
-  Other:          Package,
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Laptop:         "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  Desktop:        "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  "Mobile Phone": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Printer:        "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  Scanner:        "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  Furniture:      "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  Vehicle:        "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  Machinery:      "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-  Other:          "bg-violet-500/10 text-violet-600 dark:text-violet-400",
 };
 
 function ensureArray<T>(v: unknown): T[] {
@@ -103,6 +74,7 @@ interface FormState {
   model: string;
   serialNumber: string;
   purchaseDate: string;
+  activationDate: string;
   purchaseInvoiceRef: string;
   supplierId: string;
   purchaseCost: string;
@@ -133,6 +105,7 @@ const emptyForm = (finYear = ""): FormState => ({
   model:              "",
   serialNumber:       "",
   purchaseDate:       "",
+  activationDate:     "",
   purchaseInvoiceRef: "",
   supplierId:         "",
   purchaseCost:       "",
@@ -221,20 +194,21 @@ function CategoryBadge({ category }: { category: string }) {
 function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean }) {
   const Icon = CATEGORY_ICONS[form.assetCategory] || FileText;
   const fields = [
-    { label: "Asset Name",    value: form.assetName || "—", done: !!form.assetName },
-    { label: "Category",      value: form.assetCategory || "—", done: !!form.assetCategory },
-    { label: "Brand / Model", value: [form.brand, form.model].filter(Boolean).join(" · ") || "—", done: !!(form.brand || form.model) },
-    { label: "Serial No.",    value: form.serialNumber || "—", done: !!form.serialNumber },
-    { label: "Purchase Cost", value: form.purchaseCost ? fmtCur(parseFloat(form.purchaseCost)) : "—", done: !!form.purchaseCost },
-    { label: "Purchase Date", value: form.purchaseDate ? fmtDate(form.purchaseDate) : "—", done: !!form.purchaseDate },
-    { label: "Location",      value: form.location || "—", done: !!form.location },
-    { label: "Custodian",     value: form.custodian || "—", done: !!form.custodian },
+    { label: "Asset Name",     value: form.assetName || "—", done: !!form.assetName },
+    { label: "Category",       value: form.assetCategory || "—", done: !!form.assetCategory },
+    { label: "Brand / Model",  value: [form.brand, form.model].filter(Boolean).join(" · ") || "—", done: !!(form.brand || form.model) },
+    { label: "Serial No.",     value: form.serialNumber || "—", done: !!form.serialNumber },
+    { label: "Purchase Cost",  value: form.purchaseCost ? fmtCur(parseFloat(form.purchaseCost)) : "—", done: !!form.purchaseCost },
+    { label: "Purchase Date",  value: form.purchaseDate ? fmtDate(form.purchaseDate) : "—", done: !!form.purchaseDate },
+    { label: "Activation Date",value: form.activationDate ? fmtDate(form.activationDate) : "—", done: !!form.activationDate },
+    { label: "Location",       value: form.location || "—", done: !!form.location },
+    { label: "Custodian",      value: form.custodian || "—", done: !!form.custodian },
   ];
   const doneCount = fields.filter((f) => f.done).length;
   const pct = Math.round((doneCount / fields.length) * 100);
 
   return (
-    <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit">
+    <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
       <div className="bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 p-4 text-white">
         <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
@@ -334,11 +308,19 @@ export default function FixedAssetRecord() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; name: string; company_id: number | null }>(allProjects)
+    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
       .filter((p) => p.company_id === Number(form.companyId));
   }, [allProjects, form.companyId]);
 
   const suppliers = ensureArray<{ LHeadId: number; LHeadName: string }>(suppliersRaw);
+
+  // Category options come from live Depreciation Setup rows (the actual
+  // backend source) — falls back to the seed list only until the first
+  // active rate is configured there.
+  const categoryOptions = useMemo(() => {
+    const fromSetups = Array.from(new Set(depSetups.map((d) => d.AssetCategory))).sort();
+    return fromSetups.length > 0 ? fromSetups : ASSET_CATEGORIES;
+  }, [depSetups]);
 
   // ── portfolio stats (for the KPI strip) ───────────────────────────────────
   const portfolioStats = useMemo(() => {
@@ -447,6 +429,7 @@ export default function FixedAssetRecord() {
         model:               d.Model || "",
         serialNumber:        d.SerialNumber || "",
         purchaseDate:        d.PurchaseDate?.slice(0, 10) || "",
+        activationDate:      d.ActivationDate?.slice(0, 10) || "",
         purchaseInvoiceRef:  d.PurchaseInvoiceRef || "",
         supplierId:          String(d.SupplierId || ""),
         purchaseCost:        String(d.PurchaseCost || ""),
@@ -507,6 +490,7 @@ export default function FixedAssetRecord() {
       model:               form.model || undefined,
       serialNumber:        form.serialNumber || undefined,
       purchaseDate:        form.purchaseDate || undefined,
+      activationDate:      form.activationDate || undefined,
       purchaseInvoiceRef:  form.purchaseInvoiceRef || undefined,
       supplierId:          form.supplierId ? Number(form.supplierId) : undefined,
       purchaseCost:        parseFloat(form.purchaseCost) || 0,
@@ -642,6 +626,7 @@ export default function FixedAssetRecord() {
                 ["Project",           d.ProjectName],
                 ["Financial Year",    d.FinYear],
                 ["Purchase Date",     fmtDate(d.PurchaseDate)],
+                ["Activation Date",   d.ActivationDate ? fmtDate(d.ActivationDate) : null],
                 ["Invoice Ref",       d.PurchaseInvoiceRef],
                 ["Supplier",          d.SupplierName],
                 ["Quantity",          fmt(d.Quantity)],
@@ -741,12 +726,12 @@ export default function FixedAssetRecord() {
           </div>
         }
       >
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5 items-start max-w-6xl">
-        <div className="space-y-5">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 lg:gap-8 items-start max-w-6xl">
+        <div className="space-y-5 min-w-0">
           {/* ── Header Info ── */}
           <div className={sectionCls}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
                 <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
@@ -755,8 +740,8 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}><Building2 size={11} /> Company</label>
                 <select value={form.companyId} onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); }} className={inputCls}>
                   <option value="">Select company…</option>
-                  {ensureArray<{ id: number; name: string }>(companies).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                  {ensureArray<{ id: number; label: string }>(companies).map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
                 </select>
               </div>
@@ -764,7 +749,7 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}>Project</label>
                 <select value={form.projectId} onChange={(e) => setField("projectId", e.target.value)} className={inputCls} disabled={!form.companyId}>
                   <option value="">Select project…</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </div>
               <div>
@@ -784,8 +769,8 @@ export default function FixedAssetRecord() {
           {/* ── Asset Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
-              <div className="col-span-2 sm:col-span-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
                 <label className={labelCls}>Fixed Asset Name *</label>
                 <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
               </div>
@@ -794,7 +779,7 @@ export default function FixedAssetRecord() {
                 <div className="relative">
                   <select value={form.assetCategory} onChange={(e) => handleCategoryChange(e.target.value)} className={`${inputCls} ${form.assetCategory ? "pl-9" : ""}`}>
                     <option value="">Select category…</option>
-                    {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                   {form.assetCategory && (
                     <span className={`absolute left-2 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded ${CATEGORY_COLORS[form.assetCategory] || ""}`}>
@@ -824,6 +809,10 @@ export default function FixedAssetRecord() {
               <div>
                 <label className={labelCls}><Calendar size={11} /> Purchase Date</label>
                 <input type="date" value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}><PlayCircle size={11} /> Activation Date</label>
+                <input type="date" value={form.activationDate} onChange={(e) => setField("activationDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Purchase Invoice Ref</label>
@@ -862,7 +851,7 @@ export default function FixedAssetRecord() {
           {/* ── Depreciation Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className={labelCls}>Depreciation Type</label>
                 <input type="text" value={form.depreciationType} readOnly placeholder="Auto-fetched…"
@@ -907,7 +896,7 @@ export default function FixedAssetRecord() {
           {(form.assetStatus === "Sold" || form.sellingPrice) && (
             <div className={sectionCls}>
               <SectionHeader icon={IndianRupee}>Asset Sale</SectionHeader>
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className={labelCls}>Selling Price (₹)</label>
                   <input type="number" min="0" step="0.01" value={form.sellingPrice} onChange={(e) => setField("sellingPrice", e.target.value)} placeholder="0.00" className={inputCls} />
@@ -988,7 +977,7 @@ export default function FixedAssetRecord() {
       </div>
 
       {/* ── filters ── */}
-      <div className="flex flex-nowrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3 overflow-x-auto">
+      <div className="flex flex-wrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3">
         <div className="relative flex-1 min-w-[160px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -1000,15 +989,15 @@ export default function FixedAssetRecord() {
             </button>
           )}
         </div>
-        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className={`${filterCls} w-36 bg-background`}>
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className={`${filterCls} w-full sm:w-36 bg-background`}>
           <option value="">All Categories</option>
-          {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={`${filterCls} w-32 bg-background`}>
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={`${filterCls} w-full sm:w-32 bg-background`}>
           <option value="">All Status</option>
           {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={`${filterCls} w-28 bg-background`}>
+        <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={`${filterCls} w-full sm:w-28 bg-background`}>
           <option value="">All Years</option>
           {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
         </select>
@@ -1020,7 +1009,7 @@ export default function FixedAssetRecord() {
             Clear
           </button>
         )}
-        <span className="ml-auto text-xs text-muted-foreground shrink-0 hidden sm:inline">{filtered.length} of {portfolioStats.count} assets</span>
+        <span className="w-full sm:w-auto sm:ml-auto text-xs text-muted-foreground shrink-0">{filtered.length} of {portfolioStats.count} assets</span>
       </div>
 
       {/* ── table ── */}

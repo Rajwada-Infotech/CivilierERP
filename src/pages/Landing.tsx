@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useAppVersion } from "@/hooks/useAppVersion";
 
 // ── Animated background orbs ──────────────────────────────────────────────────
 function BackgroundOrbs() {
@@ -76,6 +77,7 @@ function BackgroundOrbs() {
 export default function Landing() {
   const navigate = useNavigate();
   const [exiting, setExiting] = useState(false);
+  const { appVersion } = useAppVersion();
 
   function handleEnter() {
     setExiting(true);
@@ -155,8 +157,8 @@ export default function Landing() {
         className="relative z-10 flex items-center justify-between px-8 py-3"
         style={{ borderTop: "1px solid rgba(167,139,250,0.08)" }}
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.65, duration: 0.6 }}>
-        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.30)" }}>© 2026 CivilierERP · Rajwada Infotech</span>
-        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.22)" }}>v1.0.0</span>
+        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.30)" }}>© {new Date().getFullYear()} CivilierERP · Rajwada Infotech</span>
+        <span className="text-[11px]" style={{ color: "rgba(167,139,250,0.22)" }}>v{appVersion}</span>
       </motion.div>
     </motion.div>
   );
