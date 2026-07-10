@@ -4,10 +4,13 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "account-head-supplier-login-
 /**
  * Supplier Master: auto-generated login email + bcrypt password.
  *
- * New requirement: creating a Supplier (LHeadType='S') requires a password,
- * auto-generates a <name>@civilier.in login email, and bcrypt-hashes the
- * password (reusing routes/users.js's own bcrypt/SALT_ROUNDS convention,
- * not a new mechanism). AccountHeadMaster is the shared, generic ledger-
+ * Creating a Supplier (LHeadType='S') auto-generates a <name>@civilier.in
+ * login email and bcrypt-hashes a password (reusing routes/users.js's own
+ * bcrypt/SALT_ROUNDS convention, not a new mechanism). The password is
+ * optional at creation time — left blank, it defaults to "123456" so
+ * creating a supplier is never blocked on picking a password up front; an
+ * admin can always set/change it later via PUT. AccountHeadMaster is the
+ * shared, generic ledger-
  * head table (suppliers/customers/banks/GL heads as rows, distinguished by
  * LHeadType) and stores NO login-related columns at all — the credential
  * lives solely in a linked dbo.users row (role='supplier', LinkedLHeadId),
@@ -161,10 +164,11 @@ beforeEach(() => {
   insertedUsersRow = null;
   updatedUsersPassword = null;
   failOnUsersInsert = false;
+  txSpy = undefined;
 });
 
-describe("Supplier Master: mandatory password + auto-generated login", () => {
-  test("POST / rejects a supplier with no password", async () => {
+describe("Supplier Master: default password + auto-generated login", () => {
+  test("POST / with no password succeeds and defaults the login to \"123456\"", async () => {
     const { createApp } = require("../server");
     const app = await createApp();
 
@@ -173,12 +177,16 @@ describe("Supplier Master: mandatory password + auto-generated login", () => {
       .set("Authorization", `Bearer ${superAdminToken()}`)
       .send({ LHeadName: "Acme Steel Co", LHeadType: "S", LHeadPan: "ABCDE1234F" });
 
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe("MISSING_SUPPLIER_PASSWORD");
-    expect(txSpy).toBeUndefined(); // never even opened a transaction
-  });
+    expect(res.status).toBe(200);
+    expect(res.body.SupplierPasswordDefaulted).toBe(true);
+    expect(res.body.SupplierDefaultPassword).toBe("123456");
+    expect(txSpy.commit).toHaveBeenCalledTimes(1);
 
-  test("POST / rejects a supplier password shorter than 6 characters", async () => {
+    expect(insertedUsersRow).not.toBeNull();
+    await expect(bcrypt.compare("123456", insertedUsersRow.password)).resolves.toBe(true);
+  }, 15000);
+
+  test("POST / rejects a supplier password shorter than 6 characters when one is given", async () => {
     const { createApp } = require("../server");
     const app = await createApp();
 
@@ -191,7 +199,8 @@ describe("Supplier Master: mandatory password + auto-generated login", () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("MISSING_SUPPLIER_PASSWORD");
+    expect(res.body.code).toBe("INVALID_SUPPLIER_PASSWORD");
+    expect(txSpy).toBeUndefined(); // never even opened a transaction
   });
 
   test("POST / creates the ledger head AND a linked dbo.users login, email auto-generated", async () => {
