@@ -88,17 +88,98 @@ router.post("/record", async (req, res) => {
   }
 });
 
+// ── GET /invoices-for-party/:partyId — invoices linked to a specific supplier/contractor
+router.get("/invoices-for-party/:partyId", async (req, res) => {
+  const partyId = parseInt(req.params.partyId, 10);
+  if (!partyId) return res.status(400).json({ error: "Invalid partyId" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("PartyId", sql.Int, partyId).query(`
+      SELECT DISTINCT
+        eb.EDocNo,
+        eb.ENetAmount,
+        eb.EAmount,
+        eb.ECgstRate,
+        eb.ESgstRate,
+        eb.EBillingTermsData,
+        eb.EDiscountData,
+        eb.ESourceType,
+        eb.ESourceId,
+        eb.ETotalPaid,
+        eb.EBillStatus,
+        ISNULL(eb.ECreatedAt, GETDATE()) AS ECreatedAt
+      FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.GoodsReceiptNotes grn
+        ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.PurchaseOrders po
+        ON eb.ESourceType IN ('PO','WO_PO') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.WorkDone wd
+        ON eb.ESourceType = 'WORK_DONE' AND wd.ID = TRY_CAST(eb.ESourceId AS INT)
+      WHERE (
+        grn.SupplierID = @PartyId
+        OR po.SupplierID = @PartyId
+        OR wd.SupplierId = @PartyId
+        OR eb.LHeadId = @PartyId
+      )
+      AND eb.EDocNo IS NOT NULL
+      ORDER BY ECreatedAt DESC
+    `);
+    const rows = await Promise.all(r.recordset.map(async (row) => {
+      let invoiceAmount = null;
+      if (row.ESourceType === "GRN" && row.ESourceId) {
+        try {
+          const grnData = await buildGrnGstData(pool, parseInt(row.ESourceId, 10));
+          if (grnData && grnData.totals.netAmount > 0) {
+            invoiceAmount = applyBillingTermsToAmount(
+              grnData.totals.netAmount, grnData.totals.taxableAmount,
+              grnData.cgstRate, grnData.sgstRate,
+              row.EBillingTermsData, row.EDiscountData,
+            );
+          }
+        } catch { /* fallback */ }
+      }
+      if (invoiceAmount == null && row.ENetAmount != null) {
+        invoiceAmount = applyBillingTermsToAmount(
+          parseFloat(row.ENetAmount), parseFloat(row.EAmount ?? 0),
+          parseFloat(row.ECgstRate ?? 0), parseFloat(row.ESgstRate ?? 0),
+          row.EBillingTermsData, row.EDiscountData,
+        );
+      }
+      const totalPaid = parseFloat(row.ETotalPaid ?? 0);
+      return {
+        docNo: row.EDocNo,
+        invoiceAmount,
+        totalPaid,
+        remaining: Math.max(0, (invoiceAmount ?? 0) - totalPaid),
+        billStatus: row.EBillStatus,
+      };
+    }));
+    res.json(rows.filter((r) => r.invoiceAmount != null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /apply-adjustment — apply OA balance to an invoice ───────────────
-// Body: { expenseRef, amount (to apply), paymentId?, createdBy? }
+// Body: { expenseRef, amount (to apply), partyId? (override), paymentId?, paymentDocNo? }
 router.post("/apply-adjustment", async (req, res) => {
-  const { expenseRef, amount, paymentDocNo, paymentId } = req.body;
+  const { expenseRef, amount, paymentDocNo, paymentId, partyId: bodyPartyId } = req.body;
   const createdBy = req.user?.email || "system";
   if (!expenseRef || !amount || amount <= 0) return res.status(400).json({ error: "expenseRef and amount required" });
   try {
     const pool = getPool();
 
-    // Resolve party
-    const party = await resolvePartyFromRef(pool, expenseRef);
+    // Resolve party — prefer explicitly supplied partyId (known from OA entry)
+    let party = null;
+    if (bodyPartyId) {
+      const typeRes = await pool.request().input("PId", sql.Int, parseInt(bodyPartyId)).query(
+        `SELECT TOP 1 LHeadId, LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PId`
+      );
+      if (typeRes.recordset.length) {
+        party = { partyId: typeRes.recordset[0].LHeadId, partyType: typeRes.recordset[0].LHeadType };
+      }
+    }
+    if (!party) party = await resolvePartyFromRef(pool, expenseRef);
     if (!party) return res.status(404).json({ error: "Party not found for this invoice" });
 
     // Check current OA balance
