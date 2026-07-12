@@ -19,6 +19,7 @@ async function get(path: string) {
 export const fetchMe = () => get("/me");
 export const fetchTimeline = () => get("/timeline");
 export const fetchTickets = () => get("/tickets");
+export const fetchActivity = () => get("/activity").catch(() => []);
 export const fetchAgreement = () => get("/agreement").catch(() => null);
 export const fetchAgreementDocuments = () => get("/agreement/documents").catch(() => []);
 
@@ -32,6 +33,26 @@ export async function uploadAgreementDocument(docId: number, file: File) {
     body: formData,
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Upload failed");
+  return res.json();
+}
+
+export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute", reason?: string) {
+  const res = await fetch(`${API}/possession-notice/respond`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ decision, reason }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to respond");
+  return res.json();
+}
+
+export async function proposeAgreementDate(proposedDate: string) {
+  const res = await fetch(`${API}/agreement/propose-date`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ proposedDate }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to propose date");
   return res.json();
 }
 

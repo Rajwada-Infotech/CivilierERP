@@ -95,6 +95,18 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
     }
 
+    // Workflow guard: if an NOC (Org or Bank) was ever requested for this
+    // booking, it has to have actually been issued before handover — a NOC
+    // in Pending/Approved-but-not-yet-issued means the paperwork isn't
+    // physically done yet. Bookings that never needed an NOC (no loan, no
+    // society clearance required) aren't blocked — this only fires when a
+    // request exists and was left unfinished.
+    const openNoc = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending', 'Approved')`);
+    if (openNoc.recordset.length) {
+      return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
+    }
+
     const result = await pool.request()
       .input("bid",  sql.Int,  parseInt(b.BookingId))
       .input("sdt",  sql.Date, b.ScheduledDate || null)

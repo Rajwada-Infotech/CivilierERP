@@ -192,6 +192,13 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/agreements",
     label: "CRM Agreements",
   },
+  "crm-agreement-date": {
+    icon: ClipboardList,
+    color: "text-indigo-500 bg-indigo-500/10",
+    navPath: "/crm/agreements",
+    apiEndpoint: "/api/crm/agreements",
+    label: "CRM Agreement Date",
+  },
   "crm-brokerage": {
     icon: Receipt,
     color: "text-amber-500 bg-amber-500/10",
@@ -219,6 +226,12 @@ const MODULE_CONFIG: Record<
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+// Agreement Date is a narrower, separate gate — super_admin only, "for now"
+// per instruction, unlike the rest of the CRM modules above. The backend
+// enforces this independently via approvalService's
+// MODULE_APPROVER_ROLE_OVERRIDES; this only controls button visibility here.
+const DATE_APPROVAL_MODULES = new Set(["crm-agreement-date"]);
+const DATE_APPROVER_ROLES = ["super_admin"];
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
@@ -366,7 +379,12 @@ const InboxRow: React.FC<{
         status={item.Status}
         recordId={item.RecordId}
         endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        approverRoles={CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES : undefined}
+        actionPathSuffix={DATE_APPROVAL_MODULES.has(item.Module) ? "date" : undefined}
+        approverRoles={
+          DATE_APPROVAL_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
+          : undefined
+        }
         onSuccess={(action) => {
           if (action === "approve" || action === "reject") {
             onOptimisticUpdate(item.RecordId, item.Module);
@@ -376,7 +394,11 @@ const InboxRow: React.FC<{
       />
       {cfg?.navPath && (
         <button
-          onClick={() => navigate(cfg.navPath)}
+          onClick={() => navigate(
+            item.Module === "crm-agreements" || item.Module === "crm-agreement-date"
+              ? `${cfg.navPath}?id=${item.RecordId}`
+              : cfg.navPath
+          )}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
           title={`Go to ${item.ModuleLabel}`}
         >

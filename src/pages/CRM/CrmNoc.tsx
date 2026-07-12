@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus } from "lucide-react";
+import { Plus, AlertTriangle, CheckCircle2, Landmark } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/noc";
 const BKG_API = "/api/crm/bookings";
@@ -26,18 +28,34 @@ async function fetchAll(): Promise<any[]> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchBookingContext(bookingId: string): Promise<any> {
+  if (!bookingId) return null;
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}/context`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
 const CrmNoc: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
 
   const { data: nocs = [], isLoading } = useQuery({ queryKey: ["crm-noc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: context, isFetching: contextLoading } = useQuery({
+    queryKey: ["crm-noc-context", form.BookingId],
+    queryFn: () => fetchBookingContext(form.BookingId),
+    enabled: !!form.BookingId,
+  });
+  const hasAgreement = !!context?.agreement;
+  const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
 
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
+    if (!hasAgreement) { toast.error("This booking has no agreement yet — NOC cannot be requested"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -63,6 +81,15 @@ const CrmNoc: React.FC = () => {
       const res = await fetchWithAuth(`${API}/${id}/mark-issued`, { method: "PUT" });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("NOC marked as issued");
+
+      const current = (nocs as any[]).find((n) => n.Id === id);
+      const siblingsIssued = current && (nocs as any[])
+        .filter((n) => n.BookingId === current.BookingId && n.Id !== id)
+        .every((n) => n.Status === "Issued");
+      if (current && siblingsIssued) {
+        promptNextStep(navigate, "All NOCs for this booking are issued — handover can now proceed.", "/crm/handover", "Go to Handover");
+      }
+
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -144,6 +171,42 @@ const CrmNoc: React.FC = () => {
                 ))}
               </select>
             </div>
+
+            {form.BookingId && contextLoading && (
+              <div className="text-xs text-muted-foreground px-1">Loading booking details...</div>
+            )}
+
+            {form.BookingId && !contextLoading && context && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{context.booking.ApplicantName}</span>
+                  <span className="text-muted-foreground">{context.booking.Mobile}</span>
+                </div>
+                <div className="text-muted-foreground">{context.booking.BookingNo} · {context.booking.UnitNo}</div>
+
+                {hasAgreement ? (
+                  <div className="flex items-center gap-1.5 text-green-700">
+                    <CheckCircle2 size={13} />
+                    Agreement {context.agreement.AgreementNo} — {context.agreement.Status}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-red-600 font-medium">
+                    <AlertTriangle size={13} />
+                    No agreement yet — NOC cannot be requested for this booking
+                  </div>
+                )}
+
+                {context.existingNocs?.length > 0 && (
+                  <div className="pt-1 border-t border-border/60">
+                    <span className="text-muted-foreground">Existing NOCs: </span>
+                    {context.existingNocs.map((n: any) => (
+                      <span key={n.Id} className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-border">{n.NocType} · {n.Status}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="text-xs text-muted-foreground block mb-1">NOC Type</label>
               <select value={form.NocType} onChange={(e) => setForm((f) => ({ ...f, NocType: e.target.value }))}
@@ -153,6 +216,17 @@ const CrmNoc: React.FC = () => {
             </div>
             {form.NocType === "Bank" && (
               <>
+                {context?.customerBankDetail?.BankName && (
+                  <button type="button"
+                    onClick={() => setForm((f) => ({
+                      ...f,
+                      BankName: context.customerBankDetail.BankName || f.BankName,
+                      LoanAccountNo: context.customerBankDetail.AccountNo || f.LoanAccountNo,
+                    }))}
+                    className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+                    <Landmark size={12} /> Use customer's on-file bank ({context.customerBankDetail.BankName}) — verify this matches their loan bank
+                  </button>
+                )}
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Bank Name</label>
                   <input type="text" value={form.BankName} onChange={(e) => setForm((f) => ({ ...f, BankName: e.target.value }))}
@@ -180,7 +254,8 @@ const CrmNoc: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving}
+            <button onClick={handleCreate} disabled={saving || !canRequest}
+              title={!canRequest && form.BookingId ? "This booking has no agreement yet" : undefined}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Requesting..." : "Request"}
             </button>

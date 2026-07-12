@@ -552,6 +552,32 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-agreement-date") {
+      queries.push(`
+        SELECT
+          'crm-agreement-date'                  AS Module,
+          'CRM Agreement (Date Approval)'       AS ModuleLabel,
+          CAST(ag.Id AS NVARCHAR)               AS RecordId,
+          ag.AgreementNo                        AS Reference,
+          ag.CreatedAt                          AS RecordDate,
+          ag.DateApprovalStatus                 AS Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          b.TotalValue                          AS Amount,
+          ${NULL_EXTRA}
+          CAST(ag.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          CONCAT('Proposed: ', CONVERT(NVARCHAR(10), ag.ProposedDateByCompany, 23)) AS RejectionNote,
+          ISNULL(ag.UpdatedAt, ag.CreatedAt)    AS LastModified
+        FROM dbo.CrmAgreement ag
+        JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE ag.DateApprovalStatus = 'Pending'
+      `);
+    }
+
     if (!module || module === "crm-brokerage") {
       queries.push(`
         SELECT
@@ -672,6 +698,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
         (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending')

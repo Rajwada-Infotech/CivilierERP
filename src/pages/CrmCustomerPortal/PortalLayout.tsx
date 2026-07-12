@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Building2, FileText, CreditCard, HardHat, LifeBuoy, IdCard,
-  LogOut, Menu, X, Bell, ChevronRight,
+  LogOut, Menu, X, Bell, ChevronRight, Radio,
 } from "lucide-react";
 import { fetchMe, fetchTimeline } from "./portalApi";
 import {
@@ -28,6 +28,9 @@ const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any
   ]},
   { label: "Support", items: [
     { to: "/crm-client-portal/tickets", label: "Support Tickets", icon: LifeBuoy },
+  ]},
+  { label: "Updates", items: [
+    { to: "/crm-client-portal/activity", label: "Updates & Approvals", icon: Radio },
   ]},
   { label: "Account", items: [
     { to: "/crm-client-portal/profile", label: "Customer 360", icon: IdCard },

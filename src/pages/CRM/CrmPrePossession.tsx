@@ -5,6 +5,8 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, CheckSquare, Square } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/pre-possession";
 const BKG_API = "/api/crm/bookings";
@@ -32,6 +34,7 @@ async function fetchBookings(): Promise<any[]> {
 
 const CrmPrePossession: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -63,11 +66,15 @@ const CrmPrePossession: React.FC = () => {
 
   const toggleCheck = async (id: number, field: string, current: boolean) => {
     try {
-      await fetchWithAuth(`${API}/${id}`, {
+      const res = await fetchWithAuth(`${API}/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: !current }),
       });
+      const data = await res.json();
+      if (data?.status === "Ready") {
+        promptNextStep(navigate, "Pre-possession check is Ready — the Possession Notice can now be sent.", "/crm/possession-notice", "Go to Possession Notice");
+      }
       qc.invalidateQueries({ queryKey: ["crm-pre-possession"] });
     } catch (e: any) {
       toast.error(e.message);

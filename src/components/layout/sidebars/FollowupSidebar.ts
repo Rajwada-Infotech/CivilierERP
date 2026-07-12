@@ -18,11 +18,17 @@ export const followupNavItems: NavItem[] = [
   },
 
   {
+    // "Agreements" and "Agreement Workflow" retired from here — both were a
+    // parallel, never-actually-used Agreement system (0 live rows in either
+    // FollowupAgreements or FollowupAgreementWorkflows) sitting alongside
+    // the real, actively-developed one at CRM > Documents > Agreements.
+    // Keeping two live "Agreement" entry points invited exactly the
+    // confusion this was retired to fix. The route files/pages themselves
+    // are left on disk, just unreachable — see backend/server.js and
+    // src/App.tsx for the matching removals.
     label: "Agreement",
     icon: DocumentText,
     children: [
-      { label: "Agreements",         path: "/followup/agreement/agreements",     pageKey: "followup-agreements" },
-      { label: "Agreement Workflow", path: "/followup/agreement/workflow",       pageKey: "followup-agreements" },
       { label: "Legal Milestones",   path: "/followup/legal/milestones",         pageKey: "followup-legal-milestones" },
       { label: "Document Vault",     path: "/followup/agreement/document-vault", pageKey: "followup-document-vault" },
       { label: "Communicator",       path: "/followup/agreement/communicator",   pageKey: "followup-communicator" },

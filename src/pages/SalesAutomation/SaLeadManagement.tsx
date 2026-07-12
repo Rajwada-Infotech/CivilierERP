@@ -159,15 +159,28 @@ const exportColumns: ExportColumn[] = [
 const SaLeadManagement: React.FC = () => {
   const queryClient = useQueryClient();
   const [bookingLead, setBookingLead] = useState<RecordWithId | null>(null);
+  // UnitId is a real Unit Master selection, not free text — the CRM booking
+  // endpoint this feeds (createCrmBookingRecord) hard-requires a genuine
+  // dbo.UnitMaster.Id, matching the workflow spec's "Unit Master involvement
+  // is mandatory" requirement. RatePerSqFt/TotalValue/BookingAmount are the
+  // only fields still hand-entered — unit name/type/area/project always
+  // come from the selected unit itself.
+  const { data: availableUnits = [] } = useQuery({
+    queryKey: ["sa-leads-available-units"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/available-units`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
   const [bookingForm, setBookingForm] = useState({
-    UnitNo: "",
-    BlockName: "",
-    FloorName: "",
-    UnitType: "",
-    AreaSqFt: "",
+    UnitId: "",
     RatePerSqFt: "",
     TotalValue: "",
     BookingAmount: "",
+    TokenType: "Percentage",
+    TokenValue: "",
     BookingDate: new Date().toISOString().slice(0, 10),
     PaymentMode: "",
   });
@@ -383,14 +396,12 @@ const SaLeadManagement: React.FC = () => {
 
   const resetBookingForm = () => {
     setBookingForm({
-      UnitNo: "",
-      BlockName: "",
-      FloorName: "",
-      UnitType: "",
-      AreaSqFt: "",
+      UnitId: "",
       RatePerSqFt: "",
       TotalValue: "",
       BookingAmount: "",
+      TokenType: "Percentage",
+      TokenValue: "",
       BookingDate: new Date().toISOString().slice(0, 10),
       PaymentMode: "",
     });
@@ -406,18 +417,16 @@ const SaLeadManagement: React.FC = () => {
 
   const promoteToBooking = async () => {
     if (!bookingLead) return;
-    if (!bookingForm.UnitNo.trim()) return toast.error("Unit No is required");
+    if (!bookingForm.UnitId) return toast.error("Select a unit from Unit Master");
     setHandoffLoading(`booking-${bookingLead._id}`);
     try {
       const payload = {
-        UnitNo: bookingForm.UnitNo.trim(),
-        BlockName: bookingForm.BlockName || null,
-        FloorName: bookingForm.FloorName || null,
-        UnitType: bookingForm.UnitType || null,
-        AreaSqFt: bookingForm.AreaSqFt ? parseFloat(bookingForm.AreaSqFt) : null,
+        UnitId: parseInt(bookingForm.UnitId),
         RatePerSqFt: bookingForm.RatePerSqFt ? parseFloat(bookingForm.RatePerSqFt) : null,
         TotalValue: bookingForm.TotalValue ? parseFloat(bookingForm.TotalValue) : null,
         BookingAmount: bookingForm.BookingAmount ? parseFloat(bookingForm.BookingAmount) : 0,
+        TokenType: bookingForm.TokenType,
+        TokenValue: bookingForm.TokenValue ? parseFloat(bookingForm.TokenValue) : null,
         BookingDate: bookingForm.BookingDate || new Date().toISOString().slice(0, 10),
         PaymentMode: bookingForm.PaymentMode || null,
       };
@@ -802,22 +811,38 @@ const SaLeadManagement: React.FC = () => {
                   <p className="text-xs text-muted-foreground">{String(bookingLead.LeadUid ?? "")} · {String(bookingLead.Mobile ?? "")}</p>
                 </div>
               )}
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Unit (Unit Master)<span className="text-destructive ml-0.5">*</span>
+                </label>
+                <select
+                  value={bookingForm.UnitId}
+                  onChange={(e) => setBookingForm((current) => ({ ...current, UnitId: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">Select an available unit...</option>
+                  {(availableUnits as any[]).map((u) => (
+                    <option key={u.Id} value={String(u.Id)}>
+                      {u.ProjectName ? `${u.ProjectName} — ` : ""}{u.UnitName}{u.UnitType ? ` (${u.UnitType})` : ""}{u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
+                    </option>
+                  ))}
+                </select>
+                {availableUnits.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-1">No available units found — all active units are already booked.</p>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
-                  ["UnitNo", "Unit No", "text", true],
-                  ["BlockName", "Block", "text", false],
-                  ["FloorName", "Floor", "text", false],
-                  ["UnitType", "Unit Type", "text", false],
-                  ["AreaSqFt", "Area Sq Ft", "number", false],
                   ["RatePerSqFt", "Rate Per Sq Ft", "number", false],
                   ["TotalValue", "Total Value", "number", false],
-                  ["BookingAmount", "Booking Amount", "number", false],
+                  ["TokenValue", `Token Value (${bookingForm.TokenType === "Amount" ? "₹" : "%"})`, "number", false],
+                  ["BookingAmount", "Booking Amount (override)", "number", false],
                   ["BookingDate", "Booking Date", "date", false],
                   ["PaymentMode", "Payment Mode", "text", false],
-                ].map(([key, label, type, required]) => (
+                ].map(([key, label, type]) => (
                   <div key={String(key)}>
                     <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                      {label}{required && <span className="text-destructive ml-0.5">*</span>}
+                      {label}
                     </label>
                     <input
                       type={String(type)}
@@ -827,6 +852,19 @@ const SaLeadManagement: React.FC = () => {
                     />
                   </div>
                 ))}
+                <div>
+                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    Token Type
+                  </label>
+                  <select
+                    value={bookingForm.TokenType}
+                    onChange={(e) => setBookingForm((current) => ({ ...current, TokenType: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="Percentage">Percentage</option>
+                    <option value="Amount">Fixed Amount</option>
+                  </select>
+                </div>
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
                 <button

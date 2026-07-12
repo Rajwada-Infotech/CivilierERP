@@ -16,6 +16,14 @@ function isSaAdmin(req) {
   return ["super_admin", "sa", "dba", "admin", "marketing_head"].includes(role);
 }
 
+// Deliberately narrower than isSaAdmin above — used for identity/contact
+// fields (Mobile, AltMobile, Email) on a confirmed lead/application, where
+// even admin/dba/marketing_head having free rein is the exact security gap
+// being closed. Only the literal "super_admin" role, no aliases.
+function isSuperAdminOnly(req) {
+  return normalizeRole(req.user?.role) === "super_admin";
+}
+
 function isSaTeamLead(req) {
   return normalizeRole(req.user?.role) === "sales_team_lead";
 }
@@ -49,4 +57,4 @@ function requireUserEmail(req, res) {
   return email;
 }
 
-module.exports = { actorId, isSaAdmin, isSaTeamLead, isSalesPerson, applyLeadScope, requireUserEmail };
+module.exports = { actorId, isSaAdmin, isSuperAdminOnly, isSaTeamLead, isSalesPerson, applyLeadScope, requireUserEmail };

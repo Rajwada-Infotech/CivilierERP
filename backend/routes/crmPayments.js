@@ -62,6 +62,12 @@ router.get("/:id/receipts", requirePageRight("crm-payments", "view"), async (req
 });
 
 // POST /:id/receipts — record a receipt against a milestone (supports partial/installment receipts)
+//
+// Workflow guard: "MILESTONE => ... NEXT MILESTONE DUE => MILESTONE WISE
+// PAYMENT" is explicit sequencing — a customer paying milestone #5 while
+// #1-4 are still outstanding would leave earlier stages permanently
+// unaccounted for. Every earlier-numbered milestone on the same booking
+// must already be Paid or Waived first.
 router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -69,6 +75,21 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
     const b = req.body;
     const amount = parseFloat(b.Amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const target = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, MilestoneNo, MilestoneName FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    if (!target.recordset.length) return res.status(404).json({ error: "Milestone not found" });
+    const targetRow = target.recordset[0];
+
+    const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
+      .query(`
+        SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+        ORDER BY MilestoneNo
+      `);
+    if (earlier.recordset.length) {
+      return res.status(400).json({ error: `Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0].MilestoneName}" is still due first` });
+    }
 
     const receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
     await pool.request()
@@ -184,6 +205,10 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
     const bid = parseInt(req.params.bookingId);
     const b = req.body;
     if (!b.MilestoneName?.trim()) return res.status(400).json({ error: "MilestoneName is required" });
+
+    const bk = await pool.request().input("bid", sql.Int, bid)
+      .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    if (!bk.recordset.length) return res.status(400).json({ error: "Selected booking does not exist" });
 
     // Get next MilestoneNo
     const noRes = await pool.request().input("bid", sql.Int, bid)

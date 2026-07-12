@@ -5,6 +5,8 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/possession-notice";
 const BKG_API = "/api/crm/bookings";
@@ -28,6 +30,7 @@ async function fetchBookings(): Promise<any[]> {
 
 const CrmPossessionNotice: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -75,6 +78,7 @@ const CrmPossessionNotice: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Notice marked Acknowledged");
+      promptNextStep(navigate, "Possession notice acknowledged — handover can now be scheduled.", "/crm/handover", "Go to Handover");
       qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
     } catch (e: any) {
       toast.error(e.message);

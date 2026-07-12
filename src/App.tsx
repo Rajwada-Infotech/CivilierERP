@@ -310,11 +310,6 @@ const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
-const FollowupAgreements = lazy(() =>
-  import("./pages/followup/Agreements").then((module) => ({
-    default: module.AgreementsPage,
-  })),
-);
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
 const ApplicantTimeline = lazy(
   () => import("./pages/followup/ApplicantTimeline"),
@@ -363,9 +358,6 @@ const FinanceDemandsPage = lazy(() =>
   import("./pages/followup/FinanceDemands").then((module) => ({
     default: module.FinanceDemandsPage,
   })),
-);
-const AgreementWorkflowPage = lazy(
-  () => import("./pages/followup/AgreementWorkflow"),
 );
 const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
 const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
@@ -422,6 +414,7 @@ const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
 const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
+const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
 const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const ApplicantsPipelinePage = lazy(() =>
@@ -648,6 +641,7 @@ function AppRoutes() {
         <Route path="payments" element={<PortalPayments />} />
         <Route path="construction" element={<PortalConstruction />} />
         <Route path="tickets" element={<PortalTickets />} />
+        <Route path="activity" element={<PortalActivity />} />
         <Route path="profile" element={<PortalProfile />} />
       </Route>
 
@@ -1045,14 +1039,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/agreement/agreements"
-        element={
-          <ProtectedRoute pageKey="followup-agreements">
-            <FollowupAgreements />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/followup/sales/welcome-calls"
         element={
           <ProtectedRoute pageKey="followup-welcome-calls">
@@ -1165,14 +1151,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/agreement/workflow"
-        element={
-          <ProtectedRoute pageKey="followup-agreements">
-            <AgreementWorkflowPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/followup/agreement/document-vault"
         element={
           <ProtectedRoute pageKey="followup-document-vault">
@@ -1205,10 +1183,12 @@ function AppRoutes() {
         }
       />
       {/* Note: FollowupPipelinePage also exports an "agreements" entity
-          (AgreementsPage) hitting the same /api/followup-agreements
-          endpoint as the bespoke page below. Intentionally not routed
-          here to avoid two divergent CRUD UIs against the same data —
-          /followup/agreement/agreements (Agreements.tsx) is canonical. */}
+          (AgreementsPage) hitting /api/followup-agreements — same table
+          the retired /followup/agreement/agreements page (Agreements.tsx)
+          and /followup/agreement/workflow page used. Both of those routes
+          were removed (0 live rows in either table, and CRM > Documents >
+          Agreements is the real, actively-developed Agreement system) —
+          not routing this embedded variant either, for the same reason. */}
 
       {/* MASTERS */}
       <Route

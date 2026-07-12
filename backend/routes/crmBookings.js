@@ -4,7 +4,6 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
-const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { emitNotification } = require("../services/notify");
@@ -13,6 +12,7 @@ const { guardAndConvertHold } = require("../services/crmHoldService");
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { createCrmBookingRecord, CrmCreationError } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 
@@ -104,156 +104,19 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
 
 // POST / — create booking from an application. Unit selection is mandatory —
 // the customer's chosen unit must exist in dbo.UnitMaster and must not
-// already be attached to another active CRM booking.
+// already be attached to another active CRM booking. Delegates to the
+// shared creation service (backend/services/crmEntityCreation.js) — the
+// exact same function backend/services/saHandoff.js calls for the Sales
+// Automation -> CRM handoff, so a booking created either way goes through
+// identical Unit Master validation, milestone generation, and hold
+// conversion — no second, drifting copy of this logic.
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const b = req.body;
-    if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required" });
-    if (!b.UnitId) return res.status(400).json({ error: "UnitId is required — a unit must be selected from Unit Master" });
-
-    // The unit's own ProjectId (and that project's parent Company) is the
-    // source of truth — Project/Company are derived from the Unit selection
-    // rather than needing separate dropdowns the caller could mismatch.
-    const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
-             proj.name AS ProjectName, proj.company_id AS CompanyId,
-             blk.BlockName
-      FROM dbo.UnitMaster u
-      LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
-      LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      WHERE u.Id = @uid AND u.IsActive = 1
-    `);
-    if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-    const unitRow = unit.recordset[0];
-
-    const taken = await pool.request().input("uid", sql.Int, parseInt(b.UnitId))
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
-    if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
-
-    // A unit on hold for a different applicant can't be booked out from
-    // under them; a hold for this same applicant is closed out (Converted)
-    // once the real booking exists.
-    await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
-
-    // Area is a fixed physical attribute of the unit — always taken from
-    // Unit Master, never re-typed per booking (same as UnitType above).
-    const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
-    const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
-    const total = b.TotalValue  != null ? parseFloat(b.TotalValue)
-                : (area && rate ? Math.round(area * rate) : null);
-
-    // Booking token/amount can be agreed as a % of TotalValue or a fixed amount
-    const tokenType = b.TokenType === "Amount" ? "Amount" : "Percentage";
-    const tokenValue = b.TokenValue != null ? parseFloat(b.TokenValue) : null;
-    let bookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : 0;
-    if (tokenValue != null) {
-      bookingAmount = tokenType === "Percentage" && total
-        ? Math.round(total * tokenValue) / 100
-        : tokenValue;
-    }
-
-    // Status always starts Pending on creation — never accepted from the
-    // request body. It only ever reaches Approved/Rejected via the shared
-    // approvalService.js engine from the Admin Approval Inbox (admin/
-    // super_admin/marketing_head), same as every other CRM approval flow.
-    // Cancelled is a separate terminal state reached exclusively via the
-    // CrmCancellation approval cascade (see crmCancellations.js).
-    const bookingNo = await getNextDocNumber(pool, "BKG", "BKG");
-    const result = await pool.request()
-      .input("no",    sql.NVarChar(30),  bookingNo)
-      .input("appId", sql.Int,           parseInt(b.ApplicationId))
-      .input("uid",   sql.Int,           parseInt(b.UnitId))
-      .input("pid",   sql.Int,           unitRow.ProjectId || null)
-      .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
-      .input("cid",   sql.Int,           unitRow.CompanyId || null)
-      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
-      .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
-      .input("flr",   sql.NVarChar(100), b.FloorName   || null)
-      .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
-      .input("area",  sql.Decimal(18,2), area)
-      .input("rate",  sql.Decimal(18,2), rate)
-      .input("tot",   sql.Decimal(18,2), total)
-      .input("bamt",  sql.Decimal(18,2), bookingAmount)
-      .input("ttype", sql.NVarChar(20),  tokenType)
-      .input("tval",  sql.Decimal(18,2), tokenValue)
-      .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
-      .input("bdate", sql.Date,          b.BookingDate || null)
-      .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
-      .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
-      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",    sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmBooking
-          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
-           AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
-           BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
-           ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES
-          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
-           @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
-           ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
-           @asgn, 'Pending', @note, 1,
-           0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME())
-      `);
-
-    const bookingId = result.recordset[0].Id;
-
-    if (total && total > 0) {
-      // Apply the chosen payment plan template if given, else the default 7-stage split
-      let milestones;
-      if (b.PaymentPlanId) {
-        const planItems = await pool.request().input("pid", sql.Int, parseInt(b.PaymentPlanId))
-          .query("SELECT MilestoneNo, MilestoneName, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid ORDER BY MilestoneNo");
-        milestones = planItems.recordset.map((r) => ({ no: r.MilestoneNo, name: r.MilestoneName, pct: r.Percent }));
-      }
-      if (!milestones?.length) {
-        milestones = [
-          { no: 1, name: "Booking",          pct: 5,  dept: "Sales",        docs: "Booking Receipt" },
-          { no: 2, name: "Agreement",        pct: 10, dept: "Legal",        docs: "Executed Agreement" },
-          { no: 3, name: "Foundation",       pct: 15, dept: "Construction", docs: "Foundation Completion Certificate" },
-          { no: 4, name: "Superstructure",   pct: 20, dept: "Construction", docs: "Superstructure Progress Photos" },
-          { no: 5, name: "Slab Casting",     pct: 20, dept: "Construction", docs: "Slab Casting Progress Photos" },
-          { no: 6, name: "Plastering",       pct: 15, dept: "Construction", docs: "Plastering Completion Photos" },
-          { no: 7, name: "Handover",         pct: 15, dept: "Sales",        docs: "Possession Letter, Handover Checklist" },
-        ];
-      }
-      // The very first milestone (the booking/token amount) is due the day
-      // the booking itself was made — every later stage is either
-      // construction-linked (no fixed calendar date until that stage is
-      // actually reached) or the Agreement milestone, whose due date gets
-      // set automatically once both sides confirm the same agreement date
-      // (see maybeResolveAgreementDate). Without this, DueDate stayed NULL
-      // forever and the overdue-payment SLA check/dashboard silently never
-      // fired for any auto-generated milestone.
-      for (const m of milestones) {
-        await pool.request()
-          .input("bid",  sql.Int,           bookingId)
-          .input("mno",  sql.Int,           m.no)
-          .input("mname",sql.NVarChar(200), m.name)
-          .input("amt",  sql.Decimal(18,2), Math.round(total * m.pct) / 100)
-          .input("due",  sql.Date,          m.no === 1 ? (b.BookingDate || new Date()) : null)
-          .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
-          .input("dept", sql.NVarChar(100), m.dept || null)
-          .input("cb",   sql.Int,           actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
-            VALUES (@bid, @mno, @mname, @amt, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
-          `);
-      }
-    }
-
-    // A booking existing at all is the strongest possible signal that the
-    // application behind it was approved — advance it automatically instead
-    // of relying on someone to remember to flip the status by hand. Applies
-    // to Submitted only (Draft applications shouldn't silently skip review);
-    // already-Approved is a no-op.
-    await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
-      `Auto-approved: booking ${bookingNo} created`, actorId(req), { force: true });
-
+    const { id: bookingId, BookingNo: bookingNo } = await createCrmBookingRecord(pool, req.body, actorId(req));
     res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo });
   } catch (e) {
+    if (e instanceof CrmCreationError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-bookings] POST error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
   }

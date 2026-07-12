@@ -5,8 +5,9 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/agreements";
 const BKG_API = "/api/crm/bookings";
@@ -30,7 +31,7 @@ const docStatusColor: Record<string, string> = {
 };
 
 const EMPTY_AGR_FORM = {
-  BookingId: "", AgreementDate: "", LegalName: "", LegalAddress: "",
+  BookingId: "", LegalName: "", LegalAddress: "",
   PanNo: "", AadhaarNo: "", Notes: "",
 };
 const EMPTY_DOC_FORM = {
@@ -118,6 +119,7 @@ async function fetchBookings(): Promise<any[]> {
 
 const CrmAgreement: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
   const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
@@ -137,7 +139,7 @@ const CrmAgreement: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
   const docFileInputRef = useRef<HTMLInputElement>(null);
   const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState({ AgreementDate: "", LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "" });
+  const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "" });
   const [saving, setSaving] = useState(false);
 
   const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
@@ -177,7 +179,6 @@ const CrmAgreement: React.FC = () => {
         body: JSON.stringify({
           ...agrForm,
           BookingId: parseInt(agrForm.BookingId),
-          AgreementDate: agrForm.AgreementDate || null,
         }),
       });
       const data = await res.json();
@@ -289,8 +290,8 @@ const CrmAgreement: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.agreementDateConfirmed
-        ? `Agreement sent — both sides now agree on ${String(data.agreementDateConfirmed).slice(0, 10)}`
+      toast.success(data.agreementDateSubmittedForApproval
+        ? "Agreement sent — both sides now agree on a date, awaiting super admin approval"
         : "Agreement sent to customer portal");
       setSendDialog(false);
       setSendDate("");
@@ -315,8 +316,8 @@ const CrmAgreement: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.agreementDateConfirmed
-        ? `Both sides now agree on ${String(data.agreementDateConfirmed).slice(0, 10)}`
+      toast.success(data.agreementDateSubmittedForApproval
+        ? "Both sides now agree — sent for super admin approval"
         : "Proposed date sent to customer");
       setProposeDateDialog(false);
       setSendDate("");
@@ -338,6 +339,9 @@ const CrmAgreement: React.FC = () => {
       toast.success(`Agreement marked ${data.status}`);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+      if (action === "mark-executed") {
+        promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
+      }
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -346,7 +350,6 @@ const CrmAgreement: React.FC = () => {
   const openEdit = () => {
     if (!detail?.agreement) return;
     setEditForm({
-      AgreementDate: detail.agreement.AgreementDate ? String(detail.agreement.AgreementDate).slice(0, 10) : "",
       LegalName: detail.agreement.LegalName || "",
       LegalAddress: detail.agreement.LegalAddress || "",
       PanNo: detail.agreement.PanNo || "",
@@ -450,10 +453,19 @@ const CrmAgreement: React.FC = () => {
                       </button>
                     )}
                     {detail.agreement?.Status === "Draft" && (
-                      <button onClick={() => handleAgreementAction("mark-executed")}
-                        className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                        Mark Executed
-                      </button>
+                      detail.agreement?.SeniorApprovalStatus === "Approved"
+                        && detail.agreement?.CustomerApprovalStatus === "Approved"
+                        && detail.agreement?.AgreementDate ? (
+                        <button onClick={() => handleAgreementAction("mark-executed")}
+                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          Mark Executed
+                        </button>
+                      ) : (
+                        <span title="Requires senior approval, customer approval, and a mutually agreed date"
+                          className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                          Mark Executed (not ready)
+                        </span>
+                      )
                     )}
                     {detail.agreement?.Status === "Executed" && (
                       <button onClick={() => handleAgreementAction("mark-registered")}
@@ -615,11 +627,22 @@ const CrmAgreement: React.FC = () => {
                       Resend After Recheck
                     </button>
                   )}
-                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === "Pending" && !detail.agreement?.AgreementDate && (
-                    <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); }}
-                      className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium hover:bg-muted">
-                      {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
-                    </button>
+                  {/* Date negotiation is the step AFTER both ends approve the
+                      agreement's content (spec: "...CUSTOMER APPROVAL ->
+                      APPROVAL FROM BOTH END -> DATE OF AGREEMENT..."), so
+                      this shows once CustomerApprovalStatus is Approved —
+                      not "Pending", which is the state *before* that. */}
+                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === "Approved" && !detail.agreement?.AgreementDate && (
+                    detail.agreement?.DateApprovalStatus === "Pending" ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
+                        Awaiting Super Admin Approval
+                      </span>
+                    ) : (
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); }}
+                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                        {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
+                      </button>
+                    )
                   )}
                   {detail.agreement?.SentToCustomerAt && (
                     <span className="text-xs text-muted-foreground">
@@ -709,7 +732,6 @@ const CrmAgreement: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { key: "LegalName",    label: "Legal Name",      type: "text" },
-                { key: "AgreementDate",label: "Agreement Date",  type: "date" },
                 { key: "PanNo",        label: "PAN No",          type: "text" },
                 { key: "AadhaarNo",    label: "Aadhaar No",      type: "text" },
               ].map(({ key, label, type }) => (
@@ -907,11 +929,6 @@ const CrmAgreement: React.FC = () => {
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
                 <input type="text" value={editForm.LegalName} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Agreement Date</label>
-                <input type="date" value={editForm.AgreementDate} onChange={(e) => setEditForm((f) => ({ ...f, AgreementDate: e.target.value }))}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               </div>
               <div>

@@ -8,7 +8,7 @@ import {
   UploadCloud, Clock, XCircle,
 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDocument, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
+import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDocument, proposeAgreementDate, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -39,7 +39,11 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
       state: !sent ? "upcoming" : status === "Approved" ? "done" : status === "Recheck" ? "blocked" : "current",
       note: !sent ? undefined : status === "Approved" ? fmtDate(ag?.CustomerApprovedAt) : status === "Recheck" ? "Recheck requested" : "Awaiting you",
     },
-    { label: "Date Confirmed", state: dated ? "done" : "upcoming", note: dated ? fmtDate(ag?.AgreementDate) : undefined },
+    {
+      label: "Date Confirmed",
+      state: dated ? "done" : ag?.DateApprovalStatus === "Pending" ? "current" : "upcoming",
+      note: dated ? fmtDate(ag?.AgreementDate) : ag?.DateApprovalStatus === "Pending" ? "Awaiting sign-off" : undefined,
+    },
   ];
 }
 
@@ -137,6 +141,53 @@ function UploadDocDialog({ doc, onClose, onUploaded }: { doc: any; onClose: () =
   );
 }
 
+function ProposeDateDialog({
+  currentProposal, companyProposal, onClose, onProposed,
+}: { currentProposal: string | null; companyProposal: string | null; onClose: () => void; onProposed: () => void }) {
+  const [date, setDate] = useState(currentProposal ? String(currentProposal).slice(0, 10) : "");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!date) { toast.error("Pick a date"); return; }
+    setSaving(true);
+    try {
+      const res = await proposeAgreementDate(date);
+      toast.success(res.agreementDateSubmittedForApproval
+        ? "Both sides now agree — sent to our team for final sign-off"
+        : "Your proposed date was sent to our team");
+      onProposed();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{currentProposal ? "Update Your Proposed Date" : "Propose an Agreement Date"}</DialogTitle>
+          <DialogDescription>
+            {companyProposal
+              ? `We proposed ${fmtDate(companyProposal)}. Pick the same date to move it forward for sign-off, or suggest another.`
+              : "Suggest a date that works for you — we'll take it forward for sign-off the moment both sides agree."}
+          </DialogDescription>
+        </DialogHeader>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" style={{ color: TEXT, background: SURFACE }} />
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg" style={{ color: TEXT_MUTED }}>Cancel</button>
+          <button onClick={submit} disabled={saving}
+            className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
+            {saving ? "Sending..." : "Submit"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RespondDialog({
   title, summary, onClose, onSubmit,
 }: {
@@ -223,6 +274,7 @@ const PortalAgreement: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
   const [uploadDoc, setUploadDoc] = useState<any | null>(null);
   const [respondFor, setRespondFor] = useState<"agreement" | "salesDeed" | null>(null);
+  const [proposeDateOpen, setProposeDateOpen] = useState(false);
 
   const { data: agreement } = useQuery({ queryKey: ["portal-agreement"], queryFn: fetchAgreement });
   const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents"], queryFn: fetchAgreementDocuments });
@@ -302,10 +354,10 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
 
-          {dateMismatch && !agreement.AgreementDate && (
+          {dateMismatch && !agreement.AgreementDate && agreement.DateApprovalStatus !== "Pending" && (
             <div className="mx-5 sm:mx-6 mb-5 text-xs rounded-lg p-3 flex items-start gap-2" style={{ background: GOLD_SOFT, color: "#8A6D14" }}>
               <CalendarCheck2 size={13} className="mt-0.5 shrink-0" />
-              We proposed {fmtDate(agreement.ProposedDateByCompany)}; your response was {fmtDate(agreement.ProposedDateByCustomer)}. Once these dates match, the agreement date is confirmed automatically.
+              We proposed {fmtDate(agreement.ProposedDateByCompany)}; your response was {fmtDate(agreement.ProposedDateByCustomer)}. Once these dates match, it goes to our team for final sign-off.
             </div>
           )}
 
@@ -329,8 +381,22 @@ const PortalAgreement: React.FC = () => {
                 </button>
               )
             ) : agreement.CustomerApprovalStatus === "Approved" ? (
-              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}>
-                <CheckCircle2 size={16} /> You approved this agreement on {fmtDate(agreement.CustomerApprovedAt)}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}>
+                  <CheckCircle2 size={16} /> You approved this agreement on {fmtDate(agreement.CustomerApprovedAt)}
+                </div>
+                {!agreement.AgreementDate && (
+                  agreement.DateApprovalStatus === "Pending" ? (
+                    <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#8A6D14" }}>
+                      <Clock size={16} /> Date agreed — awaiting our team's final sign-off
+                    </div>
+                  ) : (
+                    <button onClick={() => setProposeDateOpen(true)}
+                      className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90 flex items-center gap-1.5" style={{ background: INK }}>
+                      <CalendarCheck2 size={15} /> {agreement.ProposedDateByCustomer ? "Update Your Proposed Date" : "Propose Agreement Date"}
+                    </button>
+                  )
+                )}
               </div>
             ) : agreement.CustomerApprovalStatus === "Recheck" ? (
               <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#A32C36" }}>
@@ -342,7 +408,7 @@ const PortalAgreement: React.FC = () => {
       )}
 
       {needsAction.length > 0 && (
-        <Card className="overflow-hidden" style={{ borderColor: "#E8C766" }}>
+        <Card className="overflow-hidden border-amber-300">
           <CardHeader icon={UploadCloud} title={`Documents Needed From You (${needsAction.length})`} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
             {needsAction.map((d: any) => {
@@ -421,6 +487,18 @@ const PortalAgreement: React.FC = () => {
       )}
 
       {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+      {proposeDateOpen && agreement && (
+        <ProposeDateDialog
+          currentProposal={agreement.ProposedDateByCustomer}
+          companyProposal={agreement.ProposedDateByCompany}
+          onClose={() => setProposeDateOpen(false)}
+          onProposed={() => {
+            setProposeDateOpen(false);
+            qc.invalidateQueries({ queryKey: ["portal-agreement"] });
+            qc.invalidateQueries({ queryKey: ["portal-timeline"] });
+          }}
+        />
+      )}
       {uploadDoc && (
         <UploadDocDialog
           doc={uploadDoc}

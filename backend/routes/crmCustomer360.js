@@ -36,6 +36,10 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                b.BookingDate, a.ApplicationNo,
                ag.Status AS AgreementStatus,
                h.Status AS HandoverStatus, h.ActualHandoverDate,
+               lm.OverallStatus AS LegalMilestoneStatus,
+               pp.Status AS PrePossessionStatus,
+               (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status <> 'Issued') AS NocPendingCount,
+               (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
                (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
                (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = b.Id AND Status IN ('Requested','Approved')) AS HasCancellation
@@ -43,6 +47,8 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
         LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
+        LEFT JOIN dbo.CrmLegalMilestone lm ON lm.BookingId = b.Id
+        LEFT JOIN dbo.CrmPrePossession pp ON pp.BookingId = b.Id
         WHERE a.Mobile = @mob OR a.AltMobile = @mob
         ORDER BY b.CreatedAt DESC
       `),

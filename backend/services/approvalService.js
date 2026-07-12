@@ -80,6 +80,20 @@ const MODULE_MAP = {
   // (SeniorApprovalStatus) — the document's own lifecycle (Draft/Executed/
   // Registered/Cancelled) is a separate column and not part of this workflow.
   "crm-agreements": { table: "dbo.CrmAgreement", pk: "Id", status: "SeniorApprovalStatus" },
+  // A second, independent gate on the same table: once both sides' proposed
+  // dates match, DateApprovalStatus goes to 'Pending' (set directly by
+  // crmWorkflowGuards.js's maybeResolveAgreementDate, not via this engine's
+  // own "submit" step — the trigger is a system event, not a user action)
+  // and needs its own sign-off before AgreementDate is written.
+  // CAVEAT: getApprovedLevelCount() below scopes purely by (TableName,
+  // RecordId) — there's no Module column on ApprovalAuditLog — so this
+  // gate's level count is NOT isolated from crm-agreements' own Senior
+  // Approval history on the same CrmAgreement row. Harmless today because
+  // this workflow is single-level (nextLevel >= totalLevels(1) is always
+  // true, so any authorized approval fully unlocks it regardless of the
+  // exact count) — but if this ever becomes genuinely multi-level, give
+  // ApprovalAuditLog a Module column and filter by it first.
+  "crm-agreement-date": { table: "dbo.CrmAgreement", pk: "Id", status: "DateApprovalStatus" },
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
@@ -117,6 +131,10 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-applications": CRM_APPROVER_ROLES,
   "crm-bookings": CRM_APPROVER_ROLES,
   "crm-agreements": CRM_APPROVER_ROLES,
+  // Explicitly narrower than the other CRM modules — super_admin only, per
+  // instruction, "for now"; reassignable later purely via LevelsData same
+  // as every other module here, no code change needed when that happens.
+  "crm-agreement-date": ["super_admin"],
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,

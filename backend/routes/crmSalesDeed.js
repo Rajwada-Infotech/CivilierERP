@@ -5,6 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
+const { logCommunication } = require("../services/crmCommunicationLog");
 
 router.use(authMiddleware);
 
@@ -155,7 +156,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     const id = parseInt(req.params.id);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, b.Status AS BookingStatus
+      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.BookingId, d.DeedNo, b.Status AS BookingStatus
       FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       WHERE d.Id = @id
     `);
@@ -200,6 +201,12 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           UPDATE dbo.CrmSalesDeed SET SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL
           WHERE Id = @id
         `);
+        await logCommunication(pool, {
+          bookingId: row.BookingId, direction: "Outbound",
+          subject: `Sales deed ${row.DeedNo} sent to customer`,
+          summary: "Sales deed executed and shared with the customer via portal, awaiting their approval.",
+          createdBy: actorId(req),
+        });
       }
     }
 

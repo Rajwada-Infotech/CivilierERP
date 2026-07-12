@@ -44,12 +44,25 @@ router.get("/booking/:bookingId", requirePageRight("crm-legal-milestones", "view
   }
 });
 
-// POST / — start the legal workflow for a booking
+// POST / — start the legal workflow for a booking. Its own steps
+// (Drafting, DocShared, MutualAgreement, FinalExecution...) are literally
+// about the agreement itself, so it can't exist before agreement
+// preparation has actually started — the one structural fact we can assert
+// without guessing at which exact CrmAgreement.Status this internal legal
+// team process is supposed to align with.
 router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+
+    const agr = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (!agr.recordset.length) {
+      return res.status(400).json({ error: "Legal milestone tracking requires an agreement to exist for this booking first" });
+    }
+
     const milestoneNo = "LGL-" + Date.now().toString(36).toUpperCase().slice(-7);
 
     const result = await pool.request()
