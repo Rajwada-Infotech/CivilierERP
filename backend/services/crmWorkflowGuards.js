@@ -223,25 +223,58 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   return { id: deedId, DeedNo: deedNo };
 }
 
-// The real "agreement date" is only ever finalized once both sides land on
-// the SAME date — company proposes one, customer proposes one (defaulting
-// to accepting the company's if they don't override), and the moment those
-// two values agree, AgreementDate itself gets set automatically. Called
+// Both sides landing on the same proposed date no longer finalizes
+// AgreementDate directly — it only puts the date up for a super_admin
+// sign-off (DateApprovalStatus='Pending', a second approval gate on the
+// same record, independent of Senior/Customer content approval). Called
 // after every point that can touch either proposed-date column (company
-// send-to-customer, customer approve) so the match is caught the instant
-// it happens, from either side.
+// propose-date, customer approve/propose-date) so the match is caught the
+// instant it happens, from either side. Returns true iff this call is the
+// one that just moved it into Pending (so a route can tell the caller
+// "submitted for approval"); false/null otherwise. Never returns a
+// confirmed date — use finalizeAgreementDate() (fired from the actual
+// approve endpoint) for that.
 async function maybeResolveAgreementDate(pool, agreementId) {
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
-    SELECT BookingId, AgreementDate, ProposedDateByCompany, ProposedDateByCustomer
+    SELECT AgreementDate, DateApprovalStatus, ProposedDateByCompany, ProposedDateByCustomer
     FROM dbo.CrmAgreement WHERE Id = @id
   `);
   const ag = row.recordset[0];
-  if (!ag || ag.AgreementDate) return null; // already finalized, never overwritten
-  if (!ag.ProposedDateByCompany || !ag.ProposedDateByCustomer) return null;
+  if (!ag || ag.AgreementDate) return false; // already finalized, never overwritten
+  if (ag.DateApprovalStatus === "Pending") return false; // already awaiting sign-off
+  if (!ag.ProposedDateByCompany || !ag.ProposedDateByCustomer) return false;
 
   const company = new Date(ag.ProposedDateByCompany).toDateString();
   const customer = new Date(ag.ProposedDateByCustomer).toDateString();
-  if (company !== customer) return null; // still negotiating
+  if (company !== customer) return false; // still negotiating
+
+  // Directly to 'Pending', not via approvalService.transition() — this is a
+  // system event (a date match), not a user clicking "submit", and the
+  // engine's own "Pending" transition expects a submitting user/role.
+  await pool.request().input("id", sql.Int, agreementId)
+    .query("UPDATE dbo.CrmAgreement SET DateApprovalStatus = 'Pending' WHERE Id = @id");
+
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .query(`
+      INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
+      VALUES (@agid, 'AgreementDateSubmittedForApproval', 'System', SYSDATETIME())
+    `);
+
+  return true;
+}
+
+// Fired from PUT /:id/date/approve once approvalService.transition() has
+// confirmed the sign-off — actually writes AgreementDate and, per the
+// workflow's APPROVAL FROM BOTH END -> DATE OF AGREEMENT -> MILESTONE
+// chain, gives the "Agreement" payment milestone its due date for the
+// first time (it had none until an agreement date genuinely existed).
+async function finalizeAgreementDate(pool, agreementId) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT BookingId, ProposedDateByCompany FROM dbo.CrmAgreement WHERE Id = @id
+  `);
+  const ag = row.recordset[0];
+  if (!ag) return null;
 
   await pool.request()
     .input("id", sql.Int, agreementId)
@@ -255,10 +288,6 @@ async function maybeResolveAgreementDate(pool, agreementId) {
       VALUES (@agid, 'AgreementDateConfirmed', 'System', SYSDATETIME())
     `);
 
-  // The "Agreement" payment milestone had no fixed due date until now — it
-  // becomes due the moment both sides actually agree on the agreement date,
-  // completing the spec's APPROVAL FROM BOTH END -> DATE OF AGREEMENT ->
-  // MILESTONE chain instead of leaving it perpetually undated.
   await pool.request()
     .input("bid", sql.Int, ag.BookingId)
     .input("adt", sql.Date, ag.ProposedDateByCompany)
@@ -270,9 +299,62 @@ async function maybeResolveAgreementDate(pool, agreementId) {
   return ag.ProposedDateByCompany;
 }
 
+// Same 8-step whitelist as crmLegalMilestones.js's PUT /:id/:step — kept in
+// sync manually (small, stable list) rather than requiring a cross-file
+// import for a single array.
+const LEGAL_MILESTONE_STEPS = [
+  "DocCollection", "LegalReview", "Drafting", "InternalApproval",
+  "DocShared", "MutualAgreement", "DirectorMeeting", "FinalExecution",
+];
+
+/**
+ * Auto-tick a Legal Milestone step the instant its real-world equivalent
+ * happens elsewhere in the Agreement lifecycle, instead of requiring staff
+ * to separately click "Mark Complete" on the Legal Milestones page for
+ * something that already just happened on the Agreement page. Only wired
+ * for steps with an unambiguous single source of truth:
+ *   InternalApproval -> Agreement senior-approved
+ *   DocShared        -> Agreement sent to customer
+ *   MutualAgreement   -> Customer approved the agreement
+ *   FinalExecution    -> Agreement marked Executed
+ * DocCollection/LegalReview/Drafting/DirectorMeeting have no equivalent
+ * external event yet and stay manual-only (via the existing PUT /:id/:step
+ * endpoint, still available for every step including these four).
+ * No-op if the legal workflow hasn't been started for this booking yet, or
+ * if the step is already Completed (idempotent — safe to call from
+ * multiple trigger points, e.g. both /:id/approve's auto-send and
+ * /:id/send-to-customer can fire DocShared).
+ */
+async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
+  if (!LEGAL_MILESTONE_STEPS.includes(step)) return;
+
+  const lm = await pool.request().input("bid", sql.Int, bookingId)
+    .query(`SELECT Id, ${step}Status FROM dbo.CrmLegalMilestone WHERE BookingId = @bid`);
+  if (!lm.recordset.length) return;
+  const row = lm.recordset[0];
+  if (row[`${step}Status`] === "Completed") return;
+
+  const idx = LEGAL_MILESTONE_STEPS.indexOf(step);
+  await pool.request()
+    .input("id", sql.Int, row.Id)
+    .input("ub", sql.Int, actorUserId || null)
+    .query(`
+      UPDATE dbo.CrmLegalMilestone SET
+        ${step}Done   = ISNULL(${step}Done, CAST(SYSDATETIME() AS DATE)),
+        ${step}Status = 'Completed',
+        ${step}Notes  = ISNULL(${step}Notes, 'Auto-synced from Agreement workflow'),
+        CurrentStep = CASE WHEN CurrentStep = ${idx + 1} THEN ${Math.min(idx + 2, LEGAL_MILESTONE_STEPS.length)} ELSE CurrentStep END,
+        OverallStatus = CASE WHEN '${step}' = 'FinalExecution' THEN 'Completed' ELSE OverallStatus END,
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateSalesDeed,
   maybeResolveAgreementDate,
+  finalizeAgreementDate,
+  syncLegalMilestoneStep,
 };

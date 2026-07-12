@@ -199,7 +199,11 @@ const ALL_ROUTES = [
     file: "./routes/followupUnitSelections",
   },
   { path: "/api/followup-bookings", file: "./routes/followupBookings" },
-  { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
+  // /api/followup-agreements retired — the route module (routes/followupAgreements.js)
+  // is left on disk but no longer mounted. 0 live rows in dbo.FollowupAgreements;
+  // CRM > Documents > Agreements (crmAgreements.js) is the real, actively-developed
+  // Agreement system. The table itself stays (still read directly by other
+  // followup* routes' joins), only this CRUD endpoint is retired.
   { path: "/api/followup-noc", file: "./routes/followupNoc" },
   { path: "/api/followup-sales-deed", file: "./routes/followupSalesDeed" },
   { path: "/api/followup-handover", file: "./routes/followupHandover" },
@@ -258,10 +262,10 @@ const ALL_ROUTES = [
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
   { path: "/api/lookups", file: "./routes/lookups" },
-  {
-    path: "/api/followup-agreement-workflow",
-    file: "./routes/followupagreementworkflow",
-  },
+  // /api/followup-agreement-workflow retired alongside /api/followup-agreements
+  // above — 0 live rows in dbo.FollowupAgreementWorkflows. The table stays
+  // (escalationEngine.js still reads it directly), only this CRUD endpoint
+  // is retired; nothing writes to the table anymore so it stays empty.
   {
     path: "/api/followup-document-vault",
     file: "./routes/followupDocumentVault",

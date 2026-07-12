@@ -69,12 +69,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-service-tickets", "view"
   }
 });
 
-// POST / — raise a service ticket
+// POST / — raise a service ticket. Gated only on the booking actually
+// existing — not on Handover having occurred, since legitimate complaints
+// (site/quality issues, construction snags) can and should be raiseable
+// before possession too, not just after.
 router.post("/", requirePageRight("crm-service-tickets", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+    const bk = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    if (!bk.recordset.length) return res.status(400).json({ error: "Selected booking does not exist" });
     if (!CATEGORIES.includes(b.Category))
       return res.status(400).json({ error: `Invalid Category. Must be: ${CATEGORIES.join(", ")}` });
     if (!b.Subject?.trim()) return res.status(400).json({ error: "Subject is required" });

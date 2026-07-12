@@ -86,12 +86,23 @@ router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) =
 // POST / — record broker involvement for a booking. Broker must be picked
 // from the Broker Master (an AccountHeadMaster row, LHeadType='BR') — the
 // same pattern Contractors use — not free-typed.
+//
+// Workflow guard: the spec's own ordering is explicit — "...DATE OF
+// AGREEMENT -> MILESTONE => BROKERAGE MASTER..." — brokerage is recorded
+// once the deal is actually confirmed (agreement executed), not while it's
+// still being negotiated.
 router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
+
+    const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
+      return res.status(400).json({ error: "Brokerage requires the agreement to be Executed first" });
+    }
 
     const broker = await pool.request().input("bid", sql.Int, parseInt(b.BrokerId))
       .query("SELECT LHeadId, LHeadName, LHeadPhone FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");

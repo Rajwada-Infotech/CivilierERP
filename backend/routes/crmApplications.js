@@ -3,7 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId, requireUserEmail } = require("../services/saAccess");
+const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { validateSourceChain } = require("../services/sourceChain");
@@ -12,6 +12,7 @@ const { logStatusChange, advanceApplicationStatus } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { createCrmApplicationRecord, CrmCreationError } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 
@@ -95,111 +96,18 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
   }
 });
 
-// POST / — create application (optionally from a lead, always starts Draft)
+// POST / — create application (optionally from a lead, always starts Draft).
+// Delegates to the shared creation service (backend/services/crmEntityCreation.js)
+// — the exact same function backend/services/saHandoff.js calls for the
+// Sales Automation -> CRM handoff, so there is one single source of truth
+// for what makes a valid CrmApplication.
 router.post("/", requirePageRight("crm-applications", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const b = req.body;
-    if (!b.ApplicantName?.trim() || !b.Mobile?.trim())
-      return res.status(400).json({ error: "ApplicantName and Mobile are required" });
-    if (b.Source && !SOURCE_TYPES.includes(b.Source))
-      return res.status(400).json({ error: `Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}` });
-
-    // If from a lead, prefill from lead record if caller didn't supply values —
-    // including its own source chain, so the application inherits exactly
-    // where the customer actually came from instead of losing that context.
-    let prefill = {};
-    if (b.LeadId) {
-      const lr = await pool.request()
-        .input("lid", sql.Int, parseInt(b.LeadId))
-        .query(`
-          SELECT CustomerName, Mobile, AltMobile, Email, BudgetMin, BudgetMax,
-                 PropertyType, BhkPreference, PreferredLocation, AssignedSalespersonId,
-                 SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId
-          FROM dbo.SaLead WHERE Id = @lid
-        `);
-      prefill = lr.recordset[0] || {};
-    }
-
-    const platformId = b.PlatformId ? parseInt(b.PlatformId) : (prefill.PlatformId || null);
-    const campaignId = b.CampaignId ? parseInt(b.CampaignId) : (prefill.CampaignId || null);
-    const adId       = b.AdId       ? parseInt(b.AdId)       : (prefill.AdId       || null);
-    const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId || null);
-
-    const sourceError = await validateSourceChain(pool, { PlatformId: platformId, CampaignId: campaignId, AdId: adId });
-    if (sourceError) return res.status(400).json({ error: sourceError });
-
-    // Resolve Project -> Company link (a Project row's company_id) and the
-    // real project/unit display names, so the app doesn't rely on hand-typed
-    // text for either.
-    let projectName = b.InterestedProject || null;
-    let companyId = b.CompanyId ? parseInt(b.CompanyId) : null;
-    if (b.ProjectId) {
-      const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
-        .query("SELECT name, company_id FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
-      if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
-      projectName = proj.recordset[0].name;
-      companyId = companyId || proj.recordset[0].company_id || null;
-    }
-    let unitName = b.InterestedUnit || null;
-    if (b.PreferredUnitId) {
-      const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
-      if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-      unitName = unit.recordset[0].UnitName;
-    }
-
-    const appNo = await getNextDocNumber(pool, "APP", "APP");
-    const actor = actorId(req);
-    const result = await pool.request()
-      .input("no",   sql.NVarChar(30),  appNo)
-      .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
-      .input("name", sql.NVarChar(200), b.ApplicantName.trim() || prefill.CustomerName)
-      .input("mob",  sql.NVarChar(20),  b.Mobile.trim()  || prefill.Mobile)
-      .input("alt",  sql.NVarChar(20),  b.AltMobile || prefill.AltMobile || null)
-      .input("em",   sql.NVarChar(200), b.Email     || prefill.Email     || null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
-      .input("cid",  sql.Int,           companyId)
-      .input("proj", sql.NVarChar(200), projectName)
-      .input("unit", sql.NVarChar(100), unitName)
-      .input("pt",   sql.NVarChar(50),  b.PropertyType  || prefill.PropertyType  || null)
-      .input("bhk",  sql.NVarChar(30),  b.BhkPreference || prefill.BhkPreference || null)
-      .input("bmin", sql.Decimal(18,2), b.BudgetMin != null ? parseFloat(b.BudgetMin) : (prefill.BudgetMin || null))
-      .input("bmax", sql.Decimal(18,2), b.BudgetMax != null ? parseFloat(b.BudgetMax) : (prefill.BudgetMax || null))
-      .input("src",  sql.NVarChar(200), b.Source || prefill.SourceType || null)
-      .input("platid", sql.Int, platformId)
-      .input("campid", sql.Int, campaignId)
-      .input("adid",   sql.Int, adId)
-      .input("cpid",   sql.Int, channelPartnerId)
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : (prefill.AssignedSalespersonId || null))
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
-      .input("cb",   sql.Int,           actor)
-      .query(`
-        INSERT INTO dbo.CrmApplication
-          (ApplicationNo, LeadId, ApplicantName, Mobile, AltMobile, Email,
-           ProjectId, PreferredUnitId, CompanyId, InterestedProject, InterestedUnit,
-           PropertyType, BhkPreference, BudgetMin, BudgetMax,
-           Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
-           AssignedTo, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES
-          (@no, @lid, @name, @mob, @alt, @em,
-           @pid, @uid, @cid, @proj, @unit,
-           @pt, @bhk, @bmin, @bmax,
-           @src, @platid, @campid, @adid, @cpid,
-           @asgn, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME())
-      `);
-    const applicationId = result.recordset[0].Id;
-    // Lands directly in Pending — same "auto-submitted on creation" convention
-    // every other module wired into the Approval Inbox uses (see
-    // ApprovalActions.tsx). Only admin/super_admin/dba can move it forward
-    // from here, from the Admin Approval Inbox.
-    await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actor);
-
+    const { id: applicationId, ApplicationNo: appNo } = await createCrmApplicationRecord(pool, req.body, actorId(req));
     res.status(201).json({ success: true, id: applicationId, ApplicationNo: appNo });
   } catch (e) {
+    if (e instanceof CrmCreationError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-applications] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -218,6 +126,20 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const old = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, AssignedTo FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    // Contact identity fields (Mobile/AltMobile/Email) get the same
+    // protection Status already had — but tighter, since these are used as
+    // the customer portal's own login credentials (email as username,
+    // mobile as the initial password) and as the phone number any
+    // verification call/SMS goes to. crm-applications:edit is held by
+    // admin/dba/marketing_head too (see requirePageRight.js's crm- prefix
+    // bypass), which is far too wide a blast radius for a field that can
+    // redirect verification contact away from the real customer — so this
+    // is a hard super_admin-only gate, not the page-right check above.
+    const changingContact = b.Mobile !== undefined || b.AltMobile !== undefined || b.Email !== undefined;
+    if (changingContact && !isSuperAdminOnly(req)) {
+      return res.status(403).json({ error: "Only a super admin can change contact details (Mobile, Alternate Mobile, or Email)." });
+    }
 
     if (b.Source && !SOURCE_TYPES.includes(b.Source))
       return res.status(400).json({ error: `Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}` });

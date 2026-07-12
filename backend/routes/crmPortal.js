@@ -10,7 +10,8 @@ const portalAuth = require("../middleware/crmPortalAuth");
 const { logCrmAudit } = require("../services/crmAudit");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
-const { maybeResolveAgreementDate } = require("../services/crmWorkflowGuards");
+const { maybeResolveAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { logCommunication } = require("../services/crmCommunicationLog");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -120,7 +121,7 @@ router.get("/timeline", async (req, res) => {
 
     if (!bk) return res.json({ stage: "Application", steps: [], holds: holds.recordset });
 
-    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, constructionUpdates] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, constructionUpdates, legalMilestone, nocs, prePossession] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1
@@ -141,8 +142,9 @@ router.get("/timeline", async (req, res) => {
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
-               ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, LastRecheckRemarks, SentToCustomerAt,
-               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount
+               ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
+               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
+               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','Rejected')) AS DocumentsNeedingAction
         FROM dbo.CrmAgreement WHERE BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
@@ -155,6 +157,10 @@ router.get("/timeline", async (req, res) => {
         FROM dbo.CrmSalesDeed WHERE BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT TOP 1 Id, NoticeNo, Status, OfferedDate, ResponseDeadline, SentAt, AcknowledgedAt, DisputedAt, DisputeReason
+        FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status <> 'Draft' ORDER BY CreatedAt DESC
+      `),
       // Construction progress is a project-wide broadcast (Foundation/
       // Superstructure/etc apply to every unit in the project, not just this
       // customer's), so it's matched on the booking's real ProjectId — the
@@ -163,6 +169,9 @@ router.get("/timeline", async (req, res) => {
         ? pool.request().input("pid", sql.Int, bk.ProjectId)
             .query("SELECT UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC")
         : Promise.resolve({ recordset: [] }),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT OverallStatus FROM dbo.CrmLegalMilestone WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledInspectionDate FROM dbo.CrmPrePossession WHERE BookingId = @bid"),
     ]);
 
     res.json({
@@ -173,8 +182,23 @@ router.get("/timeline", async (req, res) => {
       paymentMilestones: milestones.recordset,
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
+      possessionNotice: possessionNotice.recordset[0] || null,
       constructionUpdates: constructionUpdates.recordset,
       holds: holds.recordset,
+      // Customer-facing framing of internal process trackers — raw step
+      // names (DocCollection/LegalReview/etc) and NOC bank details are never
+      // exposed, only an overall status the customer can act/wait on.
+      legalDocumentation: legalMilestone.recordset[0]
+        ? { status: legalMilestone.recordset[0].OverallStatus }
+        : null,
+      nocStatus: {
+        total: nocs.recordset.length,
+        issued: nocs.recordset.filter((n) => n.Status === "Issued").length,
+        items: nocs.recordset.map((n) => ({ type: n.NocType, status: n.Status })),
+      },
+      prePossession: prePossession.recordset[0]
+        ? { status: prePossession.recordset[0].Status, scheduledDate: prePossession.recordset[0].ScheduledInspectionDate }
+        : null,
     });
   } catch (e) {
     console.error("[crm-portal] GET /timeline error:", e.message);
@@ -192,7 +216,7 @@ router.get("/agreement", async (req, res) => {
              ag.PanNo, ag.AadhaarNo, ag.VersionNo, ag.CreatedAt,
              ag.SeniorApprovalStatus, ag.SeniorApprovedAt,
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
-             ag.ProposedDateByCompany, ag.ProposedDateByCustomer,
+             ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.DateApprovalStatus,
              ag.SentToCustomerAt, ag.LastRecheckRemarks,
              b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingDate
       FROM dbo.CrmAgreement ag
@@ -275,7 +299,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
       const docId = parseInt(req.params.docId, 10);
 
       const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
-        SELECT d.Id, d.Status, d.DocumentType, ag.AgreementNo, b.AssignedTo, b.BookingNo, a.ApplicantName
+        SELECT d.Id, d.Status, d.DocumentType, ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
         FROM dbo.CrmAgreementDocument d
         JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
         JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
@@ -310,6 +334,11 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
           `${doc.ApplicantName} uploaded ${doc.DocumentType.replace(/([A-Z])/g, " $1").trim()} for ${doc.AgreementNo} (${doc.BookingNo}).`,
           docId, "crm_agreement_document");
       }
+      await logCommunication(pool, {
+        bookingId: doc.BookingId, direction: "Inbound",
+        subject: `Customer submitted a document — ${doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}`,
+        summary: `${doc.ApplicantName} uploaded ${doc.DocumentType.replace(/([A-Z])/g, " $1").trim()} for ${doc.AgreementNo}.`,
+      });
 
       res.json({ success: true });
     } catch (e) {
@@ -363,7 +392,7 @@ router.post("/agreement/respond", async (req, res) => {
 
     const ag = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.RecheckCount, ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
-             ag.AgreementNo, b.AssignedTo, b.BookingNo, a.ApplicantName
+             ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -401,9 +430,11 @@ router.post("/agreement/respond", async (req, res) => {
           WHERE Id = @id
         `);
       // The customer just approved and (optionally) proposed a date — if it
-      // now matches the company's proposed date, the agreement date is
-      // finalized right here, immediately, from the customer's own action.
+      // now matches the company's proposed date, it goes to a super_admin
+      // for sign-off (DateApprovalStatus='Pending'), not straight to
+      // AgreementDate.
       await maybeResolveAgreementDate(pool, agreementId);
+      await syncLegalMilestoneStep(pool, agreementRow.BookingId, "MutualAgreement", null);
     } else {
       await pool.request()
         .input("id",  sql.Int, agreementId)
@@ -439,10 +470,93 @@ router.post("/agreement/respond", async (req, res) => {
           : `${agreementRow.ApplicantName} requested a recheck on agreement ${agreementRow.AgreementNo} (${agreementRow.BookingNo}): ${remarks}`,
         agreementId, "crm_agreement");
     }
+    await logCommunication(pool, {
+      bookingId: agreementRow.BookingId, direction: "Inbound",
+      subject: decision === "Approve" ? "Customer approved the agreement" : "Customer requested a recheck",
+      summary: decision === "Approve"
+        ? `${agreementRow.ApplicantName} approved ${agreementRow.AgreementNo}.`
+        : `${agreementRow.ApplicantName} requested a recheck on ${agreementRow.AgreementNo}: ${remarks}`,
+    });
 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /agreement/respond error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /agreement/propose-date — the customer's side of date negotiation,
+// independent of the Approve/Recheck decision. /agreement/respond only ever
+// lets a proposed date piggyback on the *first* approval action and then
+// blocks entirely once approved ("already been approved") — so if staff
+// proposes a date only after the customer has already approved the
+// agreement's content (the normal order per the workflow spec: content
+// approval happens before date negotiation), the customer previously had no
+// way to respond at all. This endpoint is the customer's mirror of the
+// staff side's PUT /:id/propose-date, usable any time after approval.
+router.post("/agreement/propose-date", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const { proposedDate } = req.body;
+    if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
+
+    const ag = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT ag.Id, ag.CustomerApprovalStatus, ag.AgreementDate, ag.DateApprovalStatus, ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+      FROM dbo.CrmAgreement ag
+      JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+    `);
+    if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
+    const agreementRow = ag.recordset[0];
+    if (agreementRow.CustomerApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Approve the agreement's content before proposing a date" });
+    }
+    if (agreementRow.AgreementDate) {
+      return res.status(400).json({ error: "The agreement date is already confirmed" });
+    }
+    if (agreementRow.DateApprovalStatus === "Pending") {
+      return res.status(400).json({ error: "Your proposed date is already awaiting approval" });
+    }
+    const agreementId = agreementRow.Id;
+
+    await pool.request()
+      .input("agid", sql.Int, agreementId)
+      .input("pd", sql.Date, proposedDate)
+      .query(`
+        INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedAt)
+        VALUES (@agid, 'Customer', @pd, SYSDATETIME())
+      `);
+    await pool.request()
+      .input("id", sql.Int, agreementId)
+      .input("pdc", sql.Date, proposedDate)
+      .query("UPDATE dbo.CrmAgreement SET ProposedDateByCustomer = @pdc WHERE Id = @id");
+
+    // A match here no longer confirms the date outright — it moves to
+    // DateApprovalStatus='Pending' and waits on a super_admin sign-off
+    // (PUT /:id/date/approve), same gate the company's own propose-date
+    // action goes through.
+    const submittedForApproval = await maybeResolveAgreementDate(pool, agreementId);
+
+    if (agreementRow.AssignedTo) {
+      await emitNotification(pool, agreementRow.AssignedTo,
+        submittedForApproval ? "crm_agreement_date_pending_approval" : "crm_agreement_customer_proposed_date",
+        submittedForApproval ? "Agreement Date Awaiting Approval" : "Customer Proposed an Agreement Date",
+        submittedForApproval
+          ? `${agreementRow.ApplicantName} matched our proposed date for ${agreementRow.AgreementNo} (${agreementRow.BookingNo}) — awaiting super admin sign-off.`
+          : `${agreementRow.ApplicantName} proposed ${proposedDate} for ${agreementRow.AgreementNo} (${agreementRow.BookingNo}) — review and confirm.`,
+        agreementId, "crm_agreement");
+    }
+    await logCommunication(pool, {
+      bookingId: agreementRow.BookingId, direction: "Inbound",
+      subject: submittedForApproval ? "Customer's date matched — sent for approval" : `Customer proposed a date — ${proposedDate}`,
+      summary: `${agreementRow.AgreementNo}: ${agreementRow.ApplicantName} ${submittedForApproval ? "matched our proposed date, sent for super admin sign-off" : `proposed ${proposedDate}`}.`,
+    });
+
+    res.json({ success: true, agreementDateSubmittedForApproval: submittedForApproval });
+  } catch (e) {
+    console.error("[crm-portal] POST /agreement/propose-date error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -460,7 +574,7 @@ router.post("/sales-deed/respond", async (req, res) => {
     }
 
     const deed = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT d.Id, d.CustomerApprovalStatus, d.DeedNo, b.AssignedTo, b.BookingNo, a.ApplicantName
+      SELECT d.Id, d.CustomerApprovalStatus, d.DeedNo, d.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
       FROM dbo.CrmSalesDeed d
       JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -504,10 +618,78 @@ router.post("/sales-deed/respond", async (req, res) => {
           : `${deedRow.ApplicantName} requested a recheck on sale deed ${deedRow.DeedNo} (${deedRow.BookingNo}): ${remarks}`,
         deedRow.Id, "crm_sales_deed");
     }
+    await logCommunication(pool, {
+      bookingId: deedRow.BookingId, direction: "Inbound",
+      subject: decision === "Approve" ? "Customer approved the sales deed" : "Customer requested a recheck on sales deed",
+      summary: decision === "Approve"
+        ? `${deedRow.ApplicantName} approved ${deedRow.DeedNo}.`
+        : `${deedRow.ApplicantName} requested a recheck on ${deedRow.DeedNo}: ${remarks}`,
+    });
 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /sales-deed/respond error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /possession-notice/respond — the customer's side of the possession
+// notice: acknowledge it (they've received/accepted the handover offer) or
+// dispute it (something's wrong — a reason is mandatory, same as the
+// staff-side mark-disputed endpoint). This is the one step in the Closure
+// sequence that previously had no customer-facing counterpart at all —
+// staff could send a notice but the customer had no way to respond to it
+// from their own portal.
+router.post("/possession-notice/respond", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const { decision, reason } = req.body; // decision: "Acknowledge" | "Dispute"
+    if (!["Acknowledge", "Dispute"].includes(decision)) return res.status(400).json({ error: "decision must be Acknowledge or Dispute" });
+    if (decision === "Dispute" && !String(reason || "").trim()) {
+      return res.status(400).json({ error: "A reason is required to dispute the possession notice" });
+    }
+
+    const notice = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT n.Id, n.Status, n.NoticeNo, n.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+      FROM dbo.CrmPossessionNotice n
+      JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.ApplicationId = @aid AND n.Status <> 'Draft'
+      ORDER BY n.CreatedAt DESC
+    `);
+    if (!notice.recordset.length) return res.status(404).json({ error: "No possession notice found" });
+    const row = notice.recordset[0];
+    if (row.Status !== "Sent") {
+      return res.status(400).json({ error: `Cannot respond to a notice in status '${row.Status}'` });
+    }
+
+    await pool.request().input("id", sql.Int, row.Id).input("reason", sql.NVarChar(sql.MAX), reason || null).query(
+      decision === "Acknowledge"
+        ? "UPDATE dbo.CrmPossessionNotice SET Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME() WHERE Id = @id"
+        : "UPDATE dbo.CrmPossessionNotice SET Status = 'Disputed', DisputedAt = SYSDATETIME(), DisputeReason = @reason WHERE Id = @id"
+    );
+
+    if (row.AssignedTo) {
+      await emitNotification(pool, row.AssignedTo,
+        decision === "Acknowledge" ? "crm_possession_notice_acknowledged" : "crm_possession_notice_disputed",
+        decision === "Acknowledge" ? "Possession Notice Acknowledged" : "Possession Notice Disputed",
+        decision === "Acknowledge"
+          ? `${row.ApplicantName} acknowledged ${row.NoticeNo} (${row.BookingNo}).`
+          : `${row.ApplicantName} disputed ${row.NoticeNo} (${row.BookingNo}): ${reason}`,
+        row.Id, "crm_possession_notice");
+    }
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: decision === "Acknowledge" ? "Customer acknowledged possession notice" : "Customer disputed possession notice",
+      summary: decision === "Acknowledge"
+        ? `${row.ApplicantName} acknowledged ${row.NoticeNo}.`
+        : `${row.ApplicantName} disputed ${row.NoticeNo}: ${reason}`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-portal] POST /possession-notice/respond error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -576,10 +758,114 @@ router.post("/tickets", async (req, res) => {
         "Customer Raised a Ticket", `${ticketNo}: ${subject.trim()} (${bk.recordset[0].BookingNo})`,
         result.recordset[0].Id, "service_ticket");
     }
+    await logCommunication(pool, {
+      bookingId, direction: "Inbound",
+      subject: `Support ticket raised — ${subject.trim()}`,
+      summary: `${ticketNo} (${category}): ${description || subject.trim()}`,
+    });
 
     res.status(201).json({ success: true, id: result.recordset[0].Id, TicketNo: ticketNo });
   } catch (e) {
     console.error("[crm-portal] POST /tickets error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Only these CrmAgreementApprovalLog actions are safe to show a customer —
+// everything else (SeniorApprove/SeniorReject, the internal in-house review)
+// is staff-only, same "never expose internal review" rule the rest of this
+// file follows for brokerage/AssignedTo/etc.
+const CUSTOMER_VISIBLE_LOG_ACTIONS = [
+  "SendToCustomer", "CustomerApprove", "CustomerRecheck",
+  "AgreementDateSubmittedForApproval", "AgreementDateConfirmed", "AgreementDateRejected",
+];
+
+// GET /activity — a single chronological feed of everything that's actually
+// happened on this customer's application: agreement lifecycle events,
+// payments received, documents reviewed, and support tickets. Requested
+// specifically so the portal isn't just a set of static status pages — the
+// customer can see the real communication/approval trail behind each one,
+// the same way staff can via CrmAgreementApprovalLog, minus anything
+// internal-only (senior review, brokerage, AssignedTo identities).
+router.get("/activity", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+
+    const [agreementLog, payments, documents, tickets] = await Promise.all([
+      pool.request().input("aid", sql.Int, appId)
+        .query(`
+          SELECT l.Action, l.Remarks, l.CreatedAt, ag.AgreementNo
+          FROM dbo.CrmAgreementApprovalLog l
+          JOIN dbo.CrmAgreement ag ON ag.Id = l.AgreementId
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE b.ApplicationId = @aid
+            AND l.Action IN (${CUSTOMER_VISIBLE_LOG_ACTIONS.map((a) => `'${a}'`).join(",")})
+          ORDER BY l.CreatedAt DESC
+        `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT r.Amount, r.ReceivedDate, r.PaymentMode, r.CreatedAt, m.MilestoneName
+        FROM dbo.CrmPaymentReceipt r
+        JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
+        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+        WHERE b.ApplicationId = @aid
+        ORDER BY r.CreatedAt DESC
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT d.DocumentType, d.Label, d.Status, d.Remarks, d.UploadedAt, ISNULL(d.UploadedAt, d.CreatedAt) AS EventAt
+        FROM dbo.CrmAgreementDocument d
+        JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+        JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+        WHERE b.ApplicationId = @aid AND d.Status IN ('Verified', 'Rejected', 'Submitted')
+        ORDER BY EventAt DESC
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT t.TicketNo, t.Subject, t.Status, t.ResolvedAt, t.CreatedAt
+        FROM dbo.CrmServiceTicket t
+        JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+        WHERE b.ApplicationId = @aid
+        ORDER BY t.CreatedAt DESC
+      `),
+    ]);
+
+    const feed = [];
+    const AGREEMENT_LOG_LABELS = {
+      SendToCustomer: (r) => ({ title: "Agreement shared with you", detail: r.AgreementNo }),
+      CustomerApprove: (r) => ({ title: "You approved the agreement", detail: r.AgreementNo }),
+      CustomerRecheck: (r) => ({ title: "You requested a recheck", detail: r.Remarks || r.AgreementNo }),
+      AgreementDateSubmittedForApproval: (r) => ({ title: "Agreement date matched — sent for approval", detail: r.AgreementNo }),
+      AgreementDateConfirmed: (r) => ({ title: "Agreement date confirmed", detail: r.AgreementNo }),
+      AgreementDateRejected: (r) => ({ title: "Proposed date was not accepted", detail: r.Remarks || r.AgreementNo }),
+    };
+    for (const r of agreementLog.recordset) {
+      const fn = AGREEMENT_LOG_LABELS[r.Action];
+      if (!fn) continue;
+      const { title, detail } = fn(r);
+      feed.push({ type: "agreement", title, detail, at: r.CreatedAt });
+    }
+    for (const r of payments.recordset) {
+      feed.push({ type: "payment", title: `Payment received — ${r.MilestoneName}`, detail: `₹${Number(r.Amount).toLocaleString("en-IN")}${r.PaymentMode ? ` via ${r.PaymentMode}` : ""}`, at: r.CreatedAt });
+    }
+    for (const r of documents.recordset) {
+      const label = r.Label || r.DocumentType?.replace(/([A-Z])/g, " $1").trim();
+      feed.push({
+        type: "document",
+        title: r.Status === "Verified" ? `Document verified — ${label}` : r.Status === "Rejected" ? `Document returned — ${label}` : `Document submitted — ${label}`,
+        detail: r.Status === "Rejected" ? r.Remarks : null,
+        at: r.EventAt,
+      });
+    }
+    for (const r of tickets.recordset) {
+      feed.push({ type: "ticket", title: `Ticket raised — ${r.Subject}`, detail: r.TicketNo, at: r.CreatedAt });
+      if (r.ResolvedAt) {
+        feed.push({ type: "ticket", title: `Ticket resolved — ${r.Subject}`, detail: r.TicketNo, at: r.ResolvedAt });
+      }
+    }
+
+    feed.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    res.json(feed);
+  } catch (e) {
+    console.error("[crm-portal] GET /activity error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

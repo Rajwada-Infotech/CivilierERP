@@ -72,6 +72,12 @@ interface ApprovalActionsProps {
    *  independently via approvalService.js's MODULE_APPROVER_ROLE_OVERRIDES —
    *  this only controls whether the buttons render. */
   approverRoles?: string[];
+  /** Inserted between recordId and the action verb — e.g. "date" turns the
+   *  call into `${endpoint}/${recordId}/date/${action}`. Used when a record
+   *  has more than one independent approval gate (e.g. CRM Agreement's
+   *  Senior Approval vs. its separate Date Approval) and each needs its own
+   *  route. Omit for the default `${endpoint}/${recordId}/${action}`. */
+  actionPathSuffix?: string;
 }
 
 export function ApprovalActions({
@@ -82,6 +88,7 @@ export function ApprovalActions({
   className,
   submitOnly = false,
   approverRoles = APPROVER_ROLES,
+  actionPathSuffix,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -94,11 +101,10 @@ export function ApprovalActions({
     setLoading(action);
     try {
       const body = action === "reject" ? { note: rejectNote } : undefined;
-      const data = await authFetch(
-        `${endpoint}/${recordId}/${action}`,
-        "PUT",
-        body,
-      );
+      const path = actionPathSuffix
+        ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
+        : `${endpoint}/${recordId}/${action}`;
+      const data = await authFetch(path, "PUT", body);
       if (
         action === "approve" &&
         data?.newStatus &&

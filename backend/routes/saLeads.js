@@ -127,6 +127,13 @@ router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
 });
 
 // POST / — create lead
+// Manual entry (this endpoint) previously had no dedup check at all — only
+// the ad-platform import path (saAds.js POST /:id/import-leads) checked for
+// existing leads, and even that was scoped per-ad so the same phone number
+// still created a new row per different ad/campaign. A phone number is
+// meant to be the effective key against duplicates system-wide, so this
+// checks across ALL active leads regardless of source, and points the
+// caller at the existing lead instead of silently creating a twin record.
 router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -134,6 +141,17 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
     const uid = genUid();
     const sourceError = await validateSourceChain(pool, b);
     if (sourceError) return res.status(400).json({ error: sourceError });
+
+    if (b.Mobile) {
+      const dup = await pool.request().input("mob", sql.NVarChar(20), b.Mobile)
+        .query("SELECT TOP 1 Id, LeadUid, CustomerName, Status FROM dbo.SaLead WHERE Mobile = @mob AND IsActive = 1 ORDER BY CreatedAt DESC");
+      if (dup.recordset.length) {
+        return res.status(409).json({
+          error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
+          existingLeadId: dup.recordset[0].Id,
+        });
+      }
+    }
 
     await pool.request()
       .input("uid", sql.NVarChar(50), uid)
@@ -223,7 +241,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
     const currentResult = await pool.request()
       .input("id", sql.Int, leadId)
       .query(`
-        SELECT LeadUid, Status, Classification,
+        SELECT LeadUid, Status, Classification, CustomerName, Mobile, AltMobile, Email, DateGenerated,
                AssignedTeamLeadId, AssignedSalespersonId, CustomerRemarks,
                SourceType, ChannelPartnerId, BudgetMin, BudgetMax, PropertyType,
                BhkPreference, PreferredLocation, PurchaseTimeline,
@@ -261,6 +279,12 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
     });
     if (sourceError) return res.status(400).json({ error: sourceError });
 
+    // Effective values actually being written — @x falls back to the
+    // existing column via ISNULL below whenever the caller omits a field,
+    // instead of the old behavior of writing a bare NULL over it. The audit
+    // trail below compares against these same effective values (not the
+    // raw request body), so a partial PUT no longer logs a false "changed
+    // to blank" for every field it didn't touch.
     await pool.request()
       .input("id",  sql.Int,           leadId)
       .input("cn",  sql.NVarChar(200), b.CustomerName || null)
@@ -299,53 +323,59 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       .input("ub",  sql.Int,           actor)
       .query(`
         UPDATE dbo.SaLead SET
-          CustomerName = @cn, Mobile = @mob, AltMobile = @alt, Email = @em,
-          PlatformId = @pid, CampaignId = @cid, AdId = @aid,
+          CustomerName = ISNULL(@cn, CustomerName), Mobile = ISNULL(@mob, Mobile),
+          AltMobile = ISNULL(@alt, AltMobile), Email = ISNULL(@em, Email),
+          PlatformId = ISNULL(@pid, PlatformId), CampaignId = ISNULL(@cid, CampaignId), AdId = ISNULL(@aid, AdId),
           DateGenerated = ISNULL(@dg, DateGenerated),
-          CustomerRemarks = @rem, Status = @st, Classification = @cl,
-          AssignedTeamLeadId = @tl, AssignedSalespersonId = @sp,
-          SourceType = @srcType, ChannelPartnerId = @cpid,
-          BudgetMin = @bmin, BudgetMax = @bmax, PropertyType = @ptype,
-          BhkPreference = @bhk, PreferredLocation = @loc, PurchaseTimeline = @timeline,
-          ExternalLeadId = @externalLeadId, LeadFormName = @leadFormName,
-          SourceCampaignName = @sourceCampaignName, SourceAdName = @sourceAdName,
-          SourcePlacement = @sourcePlacement, LeadCaptureUrl = @leadCaptureUrl,
-          UtmSource = @utmSource, UtmMedium = @utmMedium, UtmCampaign = @utmCampaign,
-          UtmContent = @utmContent, UtmTerm = @utmTerm, CapturedAt = @capturedAt,
+          CustomerRemarks = ISNULL(@rem, CustomerRemarks), Status = @st, Classification = ISNULL(@cl, Classification),
+          AssignedTeamLeadId = ISNULL(@tl, AssignedTeamLeadId), AssignedSalespersonId = ISNULL(@sp, AssignedSalespersonId),
+          SourceType = ISNULL(@srcType, SourceType), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
+          BudgetMin = ISNULL(@bmin, BudgetMin), BudgetMax = ISNULL(@bmax, BudgetMax), PropertyType = ISNULL(@ptype, PropertyType),
+          BhkPreference = ISNULL(@bhk, BhkPreference), PreferredLocation = ISNULL(@loc, PreferredLocation),
+          PurchaseTimeline = ISNULL(@timeline, PurchaseTimeline),
+          ExternalLeadId = ISNULL(@externalLeadId, ExternalLeadId), LeadFormName = ISNULL(@leadFormName, LeadFormName),
+          SourceCampaignName = ISNULL(@sourceCampaignName, SourceCampaignName), SourceAdName = ISNULL(@sourceAdName, SourceAdName),
+          SourcePlacement = ISNULL(@sourcePlacement, SourcePlacement), LeadCaptureUrl = ISNULL(@leadCaptureUrl, LeadCaptureUrl),
+          UtmSource = ISNULL(@utmSource, UtmSource), UtmMedium = ISNULL(@utmMedium, UtmMedium), UtmCampaign = ISNULL(@utmCampaign, UtmCampaign),
+          UtmContent = ISNULL(@utmContent, UtmContent), UtmTerm = ISNULL(@utmTerm, UtmTerm), CapturedAt = ISNULL(@capturedAt, CapturedAt),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
-    // Audit: compare old vs new for tracked fields
+    // Audit: compare old vs the EFFECTIVE new value (falls back to old when
+    // the caller omitted the field) — not the raw request body, which is
+    // what previously logged a false "changed to blank" for every field a
+    // partial PUT didn't include.
+    const eff = (key) => (b[key] !== undefined && b[key] !== null && b[key] !== "" ? b[key] : old[key]);
     const auditFields = [
-      { field: "Status",               oldVal: old.Status,               newVal: b.Status },
-      { field: "Classification",       oldVal: old.Classification,       newVal: b.Classification },
-      { field: "AssignedTeamLeadId",   oldVal: old.AssignedTeamLeadId,   newVal: b.AssignedTeamLeadId },
-      { field: "AssignedSalespersonId",oldVal: old.AssignedSalespersonId,newVal: b.AssignedSalespersonId },
-      { field: "CustomerRemarks",      oldVal: old.CustomerRemarks,      newVal: b.CustomerRemarks },
-      { field: "SourceType",           oldVal: old.SourceType,           newVal: b.SourceType },
-      { field: "ChannelPartnerId",     oldVal: old.ChannelPartnerId,     newVal: b.ChannelPartnerId },
-      { field: "BudgetMin",            oldVal: old.BudgetMin,            newVal: b.BudgetMin },
-      { field: "BudgetMax",            oldVal: old.BudgetMax,            newVal: b.BudgetMax },
-      { field: "PropertyType",         oldVal: old.PropertyType,         newVal: b.PropertyType },
-      { field: "BhkPreference",        oldVal: old.BhkPreference,        newVal: b.BhkPreference },
-      { field: "PreferredLocation",    oldVal: old.PreferredLocation,    newVal: b.PreferredLocation },
-      { field: "PurchaseTimeline",     oldVal: old.PurchaseTimeline,     newVal: b.PurchaseTimeline },
-      { field: "PlatformId",           oldVal: old.PlatformId,           newVal: b.PlatformId },
-      { field: "CampaignId",           oldVal: old.CampaignId,           newVal: b.CampaignId },
-      { field: "AdId",                 oldVal: old.AdId,                 newVal: b.AdId },
-      { field: "ExternalLeadId",       oldVal: old.ExternalLeadId,       newVal: b.ExternalLeadId },
-      { field: "LeadFormName",         oldVal: old.LeadFormName,         newVal: b.LeadFormName },
-      { field: "SourceCampaignName",   oldVal: old.SourceCampaignName,   newVal: b.SourceCampaignName },
-      { field: "SourceAdName",         oldVal: old.SourceAdName,         newVal: b.SourceAdName },
-      { field: "SourcePlacement",      oldVal: old.SourcePlacement,      newVal: b.SourcePlacement },
-      { field: "LeadCaptureUrl",       oldVal: old.LeadCaptureUrl,       newVal: b.LeadCaptureUrl },
-      { field: "UtmSource",            oldVal: old.UtmSource,            newVal: b.UtmSource },
-      { field: "UtmMedium",            oldVal: old.UtmMedium,            newVal: b.UtmMedium },
-      { field: "UtmCampaign",          oldVal: old.UtmCampaign,          newVal: b.UtmCampaign },
-      { field: "UtmContent",           oldVal: old.UtmContent,           newVal: b.UtmContent },
-      { field: "UtmTerm",              oldVal: old.UtmTerm,              newVal: b.UtmTerm },
-      { field: "CapturedAt",           oldVal: old.CapturedAt,           newVal: b.CapturedAt },
+      { field: "Status",               oldVal: old.Status,               newVal: b.Status !== undefined ? b.Status : old.Status },
+      { field: "Classification",       oldVal: old.Classification,       newVal: eff("Classification") },
+      { field: "AssignedTeamLeadId",   oldVal: old.AssignedTeamLeadId,   newVal: eff("AssignedTeamLeadId") },
+      { field: "AssignedSalespersonId",oldVal: old.AssignedSalespersonId,newVal: eff("AssignedSalespersonId") },
+      { field: "CustomerRemarks",      oldVal: old.CustomerRemarks,      newVal: eff("CustomerRemarks") },
+      { field: "SourceType",           oldVal: old.SourceType,           newVal: eff("SourceType") },
+      { field: "ChannelPartnerId",     oldVal: old.ChannelPartnerId,     newVal: eff("ChannelPartnerId") },
+      { field: "BudgetMin",            oldVal: old.BudgetMin,            newVal: eff("BudgetMin") },
+      { field: "BudgetMax",            oldVal: old.BudgetMax,            newVal: eff("BudgetMax") },
+      { field: "PropertyType",         oldVal: old.PropertyType,         newVal: eff("PropertyType") },
+      { field: "BhkPreference",        oldVal: old.BhkPreference,        newVal: eff("BhkPreference") },
+      { field: "PreferredLocation",    oldVal: old.PreferredLocation,    newVal: eff("PreferredLocation") },
+      { field: "PurchaseTimeline",     oldVal: old.PurchaseTimeline,     newVal: eff("PurchaseTimeline") },
+      { field: "PlatformId",           oldVal: old.PlatformId,           newVal: eff("PlatformId") },
+      { field: "CampaignId",           oldVal: old.CampaignId,           newVal: eff("CampaignId") },
+      { field: "AdId",                 oldVal: old.AdId,                 newVal: eff("AdId") },
+      { field: "ExternalLeadId",       oldVal: old.ExternalLeadId,       newVal: eff("ExternalLeadId") },
+      { field: "LeadFormName",         oldVal: old.LeadFormName,         newVal: eff("LeadFormName") },
+      { field: "SourceCampaignName",   oldVal: old.SourceCampaignName,   newVal: eff("SourceCampaignName") },
+      { field: "SourceAdName",         oldVal: old.SourceAdName,         newVal: eff("SourceAdName") },
+      { field: "SourcePlacement",      oldVal: old.SourcePlacement,      newVal: eff("SourcePlacement") },
+      { field: "LeadCaptureUrl",       oldVal: old.LeadCaptureUrl,       newVal: eff("LeadCaptureUrl") },
+      { field: "UtmSource",            oldVal: old.UtmSource,            newVal: eff("UtmSource") },
+      { field: "UtmMedium",            oldVal: old.UtmMedium,            newVal: eff("UtmMedium") },
+      { field: "UtmCampaign",          oldVal: old.UtmCampaign,          newVal: eff("UtmCampaign") },
+      { field: "UtmContent",           oldVal: old.UtmContent,           newVal: eff("UtmContent") },
+      { field: "UtmTerm",              oldVal: old.UtmTerm,              newVal: eff("UtmTerm") },
+      { field: "CapturedAt",           oldVal: old.CapturedAt,           newVal: eff("CapturedAt") },
     ];
     for (const af of auditFields) {
       const o = af.oldVal == null ? "" : String(af.oldVal);
@@ -437,6 +467,32 @@ router.delete("/:id", requirePageRight("sa-leads", "delete"), async (req, res) =
     res.json({ success: true });
   } catch (e) {
     console.error("[sa-leads] DELETE error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /available-units — real Unit Master rows not attached to any active
+// CRM booking, for the "Promote to Booking" dialog's unit picker. Exists
+// here (rather than requiring sa-leads users to also hold crm-unit-matrix
+// rights) since Sales Automation and CRM are separately permissioned
+// modules — this keeps the picker usable for whoever can already promote a
+// lead, without a second permission grant.
+router.get("/available-units", requirePageRight("sa-leads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT u.Id, u.UnitName, u.ProjectId, u.UnitType, u.AreaSqFt, proj.name AS ProjectName
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
+      WHERE u.IsActive = 1
+        AND u.Id NOT IN (
+          SELECT UnitId FROM dbo.CrmBooking WHERE UnitId IS NOT NULL AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')
+        )
+      ORDER BY proj.name, u.UnitName
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[sa-leads] GET /available-units error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

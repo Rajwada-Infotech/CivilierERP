@@ -5,7 +5,8 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, IndianRupee, AlertCircle, CheckCircle2, Clock, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -43,6 +44,7 @@ async function fetchBookings(): Promise<any[]> {
 
 const CrmPaymentMilestones: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgParam = sp.get("bookingId") || "";
   const [selectedBookingId, setSelectedBookingId] = useState(bkgParam);
@@ -87,6 +89,12 @@ const CrmPaymentMilestones: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Milestone waived");
+
+      const allOthersCleared = milestones.filter((x) => x.Id !== m.Id).every((x) => ["Paid", "Waived"].includes(x.Status));
+      if (allOthersCleared) {
+        promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
+      }
+
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -110,6 +118,15 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Payment recorded");
+
+      const current = milestones.find((m) => m.Id === editingId);
+      const paidAmt = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : current?.AmountPaid;
+      const thisOneCleared = current && paidAmt != null && paidAmt >= current.AmountDue;
+      const allOthersCleared = milestones.filter((m) => m.Id !== editingId).every((m) => ["Paid", "Waived"].includes(m.Status));
+      if (thisOneCleared && allOthersCleared) {
+        promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
+      }
+
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {

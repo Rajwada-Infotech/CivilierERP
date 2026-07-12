@@ -47,13 +47,26 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
 });
 
 // POST / — request a cancellation; auto-computes refund from paid milestones
+//
+// Workflow guard: once the sales deed is Registered, the unit is legally
+// conveyed — a simple refund-and-release cancellation is no longer the
+// correct instrument (that needs a formal deed-cancellation/deed-of-
+// rescission process, not this flow). Blocked here rather than silently
+// letting staff "cancel" a booking whose title has already legally passed.
 router.post("/", requirePageRight("crm-cancellations", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
 
-    const paidRes = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (deed.recordset.length && deed.recordset[0].Status === "Registered") {
+      return res.status(400).json({ error: "This booking's sales deed is already Registered — a legal deed-cancellation process is required, not a standard cancellation request" });
+    }
+
+    const paidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
