@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { FinanceShell, FinanceGlassCard } from "@/components/finance/FinanceShell";
 import { getInvoicesForParty, applyOAAdjustment } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
+import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 import { toast } from "sonner";
 
 interface PartySummary {
@@ -90,16 +91,19 @@ function AdjustDialog({
   }, [entry.PartyId]);
 
   const selected = invoices.find((i) => i.docNo === selectedDoc);
+  const invoiceRemaining = selected ? (selected.remaining > 0 ? selected.remaining : selected.invoiceAmount) : 0;
 
-  // Pre-fill amount: min(balance, invoice remaining)
+  // Pre-fill amount: as much as this adjustment can cover
   useEffect(() => {
     if (!selected) { setAmount(""); return; }
-    const maxAdjust = Math.min(currentBalance, selected.remaining > 0 ? selected.remaining : selected.invoiceAmount);
-    setAmount(String(Math.round(maxAdjust)));
+    const preview = previewOAAdjustment(currentBalance, invoiceRemaining);
+    setAmount(String(Math.round(preview.applyAmount)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, currentBalance]);
 
   const adjAmount = parseFloat(amount) || 0;
-  const previewBalance = Math.max(0, currentBalance - adjAmount);
+  const preview = selected ? previewOAAdjustment(currentBalance, invoiceRemaining, adjAmount) : null;
+  const previewBalance = preview ? preview.balanceAfter : Math.max(0, currentBalance - adjAmount);
   const canSubmit = selectedDoc && adjAmount > 0 && adjAmount <= currentBalance && !submitting;
 
   async function handleSubmit() {

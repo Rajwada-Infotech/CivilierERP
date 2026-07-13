@@ -13,20 +13,21 @@ router.use(requireAuth);
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
 // ── GET /balance/:partyId — running balance for a party ───────────────────
+// Reads the materialized AccountHeadMaster.OnAccountBalance column — kept in
+// lockstep with every dbo.OnAccountLedger write (see newPayment.js approve
+// hook and POST /apply-adjustment below) — rather than summing the ledger on
+// every call. dbo.OnAccountLedger remains the full audit trail (used by
+// /report), this is just the fast current-balance read.
 router.get("/balance/:partyId", async (req, res) => {
   const partyId = parseInt(req.params.partyId, 10);
   if (!partyId) return res.status(400).json({ error: "Invalid partyId" });
   try {
     const pool = getPool();
     const r = await pool.request().input("PartyId", sql.Int, partyId).query(`
-      SELECT
-        ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE 0 END), 0) AS totalCredit,
-        ISNULL(SUM(CASE WHEN TxnType='DEBIT'  THEN Amount ELSE 0 END), 0) AS totalDebit
-      FROM dbo.OnAccountLedger WHERE PartyId = @PartyId
+      SELECT ISNULL(OnAccountBalance, 0) AS balance FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId
     `);
-    const { totalCredit, totalDebit } = r.recordset[0];
-    const balance = parseFloat(totalCredit) - parseFloat(totalDebit);
-    res.json({ partyId, balance: Math.max(0, balance), totalCredit: parseFloat(totalCredit), totalDebit: parseFloat(totalDebit) });
+    const balance = Math.max(0, parseFloat(r.recordset[0]?.balance ?? 0));
+    res.json({ partyId, balance });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -40,13 +41,9 @@ router.get("/balance-by-ref/:expenseRef", async (req, res) => {
     const party = await resolvePartyFromRef(pool, expenseRef);
     if (!party) return res.json({ balance: 0, partyId: null, partyType: null });
     const r = await pool.request().input("PartyId", sql.Int, party.partyId).query(`
-      SELECT
-        ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE 0 END), 0) AS totalCredit,
-        ISNULL(SUM(CASE WHEN TxnType='DEBIT'  THEN Amount ELSE 0 END), 0) AS totalDebit
-      FROM dbo.OnAccountLedger WHERE PartyId = @PartyId
+      SELECT ISNULL(OnAccountBalance, 0) AS balance FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId
     `);
-    const { totalCredit, totalDebit } = r.recordset[0];
-    const balance = Math.max(0, parseFloat(totalCredit) - parseFloat(totalDebit));
+    const balance = Math.max(0, parseFloat(r.recordset[0]?.balance ?? 0));
     res.json({ ...party, balance, partyLabel: PARTY_LABEL[party.partyType] ?? party.partyType });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -80,7 +77,10 @@ router.post("/record", async (req, res) => {
           (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
         OUTPUT INSERTED.OAId
         VALUES
-          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = OnAccountBalance + (CASE WHEN @TxnType = 'CREDIT' THEN @Amount ELSE -@Amount END)
+          WHERE LHeadId = @PartyId;
       `);
     res.status(201).json({ oaId: r.recordset[0].OAId });
   } catch (err) {
@@ -197,10 +197,9 @@ router.post("/apply-adjustment", async (req, res) => {
 
     // Check current OA balance
     const balRes = await pool.request().input("PartyId", sql.Int, party.partyId).query(`
-      SELECT ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END), 0) AS balance
-      FROM dbo.OnAccountLedger WHERE PartyId = @PartyId
+      SELECT ISNULL(OnAccountBalance, 0) AS balance FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId
     `);
-    const balance = parseFloat(balRes.recordset[0].balance);
+    const balance = parseFloat(balRes.recordset[0]?.balance ?? 0);
     if (balance <= 0) return res.status(400).json({ error: "No On Account balance available" });
 
     const applyAmt = Math.min(amount, balance);
@@ -229,7 +228,10 @@ router.post("/apply-adjustment", async (req, res) => {
         INSERT INTO dbo.OnAccountLedger
           (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
         VALUES
-          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = OnAccountBalance - @Amount
+          WHERE LHeadId = @PartyId;
       `);
 
     res.json({ applied: applyAmt, remainingBalance: Math.max(0, balance - applyAmt) });
