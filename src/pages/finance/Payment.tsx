@@ -112,6 +112,8 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
+import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -175,6 +177,10 @@ const Payment: React.FC = () => {
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
   // On Account balance for the selected invoice's party
   const [oaBalance, setOaBalance] = useState<number>(0);
+  // "Use on-account balance for this payment" checkbox — defaults to true
+  // (preserves the existing auto-apply-at-approval behavior); unchecking
+  // keeps the party's balance untouched (OASkipAutoApply on save).
+  const [useOnAccountBalance, setUseOnAccountBalance] = useState(true);
   // Context injected from the On A/C Adjustment page
   const [oaAdjustCtx, setOaAdjustCtx] = useState<{
     partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
@@ -1157,6 +1163,7 @@ const Payment: React.FC = () => {
 
   // Fetch On Account balance when invoice changes
   useEffect(() => {
+    setUseOnAccountBalance(true); // reset to default for the newly-selected invoice
     if (!form.expenseRef) { setOaBalance(0); return; }
     getOABalanceByRef(form.expenseRef)
       .then((d) => setOaBalance(d.balance ?? 0))
@@ -1187,14 +1194,8 @@ const Payment: React.FC = () => {
     if (!inv) return;
     const fullAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
     if (!fullAmt) return;
-    const paidExcludingBounced = formChainData.payments
-      .filter((p) => p.Status === "Approved" && !p.IsBounced)
-      .reduce((sum, p) => {
-        const amt = parseFloat(String(p.PAmount ?? 0)) || 0;
-        const bounce = parseFloat(String(p.BounceCharge ?? 0)) || 0;
-        return sum + amt - bounce;
-      }, 0);
-    const liveRemaining = Math.max(0, Math.round((fullAmt - paidExcludingBounced) * 100) / 100);
+    const { totalPaid: paidExcludingBounced, remaining: liveRemaining } =
+      computePaymentStatus(fullAmt, formChainData.payments);
     // formLiveRemaining is always the true invoice outstanding (excludes bounced payments).
     setFormLiveRemaining(liveRemaining);
 
@@ -1383,6 +1384,9 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      // "Keep the balance on his on account" — unchecked means don't let the
+      // approve-time hook auto-apply this party's on-account balance.
+      oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
       // Re-issue fields
       ...(reissueCtx ? {
         ReplacesPaymentId: reissueCtx.replacesPaymentId,
@@ -2038,7 +2042,7 @@ const Payment: React.FC = () => {
                 const remaining = formLiveRemaining ?? (opt.remainingAmount != null
                   ? (grnTotal > 0 ? Math.max(0, netAmt - (opt.totalPaid ?? 0)) : opt.remainingAmount)
                   : Math.max(0, netAmt - paid));
-                const bStatus = remaining <= 0 && netAmt > 0 ? "Paid" : paid > 0 ? "Partially Paid" : "Payment Due";
+                const bStatus = deriveBillStatus(paid, remaining, netAmt);
                 return (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -2105,22 +2109,52 @@ const Payment: React.FC = () => {
                 </div>
               )}
 
-              {/* ── On Account Banner ── */}
-              {oaBalance > 0.01 && (
-                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
-                      On Account Available
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Excess credit stored against this party — will auto-adjust on payment
-                    </p>
+              {/* ── On Account Balance section ── */}
+              {form.expenseRef && oaBalance > 0.01 && (() => {
+                const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
+                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+                const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
+                const invoiceRemaining = resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
+                const preview = previewOAAdjustment(oaBalance, invoiceRemaining);
+                if (preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
+
+                return (
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                        On Account Balance
+                      </p>
+                      <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatINR(oaBalance)}
+                      </span>
+                    </div>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useOnAccountBalance}
+                        onChange={(e) => setUseOnAccountBalance(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-border text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer"
+                      />
+                      <div className="text-xs">
+                        <p className="font-medium text-foreground">Use on-account balance for this payment</p>
+                        {useOnAccountBalance ? (
+                          <p className="text-muted-foreground mt-0.5">
+                            {formatINR(preview.applyAmount)} will be adjusted from balance
+                            {preview.isFullyCovered
+                              ? " — this fully settles the invoice."
+                              : `, leaving ${formatINR(preview.invoiceRemainingAfter)} still outstanding.`}
+                          </p>
+                        ) : (
+                          <p className="text-muted-foreground mt-0.5">
+                            Balance stays untouched — {formatINR(oaBalance)} kept on his on-account.
+                          </p>
+                        )}
+                      </div>
+                    </label>
                   </div>
-                  <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                    {formatINR(oaBalance)}
-                  </span>
-                </div>
-              )}
+                );
+              })()}
 
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
@@ -2635,9 +2669,11 @@ const Payment: React.FC = () => {
                               const opt = expenseOptions.find(
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
-                              const prevOutstanding = formLiveRemaining != null
-                                ? formLiveRemaining
-                                : Math.max(0, net - (formKnownTotalPaid ?? opt?.totalPaid ?? 0));
+                              const prevOutstanding = resolveOutstanding(
+                                net,
+                                formLiveRemaining,
+                                formKnownTotalPaid ?? opt?.totalPaid,
+                              );
                               const alreadyPaid = Math.max(0, net - prevOutstanding);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
                               const isExact   = Math.abs(entered - prevOutstanding) < 0.01;
@@ -3857,13 +3893,11 @@ const Payment: React.FC = () => {
                         : (paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0)
                     );
                     // Sum non-bounced Approved payments, subtract bounce charge (bank fee, not supplier payment)
-                    const chainTotalPaid = (paymentChainData.payments ?? [])
-                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
-                      .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0);
-                    const chainBounceTotal = (paymentChainData.payments ?? [])
-                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
-                      .reduce((sum, p) => sum + Number(p.BounceCharge ?? 0), 0);
-                    const chainOutstanding = Math.max(0, chainInvoiceTotal - chainTotalPaid);
+                    const {
+                      totalPaid: chainTotalPaid,
+                      bounceChargeTotal: chainBounceTotal,
+                      remaining: chainOutstanding,
+                    } = computePaymentStatus(chainInvoiceTotal, paymentChainData.payments);
                     return (
                     <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
                       <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
@@ -4196,14 +4230,11 @@ const Payment: React.FC = () => {
                         : 0;
                     const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
                     // Exclude bounce charges — they're bank fees, not supplier payments
+                    const chainStatus = computePaymentStatus(displayNet, paymentChainData?.payments);
                     const displayTotalPaid = paymentChainData?.payments?.length
-                      ? (paymentChainData.payments)
-                          .filter((p) => p.Status === "Approved" && !p.IsBounced)
-                          .reduce((sum, p) => sum + (Number(p.PAmount ?? 0) - Number(p.BounceCharge ?? 0)), 0)
+                      ? chainStatus.totalPaid
                       : viewingChain.totalPaid;
-                    const displayBounceTotal = (paymentChainData?.payments ?? [])
-                      .filter((p) => p.Status === "Approved" && !p.IsBounced)
-                      .reduce((sum, p) => sum + Number(p.BounceCharge ?? 0), 0);
+                    const displayBounceTotal = chainStatus.bounceChargeTotal;
                     const displayRemaining = Math.max(0, displayNet - displayTotalPaid);
                     return (
                     <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">

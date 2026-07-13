@@ -18,6 +18,7 @@ const {
   emiToggleSchema,
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
+const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
@@ -723,6 +724,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const offset = (page - 1) * limit;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
+    const ebSupplierList = expenseBookingSupplierSql("eb", "lsup");
 
     // Run status counts and paginated list in parallel
     const [countResult, result] = await Promise.all([
@@ -752,6 +754,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
           eb.EAmount, eb.ENetAmount, eb.ECgstRate, eb.ESgstRate,
+          eb.EIgstRate, eb.EPaymentType, eb.EPartialAmount,
           eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
@@ -776,16 +779,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
             ELSE NULL
           END AS sourceDocNo,
-          -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
-          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
-          -- booking/item label) only as a last-resort fallback — never the
-          -- supplier itself.
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN ISNULL(grn_supp_list.LHeadName, eb.EName)
-            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_list.LHeadName, eb.EName)
-            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_list.LHeadName, eb.EName)
-            ELSE eb.EName
-          END AS ESupplierName,
+          -- Supplier name/id: resolved via the shared expenseBookingSupplierSql
+          -- helper (GRN/PO/WO_PO/WORK_DONE/WO -> source doc's supplier;
+          -- direct/manual bookings -> eb.LHeadId). EName is only ever the
+          -- last-resort fallback baked into the helper's expression — never
+          -- the supplier itself.
+          ${ebSupplierList.nameExpr} AS ESupplierName,
+          ${ebSupplierList.idExpr} AS ESupplierId,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
           -- Frontend uses this as the authoritative Net Amt for GRN rows.
           CASE
@@ -802,15 +802,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         -- GRN join for sourceDocNo and project fallback
         LEFT JOIN dbo.GoodsReceiptNotes grn_list
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
-        LEFT JOIN dbo.PurchaseOrders po_supp_list_po
-          ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_list_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster po_supp_list ON po_supp_list.LHeadId = po_supp_list_po.SupplierID
-        LEFT JOIN dbo.WorkDone wd_supp_list_wd
-          ON eb.ESourceType = 'WORK_DONE' AND wd_supp_list_wd.ID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster wd_supp_list ON wd_supp_list.LHeadId = wd_supp_list_wd.SupplierId
+        ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid DESC
@@ -1069,6 +1063,7 @@ router.get("/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const ebSupplierDet = expenseBookingSupplierSql("eb", "dsup");
     const result = await pool.request().input("Eid", sql.Int, id).query(`
         SELECT eb.*,
                eb.Eid AS id,
@@ -1083,16 +1078,12 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
                  ELSE NULL
                END AS sourceDocNo,
-               -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's
-               -- own SupplierID; WORK_DONE -> the WorkDone's contractor.
-               -- EName (the booking/item label) only as a last-resort
-               -- fallback — never the supplier itself.
-               CASE
-                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN ISNULL(grn_supp_det.LHeadName, eb.EName)
-                 WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_det.LHeadName, eb.EName)
-                 WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_det.LHeadName, eb.EName)
-                 ELSE eb.EName
-               END AS ESupplierName,
+               -- Supplier name/id: resolved via the shared expenseBookingSupplierSql
+               -- helper (GRN/PO/WO_PO/WORK_DONE/WO -> source doc's supplier;
+               -- direct/manual bookings -> eb.LHeadId). EName is only ever the
+               -- last-resort fallback baked into the helper's expression.
+               ${ebSupplierDet.nameExpr} AS ESupplierName,
+               ${ebSupplierDet.idExpr} AS ESupplierId,
                -- Live GRN total (incl. GST) so detail modal always shows current value
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
@@ -1114,11 +1105,7 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.PurchaseOrders po_direct
           ON eb.ESourceType IN ('PO','WO_PO') AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.enterprise epo_direct ON epo_direct.id = po_direct.ProjectId
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_det ON grn_supp_det.LHeadId = grn_det.SupplierID
-        LEFT JOIN dbo.AccountHeadMaster po_supp_det ON po_supp_det.LHeadId = po_direct.SupplierID
-        LEFT JOIN dbo.WorkDone wd_det
-          ON eb.ESourceType = 'WORK_DONE' AND wd_det.ID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster wd_supp_det ON wd_supp_det.LHeadId = wd_det.SupplierId
+        ${ebSupplierDet.joins}
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)
@@ -1684,6 +1671,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     ENetAmount: ENetAmountBody,
     ECgstRate: ECgstRateBody,
     ESgstRate: ESgstRateBody,
+    EIgstRate: EIgstRateBody,
+    EPaymentType,
+    EPartialAmount,
     EDiscountData,
     EDocNo,
     EEmiPayment,
@@ -1714,6 +1704,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     PaymentTermId,
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
+    LHeadId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -1744,6 +1735,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   let bookingNetAmount;
   let bookingCgstRate;
   let bookingSgstRate;
+  let bookingIgstRate;
 
   try {
     await transaction.begin();
@@ -1807,6 +1799,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingNetAmount = grnGst.totals.netAmount;
       bookingCgstRate = grnGst.cgstRate;
       bookingSgstRate = grnGst.sgstRate;
+      bookingIgstRate = 0;
       // Apply billing terms on top of the GRN gross amount
       bookingNetAmount = applyBillingTermsToAmount(
         bookingNetAmount,
@@ -1921,6 +1914,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingNetAmount = ENetAmountBody != null ? Number(ENetAmountBody) : bookingAmount;
       bookingCgstRate = ECgstRateBody ?? 0;
       bookingSgstRate = ESgstRateBody ?? 0;
+      bookingIgstRate = EIgstRateBody ?? 0;
     }
 
     if (EDocTypeId) {
@@ -2074,6 +2068,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
       .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
+      .input("EIgstRate", sql.Decimal(5, 2), bookingIgstRate ?? 0)
+      .input("EPaymentType", sql.NVarChar(20), EPaymentType === "partial" ? "partial" : "full")
+      .input("EPartialAmount", sql.Decimal(18, 2), EPartialAmount != null ? Number(EPartialAmount) : null)
       .input(
         "EDiscountData",
         sql.NVarChar(sql.MAX),
@@ -2137,7 +2134,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
-      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
+      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -2145,7 +2143,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
-          ECgstRate, ESgstRate, EDiscountData, EDocNo,
+          ECgstRate, ESgstRate, EIgstRate, EPaymentType, EPartialAmount, EDiscountData, EDocNo,
           EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
@@ -2154,11 +2152,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef, ContractId
+          ECostCenter, EGLAccount, EWorkDoneRef, ContractId, LHeadId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
-          @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
+          @ECgstRate, @ESgstRate, @EIgstRate, @EPaymentType, @EPartialAmount, @EDiscountData, @EDocNo,
           @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
@@ -2167,7 +2165,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId
+          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId, @LHeadId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
@@ -2692,6 +2690,9 @@ router.put(
       ENetAmount,
       ECgstRate,
       ESgstRate,
+      EIgstRate,
+      EPaymentType,
+      EPartialAmount,
       EDiscountData,
       EDocNo,
       EEmiPayment,
@@ -2720,6 +2721,7 @@ router.put(
       EGLAccount,
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
+      LHeadId,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -2746,6 +2748,7 @@ router.put(
       let bookingNetAmount = ENetAmount;
       let bookingCgstRate = ECgstRate;
       let bookingSgstRate = ESgstRate;
+      let bookingIgstRate = EIgstRate;
 
       if (ESourceType === "GRN") {
         const grnId = parseInt(ESourceId, 10);
@@ -2767,6 +2770,7 @@ router.put(
         bookingNetAmount = grnGst.totals.netAmount;
         bookingCgstRate = grnGst.cgstRate;
         bookingSgstRate = grnGst.sgstRate;
+        bookingIgstRate = 0;
         // Apply billing terms on top of the GRN gross amount
         bookingNetAmount = applyBillingTermsToAmount(
           bookingNetAmount,
@@ -2801,6 +2805,9 @@ router.put(
         )
         .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
         .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
+        .input("EIgstRate", sql.Decimal(5, 2), bookingIgstRate ?? 0)
+        .input("EPaymentType", sql.NVarChar(20), EPaymentType === "partial" ? "partial" : "full")
+        .input("EPartialAmount", sql.Decimal(18, 2), EPartialAmount != null ? Number(EPartialAmount) : null)
         .input(
           "EDiscountData",
           sql.NVarChar(sql.MAX),
@@ -2860,7 +2867,8 @@ router.put(
         )
         .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
+        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
 
@@ -2868,6 +2876,7 @@ router.put(
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
+          EIgstRate=@EIgstRate, EPaymentType=@EPaymentType, EPartialAmount=@EPartialAmount,
           EDiscountData=@EDiscountData, EDocNo=@EDocNo, EEmiPayment=@EEmiPayment,
           EEmiData=@EEmiData, EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount,
           EEmiStartDate=@EEmiStartDate, EReminder=@EReminder, ERemarks=@ERemarks,
@@ -2879,7 +2888,8 @@ router.put(
           ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
-          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef
+          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef,
+          LHeadId=@LHeadId
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
         WHERE Eid = @Eid
       `);
