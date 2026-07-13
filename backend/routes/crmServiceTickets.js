@@ -7,11 +7,12 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Other"];
+const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
 // SLA windows in hours, keyed by priority — used to auto-set SlaDueDate
 const SLA_HOURS = { Urgent: 24, High: 48, Normal: 96, Low: 168 };
@@ -20,7 +21,7 @@ const TICKET_SELECT = `
   SELECT
     t.Id, t.TicketNo, t.BookingId, t.Category, t.Priority, t.Subject, t.Description,
     t.Status, t.AssignedTo, t.SlaDueDate, t.ResolvedAt, t.ResolutionNotes,
-    t.CustomerRating, t.CustomerFeedback, t.CreatedAt, t.UpdatedAt,
+    t.CustomerRating, t.CustomerFeedback, t.RaisedByCustomer, t.CreatedAt, t.UpdatedAt,
     b.BookingNo, b.UnitNo, b.ProjectName,
     a.ApplicantName, a.Mobile,
     u.name  AS AssigneeName,
@@ -71,12 +72,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-service-tickets", "view"
   }
 });
 
-// POST / — raise a service ticket
+// POST / — raise a service ticket. Gated on the booking actually existing
+// and still being active (not Cancelled/Rejected) — but not on Handover
+// having occurred, since legitimate complaints (site/quality issues,
+// construction snags) can and should be raiseable before possession too,
+// not just after.
 router.post("/", requirePageRight("crm-service-tickets", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (!CATEGORIES.includes(b.Category))
       return res.status(400).json({ error: `Invalid Category. Must be: ${CATEGORIES.join(", ")}` });
     if (!b.Subject?.trim()) return res.status(400).json({ error: "Subject is required" });

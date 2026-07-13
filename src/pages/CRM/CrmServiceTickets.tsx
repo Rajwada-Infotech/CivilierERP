@@ -169,7 +169,12 @@ const CrmServiceTickets: React.FC = () => {
                     <div className="text-xs text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
                   </td>
                   <td className="px-4 py-3 text-xs">{t.Category.replace(/([A-Z])/g, " $1").trim()}</td>
-                  <td className="px-4 py-3 max-w-xs truncate">{t.Subject}</td>
+                  <td className="px-4 py-3 max-w-xs truncate">
+                    {t.Subject}
+                    {t.RaisedByCustomer && (
+                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[t.Priority] || ""}`}>{t.Priority}</span>
                   </td>

@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId, requireUserEmail } = require("../services/saAccess");
+const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { validateSourceChain } = require("../services/sourceChain");
@@ -13,6 +13,7 @@ const { logStatusChange, advanceApplicationStatus } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { createCrmApplicationRecord, CrmCreationError } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -23,7 +24,7 @@ const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "
 
 const APP_SELECT = `
   SELECT
-    a.Id, a.ApplicationNo, a.LeadId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email,
+    a.Id, a.ApplicationNo, a.LeadId, a.CustomerId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email,
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.BudgetMin, a.BudgetMax, a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
@@ -35,7 +36,27 @@ const APP_SELECT = `
     plat.Name AS PlatformName, camp.Name AS CampaignName, ad.Name AS AdName,
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
-    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName
+    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName,
+    -- Customer-master fields, auto-fetched here so the Application page
+    -- never asks staff to retype what's already on the Customer record.
+    cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
+    cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
+    cust.CoApplicantName, cust.CoApplicantMobile, cust.CoApplicantPanNo, cust.CoApplicantRelation,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
+    bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.BookingDate,
+    -- Stage drives the Converted/In Process/Not Converted split every
+    -- Applications view now works from: once ANY booking has ever been
+    -- created for this application, it's Converted for good (even if that
+    -- booking later gets cancelled — the conversion event itself already
+    -- happened and a fresh booking attempt belongs on a fresh application,
+    -- matching the linear APPLICATION -> BOOKING step in the workflow spec).
+    -- Dead-end applications (Rejected/Cancelled, never booked) are Not
+    -- Converted; everything else still moving is In Process.
+    CASE
+      WHEN bk.Id IS NOT NULL THEN 'Converted'
+      WHEN a.Status IN ('Rejected', 'Cancelled') THEN 'NotConverted'
+      ELSE 'InProcess'
+    END AS Stage
   FROM dbo.CrmApplication a
   LEFT JOIN dbo.Users u   ON u.id  = a.AssignedTo
   LEFT JOIN dbo.Users cu  ON cu.id = a.CreatedBy
@@ -48,13 +69,27 @@ const APP_SELECT = `
   LEFT JOIN dbo.enterprise proj ON proj.id = a.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.enterprise comp ON comp.id = a.CompanyId AND comp.business_type = 'C'
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
+  LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
+  OUTER APPLY (
+    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, BookingDate
+    FROM dbo.CrmBooking
+    WHERE ApplicationId = a.Id
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected') THEN 0 ELSE 1 END, CreatedAt DESC
+  ) bk
 `;
 
-// GET / — all applications
+// GET / — all applications. By default, Converted applications (one that
+// already has a booking) are excluded — every "select an application"
+// dropdown across the CRM (new Booking, Unit/Parking Matrix hold
+// assignment, Communication Log) calls this with no params and previously
+// kept offering already-converted applications as if they still needed
+// booking. The Applications management page itself passes
+// ?includeConverted=1 (or an explicit ?stage=/?status=) to see everything,
+// which is how its own Converted/In Process/Not Converted tabs work.
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
+    const { status, search, stage, includeConverted } = req.query;
     const req0 = pool.request();
     const conds = ["a.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
@@ -64,7 +99,13 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     }
     const where = "WHERE " + conds.join(" AND ");
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
-    res.json(result.recordset);
+    let rows = result.recordset;
+    if (stage) {
+      rows = rows.filter((r) => r.Stage === stage);
+    } else if (!status && !includeConverted) {
+      rows = rows.filter((r) => r.Stage !== "Converted");
+    }
+    res.json(rows);
   } catch (e) {
     console.error("[crm-applications] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -97,111 +138,18 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
   }
 });
 
-// POST / — create application (optionally from a lead, always starts Draft)
+// POST / — create application (optionally from a lead, always starts Draft).
+// Delegates to the shared creation service (backend/services/crmEntityCreation.js)
+// — the exact same function backend/services/saHandoff.js calls for the
+// Sales Automation -> CRM handoff, so there is one single source of truth
+// for what makes a valid CrmApplication.
 router.post("/", requirePageRight("crm-applications", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const b = req.body;
-    if (!b.ApplicantName?.trim() || !b.Mobile?.trim())
-      return res.status(400).json({ error: "ApplicantName and Mobile are required" });
-    if (b.Source && !SOURCE_TYPES.includes(b.Source))
-      return res.status(400).json({ error: `Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}` });
-
-    // If from a lead, prefill from lead record if caller didn't supply values —
-    // including its own source chain, so the application inherits exactly
-    // where the customer actually came from instead of losing that context.
-    let prefill = {};
-    if (b.LeadId) {
-      const lr = await pool.request()
-        .input("lid", sql.Int, parseInt(b.LeadId))
-        .query(`
-          SELECT CustomerName, Mobile, AltMobile, Email, BudgetMin, BudgetMax,
-                 PropertyType, BhkPreference, PreferredLocation, AssignedSalespersonId,
-                 SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId
-          FROM dbo.SaLead WHERE Id = @lid
-        `);
-      prefill = lr.recordset[0] || {};
-    }
-
-    const platformId = b.PlatformId ? parseInt(b.PlatformId) : (prefill.PlatformId || null);
-    const campaignId = b.CampaignId ? parseInt(b.CampaignId) : (prefill.CampaignId || null);
-    const adId       = b.AdId       ? parseInt(b.AdId)       : (prefill.AdId       || null);
-    const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId || null);
-
-    const sourceError = await validateSourceChain(pool, { PlatformId: platformId, CampaignId: campaignId, AdId: adId });
-    if (sourceError) return res.status(400).json({ error: sourceError });
-
-    // Resolve Project -> Company link (a Project row's company_id) and the
-    // real project/unit display names, so the app doesn't rely on hand-typed
-    // text for either.
-    let projectName = b.InterestedProject || null;
-    let companyId = b.CompanyId ? parseInt(b.CompanyId) : null;
-    if (b.ProjectId) {
-      const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
-        .query("SELECT name, company_id FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
-      if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
-      projectName = proj.recordset[0].name;
-      companyId = companyId || proj.recordset[0].company_id || null;
-    }
-    let unitName = b.InterestedUnit || null;
-    if (b.PreferredUnitId) {
-      const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
-      if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-      unitName = unit.recordset[0].UnitName;
-    }
-
-    const appNo = await getNextDocNumber(pool, "APP", "APP");
-    const actor = actorId(req);
-    const result = await pool.request()
-      .input("no",   sql.NVarChar(30),  appNo)
-      .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
-      .input("name", sql.NVarChar(200), b.ApplicantName.trim() || prefill.CustomerName)
-      .input("mob",  sql.NVarChar(20),  b.Mobile.trim()  || prefill.Mobile)
-      .input("alt",  sql.NVarChar(20),  b.AltMobile || prefill.AltMobile || null)
-      .input("em",   sql.NVarChar(200), b.Email     || prefill.Email     || null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
-      .input("cid",  sql.Int,           companyId)
-      .input("proj", sql.NVarChar(200), projectName)
-      .input("unit", sql.NVarChar(100), unitName)
-      .input("pt",   sql.NVarChar(50),  b.PropertyType  || prefill.PropertyType  || null)
-      .input("bhk",  sql.NVarChar(30),  b.BhkPreference || prefill.BhkPreference || null)
-      .input("bmin", sql.Decimal(18,2), b.BudgetMin != null ? parseFloat(b.BudgetMin) : (prefill.BudgetMin || null))
-      .input("bmax", sql.Decimal(18,2), b.BudgetMax != null ? parseFloat(b.BudgetMax) : (prefill.BudgetMax || null))
-      .input("src",  sql.NVarChar(200), b.Source || prefill.SourceType || null)
-      .input("platid", sql.Int, platformId)
-      .input("campid", sql.Int, campaignId)
-      .input("adid",   sql.Int, adId)
-      .input("cpid",   sql.Int, channelPartnerId)
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : (prefill.AssignedSalespersonId || null))
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
-      .input("cb",   sql.Int,           actor)
-      .query(`
-        INSERT INTO dbo.CrmApplication
-          (ApplicationNo, LeadId, ApplicantName, Mobile, AltMobile, Email,
-           ProjectId, PreferredUnitId, CompanyId, InterestedProject, InterestedUnit,
-           PropertyType, BhkPreference, BudgetMin, BudgetMax,
-           Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
-           AssignedTo, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES
-          (@no, @lid, @name, @mob, @alt, @em,
-           @pid, @uid, @cid, @proj, @unit,
-           @pt, @bhk, @bmin, @bmax,
-           @src, @platid, @campid, @adid, @cpid,
-           @asgn, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME())
-      `);
-    const applicationId = result.recordset[0].Id;
-    // Lands directly in Pending — same "auto-submitted on creation" convention
-    // every other module wired into the Approval Inbox uses (see
-    // ApprovalActions.tsx). Only admin/super_admin/dba can move it forward
-    // from here, from the Admin Approval Inbox.
-    await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actor);
-
+    const { id: applicationId, ApplicationNo: appNo } = await createCrmApplicationRecord(pool, req.body, actorId(req));
     res.status(201).json({ success: true, id: applicationId, ApplicationNo: appNo });
   } catch (e) {
+    if (e instanceof CrmCreationError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-applications] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -220,6 +168,20 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const old = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, AssignedTo FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    // Contact identity fields (Mobile/AltMobile/Email) get the same
+    // protection Status already had — but tighter, since these are used as
+    // the customer portal's own login credentials (email as username,
+    // mobile as the initial password) and as the phone number any
+    // verification call/SMS goes to. crm-applications:edit is held by
+    // admin/dba/marketing_head too (see requirePageRight.js's crm- prefix
+    // bypass), which is far too wide a blast radius for a field that can
+    // redirect verification contact away from the real customer — so this
+    // is a hard super_admin-only gate, not the page-right check above.
+    const changingContact = b.Mobile !== undefined || b.AltMobile !== undefined || b.Email !== undefined;
+    if (changingContact && !isSuperAdminOnly(req)) {
+      return res.status(403).json({ error: "Only a super admin can change contact details (Mobile, Alternate Mobile, or Email)." });
+    }
 
     if (b.Source && !SOURCE_TYPES.includes(b.Source))
       return res.status(400).json({ error: `Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}` });

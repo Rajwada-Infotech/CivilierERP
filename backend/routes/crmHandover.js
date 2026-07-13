@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -74,12 +75,46 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
 
+    const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     // Workflow guard: booking must have an executed/registered agreement first
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
     if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
+    }
+
+    // Workflow guard: the sales deed itself must exist, be customer-
+    // approved, AND director-approved before handover — matching the spec's
+    // SALES DEED -> APPROVAL FROM BOTH SIDES -> DIRECTOR APPROVAL -> SALES
+    // DEED COMPLETE -> KEY HANDOVER chain. An Executed agreement alone used
+    // to be enough to schedule a handover, which let staff skip past both
+    // the sales deed and director sign-off steps entirely.
+    const deed = await pool.request()
+      .input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!deed.recordset.length) {
+      return res.status(400).json({ error: "Handover requires the sales deed to be created first" });
+    }
+    if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
+    }
+    if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Handover requires director approval of the sales deed first" });
+    }
+
+    // Workflow guard: if an NOC (Org or Bank) was ever requested for this
+    // booking, it has to have actually been issued before handover — a NOC
+    // in Pending/Approved-but-not-yet-issued means the paperwork isn't
+    // physically done yet. Bookings that never needed an NOC (no loan, no
+    // society clearance required) aren't blocked — this only fires when a
+    // request exists and was left unfinished.
+    const openNoc = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending', 'Approved')`);
+    if (openNoc.recordset.length) {
+      return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
     }
 
     const result = await pool.request()
@@ -147,15 +182,6 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-
-    // On completion, cascade booking status to Handed Over
-    if (b.Status === "Completed") {
-      const h = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
-      if (h.recordset[0]) {
-        await pool.request().input("bid", sql.Int, h.recordset[0].BookingId)
-          .query("UPDATE dbo.CrmBooking SET Status = 'Confirmed', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
-      }
-    }
 
     res.json({ success: true });
   } catch (e) {

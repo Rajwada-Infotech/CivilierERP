@@ -9,7 +9,7 @@ const { actorId } = require("../services/saAccess");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-const CHANNELS = ["Call", "Email", "SMS", "WhatsApp", "InPerson", "Letter"];
+const CHANNELS = ["Call", "Email", "SMS", "WhatsApp", "InPerson", "Letter", "System"];
 
 router.get("/", requirePageRight("crm-communication", "view"), async (req, res) => {
   try {
@@ -22,11 +22,14 @@ router.get("/", requirePageRight("crm-communication", "view"), async (req, res) 
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
       SELECT c.*, cu.name AS CreatedByName,
-             a.ApplicantName, b.BookingNo
+             a.ApplicantName, a.Mobile, a.Email, b.BookingNo
       FROM dbo.CrmCommunicationLog c
-      LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
-      LEFT JOIN dbo.CrmApplication a ON a.Id = c.ApplicationId
       LEFT JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+      -- Resolve the applicant via either linkage — a log entry created with
+      -- only a BookingId still needs its ApplicantName/Mobile/Email so the
+      -- Communication Log's call/SMS/WhatsApp/email quick-actions work.
+      LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(c.ApplicationId, b.ApplicationId)
+      LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
       ${where}
       ORDER BY c.ContactedAt DESC
     `);
@@ -61,6 +64,52 @@ router.post("/", requirePageRight("crm-communication", "create"), async (req, re
     res.status(201).json({ success: true });
   } catch (e) {
     console.error("[crm-communication] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id — edit an existing log entry
+router.put("/:id", requirePageRight("crm-communication", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body;
+    if (b.Channel && !CHANNELS.includes(b.Channel)) return res.status(400).json({ error: `Invalid Channel. Must be: ${CHANNELS.join(", ")}` });
+
+    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmCommunicationLog WHERE Id = @id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Log entry not found" });
+
+    await pool.request()
+      .input("id",   sql.Int, id)
+      .input("ch",   sql.NVarChar(30), b.Channel || null)
+      .input("dir",  sql.NVarChar(20), b.Direction || null)
+      .input("subj", sql.NVarChar(300), b.Subject ?? null)
+      .input("sum",  sql.NVarChar(sql.MAX), b.Summary ?? null)
+      .input("cat",  sql.DateTime2(3), b.ContactedAt || null)
+      .query(`
+        UPDATE dbo.CrmCommunicationLog SET
+          Channel = ISNULL(@ch, Channel), Direction = ISNULL(@dir, Direction),
+          Subject = @subj, Summary = @sum,
+          ContactedAt = ISNULL(@cat, ContactedAt)
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-communication] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id
+router.delete("/:id", requirePageRight("crm-communication", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmCommunicationLog WHERE Id = @id");
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Log entry not found" });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-communication] DELETE error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
