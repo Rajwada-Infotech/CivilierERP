@@ -4,13 +4,15 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2 } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ContactActionBar } from "@/components/crm/ContactActionBar";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
 const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
+const PAY_API = "/api/crm/payments";
 const SA_LEADS_API = "/api/sa/leads";
 
 const OUTCOMES = ["Welcomed", "NotReachable", "RequestedCallback", "VoiceMail", "Busy", "SwitchedOff"];
@@ -25,8 +27,9 @@ const outcomeColor: Record<string, string> = {
 
 const EMPTY_FORM = {
   CalledBy: "", CallDate: "", DurationSeconds: "",
-  Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "",
+  Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "", PaymentPlanConfirmed: false,
 };
+const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
 async function fetchQueue(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/queue`); return r.ok ? r.json() : []; } catch { return []; }
@@ -58,6 +61,9 @@ async function fetchBookingById(bookingId: number): Promise<any | null> {
     const d = await r.json();
     return { BookingId: d.Id, BookingNo: d.BookingNo, ApplicantName: d.ApplicantName, Mobile: d.Mobile, ProjectName: d.ProjectName, UnitNo: d.UnitNo };
   } catch { return null; }
+}
+async function fetchCallContext(bookingId: number): Promise<any | null> {
+  try { const r = await fetchWithAuth(`${API}/${bookingId}/call-context`); return r.ok ? r.json() : null; } catch { return null; }
 }
 
 function mimeIcon(mime: string | null | undefined) {
@@ -134,11 +140,18 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
+  const [onAccountDialog, setOnAccountDialog] = useState(false);
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+  const [recordingOnAccount, setRecordingOnAccount] = useState(false);
 
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: checklist, refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-welcome-checklist", booking.BookingId],
     queryFn: () => fetchChecklist(booking.BookingId),
+  });
+  const { data: callContext, refetch: refetchCallContext } = useQuery({
+    queryKey: ["crm-welcome-call-context", booking.BookingId],
+    queryFn: () => fetchCallContext(booking.BookingId),
   });
   const { data: docData = { documents: [], standardTypes: [] }, refetch: refetchDocs } = useQuery({
     queryKey: ["crm-booking-documents", booking.BookingId],
@@ -166,6 +179,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
           NextCallDate: form.NextCallDate || null,
           Notes: form.Notes || null,
           PreferredAgreementDate: form.PreferredAgreementDate || null,
+          PaymentPlanConfirmed: form.PaymentPlanConfirmed,
           CustomFields: customFields,
         }),
       });
@@ -193,6 +207,30 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // "If the customer is paying extra amount" — recorded straight from the
+  // call as an on-account deposit, not tied to any milestone yet.
+  const handleRecordOnAccount = async () => {
+    if (!onAccountForm.Amount) { toast.error("Amount is required"); return; }
+    setRecordingOnAccount(true);
+    try {
+      const res = await fetchWithAuth(`${PAY_API}/booking/${booking.BookingId}/on-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...onAccountForm, Amount: parseFloat(onAccountForm.Amount) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
+      setOnAccountDialog(false);
+      setOnAccountForm({ Amount: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+      refetchCallContext();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setRecordingOnAccount(false);
     }
   };
 
@@ -297,6 +335,57 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
           </DialogTitle>
         </DialogHeader>
 
+        {/* ── Customer Snapshot — everything the telecaller needs on-screen
+             DURING the call, in one glance ── */}
+        {callContext && (
+          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <ContactActionBar
+                applicantName={callContext.customer?.CustomerName || booking.ApplicantName}
+                mobile={callContext.customer?.Mobile || booking.Mobile}
+                email={callContext.customer?.Email || null}
+              />
+              <button onClick={() => setOnAccountDialog(true)}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100">
+                <Wallet size={13} /> Customer Paying Extra? Record On-Account
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="rounded-lg border border-border bg-background p-2.5">
+                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Total Value</div>
+                <div className="font-bold">{fmt(callContext.booking?.GrandTotal ?? callContext.booking?.TotalValue)}</div>
+              </div>
+              <div className={`rounded-lg border p-2.5 ${callContext.outstanding?.balance > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
+                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Outstanding</div>
+                <div className={`font-bold ${callContext.outstanding?.balance > 0 ? "text-amber-700" : ""}`}>{fmt(callContext.outstanding?.balance)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-background p-2.5">
+                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><ClipboardCheck size={11} /> Payment Plan</div>
+                <div className="font-medium truncate" title={callContext.booking?.PaymentPlanName}>{callContext.booking?.PaymentPlanName || "7-stage default"}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-background p-2.5">
+                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><Landmark size={11} /> Bank Preference</div>
+                <div className="font-medium truncate" title={callContext.loan?.BankName}>{callContext.loan?.BankName || "Not on file"}</div>
+              </div>
+            </div>
+
+            {callContext.invoices?.length > 0 && (
+              <div className="text-xs">
+                <span className="text-muted-foreground">Invoices: </span>
+                {callContext.invoices.map((inv: any) => (
+                  <span key={inv.InvoiceNo} className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-border font-mono">{inv.InvoiceNo} ({fmt(inv.Amount)})</span>
+                ))}
+              </div>
+            )}
+            {callContext.onAccount?.availableBalance > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium">
+                <Wallet size={12} /> {fmt(callContext.onAccount.availableBalance)} sitting on account, not yet applied to a milestone
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Checklist strip ── */}
         {checklist && (
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
@@ -364,6 +453,13 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>
+            <label className="col-span-2 flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
+              <input type="checkbox" checked={form.PaymentPlanConfirmed}
+                onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
+                className="rounded border-border" />
+              <ClipboardCheck size={13} className="text-muted-foreground" />
+              Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
+            </label>
           </div>
 
           {/* Dynamic custom fields */}
@@ -520,6 +616,47 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     </Dialog>
 
     {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+
+    {/* On-Account Deposit Dialog */}
+    <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Record On-Account Deposit</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due — held as a credit and applied to milestones as they come up, in order.</p>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
+            <input type="number" value={onAccountForm.Amount}
+              onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
+            <input type="text" value={onAccountForm.PaymentMode}
+              onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+              placeholder="e.g. UPI, NEFT, Cheque"
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
+            <input type="text" value={onAccountForm.TransactionRef}
+              onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+            <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
+              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+          <button onClick={() => setOnAccountDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+          <button onClick={handleRecordOnAccount} disabled={recordingOnAccount || !onAccountForm.Amount}
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+            {recordingOnAccount ? "Recording..." : "Record Deposit"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 };

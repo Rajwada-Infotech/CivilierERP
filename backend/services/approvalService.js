@@ -97,6 +97,10 @@ const MODULE_MAP = {
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
+  // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
+  // column, so this shares level-count history with any other gate on
+  // CrmSalesDeed — harmless since this is single-level too.
+  "crm-sales-deed-director": { table: "dbo.CrmSalesDeed", pk: "Id", status: "DirectorApprovalStatus" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -135,6 +139,9 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   // instruction, "for now"; reassignable later purely via LevelsData same
   // as every other module here, no code change needed when that happens.
   "crm-agreement-date": ["super_admin"],
+  // No dedicated "director" role exists yet — hardcoded to super_admin
+  // only "for now", same reasoning as crm-agreement-date above.
+  "crm-sales-deed-director": ["super_admin"],
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,

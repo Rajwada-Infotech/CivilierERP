@@ -243,6 +243,112 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   return { id: deedId, DeedNo: deedNo };
 }
 
+/**
+ * Auto-advance step: the moment every payment milestone is Paid/Waived —
+ * the "ON POSSESSION (LAST PAYMENT STAGE)" point in the workflow spec —
+ * automatically generate the Possession invoice, instead of waiting for
+ * staff to notice and click "Generate Invoice" manually. Idempotent: no-op
+ * if a Possession invoice already exists for this booking. Fires alongside
+ * maybeAutoCreateSalesDeed at every call site — both share the exact same
+ * trigger condition (all milestones settled).
+ */
+async function maybeAutoGenerateInvoice(pool, bookingId, actorUserId) {
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Possession'");
+  if (existing.recordset.length) return null;
+
+  const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
+  `);
+  if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
+  const hasMilestones = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+  if (!hasMilestones.recordset[0]?.Cnt) return null;
+
+  const booking = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT BookingNo, AssignedTo, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
+  const bookingRow = booking.recordset[0];
+  if (!bookingRow) return null;
+
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+  const amount = bookingRow.GrandTotal || bookingRow.TotalValue || 0;
+  const result = await pool.request()
+    .input("no",   sql.NVarChar(30),  invoiceNo)
+    .input("bid",  sql.Int,           bookingId)
+    .input("amt",  sql.Decimal(18,2), amount)
+    .input("desc", sql.NVarChar(500), "Auto-generated — all payment milestones settled (on-possession stage)")
+    .input("cb",   sql.Int,           actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@no, @bid, 'Possession', @amt, @desc, @cb, SYSDATETIME())
+    `);
+  const invoiceId = result.recordset[0].Id;
+
+  if (bookingRow.AssignedTo) {
+    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
+      "Possession Invoice Generated",
+      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — all payment milestones are settled.`,
+      invoiceId, "crm_invoice");
+  }
+
+  return { id: invoiceId, InvoiceNo: invoiceNo };
+}
+
+/**
+ * Auto-advance step: "AGREEMENT DONE -> INVOICE (receive payment for these
+ * agreemental works)" — the moment an agreement reaches Executed (both
+ * Senior and Customer approval already landed, per mark-executed's own
+ * gate), automatically generate the Agreement-stage invoice, the same way
+ * maybeAutoGenerateInvoice() does for the Possession stage. Only fires if
+ * the booking's payment plan actually has a milestone named "Agreement..."
+ * to invoice — if a custom plan doesn't have one, this deliberately does
+ * nothing rather than guessing an amount; staff can still generate it
+ * manually from the Booking Detail Invoice tab. Idempotent: no-op if an
+ * Agreement-type invoice already exists for the booking.
+ */
+async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Agreement'");
+  if (existing.recordset.length) return null;
+
+  const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND MilestoneName LIKE 'Agreement%'
+    ORDER BY MilestoneNo
+  `);
+  if (!milestone.recordset.length) return null;
+
+  const booking = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
+  const bookingRow = booking.recordset[0];
+  if (!bookingRow) return null;
+
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+  const amount = milestone.recordset[0].AmountDue || 0;
+  const result = await pool.request()
+    .input("no",   sql.NVarChar(30),  invoiceNo)
+    .input("bid",  sql.Int,           bookingId)
+    .input("amt",  sql.Decimal(18,2), amount)
+    .input("desc", sql.NVarChar(500), "Auto-generated — agreement executed, both sides approved")
+    .input("cb",   sql.Int,           actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@no, @bid, 'Agreement', @amt, @desc, @cb, SYSDATETIME())
+    `);
+  const invoiceId = result.recordset[0].Id;
+
+  if (bookingRow.AssignedTo) {
+    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
+      "Agreement Invoice Generated",
+      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — agreement executed.`,
+      invoiceId, "crm_invoice");
+  }
+
+  return { id: invoiceId, InvoiceNo: invoiceNo };
+}
+
 // Both sides landing on the same proposed date no longer finalizes
 // AgreementDate directly — it only puts the date up for a super_admin
 // sign-off (DateApprovalStatus='Pending', a second approval gate on the
@@ -374,6 +480,8 @@ module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateSalesDeed,
+  maybeAutoGenerateInvoice,
+  maybeAutoGenerateAgreementInvoice,
   maybeResolveAgreementDate,
   finalizeAgreementDate,
   syncLegalMilestoneStep,

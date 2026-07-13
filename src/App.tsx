@@ -381,6 +381,7 @@ const SaCommissions = lazy(() => import("./pages/SalesAutomation/SaCommissions")
 const SaDistributionRules = lazy(() => import("./pages/SalesAutomation/SaDistributionRules"));
 const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
 // ── CRM Module ────────────────────────────────────────────────────────────────
+const CrmCustomers         = lazy(() => import("./pages/CRM/CrmCustomers"));
 const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
@@ -2175,6 +2176,7 @@ function AppRoutes() {
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
       <Route path="/sales-automation/role-master" element={<ProtectedRoute pageKey="sa-role-master"><SaRoleMaster /></ProtectedRoute>} />
       {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
+      <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />

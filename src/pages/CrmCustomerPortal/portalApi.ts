@@ -22,6 +22,7 @@ export const fetchTickets = () => get("/tickets");
 export const fetchActivity = () => get("/activity").catch(() => []);
 export const fetchAgreement = () => get("/agreement").catch(() => null);
 export const fetchAgreementDocuments = () => get("/agreement/documents").catch(() => []);
+export const fetchInvoices = () => get("/invoices").catch(() => []);
 
 export async function uploadAgreementDocument(docId: number, file: File) {
   const token = localStorage.getItem("crm_portal_token");

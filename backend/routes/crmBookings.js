@@ -1,4 +1,7 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -8,13 +11,40 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { emitNotification } = require("../services/notify");
 const { guardAndConvertHold } = require("../services/crmHoldService");
+const { getNextDocNumber } = require("../services/docNumber");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmBookingRecord, CrmCreationError } = require("../services/crmEntityCreation");
+const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, validatePaymentPlanScope } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
+
+const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-booking-attachments");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = [
+      "application/pdf", "image/jpeg", "image/png", "image/webp",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("File type not allowed"));
+  },
+});
 
 // Flow-progress flags (HasWelcomeCall / BankDetailsComplete / Agreement*)
 // drive the list page's single "next step" action — the UI is never allowed
@@ -87,12 +117,15 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   }
 });
 
-// GET /:id — single booking with milestones, welcome calls, agreement
+// GET /:id — single booking with milestones, welcome calls, agreement,
+// full customer record (Details tab needs "all means all" — every KYC/
+// contact/co-applicant field, not just the denormalized name/mobile on the
+// booking itself), and a payment summary.
 router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const [bkRes, milRes, wcRes, agRes] = await Promise.all([
+    const [bkRes, milRes, wcRes, agRes, custRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
       pool.request().input("id", sql.Int, id).query(
         `SELECT * FROM dbo.CrmPaymentMilestone WHERE BookingId = @id ORDER BY MilestoneNo`),
@@ -100,13 +133,25 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
         `SELECT wc.*, u.name AS CalledByName FROM dbo.CrmWelcomeCall wc LEFT JOIN dbo.Users u ON u.id = wc.CalledBy WHERE wc.BookingId = @id ORDER BY wc.CreatedAt DESC`),
       pool.request().input("id", sql.Int, id).query(
         `SELECT ag.*, (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id) AS DocumentCount FROM dbo.CrmAgreement ag WHERE ag.BookingId = @id`),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT c.*
+        FROM dbo.CrmCustomer c
+        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+        JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
+        WHERE b.Id = @id
+      `),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
+    const milestones = milRes.recordset;
+    const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
+    const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
     res.json({
       booking: bkRes.recordset[0],
-      milestones: milRes.recordset,
+      milestones,
       welcomeCalls: wcRes.recordset,
       agreement: agRes.recordset[0] || null,
+      customer: custRes.recordset[0] || null,
+      paymentSummary: { totalDue, totalPaid, balance: totalDue - totalPaid },
     });
   } catch (e) {
     console.error("[crm-bookings] GET /:id error:", e.message);
@@ -149,12 +194,45 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, AreaSqFt FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Status, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    const existingArea = old.recordset[0].AreaSqFt;
+    const oldRow = old.recordset[0];
+    const existingArea = oldRow.AreaSqFt;
 
     const total = b.TotalValue != null ? parseFloat(b.TotalValue)
                 : (existingArea && rate ? Math.round(existingArea * rate) : null);
+
+    // Changing the payment plan on a booking that already has milestone
+    // history is NOT a cosmetic FK swap — the actual payment schedule
+    // (amounts, due dates) was generated from the OLD plan and, unless
+    // regenerated, silently keeps running on it while the record now claims
+    // to be on the new one. Blocked once any real payment exists (nothing
+    // to safely regenerate against); regenerated from scratch otherwise so
+    // the schedule actually matches what's now selected — matching what
+    // booking creation itself would have produced.
+    const newPlanId = b.PaymentPlanId !== undefined ? (b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null) : undefined;
+    const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
+    if (planIsChanging) {
+      if (newPlanId) {
+        const unitBlock = oldRow.UnitId
+          ? await pool.request().input("uid", sql.Int, oldRow.UnitId).query("SELECT BlockId FROM dbo.UnitMaster WHERE Id = @uid")
+          : { recordset: [] };
+        try {
+          await validatePaymentPlanScope(pool, newPlanId, {
+            companyId: oldRow.CompanyId, projectId: oldRow.ProjectId, blockId: unitBlock.recordset[0]?.BlockId || null,
+          });
+        } catch (e) {
+          return res.status(400).json({ error: e.message });
+        }
+      }
+      const paid = await pool.request().input("bid", sql.Int, id).query(`
+        SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))
+      `);
+      if (paid.recordset[0]?.Cnt > 0) {
+        return res.status(400).json({ error: "Cannot change payment plan — payments have already been recorded against the existing schedule" });
+      }
+    }
 
     await pool.request()
       .input("id",    sql.Int,           id)
@@ -169,6 +247,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       .input("bdate", sql.Date,          b.BookingDate || null)
       .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
       .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
+      .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -180,6 +259,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           BookingAmount = ISNULL(@bamt, BookingAmount),
           BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
           AssignedTo = ISNULL(@asgn, AssignedTo),
+          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
           -- GrandTotal tracks TotalValue changes without disturbing the
           -- already-rolled-up Parking/ExtraCharges totals.
           GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
@@ -188,10 +268,16 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       `);
 
     await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "AssignedTo", oldVal: old.recordset[0].AssignedTo, newVal: b.AssignedTo },
+      { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
     ]);
 
-    res.json({ success: true });
+    if (planIsChanging) {
+      await pool.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+      const effectiveTotal = total || oldRow.TotalValue;
+      await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor);
+    }
+
+    res.json({ success: true, milestonesRegenerated: planIsChanging });
   } catch (e) {
     console.error("[crm-bookings] PUT error:", e.message);
     res.status(500).json({ error: e.message });
@@ -439,6 +525,155 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-bookings] PUT /:id/loan error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Invoice tab ──────────────────────────────────────────────────────────────
+
+// GET /:id/invoices — every invoice generated for this booking
+router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT inv.*, cu.name AS CreatedByName
+      FROM dbo.CrmInvoice inv
+      LEFT JOIN dbo.Users cu ON cu.id = inv.CreatedBy
+      WHERE inv.BookingId = @id
+      ORDER BY inv.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/invoices — generate a real, permanently-numbered invoice.
+// Visible to the customer in their portal immediately (no separate "send"
+// step — an invoice is a record of a real transaction, not a draft that
+// needs sign-off like the Agreement/Sales Deed documents).
+router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body;
+    const amount = parseFloat(b.Amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30),  invoiceNo)
+      .input("bid",  sql.Int,           id)
+      .input("type", sql.NVarChar(30),  b.InvoiceType || "Booking")
+      .input("amt",  sql.Decimal(18,2), amount)
+      .input("dt",   sql.Date,          b.InvoiceDate || null)
+      .input("desc", sql.NVarChar(500), b.Description || null)
+      .input("cb",   sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, InvoiceNo: invoiceNo });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Attachments tab ──────────────────────────────────────────────────────────
+
+// GET /:id/attachments — every file attached to this booking
+router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT a.Id, a.Label, a.FileName, a.FileSize, a.MimeType, a.UploadedAt, u.name AS UploadedByName
+      FROM dbo.CrmBookingAttachment a
+      LEFT JOIN dbo.Users u ON u.id = a.UploadedBy
+      WHERE a.BookingId = @id
+      ORDER BY a.UploadedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/attachments error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/attachments — upload one or more files
+router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload.array("files", 10), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: "No files uploaded" });
+
+    const inserted = [];
+    for (const file of files) {
+      const result = await pool.request()
+        .input("bid",   sql.Int,           id)
+        .input("label", sql.NVarChar(200), req.body.Label || null)
+        .input("fname", sql.NVarChar(300), file.originalname)
+        .input("sname", sql.NVarChar(300), file.filename)
+        .input("fsize", sql.Int,           file.size)
+        .input("mime",  sql.NVarChar(150), file.mimetype)
+        .input("cb",    sql.Int,           actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmBookingAttachment (BookingId, Label, FileName, StoredName, FileSize, MimeType, UploadedBy, UploadedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@bid, @label, @fname, @sname, @fsize, @mime, @cb, SYSDATETIME())
+        `);
+      inserted.push(result.recordset[0].Id);
+    }
+    res.status(201).json({ success: true, ids: inserted });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/attachments error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/attachments/file/:attId — download/preview a stored file
+router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const attId = parseInt(req.params.attId);
+    const result = await pool.request().input("id", sql.Int, attId)
+      .query("SELECT StoredName, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id");
+    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    const row = result.recordset[0];
+    const resolvedPath = path.resolve(UPLOAD_DIR, row.StoredName);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
+    res.setHeader("Content-Type", row.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${row.FileName.replace(/"/g, "")}"`);
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/attachments/file/:attId error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id/attachments/:attId
+router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const attId = parseInt(req.params.attId);
+    const result = await pool.request().input("id", sql.Int, attId)
+      .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id");
+    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    await pool.request().input("id", sql.Int, attId).query("DELETE FROM dbo.CrmBookingAttachment WHERE Id = @id");
+    const resolvedPath = path.resolve(UPLOAD_DIR, result.recordset[0].StoredName);
+    if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolvedPath, () => {});
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] DELETE /:id/attachments/:attId error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

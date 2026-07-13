@@ -23,9 +23,51 @@ class CrmCreationError extends Error {
   }
 }
 
+// Every Application must resolve to a Customer — either an existing one the
+// caller explicitly selected, or one auto-found-by-Mobile/auto-created from
+// whatever raw name/mobile fields the caller has (the SA Leads handoff path
+// in saHandoff.js never went through an interactive "pick a customer" step,
+// so it still supplies raw fields; this makes that keep working while every
+// Application still ends up linked to a real Customer row). No-ops to a
+// lookup when a live Customer already exists for that Mobile — never
+// creates a second identity for the same phone number.
+async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, leadId }, actorUserId) {
+  if (!mobile) return null;
+  const existing = await pool.request().input("mob", sql.NVarChar(20), mobile)
+    .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+  if (existing.recordset.length) return existing.recordset[0].Id;
+
+  const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
+  try {
+    const result = await pool.request()
+      .input("no",    sql.NVarChar(30),  customerNo)
+      .input("lid",   sql.Int,           leadId ? parseInt(leadId) : null)
+      .input("name",  sql.NVarChar(200), name || "Unknown")
+      .input("mob",   sql.NVarChar(20),  mobile)
+      .input("alt",   sql.NVarChar(20),  altMobile || null)
+      .input("email", sql.NVarChar(200), email || null)
+      .input("cb",    sql.Int,           actorUserId)
+      .query(`
+        INSERT INTO dbo.CrmCustomer (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @lid, @name, @mob, @alt, @email, @cb, SYSDATETIME())
+      `);
+    return result.recordset[0].Id;
+  } catch (e) {
+    // Race: two near-simultaneous creations for the same mobile — the loser
+    // just looks the winner up instead of failing the whole caller's flow.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
+      const retry = await pool.request().input("mob", sql.NVarChar(20), mobile)
+        .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+      return retry.recordset[0]?.Id || null;
+    }
+    throw e;
+  }
+}
+
 async function createCrmApplicationRecord(pool, b, actorUserId) {
-  if (!b.ApplicantName?.trim() || !b.Mobile?.trim())
-    throw new CrmCreationError("ApplicantName and Mobile are required");
+  if (!b.CustomerId && (!b.ApplicantName?.trim() || !b.Mobile?.trim()))
+    throw new CrmCreationError("Either CustomerId or ApplicantName and Mobile are required");
   if (b.Source && !SOURCE_TYPES.includes(b.Source))
     throw new CrmCreationError(`Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}`);
 
@@ -40,6 +82,28 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
         FROM dbo.SaLead WHERE Id = @lid
       `);
     prefill = lr.recordset[0] || {};
+  }
+
+  // Resolve the Customer this application belongs to: an explicit selection
+  // wins outright (its own name/mobile/email become authoritative, even if
+  // the request also carries stale raw fields); otherwise fall back to
+  // finding/creating one from whatever raw identity the caller supplied.
+  let customerId = b.CustomerId ? parseInt(b.CustomerId) : null;
+  let customerRow = null;
+  if (customerId) {
+    const cr = await pool.request().input("cid", sql.Int, customerId)
+      .query("SELECT CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
+    if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
+    customerRow = cr.recordset[0];
+  } else {
+    const name = b.ApplicantName?.trim() || prefill.CustomerName;
+    const mobile = b.Mobile?.trim() || prefill.Mobile;
+    customerId = await findOrCreateCustomer(pool, {
+      name, mobile,
+      altMobile: b.AltMobile || prefill.AltMobile,
+      email: b.Email || prefill.Email,
+      leadId: b.LeadId,
+    }, actorUserId);
   }
 
   const platformId = b.PlatformId ? parseInt(b.PlatformId) : (prefill.PlatformId || null);
@@ -73,10 +137,11 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     result = await pool.request()
       .input("no",   sql.NVarChar(30),  appNo)
       .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
-      .input("name", sql.NVarChar(200), b.ApplicantName.trim() || prefill.CustomerName)
-      .input("mob",  sql.NVarChar(20),  b.Mobile.trim()  || prefill.Mobile)
-      .input("alt",  sql.NVarChar(20),  b.AltMobile || prefill.AltMobile || null)
-      .input("em",   sql.NVarChar(200), b.Email     || prefill.Email     || null)
+      .input("custid", sql.Int,         customerId)
+      .input("name", sql.NVarChar(200), customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName)
+      .input("mob",  sql.NVarChar(20),  customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile)
+      .input("alt",  sql.NVarChar(20),  customerRow?.AltMobile || b.AltMobile || prefill.AltMobile || null)
+      .input("em",   sql.NVarChar(200), customerRow?.Email     || b.Email     || prefill.Email     || null)
       .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
       .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
       .input("cid",  sql.Int,           companyId)
@@ -97,14 +162,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("cb",   sql.Int,           actorUserId)
       .query(`
         INSERT INTO dbo.CrmApplication
-          (ApplicationNo, LeadId, ApplicantName, Mobile, AltMobile, Email,
+          (ApplicationNo, LeadId, CustomerId, ApplicantName, Mobile, AltMobile, Email,
            ProjectId, PreferredUnitId, CompanyId, InterestedProject, InterestedUnit,
            PropertyType, BhkPreference, BudgetMin, BudgetMax,
            Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
            AssignedTo, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
-          (@no, @lid, @name, @mob, @alt, @em,
+          (@no, @lid, @custid, @name, @mob, @alt, @em,
            @pid, @uid, @cid, @proj, @unit,
            @pt, @bhk, @bmin, @bmax,
            @src, @platid, @campid, @adid, @cpid,
@@ -119,6 +184,69 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actorUserId);
 
   return { id: applicationId, ApplicationNo: appNo };
+}
+
+const DEFAULT_MILESTONES = [
+  { no: 1, name: "Booking",          pct: 5,  dept: "Sales",        docs: "Booking Receipt" },
+  { no: 2, name: "Agreement",        pct: 10, dept: "Legal",        docs: "Executed Agreement" },
+  { no: 3, name: "Foundation",       pct: 15, dept: "Construction", docs: "Foundation Completion Certificate" },
+  { no: 4, name: "Superstructure",   pct: 20, dept: "Construction", docs: "Superstructure Progress Photos" },
+  { no: 5, name: "Slab Casting",     pct: 20, dept: "Construction", docs: "Slab Casting Progress Photos" },
+  { no: 6, name: "Plastering",       pct: 15, dept: "Construction", docs: "Plastering Completion Photos" },
+  { no: 7, name: "Handover",         pct: 15, dept: "Sales",        docs: "Possession Letter, Handover Checklist" },
+];
+
+// Shared by booking creation AND payment-plan changes on an existing
+// booking (see crmBookings.js PUT /:id) — one place that knows how to turn
+// a plan (or the 7-stage default, when none is selected) into real
+// CrmPaymentMilestone rows, so a plan switch produces an identical shape
+// to what creation would have produced.
+async function generateMilestonesForBooking(pool, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId) {
+  if (!totalValue || totalValue <= 0) return;
+  let milestones;
+  if (paymentPlanId) {
+    const planItems = await pool.request().input("pid", sql.Int, parseInt(paymentPlanId))
+      .query("SELECT MilestoneNo, MilestoneName, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid ORDER BY MilestoneNo");
+    milestones = planItems.recordset.map((r) => ({ no: r.MilestoneNo, name: r.MilestoneName, pct: r.Percent }));
+  }
+  if (!milestones?.length) milestones = DEFAULT_MILESTONES;
+
+  for (const m of milestones) {
+    await pool.request()
+      .input("bid",  sql.Int,           bookingId)
+      .input("mno",  sql.Int,           m.no)
+      .input("mname",sql.NVarChar(200), m.name)
+      .input("amt",  sql.Decimal(18,2), Math.round(totalValue * m.pct) / 100)
+      .input("due",  sql.Date,          m.no === 1 ? (bookingDate || new Date()) : null)
+      .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
+      .input("dept", sql.NVarChar(100), m.dept || null)
+      .input("cb",   sql.Int,           actorUserId)
+      .query(`
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        VALUES (@bid, @mno, @mname, @amt, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+      `);
+  }
+}
+
+// A payment plan scoped to a specific Company/Project/Block must actually
+// match the booking it's being attached to — otherwise the scoping built
+// into the Payment Plan Master (see migration 182) is purely cosmetic, only
+// ever enforced by which options happen to be in a dropdown. NULL scope
+// columns on the plan mean "applies everywhere" and always pass.
+async function validatePaymentPlanScope(pool, planId, { companyId, projectId, blockId }) {
+  const plan = await pool.request().input("pid", sql.Int, planId)
+    .query("SELECT PlanName, CompanyId, ProjectId, BlockId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+  if (!plan.recordset.length) throw new CrmCreationError("Selected payment plan does not exist");
+  const p = plan.recordset[0];
+  if (p.CompanyId && companyId && p.CompanyId !== companyId) {
+    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different company`);
+  }
+  if (p.ProjectId && projectId && p.ProjectId !== projectId) {
+    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different project`);
+  }
+  if (p.BlockId && blockId && p.BlockId !== blockId) {
+    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
+  }
 }
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
@@ -142,6 +270,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
 
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
+
+  if (b.PaymentPlanId) {
+    await validatePaymentPlanScope(pool, parseInt(b.PaymentPlanId), {
+      companyId: unitRow.CompanyId || null, projectId: unitRow.ProjectId || null, blockId: unitRow.BlockId || null,
+    });
+  }
 
   const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
   const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
@@ -198,40 +332,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const bookingId = result.recordset[0].Id;
 
-  if (total && total > 0) {
-    let milestones;
-    if (b.PaymentPlanId) {
-      const planItems = await pool.request().input("pid", sql.Int, parseInt(b.PaymentPlanId))
-        .query("SELECT MilestoneNo, MilestoneName, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid ORDER BY MilestoneNo");
-      milestones = planItems.recordset.map((r) => ({ no: r.MilestoneNo, name: r.MilestoneName, pct: r.Percent }));
-    }
-    if (!milestones?.length) {
-      milestones = [
-        { no: 1, name: "Booking",          pct: 5,  dept: "Sales",        docs: "Booking Receipt" },
-        { no: 2, name: "Agreement",        pct: 10, dept: "Legal",        docs: "Executed Agreement" },
-        { no: 3, name: "Foundation",       pct: 15, dept: "Construction", docs: "Foundation Completion Certificate" },
-        { no: 4, name: "Superstructure",   pct: 20, dept: "Construction", docs: "Superstructure Progress Photos" },
-        { no: 5, name: "Slab Casting",     pct: 20, dept: "Construction", docs: "Slab Casting Progress Photos" },
-        { no: 6, name: "Plastering",       pct: 15, dept: "Construction", docs: "Plastering Completion Photos" },
-        { no: 7, name: "Handover",         pct: 15, dept: "Sales",        docs: "Possession Letter, Handover Checklist" },
-      ];
-    }
-    for (const m of milestones) {
-      await pool.request()
-        .input("bid",  sql.Int,           bookingId)
-        .input("mno",  sql.Int,           m.no)
-        .input("mname",sql.NVarChar(200), m.name)
-        .input("amt",  sql.Decimal(18,2), Math.round(total * m.pct) / 100)
-        .input("due",  sql.Date,          m.no === 1 ? (b.BookingDate || new Date()) : null)
-        .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
-        .input("dept", sql.NVarChar(100), m.dept || null)
-        .input("cb",   sql.Int,           actorUserId)
-        .query(`
-          INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
-          VALUES (@bid, @mno, @mname, @amt, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
-        `);
-    }
-  }
+  await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId);
 
   await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
     `Auto-approved: booking ${bookingNo} created`, actorUserId, { force: true });
@@ -239,4 +340,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   return { id: bookingId, BookingNo: bookingNo };
 }
 
-module.exports = { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES };
+module.exports = {
+  createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
+  generateMilestonesForBooking, validatePaymentPlanScope,
+};

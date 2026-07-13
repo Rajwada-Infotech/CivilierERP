@@ -22,7 +22,7 @@ const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "
 
 const APP_SELECT = `
   SELECT
-    a.Id, a.ApplicationNo, a.LeadId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email,
+    a.Id, a.ApplicationNo, a.LeadId, a.CustomerId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email,
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.BudgetMin, a.BudgetMax, a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
@@ -35,6 +35,11 @@ const APP_SELECT = `
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
     proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName,
+    -- Customer-master fields, auto-fetched here so the Application page
+    -- never asks staff to retype what's already on the Customer record.
+    cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
+    cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
+    cust.CoApplicantName, cust.CoApplicantMobile, cust.CoApplicantPanNo, cust.CoApplicantRelation,
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.BookingDate,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -62,6 +67,7 @@ const APP_SELECT = `
   LEFT JOIN dbo.enterprise proj ON proj.id = a.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.enterprise comp ON comp.id = a.CompanyId AND comp.business_type = 'C'
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
+  LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
     SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, BookingDate
     FROM dbo.CrmBooking

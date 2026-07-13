@@ -11,7 +11,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -712,6 +712,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     // Auto-flow: execution is one of two sales-deed prerequisites — fire the
     // auto-create check (no-op if milestones aren't fully settled yet).
     await maybeAutoCreateSalesDeed(pool, row.BookingId, actor);
+    await maybeAutoGenerateInvoice(pool, row.BookingId, actor);
+    await maybeAutoGenerateAgreementInvoice(pool, row.BookingId, actor);
     await syncLegalMilestoneStep(pool, row.BookingId, "FinalExecution", actor);
 
     res.json({ success: true, status: "Executed" });

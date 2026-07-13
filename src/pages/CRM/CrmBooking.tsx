@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { CrmBookingDetail } from "./CrmBookingDetail";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -386,6 +387,7 @@ const CrmBooking: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
   const [chargesBooking, setChargesBooking] = useState<any | null>(null);
+  const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
 
   const { data: bookings = [], isLoading } = useQuery({
     queryKey: ["crm-bookings", appFilter],
@@ -543,7 +545,11 @@ const CrmBooking: React.FC = () => {
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">No bookings found</td></tr>
               ) : (filtered as any[]).map((b: any) => (
                 <tr key={b.Id} className="border-t border-border hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{b.BookingNo}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => setViewingBookingId(b.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
+                      {b.BookingNo}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{b.ApplicantName}</div>
                     <div className="text-xs text-muted-foreground">{b.Mobile}</div>
@@ -610,6 +616,7 @@ const CrmBooking: React.FC = () => {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
@@ -769,6 +776,10 @@ const CrmBooking: React.FC = () => {
 
       {chargesBooking && (
         <ChargesDialog booking={chargesBooking} onClose={() => setChargesBooking(null)} />
+      )}
+
+      {viewingBookingId && (
+        <CrmBookingDetail bookingId={viewingBookingId} onClose={() => setViewingBookingId(null)} />
       )}
     </SalesAutoShell>
   );
