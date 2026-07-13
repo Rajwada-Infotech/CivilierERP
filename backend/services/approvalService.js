@@ -75,14 +75,33 @@ const MODULE_MAP = {
     status: "Status",
   },
   "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
+  "crm-bookings": { table: "dbo.CrmBooking", pk: "Id", status: "Status" },
   // The "approval" on a CrmAgreement is specifically the senior sign-off gate
   // (SeniorApprovalStatus) — the document's own lifecycle (Draft/Executed/
   // Registered/Cancelled) is a separate column and not part of this workflow.
   "crm-agreements": { table: "dbo.CrmAgreement", pk: "Id", status: "SeniorApprovalStatus" },
+  // A second, independent gate on the same table: once both sides' proposed
+  // dates match, DateApprovalStatus goes to 'Pending' (set directly by
+  // crmWorkflowGuards.js's maybeResolveAgreementDate, not via this engine's
+  // own "submit" step — the trigger is a system event, not a user action)
+  // and needs its own sign-off before AgreementDate is written.
+  // CAVEAT: getApprovedLevelCount() below scopes purely by (TableName,
+  // RecordId) — there's no Module column on ApprovalAuditLog — so this
+  // gate's level count is NOT isolated from crm-agreements' own Senior
+  // Approval history on the same CrmAgreement row. Harmless today because
+  // this workflow is single-level (nextLevel >= totalLevels(1) is always
+  // true, so any authorized approval fully unlocks it regardless of the
+  // exact count) — but if this ever becomes genuinely multi-level, give
+  // ApprovalAuditLog a Module column and filter by it first.
+  "crm-agreement-date": { table: "dbo.CrmAgreement", pk: "Id", status: "DateApprovalStatus" },
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
+  // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
+  // column, so this shares level-count history with any other gate on
+  // CrmSalesDeed — harmless since this is single-level too.
+  "crm-sales-deed-director": { table: "dbo.CrmSalesDeed", pk: "Id", status: "DirectorApprovalStatus" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -115,7 +134,15 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "journal-voucher": ["super_admin"],
   "inter-company-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
+  "crm-bookings": CRM_APPROVER_ROLES,
   "crm-agreements": CRM_APPROVER_ROLES,
+  // Explicitly narrower than the other CRM modules — super_admin only, per
+  // instruction, "for now"; reassignable later purely via LevelsData same
+  // as every other module here, no code change needed when that happens.
+  "crm-agreement-date": ["super_admin"],
+  // No dedicated "director" role exists yet — hardcoded to super_admin
+  // only "for now", same reasoning as crm-agreement-date above.
+  "crm-sales-deed-director": ["super_admin"],
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,
@@ -208,9 +235,17 @@ async function getWorkflow(module) {
   } catch {
     levels = [];
   }
+  const levelDefs = Array.isArray(levels) ? levels : [];
   return {
     Id: row.Id,
-    Levels: (Array.isArray(levels) ? levels.length : Number(levels)) || 1,
+    Levels: levelDefs.length || Number(levels) || 1,
+    // Per-level definitions, e.g. [{ id, label, roles?: string[], userIds?: number[] }].
+    // Both fields are optional per level — a level with neither is treated as
+    // open to anyone who already passed the module's coarse role gate above.
+    // This lets modules like CRM Agreements start with a single super_admin-only
+    // level and grow into a real named hierarchy purely via data (Approval
+    // Setup UI), with no code change needed to add levels or name approvers.
+    LevelDefs: levelDefs,
   };
 }
 
@@ -406,6 +441,7 @@ async function transition(
   userEmail,
   userRole,
   note = null,
+  userId = null,
 ) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
@@ -478,6 +514,35 @@ async function transition(
       const totalLevels = workflow?.Levels ?? 1;
       const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
       const nextLevel = approvedSoFar + 1;
+
+      // -- Per-level gate --
+      // The coarse role check above only confirms the user is *some* kind of
+      // approver for this module. If this specific level names roles and/or
+      // specific users, narrow to that -- this is what lets a workflow grow
+      // into a real hierarchy (different approver per level) purely by
+      // editing ApprovalWorkflows.LevelsData, with no code change.
+      // A level with neither `roles` nor `userIds` set falls through to the
+      // module-wide coarse check only (today's existing behaviour), so this
+      // is fully backward compatible with workflows that don't use it yet.
+      const levelDef = workflow?.LevelDefs?.[nextLevel - 1];
+      if (levelDef) {
+        const roleOk =
+          !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
+          levelDef.roles.map((r) => String(r).toLowerCase()).includes((userRole || "").toLowerCase());
+        // userIds is only enforced when the caller actually passed a userId --
+        // callers that don't pass one (older call sites) skip this check
+        // rather than being denied, so this can't regress any existing module.
+        const userOk =
+          !Array.isArray(levelDef.userIds) || levelDef.userIds.length === 0 ||
+          userId == null || levelDef.userIds.includes(userId);
+        if (!roleOk || !userOk) {
+          const levelErr = new Error(
+            `You are not authorized to approve level ${nextLevel}${levelDef.label ? ` (${levelDef.label})` : ""} of this workflow.`,
+          );
+          levelErr.status = 403;
+          throw levelErr;
+        }
+      }
 
       await writeAuditLog(
         tableName,

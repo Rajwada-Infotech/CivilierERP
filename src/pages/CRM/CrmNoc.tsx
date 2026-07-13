@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus } from "lucide-react";
+import { Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/noc";
 const BKG_API = "/api/crm/bookings";
@@ -26,18 +28,55 @@ async function fetchAll(): Promise<any[]> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchBookingContext(bookingId: string): Promise<any> {
+  if (!bookingId) return null;
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}/context`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
 const CrmNoc: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  // Auto-fetched bank fields are locked (read-only) by default — they come
+  // from a trusted source (KYC + real payment ledger), not free-typed, so
+  // locking prevents an accidental edit that silently drifts from the
+  // source of truth. Staff can still unlock to correct it (e.g. the loan
+  // bank genuinely differs from the customer's personal on-file bank).
+  const [bankFieldsLocked, setBankFieldsLocked] = useState(true);
 
   const { data: nocs = [], isLoading } = useQuery({ queryKey: ["crm-noc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: context, isFetching: contextLoading } = useQuery({
+    queryKey: ["crm-noc-context", form.BookingId],
+    queryFn: () => fetchBookingContext(form.BookingId),
+    enabled: !!form.BookingId,
+  });
+  const hasAgreement = !!context?.agreement;
+  const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
+
+  // Auto-fill Bank NOC fields from data the system already has, the moment
+  // both the booking context and "Bank" type are in place — no click
+  // required. Only fills fields still blank, so it never clobbers something
+  // staff already typed (e.g. after switching booking mid-edit).
+  useEffect(() => {
+    if (form.NocType !== "Bank" || !context) return;
+    setForm((f) => ({
+      ...f,
+      BankName: f.BankName || context.customerBankDetail?.BankName || "",
+      LoanAccountNo: f.LoanAccountNo || context.customerBankDetail?.AccountNo || "",
+      LoanAmount: f.LoanAmount || (context.outstandingBalance != null ? String(Math.round(context.outstandingBalance)) : ""),
+    }));
+    setBankFieldsLocked(true);
+  }, [form.NocType, context]);
 
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
+    if (!hasAgreement) { toast.error("This booking has no agreement yet — NOC cannot be requested"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -63,6 +102,15 @@ const CrmNoc: React.FC = () => {
       const res = await fetchWithAuth(`${API}/${id}/mark-issued`, { method: "PUT" });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("NOC marked as issued");
+
+      const current = (nocs as any[]).find((n) => n.Id === id);
+      const siblingsIssued = current && (nocs as any[])
+        .filter((n) => n.BookingId === current.BookingId && n.Id !== id)
+        .every((n) => n.Status === "Issued");
+      if (current && siblingsIssued) {
+        promptNextStep(navigate, "All NOCs for this booking are issued — handover can now proceed.", "/crm/handover", "Go to Handover");
+      }
+
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -131,9 +179,9 @@ const CrmNoc: React.FC = () => {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request NOC</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
               <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
@@ -144,6 +192,27 @@ const CrmNoc: React.FC = () => {
                 ))}
               </select>
             </div>
+
+            {form.BookingId && !contextLoading && context && (
+              <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed">
+                <div className="font-medium text-foreground">
+                  {context.booking.ApplicantName} <span className="text-muted-foreground font-normal">· {context.booking.Mobile} · {context.booking.BookingNo} · {context.booking.UnitNo}</span>
+                </div>
+                {hasAgreement ? (
+                  <div className="flex items-center gap-1 text-green-700">
+                    <CheckCircle2 size={11} /> {context.agreement.AgreementNo} — {context.agreement.Status}
+                    {context.existingNocs?.length > 0 && (
+                      <span className="text-muted-foreground">· {context.existingNocs.map((n: any) => `${n.NocType}: ${n.Status}`).join(", ")}</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-red-600 font-medium">
+                    <AlertTriangle size={11} /> No agreement yet — NOC cannot be requested
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="text-xs text-muted-foreground block mb-1">NOC Type</label>
               <select value={form.NocType} onChange={(e) => setForm((f) => ({ ...f, NocType: e.target.value }))}
@@ -152,35 +221,39 @@ const CrmNoc: React.FC = () => {
               </select>
             </div>
             {form.NocType === "Bank" && (
-              <>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Bank Name</label>
-                  <input type="text" value={form.BankName} onChange={(e) => setForm((f) => ({ ...f, BankName: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                  <span className="flex items-center gap-1">
+                    <Landmark size={11} /> {bankFieldsLocked ? "Auto-filled from customer KYC & balance due" : "Editing — override the auto-filled values"}
+                  </span>
+                  <button type="button" onClick={() => setBankFieldsLocked((l) => !l)}
+                    className="flex items-center gap-1 text-primary hover:underline shrink-0">
+                    {bankFieldsLocked ? <><Pencil size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Loan A/C No.</label>
-                    <input type="text" value={form.LoanAccountNo} onChange={(e) => setForm((f) => ({ ...f, LoanAccountNo: e.target.value }))}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Loan Amount</label>
-                    <input type="number" value={form.LoanAmount} onChange={(e) => setForm((f) => ({ ...f, LoanAmount: e.target.value }))}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="text" placeholder="Bank Name" value={form.BankName} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, BankName: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
+                  <input type="text" placeholder="Loan A/C No." value={form.LoanAccountNo} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, LoanAccountNo: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
+                  <input type="number" placeholder="Loan Amount" value={form.LoanAmount} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, LoanAmount: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
                 </div>
-              </>
+              </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Reason / Purpose</label>
               <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                placeholder="Reason / purpose (optional)"
+                rows={1} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving}
+            <button onClick={handleCreate} disabled={saving || !canRequest}
+              title={!canRequest && form.BookingId ? "This booking has no agreement yet" : undefined}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Requesting..." : "Request"}
             </button>

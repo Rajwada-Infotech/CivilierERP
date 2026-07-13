@@ -1,0 +1,201 @@
+const express = require("express");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId } = require("../services/saAccess");
+const { getNextDocNumber } = require("../services/docNumber");
+
+router.use(authMiddleware);
+
+// Fields the Application page ("select company/project, auto-fetch
+// everything from the customer") reads directly, plus the co-applicant set
+// and PAN/Address that now live here instead of being typed fresh on every
+// application.
+const CUSTOMER_SELECT = `
+  SELECT
+    c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
+    c.PanNo, c.Address, c.City, c.State, c.Pincode, c.DateOfBirth,
+    c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation,
+    c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
+    cu.name AS CreatedByName,
+    l.LeadUid, l.Classification AS LeadClassification,
+    (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount
+  FROM dbo.CrmCustomer c
+  LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
+  LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId
+`;
+
+// GET / — all customers
+router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { search } = req.query;
+    const req0 = pool.request();
+    const conds = ["c.IsActive = 1"];
+    if (search) {
+      req0.input("srch", sql.NVarChar(200), `%${search}%`);
+      conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
+    }
+    const result = await req0.query(`${CUSTOMER_SELECT} WHERE ${conds.join(" AND ")} ORDER BY c.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-customers] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id — single customer plus every application filed under them, so
+// staff can see their full history in one place (not just the latest one).
+// Also aggregates outstanding payment across EVERY booking this customer
+// has — not just one booking at a time like Customer 360's per-row figures
+// — since a customer with two units should see one true total, not have to
+// add up two separate numbers themselves.
+router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const [custRes, appsRes, outstandingRes] = await Promise.all([
+      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT a.Id, a.ApplicationNo, a.Status, a.InterestedProject, a.CreatedAt,
+               b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus
+        FROM dbo.CrmApplication a
+        OUTER APPLY (SELECT TOP 1 Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = a.Id ORDER BY CreatedAt DESC) b
+        WHERE a.CustomerId = @id
+        ORDER BY a.CreatedAt DESC
+      `),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          ISNULL(SUM(CASE WHEN m.Status NOT IN ('Paid', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0) AS TotalOutstanding,
+          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS TotalPaid,
+          ISNULL(SUM(m.AmountDue), 0) AS TotalDue
+        FROM dbo.CrmPaymentMilestone m
+        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE a.CustomerId = @id AND b.Status NOT IN ('Cancelled', 'Rejected')
+      `),
+    ]);
+    if (!custRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
+    res.json({
+      ...custRes.recordset[0],
+      applications: appsRes.recordset,
+      outstanding: outstandingRes.recordset[0],
+    });
+  } catch (e) {
+    console.error("[crm-customers] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST / — register a new customer. Name/Mobile/PAN/Address are the
+// must-needed fields kept mandatory; everything else (co-applicant, DOB,
+// city/state/pincode) is optional detail filled in as it becomes available.
+// Deduped by Mobile — reusing an existing customer instead of silently
+// creating a second identity for the same phone number, mirroring the
+// SaLead dedup pattern already used elsewhere in the CRM.
+router.post("/", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const missing = [];
+    if (!b.CustomerName?.trim()) missing.push("Customer Name");
+    if (!b.Mobile?.trim()) missing.push("Mobile");
+    if (!b.PanNo?.trim()) missing.push("PAN Number");
+    if (!b.Address?.trim()) missing.push("Address");
+    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+
+    const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
+      .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+    if (existing.recordset.length) {
+      return res.status(409).json({
+        error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
+        existingCustomerId: existing.recordset[0].Id,
+      });
+    }
+
+    const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
+    const result = await pool.request()
+      .input("no",     sql.NVarChar(30),  customerNo)
+      .input("lid",     sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
+      .input("name",    sql.NVarChar(200), b.CustomerName.trim())
+      .input("mob",     sql.NVarChar(20),  b.Mobile.trim())
+      .input("altmob",  sql.NVarChar(20),  b.AltMobile || null)
+      .input("email",   sql.NVarChar(200), b.Email || null)
+      .input("pan",     sql.NVarChar(20),  b.PanNo.trim())
+      .input("addr",    sql.NVarChar(500), b.Address.trim())
+      .input("city",    sql.NVarChar(100), b.City || null)
+      .input("state",   sql.NVarChar(100), b.State || null)
+      .input("pin",     sql.NVarChar(10),  b.Pincode || null)
+      .input("dob",     sql.Date,          b.DateOfBirth || null)
+      .input("coname",  sql.NVarChar(200), b.CoApplicantName || null)
+      .input("comob",   sql.NVarChar(20),  b.CoApplicantMobile || null)
+      .input("copan",   sql.NVarChar(20),  b.CoApplicantPanNo || null)
+      .input("corel",   sql.NVarChar(50),  b.CoApplicantRelation || null)
+      .input("notes",   sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",      sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmCustomer
+          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode,
+           DateOfBirth, CoApplicantName, CoApplicantMobile, CoApplicantPanNo, CoApplicantRelation, Notes,
+           CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @addr, @city, @state, @pin,
+                @dob, @coname, @comob, @copan, @corel, @notes, @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, CustomerNo: customerNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
+      return res.status(409).json({ error: "A customer with this mobile number already exists" });
+    }
+    console.error("[crm-customers] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id — edit. Mobile is intentionally left editable here (typos
+// happen) but stays subject to the same unique-while-active index.
+router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body;
+    await pool.request()
+      .input("id",      sql.Int,           id)
+      .input("name",    sql.NVarChar(200), b.CustomerName || null)
+      .input("mob",     sql.NVarChar(20),  b.Mobile || null)
+      .input("altmob",  sql.NVarChar(20),  b.AltMobile ?? null)
+      .input("email",   sql.NVarChar(200), b.Email ?? null)
+      .input("pan",     sql.NVarChar(20),  b.PanNo || null)
+      .input("addr",    sql.NVarChar(500), b.Address || null)
+      .input("city",    sql.NVarChar(100), b.City ?? null)
+      .input("state",   sql.NVarChar(100), b.State ?? null)
+      .input("pin",     sql.NVarChar(10),  b.Pincode ?? null)
+      .input("dob",     sql.Date,          b.DateOfBirth || null)
+      .input("coname",  sql.NVarChar(200), b.CoApplicantName ?? null)
+      .input("comob",   sql.NVarChar(20),  b.CoApplicantMobile ?? null)
+      .input("copan",   sql.NVarChar(20),  b.CoApplicantPanNo ?? null)
+      .input("corel",   sql.NVarChar(50),  b.CoApplicantRelation ?? null)
+      .input("notes",   sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("ub",      sql.Int,           actorId(req))
+      .query(`
+        UPDATE dbo.CrmCustomer SET
+          CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
+          AltMobile = @altmob, Email = @email,
+          PanNo = ISNULL(@pan, PanNo), Address = ISNULL(@addr, Address),
+          City = @city, State = @state, Pincode = @pin, DateOfBirth = ISNULL(@dob, DateOfBirth),
+          CoApplicantName = @coname, CoApplicantMobile = @comob, CoApplicantPanNo = @copan, CoApplicantRelation = @corel,
+          Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
+      return res.status(409).json({ error: "A customer with this mobile number already exists" });
+    }
+    console.error("[crm-customers] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

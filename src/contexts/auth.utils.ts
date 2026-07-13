@@ -15,20 +15,20 @@ import type {
 export const PRIVILEGED_ROLES: UserRole[] = ["super_admin", "admin", "dba"];
 
 // Pages the marketing_head role controls as an admin (full CRUD, no restrictions).
-// Backend mirrors this in requirePageRight.js → isMarketingHeadAllowed().
-export const MARKETING_HEAD_PAGES = new Set<string>([
-  // Sales Automation — all sa- prefixed pages
-  "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
-  "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
-  "sa-distribution-rules", "sa-lead-transfers", "sa-role-master",
-  "sa-channel-partners", "sa-lead-activities", "sa-lead-tasks", "sa-commissions",
-  // CRM module — all crm- prefixed pages
-  "crm-applications", "crm-bookings", "crm-welcome-calls",
-  "crm-agreements", "crm-documents", "crm-payments", "crm-loan-details",
-  "crm-handover", "crm-service-tickets", "crm-cancellations", "crm-customer-360",
-  // Sales module
+// Backend mirrors this in requirePageRight.js → isMarketingHeadAllowed(), which
+// matches by "sa-"/"crm-" PREFIX rather than an explicit list — this Set used
+// to be a hand-maintained explicit list too and silently drifted out of sync
+// every time a new crm-* page was added (e.g. crm-communication, crm-noc,
+// crm-unit-matrix were all missing, blocking marketing_head from pages the
+// backend already allowed). isMarketingHeadPage() below now mirrors the
+// backend's prefix logic so no page can ever be missed here again; this Set
+// only needs to keep the non-prefixed Sales-module page keys.
+export const MARKETING_HEAD_SALES_PAGES = new Set<string>([
   "sale-order", "sale-invoice", "sales-payment",
 ]);
+
+export const isMarketingHeadPage = (page: string): boolean =>
+  page.startsWith("sa-") || page.startsWith("crm-") || MARKETING_HEAD_SALES_PAGES.has(page);
 
 // ======================
 // PAGE DEFINITIONS
@@ -132,10 +132,35 @@ export const SALES_PERSON_ACCESS: PagePermission[] = [
   { page: "sa-site-visits", actions: ["view", "create", "edit"] },
 ];
 
-// marketing_head: full CRUD on all SA + Sales pages, plus dashboard access
+// marketing_head: full CRUD on all SA + Sales pages, plus dashboard access.
+// This populates currentUser.pagePermissions for any code that reads that
+// array directly instead of going through canAccessPage/canDoAction (which
+// gate marketing_head via isMarketingHeadPage()'s prefix match and don't
+// depend on this list being exhaustive). Kept as an explicit enumeration
+// only because pagePermissions needs concrete {page, actions} entries, not
+// a predicate — every sa-/crm- page key actually routed in App.tsx should
+// appear here.
+const MARKETING_HEAD_KNOWN_PAGES = [
+  // Sales Automation
+  "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
+  "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
+  "sa-distribution-rules", "sa-lead-transfers", "sa-role-master",
+  "sa-channel-partners", "sa-lead-activities", "sa-lead-tasks", "sa-commissions",
+  // CRM module
+  "crm-dashboard", "crm-applications", "crm-bookings", "crm-welcome-calls",
+  "crm-communication", "crm-customer-bank-details", "crm-agreements", "crm-documents",
+  "crm-unit-matrix", "crm-parking-matrix",
+  "crm-legal-milestones", "crm-noc", "crm-sales-deed",
+  "crm-pre-possession", "crm-possession-notice", "crm-construction-updates",
+  "crm-payments", "crm-payment-plans", "crm-brokerage",
+  "crm-handover", "crm-service-tickets", "crm-cancellations", "crm-customer-360", "crm-loan-details",
+  // Sales module
+  "sale-order", "sale-invoice", "sales-payment",
+] as const;
+
 export const MARKETING_HEAD_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
-  ...[...MARKETING_HEAD_PAGES].map((page) => ({
+  ...MARKETING_HEAD_KNOWN_PAGES.map((page) => ({
     page,
     actions: ["view", "create", "edit", "delete", "print", "export"] as PageAction[],
   })),
@@ -180,7 +205,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: full access within their scope, no access outside it
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return MARKETING_HEAD_PAGES.has(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
@@ -194,7 +219,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: all actions on their scoped pages
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return MARKETING_HEAD_PAGES.has(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(

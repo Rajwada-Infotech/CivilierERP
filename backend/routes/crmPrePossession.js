@@ -5,6 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -27,11 +28,30 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
   }
 });
 
+// Workflow guard: pre-possession inspection only makes sense once the sales
+// deed is customer-approved (not merely Executed/Registered) — tightened to
+// match crmHandover.js's own gate exactly, since a physical pre-possession
+// inspection is downstream of both parties agreeing the deed is final, the
+// same threshold Handover already enforces.
 router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT TOP 1 CustomerApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!deed.recordset.length) {
+      return res.status(400).json({ error: "Pre-possession check requires the sales deed to be created first" });
+    }
+    if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Pre-possession check requires the customer to approve the sales deed first" });
+    }
+
     const result = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
       .input("sdt", sql.Date, b.ScheduledInspectionDate || null)
@@ -55,7 +75,10 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
-    await pool.request()
+    // Derive overall status once all four checks pass
+    const allChecked = [b.DuesClearedCheck, b.DocumentationCheck, b.QualityInspectionCheck, b.UtilityReadinessCheck]
+      .every((v) => v === true || v === undefined);
+    const result = await pool.request()
       .input("id",   sql.Int, id)
       .input("dues", sql.Bit, b.DuesClearedCheck ? 1 : (b.DuesClearedCheck === false ? 0 : null))
       .input("doc",  sql.Bit, b.DocumentationCheck ? 1 : (b.DocumentationCheck === false ? 0 : null))
@@ -77,9 +100,10 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
              AND ISNULL(@qc, QualityInspectionCheck) = 1 AND ISNULL(@util, UtilityReadinessCheck) = 1
             THEN 'Ready' ELSE Status END),
           Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.Status
         WHERE Id = @id
       `);
-    res.json({ success: true });
+    res.json({ success: true, status: result.recordset[0]?.Status });
   } catch (e) {
     console.error("[crm-pre-possession] PUT error:", e.message);
     res.status(500).json({ error: e.message });

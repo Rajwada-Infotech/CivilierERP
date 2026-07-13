@@ -10,6 +10,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -41,12 +42,82 @@ router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
   }
 });
 
-// POST / — request a NOC
+// GET /booking/:bookingId/context — everything the "Request NOC" dialog
+// needs the instant a booking is picked, so staff see the real gate
+// (Agreement must exist) and every field the form can be pre-filled from
+// *before* filling the form, instead of typing everything and only finding
+// out it's rejected on submit.
+router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+
+    const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.Id, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+             ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
+      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.Id = @bid
+    `);
+    if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    const existingNocs = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, NocNo, NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    // The customer's own bank account on file (KYC/Welcome Call) — not
+    // necessarily the same bank issuing their home loan, but the only bank
+    // reference the system actually has, so it's used to pre-fill the form
+    // (still freely editable, and labeled as such in the response).
+    const bankDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, AccountNo, IfscCode FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+
+    // Suggested loan amount: the balance still outstanding on the unit
+    // (GrandTotal minus whatever's already been paid) — a real, derivable
+    // number, not a guess, since a home loan is typically sized to cover
+    // exactly what's left to pay.
+    const paid = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+    const grandTotal = booking.recordset[0].GrandTotal;
+    const outstandingBalance = grandTotal != null ? Math.max(0, grandTotal - paid.recordset[0].TotalPaid) : null;
+
+    res.json({
+      booking: booking.recordset[0],
+      agreement: agreement.recordset[0] || null,
+      existingNocs: existingNocs.recordset,
+      customerBankDetail: bankDetail.recordset[0] || null,
+      outstandingBalance,
+    });
+  } catch (e) {
+    console.error("[crm-noc] GET /booking/:id/context error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST / — request a NOC. Gated on an Agreement existing for the booking —
+// deliberately not a stricter "Executed" gate: a Bank NOC (loan clearance/
+// disbursement condition) can legitimately need to be requested while the
+// agreement is still being finalized, unlike Org NOC which typically comes
+// later. Both need the transaction (the agreement) to exist to reference,
+// which is the one threshold true for both types without guessing at
+// exactly when each is supposed to fire.
 router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const agr = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (!agr.recordset.length) {
+      return res.status(400).json({ error: "NOC requires an agreement to exist for this booking first" });
+    }
+
     const nocType = NOC_TYPES.includes(b.NocType) ? b.NocType : "Organisation";
     const nocNo = await getNextDocNumber(pool, "NOC", "NOC");
 

@@ -146,10 +146,14 @@ const PaymentPlanMaster = lazy(
   () => import("./pages/followup/PaymentPlanMaster"),
 );
 const ParkingMaster = lazy(() => import("./pages/followup/ParkingMaster"));
+const ParkingSlotMaster = lazy(
+  () => import("./pages/followup/ParkingSlotMaster"),
+);
 const ExtraChargeMaster = lazy(
   () => import("./pages/followup/ExtraChargeMaster"),
 );
-const UnitMatrixPage = lazy(() => import("./pages/followup/UnitMatrix"));
+const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
+const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -311,11 +315,6 @@ const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
-const FollowupAgreements = lazy(() =>
-  import("./pages/followup/Agreements").then((module) => ({
-    default: module.AgreementsPage,
-  })),
-);
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
 const ApplicantTimeline = lazy(
   () => import("./pages/followup/ApplicantTimeline"),
@@ -365,9 +364,6 @@ const FinanceDemandsPage = lazy(() =>
     default: module.FinanceDemandsPage,
   })),
 );
-const AgreementWorkflowPage = lazy(
-  () => import("./pages/followup/AgreementWorkflow"),
-);
 const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
 const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
@@ -390,10 +386,12 @@ const SaCommissions = lazy(() => import("./pages/SalesAutomation/SaCommissions")
 const SaDistributionRules = lazy(() => import("./pages/SalesAutomation/SaDistributionRules"));
 const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
 // ── CRM Module ────────────────────────────────────────────────────────────────
+const CrmCustomers         = lazy(() => import("./pages/CRM/CrmCustomers"));
 const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
+const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
@@ -415,7 +413,15 @@ const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
 const CrmBrokerPayments    = lazy(() => import("./pages/CRM/CrmBrokerPayments"));
 const PortalLogin          = lazy(() => import("./pages/CrmCustomerPortal/PortalLogin"));
 const PortalChangePassword = lazy(() => import("./pages/CrmCustomerPortal/PortalChangePassword"));
-const PortalDashboard      = lazy(() => import("./pages/CrmCustomerPortal/PortalDashboard"));
+const PortalLayout         = lazy(() => import("./pages/CrmCustomerPortal/PortalLayout"));
+const PortalOverview       = lazy(() => import("./pages/CrmCustomerPortal/PortalOverview"));
+const PortalBooking        = lazy(() => import("./pages/CrmCustomerPortal/PortalBooking"));
+const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/PortalAgreement"));
+const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
+const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
+const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
+const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
+const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
 const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const ApplicantsPipelinePage = lazy(() =>
   import("./pages/followup/FollowupPipelinePage").then((module) => ({
@@ -632,9 +638,18 @@ function AppRoutes() {
   return (
     <Routes>
       {/* CRM CUSTOMER PORTAL — separate token-based auth, not the staff ERP session */}
-      <Route path="/crm-client-portal/login" element={<PortalLogin />} />
-      <Route path="/crm-client-portal/change-password" element={<PortalChangePassword />} />
-      <Route path="/crm-client-portal/dashboard" element={<PortalDashboard />} />
+      <Route path="/crm-client-portal/login" element={<Suspense fallback={<PageSkeleton />}><PortalLogin /></Suspense>} />
+      <Route path="/crm-client-portal/change-password" element={<Suspense fallback={<PageSkeleton />}><PortalChangePassword /></Suspense>} />
+      <Route path="/crm-client-portal" element={<Suspense fallback={<PageSkeleton />}><PortalLayout /></Suspense>}>
+        <Route path="dashboard" element={<PortalOverview />} />
+        <Route path="booking" element={<PortalBooking />} />
+        <Route path="agreement" element={<PortalAgreement />} />
+        <Route path="payments" element={<PortalPayments />} />
+        <Route path="construction" element={<PortalConstruction />} />
+        <Route path="tickets" element={<PortalTickets />} />
+        <Route path="activity" element={<PortalActivity />} />
+        <Route path="profile" element={<PortalProfile />} />
+      </Route>
 
       {/* AUTH */}
       <Route
@@ -978,18 +993,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/setup/extra-charge-master"
+        path="/followup/setup/parking-slot-master"
         element={
-          <ProtectedRoute pageKey="followup-extra-charge-master">
-            <ExtraChargeMaster />
+          <ProtectedRoute pageKey="followup-parking-slot-master">
+            <ParkingSlotMaster />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/followup/sales/unit-matrix"
+        path="/followup/setup/extra-charge-master"
         element={
-          <ProtectedRoute pageKey="followup-unit-matrix">
-            <UnitMatrixPage />
+          <ProtectedRoute pageKey="followup-extra-charge-master">
+            <ExtraChargeMaster />
           </ProtectedRoute>
         }
       />
@@ -1046,14 +1061,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-unit-selections">
             <FollowupUnitSelection />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/agreement/agreements"
-        element={
-          <ProtectedRoute pageKey="followup-agreements">
-            <FollowupAgreements />
           </ProtectedRoute>
         }
       />
@@ -1170,14 +1177,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/agreement/workflow"
-        element={
-          <ProtectedRoute pageKey="followup-agreements">
-            <AgreementWorkflowPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/followup/agreement/document-vault"
         element={
           <ProtectedRoute pageKey="followup-document-vault">
@@ -1210,10 +1209,12 @@ function AppRoutes() {
         }
       />
       {/* Note: FollowupPipelinePage also exports an "agreements" entity
-          (AgreementsPage) hitting the same /api/followup-agreements
-          endpoint as the bespoke page below. Intentionally not routed
-          here to avoid two divergent CRUD UIs against the same data —
-          /followup/agreement/agreements (Agreements.tsx) is canonical. */}
+          (AgreementsPage) hitting /api/followup-agreements — same table
+          the retired /followup/agreement/agreements page (Agreements.tsx)
+          and /followup/agreement/workflow page used. Both of those routes
+          were removed (0 live rows in either table, and CRM > Documents >
+          Agreements is the real, actively-developed Agreement system) —
+          not routing this embedded variant either, for the same reason. */}
 
       {/* MASTERS */}
       <Route
@@ -2216,11 +2217,12 @@ function AppRoutes() {
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
       <Route path="/sales-automation/role-master" element={<ProtectedRoute pageKey="sa-role-master"><SaRoleMaster /></ProtectedRoute>} />
       {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
+      <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
-      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreement /></ProtectedRoute>} />
+      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
@@ -2236,6 +2238,8 @@ function AppRoutes() {
       <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />
       <Route path="/crm/communication"         element={<ProtectedRoute pageKey="crm-communication"><CrmCommunication /></ProtectedRoute>} />
       <Route path="/crm/customer-bank-details" element={<ProtectedRoute pageKey="crm-customer-bank-details"><CrmCustomerBankDetails /></ProtectedRoute>} />
+      <Route path="/crm/unit-matrix"    element={<ProtectedRoute pageKey="crm-unit-matrix"><UnitMatrixPage /></ProtectedRoute>} />
+      <Route path="/crm/parking-matrix" element={<ProtectedRoute pageKey="crm-parking-matrix"><ParkingMatrixPage /></ProtectedRoute>} />
       <Route path="/crm/brokerage"             element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerage /></ProtectedRoute>} />
       <Route path="/crm/payment-plans"         element={<ProtectedRoute pageKey="crm-payment-plans"><CrmPaymentPlans /></ProtectedRoute>} />
       <Route path="/masters/brokers"           element={<ProtectedRoute pageKey="broker-master"><CrmBrokerMaster /></ProtectedRoute>} />

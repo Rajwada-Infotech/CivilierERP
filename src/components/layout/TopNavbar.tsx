@@ -336,10 +336,17 @@ const followupSetupItems = [
   },
   {
     icon: Car,
-    label: "Parking Master",
+    label: "Parking Rates",
     path: "/followup/setup/parking-master",
     color: "text-blue-500",
     pageKey: "followup-parking-master",
+  },
+  {
+    icon: Hash,
+    label: "Parking Slots",
+    path: "/followup/setup/parking-slot-master",
+    color: "text-sky-500",
+    pageKey: "followup-parking-slot-master",
   },
   {
     icon: PlusCircle,

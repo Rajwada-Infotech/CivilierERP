@@ -1,0 +1,225 @@
+import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { safeHtml } from "@/utils/escapeHtml";
+import { FollowupShell } from "@/components/followup/FollowupShell";
+import {
+  MasterPage,
+  type DataChangeEvent,
+  type RecordWithId,
+  type FieldDef,
+} from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+const API = "/api/parking-slot-master";
+const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
+
+async function fetchSlots(): Promise<any[]> {
+  const res = await fetchWithAuth(API);
+  if (!res.ok) throw new Error("Failed to fetch parking slots");
+  return res.json().catch(() => ({}));
+}
+async function fetchProjectOptions(): Promise<{ value: string; label: string }[]> {
+  const res = await fetchWithAuth("/api/unit-master/projects");
+  if (!res.ok) throw new Error("Failed to fetch projects");
+  const data: { Id: number; Name: string }[] = await res.json().catch(() => ({}));
+  return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+}
+
+// Real, individually numbered parking inventory — distinct from Parking
+// Master (which is only the pricing rate). This is what the Parking Matrix
+// renders and what a sale actually allots against.
+const fields: FieldDef[] = [
+  {
+    name: "projectId",
+    label: "Project",
+    type: "select",
+    required: true,
+    asyncOptions: fetchProjectOptions,
+  },
+  {
+    name: "blockId",
+    label: "Block",
+    type: "select",
+    optionsProvider: (_data, _currentId, form) => {
+      const blocks: { Id: number; Name: string; ProjectId: number }[] = (form?.__blocks as any) ?? [];
+      const selectedProject = form?.projectId as string | undefined;
+      return blocks
+        .filter((b) => (selectedProject ? String(b.ProjectId) === selectedProject : true))
+        .map((b) => ({ value: String(b.Id), label: b.Name }));
+    },
+  },
+  {
+    name: "slotNo",
+    label: "Slot No.",
+    type: "text",
+    required: true,
+  },
+  {
+    name: "parkingType",
+    label: "Parking Type",
+    type: "select",
+    required: true,
+    defaultValue: "Open",
+    options: PARKING_TYPES,
+  },
+  {
+    name: "isActive",
+    label: "Status",
+    type: "toggle",
+    defaultValue: true,
+  },
+];
+
+const columns = [
+  { key: "projectName", label: "Project" },
+  { key: "blockName", label: "Block" },
+  { key: "slotNo", label: "Slot No." },
+  { key: "parkingType", label: "Type" },
+  { key: "isActive", label: "Status" },
+];
+
+const exportColumns: ExportColumn[] = [
+  { header: "Project", accessor: "projectName" },
+  { header: "Block", accessor: "blockName" },
+  { header: "Slot No.", accessor: "slotNo" },
+  { header: "Type", accessor: "parkingType" },
+  { header: "Status", accessor: "isActive" },
+];
+
+const ParkingSlotMaster: React.FC = () => {
+  const queryClient = useQueryClient();
+
+  const { data: slots, isLoading, error } = useQuery({
+    queryKey: ["parking-slot-master"],
+    queryFn: fetchSlots,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: allBlocks = [] } = useQuery<{ Id: number; Name: string; ProjectId: number }[]>({
+    queryKey: ["parking-slot-master-blocks"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/unit-master/blocks");
+      if (!res.ok) throw new Error("Failed to fetch blocks");
+      return res.json().catch(() => ({}));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const mappedData: RecordWithId[] = React.useMemo(() => {
+    if (!Array.isArray(slots)) return [];
+    return slots.map((item) => ({
+      _id: String(item.Id),
+      projectId: String(item.ProjectId),
+      projectName: item.ProjectName ?? "",
+      blockId: item.BlockId ? String(item.BlockId) : "",
+      blockName: item.BlockName ?? "",
+      slotNo: item.SlotNo ?? "",
+      parkingType: item.ParkingType ?? "Open",
+      isActive: Boolean(item.IsActive),
+    }));
+  }, [slots]);
+
+  const blocksPatch = React.useMemo(() => ({ __blocks: allBlocks }), [allBlocks]);
+
+  const toPayload = (r: Record<string, any>) => ({
+    ProjectId: parseInt(r.projectId),
+    BlockId: r.blockId ? parseInt(r.blockId) : null,
+    SlotNo: r.slotNo?.trim() || null,
+    ParkingType: r.parkingType || "Open",
+    IsActive: r.isActive !== false,
+  });
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "add") {
+        const res = await fetchWithAuth(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toPayload(event.record)),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking slot");
+        toast.success("Parking slot added!");
+      }
+      if (event.action === "update") {
+        const res = await fetchWithAuth(`${API}/${event.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toPayload(event.record)),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking slot");
+        toast.success("Parking slot updated!");
+      }
+      if (event.action === "delete") {
+        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking slot");
+        toast.success("Parking slot deleted!");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["parking-slot-master"] });
+    } catch (err: any) {
+      toast.error(err.message || "Operation failed");
+    }
+  };
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading parking slots...</div>;
+  if (error) return <div className="p-6 text-red-500">Failed to load parking slots.</div>;
+
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Parking Slot Master"]} />
+      <FollowupShell title="Parking Slot Master">
+        <MasterPage
+          title="Parking Slot"
+          fields={fields}
+          columns={columns}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          externalFormPatch={blocksPatch}
+          externalFormPatchKey={allBlocks.length}
+          onFieldChange={(form, fieldName) => {
+            if (fieldName === "projectId") {
+              return { ...form, blockId: "" };
+            }
+            return form;
+          }}
+          exportConfig={{
+            title: "Parking Slot Master",
+            filename: "parking-slot-master",
+            columns: exportColumns,
+          }}
+          viewConfig={{
+            title: "Parking Slot Details",
+            fields: [
+              { key: "projectName", label: "Project" },
+              { key: "blockName", label: "Block" },
+              { key: "slotNo", label: "Slot No." },
+              { key: "parkingType", label: "Type" },
+              { key: "isActive", label: "Status" },
+            ],
+          }}
+          onPrint={(row) => {
+            const win = window.open("", "_blank", "width=600,height=400");
+            if (!win) return;
+            win.document.write(safeHtml`
+              <html><head><title>Parking Slot — ${row.slotNo}</title>
+              <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+              </head><body><h2>Parking Slot</h2><table>
+                <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+                <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
+                <tr><td>Slot No.</td><td>${row.slotNo || "—"}</td></tr>
+                <tr><td>Type</td><td>${row.parkingType || "—"}</td></tr>
+                <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+              </table></body></html>
+            `);
+            win.document.close();
+            win.print();
+          }}
+        />
+      </FollowupShell>
+    </>
+  );
+};
+
+export default ParkingSlotMaster;

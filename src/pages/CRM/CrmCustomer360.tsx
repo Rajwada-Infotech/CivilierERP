@@ -96,6 +96,16 @@ const CrmCustomer360: React.FC = () => {
                     <div><span className="text-muted-foreground">Balance: </span><span className="text-orange-600 font-medium">{fmt((b.TotalDue || 0) - (b.TotalPaid || 0))}</span></div>
                     <div><span className="text-muted-foreground">Agreement: </span>{b.AgreementStatus || "—"}</div>
                     <div><span className="text-muted-foreground">Handover: </span>{b.HandoverStatus || "—"}</div>
+                    <div><span className="text-muted-foreground">Legal: </span>{b.LegalMilestoneStatus || "—"}</div>
+                    <div><span className="text-muted-foreground">Pre-Possession: </span>{b.PrePossessionStatus || "—"}</div>
+                    {b.NocTotalCount > 0 && (
+                      <div>
+                        <span className="text-muted-foreground">NOC: </span>
+                        <span className={b.NocPendingCount > 0 ? "text-orange-600 font-medium" : "text-green-600 font-medium"}>
+                          {b.NocTotalCount - b.NocPendingCount}/{b.NocTotalCount} issued
+                        </span>
+                      </div>
+                    )}
                     {b.HasCancellation > 0 && <div className="text-red-600 font-medium">Cancellation pending</div>}
                   </div>
                 </div>
