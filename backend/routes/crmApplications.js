@@ -34,7 +34,22 @@ const APP_SELECT = `
     plat.Name AS PlatformName, camp.Name AS CampaignName, ad.Name AS AdName,
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
-    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName
+    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
+    bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.BookingDate,
+    -- Stage drives the Converted/In Process/Not Converted split every
+    -- Applications view now works from: once ANY booking has ever been
+    -- created for this application, it's Converted for good (even if that
+    -- booking later gets cancelled — the conversion event itself already
+    -- happened and a fresh booking attempt belongs on a fresh application,
+    -- matching the linear APPLICATION -> BOOKING step in the workflow spec).
+    -- Dead-end applications (Rejected/Cancelled, never booked) are Not
+    -- Converted; everything else still moving is In Process.
+    CASE
+      WHEN bk.Id IS NOT NULL THEN 'Converted'
+      WHEN a.Status IN ('Rejected', 'Cancelled') THEN 'NotConverted'
+      ELSE 'InProcess'
+    END AS Stage
   FROM dbo.CrmApplication a
   LEFT JOIN dbo.Users u   ON u.id  = a.AssignedTo
   LEFT JOIN dbo.Users cu  ON cu.id = a.CreatedBy
@@ -47,13 +62,26 @@ const APP_SELECT = `
   LEFT JOIN dbo.enterprise proj ON proj.id = a.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.enterprise comp ON comp.id = a.CompanyId AND comp.business_type = 'C'
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
+  OUTER APPLY (
+    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, BookingDate
+    FROM dbo.CrmBooking
+    WHERE ApplicationId = a.Id
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected') THEN 0 ELSE 1 END, CreatedAt DESC
+  ) bk
 `;
 
-// GET / — all applications
+// GET / — all applications. By default, Converted applications (one that
+// already has a booking) are excluded — every "select an application"
+// dropdown across the CRM (new Booking, Unit/Parking Matrix hold
+// assignment, Communication Log) calls this with no params and previously
+// kept offering already-converted applications as if they still needed
+// booking. The Applications management page itself passes
+// ?includeConverted=1 (or an explicit ?stage=/?status=) to see everything,
+// which is how its own Converted/In Process/Not Converted tabs work.
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
+    const { status, search, stage, includeConverted } = req.query;
     const req0 = pool.request();
     const conds = ["a.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
@@ -63,7 +91,13 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     }
     const where = "WHERE " + conds.join(" AND ");
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
-    res.json(result.recordset);
+    let rows = result.recordset;
+    if (stage) {
+      rows = rows.filter((r) => r.Stage === stage);
+    } else if (!status && !includeConverted) {
+      rows = rows.filter((r) => r.Stage !== "Converted");
+    }
+    res.json(rows);
   } catch (e) {
     console.error("[crm-applications] GET error:", e.message);
     res.status(500).json({ error: e.message });

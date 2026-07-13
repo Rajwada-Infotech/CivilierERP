@@ -1,13 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  Plus, Phone, Mail, MessageSquare, MapPin, FileText, X, Search, ChevronRight,
+  Plus, Phone, Mail, MessageSquare, MapPin, FileText, X, Search,
   Trash2, Cog, MessageCircle, Copy, PhoneCall, ArrowDownLeft, ArrowUpRight,
   Clock, History, Building2, User, Target, IndianRupee, UserCheck, CalendarClock,
+  Send, Pencil,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -34,6 +35,26 @@ function initials(name: string | null | undefined) {
 function fmtDateTime(v: string | null | undefined) {
   if (!v) return "—";
   return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtTime(v: string | null | undefined) {
+  if (!v) return "—";
+  return new Date(v).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+function fmtRelative(v: string | null | undefined) {
+  if (!v) return "—";
+  const d = new Date(v), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return fmtTime(v);
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+function dayLabel(v: string) {
+  const d = new Date(v), now = new Date();
+  if (d.toDateString() === now.toDateString()) return "Today";
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 async function fetchAll(): Promise<any[]> {
@@ -97,36 +118,39 @@ function CallDialog({ applicantName, mobile, onClose }: { applicantName: string;
 // Optionally reports which channel was used back to the caller so the log
 // form can reflect it automatically.
 function ContactActionBar({
-  applicantName, mobile, email, onUsed,
-}: { applicantName: string; mobile: string | null; email: string | null; onUsed?: (channel: string) => void }) {
+  applicantName, mobile, email, onUsed, compact,
+}: { applicantName: string; mobile: string | null; email: string | null; onUsed?: (channel: string) => void; compact?: boolean }) {
   const [calling, setCalling] = useState(false);
   if (!mobile && !email) return null;
+  const btnCls = compact
+    ? "flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border font-medium"
+    : "flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium";
 
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
         {mobile && (
           <button onClick={() => { setCalling(true); onUsed?.("Call"); }}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100">
-            <Phone size={13} /> Call
+            className={`${btnCls} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}>
+            <Phone size={compact ? 11 : 13} /> Call
           </button>
         )}
         {mobile && (
           <a href={`sms:${mobile}`} onClick={() => onUsed?.("SMS")}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100">
-            <MessageSquare size={13} /> SMS
+            className={`${btnCls} border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100`}>
+            <MessageSquare size={compact ? 11 : 13} /> SMS
           </a>
         )}
         {mobile && (
           <a href={`https://wa.me/${toWhatsAppNumber(mobile)}`} target="_blank" rel="noreferrer" onClick={() => onUsed?.("WhatsApp")}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-green-200 bg-green-50 text-green-700 font-medium hover:bg-green-100">
-            <MessageCircle size={13} /> WhatsApp
+            className={`${btnCls} border-green-200 bg-green-50 text-green-700 hover:bg-green-100`}>
+            <MessageCircle size={compact ? 11 : 13} /> WhatsApp
           </a>
         )}
         {email && (
           <a href={`mailto:${email}`} onClick={() => onUsed?.("Email")}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 font-medium hover:bg-violet-100">
-            <Mail size={13} /> Email
+            className={`${btnCls} border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100`}>
+            <Mail size={compact ? 11 : 13} /> Email
           </a>
         )}
       </div>
@@ -136,7 +160,7 @@ function ContactActionBar({
 }
 
 // Shared form body used by both the "Log Communication" create dialog and
-// the edit dialog opened when a log entry is clicked.
+// the edit dialog opened when a message bubble is clicked.
 function LogForm({
   form, setForm, apps, bookings, lockLinkage,
 }: {
@@ -200,10 +224,9 @@ function LogForm({
   );
 }
 
-// Click any logged touchpoint -> reach out directly (call/SMS/WhatsApp/
-// email), edit its details in place, or remove it entirely. Also surfaces
-// the related booking and the customer's most recent other interactions so
-// staff have real context instead of an isolated, disconnected form.
+// Click any message bubble -> reach out directly (call/SMS/WhatsApp/email),
+// edit its details in place, or remove it entirely. Also surfaces the
+// related application/booking and engagement stats for real context.
 function EditLogDialog({
   log, apps, bookings, allLogs, onClose, onSaved,
 }: { log: any; apps: any[]; bookings: any[]; allLogs: any[]; onClose: () => void; onSaved: () => void }) {
@@ -228,9 +251,6 @@ function EditLogDialog({
     [apps, log.ApplicationId]
   );
 
-  // Every other touchpoint with this same customer — a real running timeline,
-  // not just a "recent few" teaser, so the full contact history is visible
-  // without leaving this dialog.
   const customerHistory = useMemo(() => {
     const key = log.ApplicationId || null;
     if (!key) return [];
@@ -300,9 +320,7 @@ function EditLogDialog({
         </DialogHeader>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* ══════════════ LEFT: Customer, Application, Booking, Stats ══════════════ */}
           <div className="space-y-4">
-            {/* ── Customer identity + direct contact actions ── */}
             <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -329,7 +347,6 @@ function EditLogDialog({
               />
             </div>
 
-            {/* ── Full applicant profile ── */}
             {relatedApplication && (
               <div className="rounded-xl border border-border p-3.5">
                 <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><User size={13} /> Applicant Profile</h3>
@@ -346,7 +363,6 @@ function EditLogDialog({
               </div>
             )}
 
-            {/* ── Related booking ── */}
             {relatedBooking && (
               <div className="rounded-xl border border-border p-3.5">
                 <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Building2 size={13} /> Related Booking</h3>
@@ -361,7 +377,6 @@ function EditLogDialog({
               </div>
             )}
 
-            {/* ── Engagement stats ── */}
             {historyStats && (
               <div className="rounded-xl border border-border p-3.5">
                 <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><CalendarClock size={13} /> Engagement Summary</h3>
@@ -374,15 +389,12 @@ function EditLogDialog({
             )}
           </div>
 
-          {/* ══════════════ RIGHT: Full interaction timeline + edit form ══════════════ */}
           <div className="space-y-4">
-            {/* ── Full interaction timeline ── */}
             <div className="rounded-xl border border-border p-3.5">
               <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2">
                 <History size={13} /> Interaction Timeline {customerHistory.length > 0 && `(${customerHistory.length} other${customerHistory.length === 1 ? "" : "s"})`}
               </h3>
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {/* current entry, pinned at top */}
                 <div className="flex items-start gap-2 text-xs bg-primary/5 border border-primary/20 rounded-lg p-2">
                   {(() => { const CIcon = channelIcon[log.Channel] || MessageSquare; return <span className={`p-1 rounded-full shrink-0 ${channelStyle[log.Channel] || "bg-muted"}`}><CIcon size={11} /></span>; })()}
                   <div className="min-w-0 flex-1">
@@ -424,7 +436,6 @@ function EditLogDialog({
               <LogForm form={form} setForm={setForm} apps={apps} bookings={bookings} lockLinkage />
             </div>
 
-            {/* ── Metadata ── */}
             <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 px-1">
               <Clock size={11} /> Logged by <span className="font-medium">{log.CreatedByName || (log.Channel === "System" ? "System" : "—")}</span> on {fmtDateTime(log.CreatedAt)}
             </div>
@@ -449,6 +460,45 @@ function EditLogDialog({
   );
 }
 
+// One chat bubble in the thread. System entries (auto-logged workflow
+// events like "agreement sent", "date proposed") render as centered pills,
+// matching how messaging apps show system notices — everything else is a
+// real bubble, right-aligned for Outbound (us -> customer), left-aligned
+// for Inbound (customer -> us).
+function MessageBubble({ log, onClick }: { log: any; onClick: () => void }) {
+  const Icon = channelIcon[log.Channel] || MessageSquare;
+  if (log.Channel === "System") {
+    return (
+      <button onClick={onClick} className="w-full flex justify-center py-1">
+        <span className="flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-full bg-muted text-muted-foreground hover:bg-muted/70 max-w-[85%] truncate">
+          <Cog size={10} className="shrink-0" /> {log.Summary || log.Subject || "System event"} · {fmtTime(log.ContactedAt)}
+        </span>
+      </button>
+    );
+  }
+  const isOutbound = log.Direction !== "Inbound";
+  return (
+    <div className={`flex ${isOutbound ? "justify-end" : "justify-start"} px-1`}>
+      <button onClick={onClick}
+        className={`group max-w-[78%] text-left rounded-2xl px-3.5 py-2 shadow-sm transition-colors ${
+          isOutbound
+            ? "bg-primary text-primary-foreground rounded-br-sm hover:bg-primary/90"
+            : "bg-muted text-foreground rounded-bl-sm hover:bg-muted/70"
+        }`}>
+        <div className={`flex items-center gap-1.5 text-[10px] mb-0.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+          <Icon size={10} /> {log.Channel}
+        </div>
+        {log.Subject && <div className="text-sm font-medium leading-snug">{log.Subject}</div>}
+        {log.Summary && <div className="text-sm leading-snug whitespace-pre-wrap">{log.Summary}</div>}
+        <div className={`flex items-center justify-end gap-1 text-[10px] mt-1 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+          {fmtTime(log.ContactedAt)}
+          <Pencil size={9} className="opacity-0 group-hover:opacity-70 transition-opacity" />
+        </div>
+      </button>
+    </div>
+  );
+}
+
 const CrmCommunication: React.FC = () => {
   const qc = useQueryClient();
   const [sp, setSp] = useSearchParams();
@@ -457,9 +507,11 @@ const CrmCommunication: React.FC = () => {
   const [editingLog, setEditingLog] = useState<any | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM, BookingId: bkgFilter });
   const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
-  const [channelFilter, setChannelFilter] = useState("");
-  const [directionFilter, setDirectionFilter] = useState("");
+  const [threadSearch, setThreadSearch] = useState("");
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [composer, setComposer] = useState({ Channel: "Call", Direction: "Outbound", Text: "" });
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: logs = [], isLoading } = useQuery({ queryKey: ["crm-communication"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -470,37 +522,78 @@ const CrmCommunication: React.FC = () => {
     [bookings, bkgFilter]
   );
 
-  // Resolve the customer behind whatever the create-dialog form currently
-  // has selected, so the quick-contact bar works there too, before anything
-  // has even been logged yet.
-  const selectedContact = useMemo(() => {
-    if (form.BookingId) {
-      const b = (bookings as any[]).find((x) => String(x.Id) === form.BookingId);
-      if (b) return { name: b.ApplicantName, mobile: b.Mobile || null, email: b.Email || null };
-    }
-    if (form.ApplicationId) {
-      const a = (apps as any[]).find((x) => String(x.Id) === form.ApplicationId);
-      if (a) return { name: a.ApplicantName, mobile: a.Mobile || null, email: a.Email || null };
-    }
-    return null;
-  }, [form.ApplicationId, form.BookingId, apps, bookings]);
+  // A booking's own ApplicationId (from the bookings list) is used to fold
+  // a log entry that only carries BookingId into the same customer thread
+  // as one carrying ApplicationId directly — otherwise the same person's
+  // conversation could fork into two separate threads.
+  const bookingAppId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const b of bookings as any[]) if (b.ApplicationId) map.set(b.Id, b.ApplicationId);
+    return map;
+  }, [bookings]);
 
-  const filteredLogs = useMemo(() => {
-    let rows = logs as any[];
+  // Group every log entry into one conversation per real-world customer —
+  // the messaging-app "contact list" this page was missing.
+  const conversations = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const log of logs as any[]) {
+      const resolvedAppId = log.ApplicationId || (log.BookingId ? bookingAppId.get(log.BookingId) : null) || null;
+      const key = resolvedAppId ? `app-${resolvedAppId}` : log.BookingId ? `bkg-${log.BookingId}` : `log-${log.Id}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key, ApplicationId: resolvedAppId, BookingId: log.BookingId,
+          ApplicantName: log.ApplicantName, Mobile: log.Mobile, Email: log.Email,
+          BookingNo: log.BookingNo, logs: [],
+        });
+      }
+      const convo = map.get(key);
+      convo.logs.push(log);
+      // Prefer the richest identity info seen across all logs in the thread.
+      if (!convo.Mobile && log.Mobile) convo.Mobile = log.Mobile;
+      if (!convo.Email && log.Email) convo.Email = log.Email;
+      if (!convo.BookingId && log.BookingId) convo.BookingId = log.BookingId;
+      if (!convo.BookingNo && log.BookingNo) convo.BookingNo = log.BookingNo;
+    }
+    return Array.from(map.values())
+      .map((c) => ({
+        ...c,
+        logs: c.logs.slice().sort((a: any, b: any) => new Date(a.ContactedAt).getTime() - new Date(b.ContactedAt).getTime()),
+      }))
+      .sort((a, b) => {
+        const la = a.logs[a.logs.length - 1]?.ContactedAt, lb = b.logs[b.logs.length - 1]?.ContactedAt;
+        return new Date(lb || 0).getTime() - new Date(la || 0).getTime();
+      });
+  }, [logs, bookingAppId]);
+
+  const filteredConversations = useMemo(() => {
+    let rows = conversations;
     if (bkgFilter) rows = rows.filter((c) => String(c.BookingId) === bkgFilter);
-    if (channelFilter) rows = rows.filter((c) => c.Channel === channelFilter);
-    if (directionFilter) rows = rows.filter((c) => c.Direction === directionFilter);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    if (threadSearch.trim()) {
+      const q = threadSearch.trim().toLowerCase();
       rows = rows.filter((c) =>
         c.ApplicantName?.toLowerCase().includes(q) ||
         c.BookingNo?.toLowerCase().includes(q) ||
-        c.Subject?.toLowerCase().includes(q) ||
-        c.Summary?.toLowerCase().includes(q)
+        c.Mobile?.includes(q)
       );
     }
     return rows;
-  }, [logs, bkgFilter, channelFilter, directionFilter, search]);
+  }, [conversations, bkgFilter, threadSearch]);
+
+  // Auto-select the most recent conversation (or the booking-filtered one)
+  // so the page never opens on an empty "pick something" state.
+  useEffect(() => {
+    if (activeKey && filteredConversations.some((c) => c.key === activeKey)) return;
+    setActiveKey(filteredConversations[0]?.key || null);
+  }, [filteredConversations, activeKey]);
+
+  const activeConvo = useMemo(() =>
+    filteredConversations.find((c) => c.key === activeKey) || null,
+    [filteredConversations, activeKey]
+  );
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [activeConvo?.logs?.length, activeKey]);
 
   const stats = useMemo(() => {
     const rows = logs as any[];
@@ -530,8 +623,10 @@ const CrmCommunication: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Communication logged");
       setDialogOpen(false);
+      const newKey = form.ApplicationId ? `app-${form.ApplicationId}` : form.BookingId ? `bkg-${form.BookingId}` : null;
       setForm({ ...EMPTY_FORM, BookingId: bkgFilter });
-      qc.invalidateQueries({ queryKey: ["crm-communication"] });
+      await qc.invalidateQueries({ queryKey: ["crm-communication"] });
+      if (newKey) setActiveKey(newKey);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -539,14 +634,73 @@ const CrmCommunication: React.FC = () => {
     }
   };
 
+  // Quick-send composer at the bottom of the active thread — the fast path
+  // for logging a touchpoint without opening the full dialog, like typing a
+  // message in a chat app instead of filling out a form every time.
+  const handleQuickSend = async () => {
+    if (!activeConvo || !composer.Text.trim()) return;
+    setSending(true);
+    try {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ApplicationId: activeConvo.ApplicationId || null,
+          BookingId: activeConvo.BookingId || null,
+          Channel: composer.Channel,
+          Direction: composer.Direction,
+          Summary: composer.Text.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setComposer((c) => ({ ...c, Text: "" }));
+      qc.invalidateQueries({ queryKey: ["crm-communication"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const selectedContact = useMemo(() => {
+    if (form.BookingId) {
+      const b = (bookings as any[]).find((x) => String(x.Id) === form.BookingId);
+      if (b) return { name: b.ApplicantName, mobile: b.Mobile || null, email: b.Email || null };
+    }
+    if (form.ApplicationId) {
+      const a = (apps as any[]).find((x) => String(x.Id) === form.ApplicationId);
+      if (a) return { name: a.ApplicantName, mobile: a.Mobile || null, email: a.Email || null };
+    }
+    return null;
+  }, [form.ApplicationId, form.BookingId, apps, bookings]);
+
+  const relatedApp = useMemo(() =>
+    activeConvo?.ApplicationId ? (apps as any[]).find((a) => a.Id === activeConvo.ApplicationId) : null,
+    [apps, activeConvo]
+  );
+
+  // Group the active thread's messages into day buckets, like a real chat
+  // app's date dividers.
+  const dayGroups = useMemo(() => {
+    if (!activeConvo) return [];
+    const groups: { label: string; items: any[] }[] = [];
+    for (const log of activeConvo.logs) {
+      const label = dayLabel(log.ContactedAt);
+      const last = groups[groups.length - 1];
+      if (last && last.label === label) last.items.push(log);
+      else groups.push({ label, items: [log] });
+    }
+    return groups;
+  }, [activeConvo]);
+
   return (
     <SalesAutoShell
       title="CRM — Communication Log"
-      subtitle={filterBooking ? `Showing only ${filterBooking.BookingNo} — ${filterBooking.ApplicantName}` : "Every touchpoint with a buyer, in one timeline"}
+      subtitle={filterBooking ? `Showing only ${filterBooking.BookingNo} — ${filterBooking.ApplicantName}` : "Every touchpoint with a buyer, in one place"}
       action={
         <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Log Communication
+          <Plus size={14} /> New Conversation
         </button>
       }
     >
@@ -578,64 +732,135 @@ const CrmCommunication: React.FC = () => {
         ))}
       </div>
 
-      <div className="flex gap-3 items-center flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by customer, booking, subject..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-          <option value="">All Channels</option>
-          {CHANNELS.map((c) => <option key={c}>{c}</option>)}
-        </select>
-        <select value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-          <option value="">All Directions</option>
-          {DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
-        </select>
-      </div>
+      {/* ── Messaging-app two-pane layout ── */}
+      <div className="rounded-xl border border-border overflow-hidden bg-card" style={{ height: "min(680px, 75vh)" }}>
+        <div className="flex h-full">
+          {/* ══ LEFT: conversation list ══ */}
+          <div className="w-[300px] shrink-0 border-r border-border flex flex-col">
+            <div className="p-2.5 border-b border-border">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input value={threadSearch} onChange={(e) => setThreadSearch(e.target.value)}
+                  placeholder="Search conversations..."
+                  className="w-full pl-7 pr-2 py-1.5 text-xs border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {isLoading ? (
+                <div className="p-4 text-center text-muted-foreground text-xs">Loading...</div>
+              ) : filteredConversations.length === 0 ? (
+                <div className="p-4 text-center text-muted-foreground text-xs">No conversations yet</div>
+              ) : filteredConversations.map((c) => {
+                const last = c.logs[c.logs.length - 1];
+                const LastIcon = channelIcon[last?.Channel] || MessageSquare;
+                const isActive = c.key === activeKey;
+                return (
+                  <button key={c.key} onClick={() => setActiveKey(c.key)}
+                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 border-b border-border/60 transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted/30"}`}>
+                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                      {initials(c.ApplicantName)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>{c.ApplicantName || c.BookingNo || "Unknown"}</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{fmtRelative(last?.ContactedAt)}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[11px] text-muted-foreground truncate mt-0.5">
+                        <LastIcon size={10} className="shrink-0" />
+                        <span className="truncate">{last?.Summary || last?.Subject || last?.Channel}</span>
+                      </div>
+                    </div>
+                    {c.logs.length > 1 && (
+                      <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground mt-0.5">{c.logs.length}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      <div className="space-y-2">
-        {isLoading ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-        ) : filteredLogs.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">No communications logged</div>
-        ) : (filteredLogs as any[]).map((c: any) => {
-          const Icon = channelIcon[c.Channel] || MessageSquare;
-          const booking = c.BookingId ? (bookings as any[]).find((b) => b.Id === c.BookingId) : null;
-          return (
-            <button
-              key={c.Id}
-              onClick={() => setEditingLog(c)}
-              className="w-full text-left rounded-lg border border-border p-3 flex items-start gap-3 hover:bg-muted/10 hover:border-primary/40 transition-colors cursor-pointer"
-            >
-              <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
-                {initials(c.ApplicantName)}
+          {/* ══ RIGHT: active thread ══ */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {!activeConvo ? (
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                Select a conversation, or start a new one
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium truncate">{c.ApplicantName || c.BookingNo || "—"}</span>
-                    <span className={`shrink-0 p-1 rounded-full ${channelStyle[c.Channel] || "bg-muted text-muted-foreground"}`}><Icon size={11} /></span>
-                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5 ${c.Direction === "Inbound" ? "bg-sky-500/10 text-sky-600" : "bg-orange-500/10 text-orange-600"}`}>
-                      {c.Direction === "Inbound" ? <ArrowDownLeft size={9} /> : <ArrowUpRight size={9} />} {c.Direction || "—"}
-                    </span>
+            ) : (
+              <>
+                {/* thread header */}
+                <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                      {initials(activeConvo.ApplicantName)}
+                    </div>
+                    <div className="min-w-0">
+                      <button onClick={() => setEditingLog(activeConvo.logs[activeConvo.logs.length - 1])}
+                        className="text-sm font-semibold text-foreground truncate hover:underline block">
+                        {activeConvo.ApplicantName || "Unknown"}
+                      </button>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {activeConvo.Mobile || "No mobile"}{activeConvo.BookingNo ? ` · ${activeConvo.BookingNo}` : ""}{relatedApp?.Status ? ` · ${relatedApp.Status}` : ""}
+                      </div>
+                    </div>
                   </div>
-                  <span className="text-xs text-muted-foreground shrink-0">{fmtDateTime(c.ContactedAt)}</span>
+                  <ContactActionBar
+                    applicantName={activeConvo.ApplicantName || "Customer"}
+                    mobile={activeConvo.Mobile || null}
+                    email={activeConvo.Email || null}
+                    onUsed={(channel) => setComposer((c) => ({ ...c, Channel: channel }))}
+                    compact
+                  />
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {c.Channel}{c.Subject ? ` · ${c.Subject}` : ""}
-                  {booking && ` · ${booking.ProjectName || ""}${booking.UnitNo ? ` (${booking.UnitNo})` : ""}`}
+
+                {/* messages */}
+                <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3 bg-muted/5">
+                  {dayGroups.map((g) => (
+                    <div key={g.label} className="space-y-2">
+                      <div className="flex justify-center">
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-muted text-muted-foreground">{g.label}</span>
+                      </div>
+                      {g.items.map((log) => (
+                        <MessageBubble key={log.Id} log={log} onClick={() => setEditingLog(log)} />
+                      ))}
+                    </div>
+                  ))}
                 </div>
-                {c.Summary && <p className="text-sm mt-1 truncate">{c.Summary}</p>}
-                <div className="text-xs text-muted-foreground mt-1">By {c.CreatedByName || (c.Channel === "System" ? "System" : "—")}</div>
-              </div>
-              <ChevronRight size={14} className="text-muted-foreground shrink-0 mt-2" />
-            </button>
-          );
-        })}
+
+                {/* quick-send composer */}
+                <div className="border-t border-border p-2.5 shrink-0 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <select value={composer.Channel} onChange={(e) => setComposer((c) => ({ ...c, Channel: e.target.value }))}
+                      className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
+                      {CHANNELS.map((ch) => <option key={ch}>{ch}</option>)}
+                    </select>
+                    <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+                      {DIRECTIONS.map((d) => (
+                        <button key={d} onClick={() => setComposer((c) => ({ ...c, Direction: d }))}
+                          className={`px-2 py-1.5 font-medium ${composer.Direction === d ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}>
+                          {d === "Inbound" ? <ArrowDownLeft size={11} /> : <ArrowUpRight size={11} />}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => setDialogOpen(true)}
+                      className="ml-auto text-[11px] text-muted-foreground hover:text-primary flex items-center gap-1">
+                      <FileText size={11} /> Full form
+                    </button>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <textarea value={composer.Text} onChange={(e) => setComposer((c) => ({ ...c, Text: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleQuickSend(); } }}
+                      placeholder={`Log a ${composer.Channel.toLowerCase()} touchpoint...`}
+                      rows={1} className="flex-1 text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none max-h-24" />
+                    <button onClick={handleQuickSend} disabled={sending || !composer.Text.trim()}
+                      className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                      <Send size={15} />
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); } }}>
