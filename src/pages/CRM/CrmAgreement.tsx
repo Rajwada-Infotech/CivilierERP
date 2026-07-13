@@ -1,18 +1,19 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/agreements";
 const BKG_API = "/api/crm/bookings";
 
 const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
-const DOC_STATUSES = ["Pending", "Uploaded", "Verified", "Rejected"];
+const DOC_STATUSES = ["Pending", "Requested", "Uploaded", "Submitted", "Verified", "Rejected"];
 
 const agrStatusColor: Record<string, string> = {
   Draft:      "text-muted-foreground bg-muted/50 border-border",
@@ -21,18 +22,81 @@ const agrStatusColor: Record<string, string> = {
   Cancelled:  "text-red-600 bg-red-50 border-red-200",
 };
 const docStatusColor: Record<string, string> = {
-  Pending:  "text-orange-600 bg-orange-50 border-orange-200",
-  Uploaded: "text-blue-600 bg-blue-50 border-blue-200",
-  Verified: "text-green-600 bg-green-50 border-green-200",
-  Rejected: "text-red-600 bg-red-50 border-red-200",
+  Pending:   "text-orange-600 bg-orange-50 border-orange-200",
+  Requested: "text-amber-600 bg-amber-50 border-amber-200",
+  Uploaded:  "text-blue-600 bg-blue-50 border-blue-200",
+  Submitted: "text-blue-600 bg-blue-50 border-blue-200",
+  Verified:  "text-green-600 bg-green-50 border-green-200",
+  Rejected:  "text-red-600 bg-red-50 border-red-200",
 };
 
 const EMPTY_AGR_FORM = {
-  BookingId: "", AgreementDate: "", LegalName: "", LegalAddress: "",
+  BookingId: "", LegalName: "", LegalAddress: "",
   PanNo: "", AadhaarNo: "", Notes: "",
 };
 const EMPTY_DOC_FORM = {
-  DocumentType: "SaleAgreement", DocumentUrl: "", FileName: "", IssuedBy: "", Remarks: "",
+  DocumentType: "SaleAgreement", DocumentUrl: "", IssuedBy: "", Remarks: "",
+};
+const EMPTY_DOC_REQUEST_FORM = {
+  DocumentType: "IdentityProof", Label: "", IsMandatory: true,
+};
+
+function mimeIcon(mime: string | null | undefined) {
+  if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
+  if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
+  if (mime === "application/pdf") return <FileText size={16} className="text-red-500 shrink-0" />;
+  if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={16} className="text-emerald-500 shrink-0" />;
+  return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
+}
+function fmtBytes(n: number | null | undefined) {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Preview dialog for a single uploaded agreement document.
+const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    fetchWithAuth(`${API}/documents/file/${doc.Id}`)
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch(() => setBlobUrl(null));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [doc.Id]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-heading flex items-center gap-2">
+            {mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/30 rounded-lg overflow-hidden">
+          {!blobUrl ? (
+            <span className="text-sm text-muted-foreground">Loading preview…</span>
+          ) : doc.MimeType?.startsWith("image/") ? (
+            <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
+          ) : doc.MimeType === "application/pdf" ? (
+            <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
+              {mimeIcon(doc.MimeType)}
+              Preview not available for this file type.
+            </div>
+          )}
+        </div>
+        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
+          <span>{fmtBytes(doc.FileSize)}</span>
+          {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline">Download</a>}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 };
 
 async function fetchAgreements(): Promise<any[]> {
@@ -43,20 +107,39 @@ async function fetchAgreementDetail(id: number): Promise<any> {
   if (!r.ok) throw new Error("Failed to load agreement");
   return r.json();
 }
+async function fetchDateHistory(id: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/${id}/date-history`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchRevisions(id: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/${id}/revisions`); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 const CrmAgreement: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
+  const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(idFilter);
   const [agrDialog, setAgrDialog] = useState(false);
   const [docDialog, setDocDialog] = useState(false);
+  const [docRequestDialog, setDocRequestDialog] = useState(false);
+  const [sendDialog, setSendDialog] = useState(false);
+  const [proposeDateDialog, setProposeDateDialog] = useState(false);
+  const [sendDate, setSendDate] = useState("");
   const [agrForm, setAgrForm] = useState({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
   const [docForm, setDocForm] = useState({ ...EMPTY_DOC_FORM });
+  const [docRequestForm, setDocRequestForm] = useState({ ...EMPTY_DOC_REQUEST_FORM });
+  const [showUrlField, setShowUrlField] = useState(false);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const docFileInputRef = useRef<HTMLInputElement>(null);
+  const [editDialog, setEditDialog] = useState(false);
+  const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "" });
   const [saving, setSaving] = useState(false);
 
   const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
@@ -67,6 +150,18 @@ const CrmAgreement: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: dateHistory = [] } = useQuery({
+    queryKey: ["crm-agreement-date-history", selectedId],
+    queryFn: () => fetchDateHistory(selectedId!),
+    enabled: !!selectedId,
+    staleTime: 30_000,
+  });
+  const { data: revisions = [] } = useQuery({
+    queryKey: ["crm-agreement-revisions", selectedId],
+    queryFn: () => fetchRevisions(selectedId!),
+    enabled: !!selectedId,
+    staleTime: 30_000,
+  });
 
   const filtered = useMemo(() =>
     (agreements as any[]).filter((a: any) =>
@@ -84,7 +179,6 @@ const CrmAgreement: React.FC = () => {
         body: JSON.stringify({
           ...agrForm,
           BookingId: parseInt(agrForm.BookingId),
-          AgreementDate: agrForm.AgreementDate || null,
         }),
       });
       const data = await res.json();
@@ -102,6 +196,7 @@ const CrmAgreement: React.FC = () => {
 
   const handleAddDocument = async () => {
     if (!selectedId) return;
+    if (!docForm.DocumentUrl.trim()) { toast.error("Enter a URL, or use the upload button to attach a file"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/documents`, {
@@ -114,11 +209,59 @@ const CrmAgreement: React.FC = () => {
       toast.success("Document added");
       setDocDialog(false);
       setDocForm({ ...EMPTY_DOC_FORM });
+      setShowUrlField(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRequestDocument = async () => {
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/documents/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(docRequestForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to request document");
+      toast.success("Document requested — the customer will see it in their portal");
+      setDocRequestDialog(false);
+      setDocRequestForm({ ...EMPTY_DOC_REQUEST_FORM });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadDocFiles = async (files: FileList | null) => {
+    if (!selectedId || !files?.length) return;
+    setUploadingDocs(true);
+    try {
+      const formData = new FormData();
+      formData.append("DocumentType", docForm.DocumentType);
+      if (docForm.IssuedBy) formData.append("IssuedBy", docForm.IssuedBy);
+      if (docForm.Remarks) formData.append("Remarks", docForm.Remarks);
+      Array.from(files).forEach((f) => formData.append("files", f));
+      const res = await fetchWithAuth(`${API}/${selectedId}/documents/upload`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success(`${data.count} file(s) uploaded`);
+      setDocDialog(false);
+      setDocForm({ ...EMPTY_DOC_FORM });
+      setShowUrlField(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploadingDocs(false);
+      if (docFileInputRef.current) docFileInputRef.current.value = "";
     }
   };
 
@@ -136,21 +279,54 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
-  const handleSendToCustomer = async () => {
+  const handleSendToCustomer = async (proposedDate: string) => {
     if (!selectedId) return;
-    const proposedDate = window.prompt("Proposed agreement date (YYYY-MM-DD), optional:") || "";
+    setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/send-to-customer`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ proposedDate: proposedDate || null }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Agreement sent to customer portal");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.agreementDateSubmittedForApproval
+        ? "Agreement sent — both sides now agree on a date, awaiting super admin approval"
+        : "Agreement sent to customer portal");
+      setSendDialog(false);
+      setSendDate("");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleProposeDate = async (proposedDate: string) => {
+    if (!selectedId || !proposedDate) { toast.error("Pick a date"); return; }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/propose-date`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposedDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.agreementDateSubmittedForApproval
+        ? "Both sides now agree — sent for super admin approval"
+        : "Proposed date sent to customer");
+      setProposeDateDialog(false);
+      setSendDate("");
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -163,8 +339,46 @@ const CrmAgreement: React.FC = () => {
       toast.success(`Agreement marked ${data.status}`);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+      if (action === "mark-executed") {
+        promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
+      }
     } catch (e: any) {
       toast.error(e.message);
+    }
+  };
+
+  const openEdit = () => {
+    if (!detail?.agreement) return;
+    setEditForm({
+      LegalName: detail.agreement.LegalName || "",
+      LegalAddress: detail.agreement.LegalAddress || "",
+      PanNo: detail.agreement.PanNo || "",
+      AadhaarNo: detail.agreement.AadhaarNo || "",
+      RevisionReason: "",
+    });
+    setEditDialog(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.versionBumped ? "Details updated — prior version preserved in history" : "Details updated");
+      setEditDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-revisions", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -223,17 +437,35 @@ const CrmAgreement: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-foreground">{detail.agreement?.ApplicantName}</h2>
-                    <p className="text-xs font-mono text-muted-foreground">{detail.agreement?.AgreementNo}</p>
+                    <p className="text-xs font-mono text-muted-foreground">
+                      {detail.agreement?.AgreementNo}
+                      {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${agrStatusColor[detail.agreement?.Status] || ""}`}>
                       {detail.agreement?.Status}
                     </span>
                     {detail.agreement?.Status === "Draft" && (
-                      <button onClick={() => handleAgreementAction("mark-executed")}
+                      <button onClick={openEdit}
                         className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                        Mark Executed
+                        Edit Details
                       </button>
+                    )}
+                    {detail.agreement?.Status === "Draft" && (
+                      detail.agreement?.SeniorApprovalStatus === "Approved"
+                        && detail.agreement?.CustomerApprovalStatus === "Approved"
+                        && detail.agreement?.AgreementDate ? (
+                        <button onClick={() => handleAgreementAction("mark-executed")}
+                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          Mark Executed
+                        </button>
+                      ) : (
+                        <span title="Requires senior approval, customer approval, and a mutually agreed date"
+                          className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                          Mark Executed (not ready)
+                        </span>
+                      )
                     )}
                     {detail.agreement?.Status === "Executed" && (
                       <button onClick={() => handleAgreementAction("mark-registered")}
@@ -263,6 +495,48 @@ const CrmAgreement: React.FC = () => {
                     <div key={k}><span className="text-xs text-muted-foreground">{k}: </span><span className="font-medium">{v}</span></div>
                   ))}
                 </div>
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 flex items-center justify-between gap-3 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Customer Portal Account: </span>
+                    {detail.agreement?.PortalEmail ? (
+                      <span className="font-medium">{detail.agreement.PortalEmail}</span>
+                    ) : (
+                      <span className="text-amber-600">Not yet provisioned — applicant needs an email and mobile on file</span>
+                    )}
+                  </div>
+                  {detail.agreement?.PortalEmail && (
+                    <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalMustChangePassword ? "text-orange-600 bg-orange-50 border-orange-200" : "text-green-600 bg-green-50 border-green-200"}`}>
+                      {detail.agreement.PortalMustChangePassword ? "First login pending" : "Password set"}
+                    </span>
+                  )}
+                </div>
+                {detail.agreement?.PortalEmail && detail.agreement?.PortalMustChangePassword && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Initial login: email above, password is the applicant's mobile number ({detail.agreement?.Mobile || "on file"}). They'll be asked to set a new password on first login.
+                  </p>
+                )}
+                {revisions.length > 0 && (
+                  <div className="text-xs">
+                    <div className="text-muted-foreground mb-1">Version History (prior to v{detail.agreement?.VersionNo})</div>
+                    <div className="space-y-1.5">
+                      {(revisions as any[]).map((r) => (
+                        <div key={r.Id} className="rounded-lg border border-border p-2">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <span className="px-1.5 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[10px] font-medium">v{r.VersionNo}</span>
+                            <span>{r.Reason}</span>
+                            <span className="text-[10px]">({String(r.CreatedAt).slice(0,16).replace("T"," ")}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
+                          </div>
+                          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                            {r.LegalName && <div><span className="text-muted-foreground">Legal Name: </span>{r.LegalName}</div>}
+                            {r.AgreementDate && <div><span className="text-muted-foreground">Agreement Date: </span>{String(r.AgreementDate).slice(0,10)}</div>}
+                            {r.PanNo && <div><span className="text-muted-foreground">PAN: </span>{r.PanNo}</div>}
+                            {r.AadhaarNo && <div><span className="text-muted-foreground">Aadhaar: </span>{r.AadhaarNo}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {detail.agreement?.LegalAddress && (
                   <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2">{detail.agreement.LegalAddress}</div>
                 )}
@@ -293,6 +567,33 @@ const CrmAgreement: React.FC = () => {
                   <div><span className="text-xs text-muted-foreground">Proposed Date (Company): </span>{detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0,10) : "—"}</div>
                   <div><span className="text-xs text-muted-foreground">Proposed Date (Customer): </span>{detail.agreement?.ProposedDateByCustomer ? String(detail.agreement.ProposedDateByCustomer).slice(0,10) : "—"}</div>
                 </div>
+                {!detail.agreement?.AgreementDate && detail.agreement?.ProposedDateByCompany && detail.agreement?.ProposedDateByCustomer && (
+                  new Date(detail.agreement.ProposedDateByCompany).toDateString() === new Date(detail.agreement.ProposedDateByCustomer).toDateString() ? (
+                    <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2">
+                      Both sides agree on this date — Agreement Date will be confirmed automatically.
+                    </div>
+                  ) : (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                      Company and customer proposed different dates — renegotiate via "Resend After Recheck" once the customer requests a recheck, or agree offline and re-send with a matching date.
+                    </div>
+                  )
+                )}
+                {dateHistory.length > 0 && (
+                  <div className="text-xs">
+                    <div className="text-muted-foreground mb-1">Reschedule History</div>
+                    <div className="space-y-1">
+                      {(dateHistory as any[]).map((h) => (
+                        <div key={h.Id} className="flex items-center gap-2 text-muted-foreground">
+                          <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
+                            {h.ProposedBy}
+                          </span>
+                          <span>proposed {String(h.ProposedDate).slice(0,10)}</span>
+                          <span className="text-[10px]">({String(h.CreatedAt).slice(0,16).replace("T"," ")}{h.CreatedByName ? ` · ${h.CreatedByName}` : ""})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {detail.agreement?.RecheckCount > 0 && (
                   <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
                     Rechecked {detail.agreement.RecheckCount}x — latest remark: {detail.agreement.LastRecheckRemarks || "—"}
@@ -315,16 +616,38 @@ const CrmAgreement: React.FC = () => {
                     <span className="text-xs text-muted-foreground">Pending admin approval</span>
                   )}
                   {detail.agreement?.SeniorApprovalStatus === "Approved" && !detail.agreement?.SentToCustomerAt && (
-                    <button onClick={handleSendToCustomer}
+                    <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
                       className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
                       Send to Customer Portal
                     </button>
                   )}
                   {detail.agreement?.CustomerApprovalStatus === "RecheckRequested" && detail.agreement?.SeniorApprovalStatus === "Approved" && (
-                    <button onClick={handleSendToCustomer}
+                    <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
                       className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
                       Resend After Recheck
                     </button>
+                  )}
+                  {/* Date negotiation is the step AFTER both ends approve the
+                      agreement's content (spec: "...CUSTOMER APPROVAL ->
+                      APPROVAL FROM BOTH END -> DATE OF AGREEMENT..."), so
+                      this shows once CustomerApprovalStatus is Approved —
+                      not "Pending", which is the state *before* that. */}
+                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === "Approved" && !detail.agreement?.AgreementDate && (
+                    detail.agreement?.DateApprovalStatus === "Pending" ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
+                        Awaiting Super Admin Approval
+                      </span>
+                    ) : (
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); }}
+                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                        {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
+                      </button>
+                    )
+                  )}
+                  {detail.agreement?.SentToCustomerAt && (
+                    <span className="text-xs text-muted-foreground">
+                      Sent to customer {String(detail.agreement.SentToCustomerAt).slice(0, 16).replace("T", " ")}
+                    </span>
                   )}
                 </div>
               </div>
@@ -333,35 +656,58 @@ const CrmAgreement: React.FC = () => {
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
                   <h3 className="text-sm font-semibold">Agreement Documents ({detail.documents?.length || 0})</h3>
-                  <button onClick={() => setDocDialog(true)}
-                    className="flex items-center gap-1 text-xs text-primary hover:underline">
-                    <Upload size={12} /> Add Document
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setDocRequestDialog(true)}
+                      className="flex items-center gap-1 text-xs text-primary hover:underline">
+                      <Send size={12} /> Request from Customer
+                    </button>
+                    <button onClick={() => setDocDialog(true)}
+                      className="flex items-center gap-1 text-xs text-primary hover:underline">
+                      <Upload size={12} /> Add Document
+                    </button>
+                  </div>
                 </div>
                 {!detail.documents?.length ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">No documents uploaded yet</div>
-                ) : (detail.documents as any[]).map((d: any) => (
-                  <div key={d.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <FileText size={16} className="text-muted-foreground shrink-0" />
-                      <div>
-                        <div className="text-sm font-medium">{d.DocumentType.replace(/([A-Z])/g, " $1").trim()}</div>
-                        {d.FileName && <div className="text-xs text-muted-foreground">{d.FileName}</div>}
-                        {d.IssuedBy && <div className="text-xs text-muted-foreground">by {d.IssuedBy}</div>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {d.DocumentUrl && (
-                        <a href={d.DocumentUrl} target="_blank" rel="noreferrer"
-                          className="text-xs text-primary hover:underline">View</a>
-                      )}
+                ) : (detail.documents as any[]).map((d: any) => {
+                  const awaitingCustomer = d.Status === "Requested" && !d.FilePath && !d.DocumentUrl;
+                  return (
+                    <div key={d.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
+                      <button
+                        onClick={() => (d.FilePath ? setPreviewDoc(d) : d.DocumentUrl && window.open(d.DocumentUrl, "_blank"))}
+                        disabled={!d.FilePath && !d.DocumentUrl}
+                        className="flex items-center gap-3 text-left disabled:cursor-default min-w-0"
+                      >
+                        {awaitingCustomer ? <Clock size={16} className="text-amber-500 shrink-0" /> : mimeIcon(d.MimeType)}
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium flex items-center gap-1.5">
+                            {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}
+                            {d.IsMandatory ? <span className="text-red-500">*</span> : null}
+                            {d.VersionNo > 1 && <span className="text-xs text-violet-600 font-normal">v{d.VersionNo}</span>}
+                            {d.UploadedByType === "Customer" && (
+                              <span className="flex items-center gap-0.5 text-[10px] text-violet-600 border border-violet-200 bg-violet-50 rounded-full px-1.5 py-0 font-normal">
+                                <UserCircle2 size={10} /> customer
+                              </span>
+                            )}
+                            {(d.FilePath || d.DocumentUrl) && <Eye size={12} className="text-muted-foreground" />}
+                          </div>
+                          {awaitingCustomer ? (
+                            <div className="text-xs text-amber-600">Awaiting upload from customer{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</div>
+                          ) : (
+                            <>
+                              {d.FileName && <div className="text-xs text-muted-foreground truncate max-w-xs">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</div>}
+                              {d.IssuedBy && <div className="text-xs text-muted-foreground">by {d.IssuedBy}</div>}
+                            </>
+                          )}
+                        </div>
+                      </button>
                       <select value={d.Status} onChange={(e) => handleDocStatusChange(d.Id, e.target.value)}
-                        className={`text-xs px-2 py-0.5 rounded-full border font-medium ${docStatusColor[d.Status] || ""} bg-transparent cursor-pointer`}>
+                        className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${docStatusColor[d.Status] || ""} bg-transparent cursor-pointer`}>
                         {DOC_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -386,7 +732,6 @@ const CrmAgreement: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { key: "LegalName",    label: "Legal Name",      type: "text" },
-                { key: "AgreementDate",label: "Agreement Date",  type: "date" },
                 { key: "PanNo",        label: "PAN No",          type: "text" },
                 { key: "AadhaarNo",    label: "Aadhaar No",      type: "text" },
               ].map(({ key, label, type }) => (
@@ -420,8 +765,67 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Add Document Dialog */}
-      <Dialog open={docDialog} onOpenChange={(o) => { if (!o) setDocDialog(false); }}>
+      {/* Send to Customer Portal Dialog — proposed date is a real date
+          picker now (was a bare window.prompt), and pre-fills with the
+          agreement's existing company-proposed date on resend. */}
+      <Dialog open={sendDialog} onOpenChange={(o) => { if (!o) { setSendDialog(false); setSendDate(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Send to Customer Portal</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              The customer will be able to review this agreement and its documents from their portal, and either approve it or request a recheck.
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
+              <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <p className="text-[11px] text-muted-foreground mt-1">If the customer proposes the same date, it's confirmed automatically as the Agreement Date.</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setSendDialog(false); setSendDate(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={() => handleSendToCustomer(sendDate)} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Propose/Update Agreement Date — the agreement itself now sends to
+          the customer automatically on senior approval, so this is the
+          standalone way to propose or renegotiate a date afterward. */}
+      <Dialog open={proposeDateDialog} onOpenChange={(o) => { if (!o) { setProposeDateDialog(false); setSendDate(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Propose Agreement Date</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              If the customer proposes (or has already proposed) the same date, it's confirmed automatically as the Agreement Date.
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date</label>
+              <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setProposeDateDialog(false); setSendDate(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={() => handleProposeDate(sendDate)} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : "Propose Date"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Document Dialog — file upload is the primary path; File Name/
+          type/size are always taken from the real uploaded file, never
+          hand-typed, so the record can't drift from what was actually
+          attached. Pasting an external URL stays available as a fallback
+          for links that live outside our own storage. */}
+      <Dialog open={docDialog} onOpenChange={(o) => { if (!o) { setDocDialog(false); setShowUrlField(false); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Add Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -432,30 +836,129 @@ const CrmAgreement: React.FC = () => {
                 {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
-            {[
-              { key: "FileName",   label: "File Name",    type: "text" },
-              { key: "DocumentUrl",label: "Document URL", type: "text" },
-              { key: "IssuedBy",   label: "Issued By",    type: "text" },
-            ].map(({ key, label, type }) => (
-              <div key={key}>
-                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type={type} value={docForm[key as keyof typeof docForm]}
-                  onChange={(e) => setDocForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-            ))}
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
+              <label className="text-xs text-muted-foreground block mb-1">Issued By</label>
+              <input type="text" value={docForm.IssuedBy} onChange={(e) => setDocForm((f) => ({ ...f, IssuedBy: e.target.value }))}
+                placeholder="e.g. Legal team, Bank, Registrar office"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Remarks (optional)</label>
               <textarea value={docForm.Remarks} onChange={(e) => setDocForm((f) => ({ ...f, Remarks: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>
+
+            <input type="file" multiple ref={docFileInputRef}
+              onChange={(e) => handleUploadDocFiles(e.target.files)}
+              className="hidden" />
+            <button onClick={() => docFileInputRef.current?.click()} disabled={uploadingDocs}
+              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-2 border-dashed border-border rounded-lg text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-primary disabled:opacity-40">
+              <Upload size={14} /> {uploadingDocs ? "Uploading..." : "Upload File(s)"}
+            </button>
+            <p className="text-[11px] text-muted-foreground text-center">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
+
+            {showUrlField ? (
+              <div className="flex items-center gap-2 pt-1">
+                <input placeholder="https://..." value={docForm.DocumentUrl} onChange={(e) => setDocForm((f) => ({ ...f, DocumentUrl: e.target.value }))}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <button onClick={handleAddDocument} disabled={saving}
+                  className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0 disabled:opacity-40">
+                  {saving ? "Adding..." : "Add Link"}
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowUrlField(true)} className="text-xs text-primary hover:underline">
+                ...or paste an external document URL instead
+              </button>
+            )}
+          </div>
+          <div className="flex justify-end pt-3 border-t border-border">
+            <button onClick={() => { setDocDialog(false); setShowUrlField(false); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Document Dialog — asks the customer for a document via
+          their portal instead of staff attaching it on their behalf. Shows
+          up there immediately as an open request once the agreement is
+          sent; their upload flips it to Submitted for review here. */}
+      <Dialog open={docRequestDialog} onOpenChange={(o) => { if (!o) setDocRequestDialog(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Request Document from Customer</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Document Type *</label>
+              <select value={docRequestForm.DocumentType} onChange={(e) => setDocRequestForm((f) => ({ ...f, DocumentType: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Label shown to customer (optional)</label>
+              <input type="text" value={docRequestForm.Label} onChange={(e) => setDocRequestForm((f) => ({ ...f, Label: e.target.value }))}
+                placeholder="e.g. Latest bank statement"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+              <input type="checkbox" checked={docRequestForm.IsMandatory}
+                onChange={(e) => setDocRequestForm((f) => ({ ...f, IsMandatory: e.target.checked }))} />
+              Required before the customer can approve the agreement
+            </label>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setDocDialog(false)}
+            <button onClick={() => setDocRequestDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleAddDocument} disabled={saving}
+            <button onClick={handleRequestDocument} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Adding..." : "Add Document"}
+              {saving ? "Requesting..." : "Request"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+
+      {/* Edit Details — every save snapshots the prior values into Version
+          History (see backend PUT /:id) rather than silently overwriting them. */}
+      <Dialog open={editDialog} onOpenChange={(o) => !o && setEditDialog(false)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="font-heading">Edit Agreement Details</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
+                <input type="text" value={editForm.LegalName} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
+                <input type="text" value={editForm.PanNo} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
+                <input type="text" value={editForm.AadhaarNo} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+              <textarea value={editForm.LegalAddress} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
+                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Reason for this revision</label>
+              <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
+                placeholder="e.g. Customer requested recheck — corrected spelling"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => setEditDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleSaveEdit} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : "Save"}
             </button>
           </div>
         </DialogContent>

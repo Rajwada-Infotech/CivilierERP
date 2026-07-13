@@ -116,6 +116,12 @@ const MODULE_OPTIONS = [
     icon: "📄",
     desc: "Auto-submitted for approval as soon as it's created — no Draft step",
   },
+  {
+    id: "crm-agreements",
+    label: "CRM Agreement (Senior Approval)",
+    icon: "📝",
+    desc: "Before an agreement is sent to the customer portal — approver roles here are always restricted to admin/super_admin/marketing_head regardless of who's assigned",
+  },
 ] as const;
 
 type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -151,6 +157,12 @@ const MODULE_GROUPS = [
     label: "Sales",
     icon: "🛍️",
     modules: ["SaleOrder"],
+  },
+  {
+    id: "crm",
+    label: "CRM",
+    icon: "🏠",
+    modules: ["crm-agreements"],
   },
 ] as const;
 

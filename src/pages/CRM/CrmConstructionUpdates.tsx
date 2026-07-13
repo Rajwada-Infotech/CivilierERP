@@ -7,12 +7,16 @@ import { Plus, HardHat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/construction-updates";
+const UNIT_API = "/api/unit-master";
 const STAGES = ["Foundation", "Superstructure", "Finishing", "Handover-Ready"];
 
-const EMPTY_FORM = { ProjectName: "", UpdateDate: "", PercentComplete: "", Stage: "Foundation", Summary: "" };
+const EMPTY_FORM = { ProjectId: "", UpdateDate: "", PercentComplete: "", Stage: "Foundation", Summary: "" };
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchProjects(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${UNIT_API}/projects`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 const CrmConstructionUpdates: React.FC = () => {
@@ -22,15 +26,16 @@ const CrmConstructionUpdates: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const { data: updates = [], isLoading } = useQuery({ queryKey: ["crm-construction-updates"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
 
   const handleCreate = async () => {
-    if (!form.ProjectName.trim()) { toast.error("Project name is required"); return; }
+    if (!form.ProjectId) { toast.error("Project is required"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, PercentComplete: form.PercentComplete || null }),
+        body: JSON.stringify({ ...form, ProjectId: parseInt(form.ProjectId), PercentComplete: form.PercentComplete || null }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Construction update logged");
@@ -86,9 +91,14 @@ const CrmConstructionUpdates: React.FC = () => {
           <DialogHeader><DialogTitle className="font-heading">Log Construction Update</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Project Name *</label>
-              <input type="text" value={form.ProjectName} onChange={(e) => setForm((f) => ({ ...f, ProjectName: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <label className="text-xs text-muted-foreground block mb-1">Project *</label>
+              <select value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">Select project</option>
+                {(projects as any[]).map((p: any) => (
+                  <option key={p.Id} value={String(p.Id)}>{p.Name}</option>
+                ))}
+              </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -28,11 +29,32 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
   }
 });
 
+// Workflow guard: a possession notice is an offer to hand over — it can't
+// legitimately go out before the deed is legally executed, and shouldn't go
+// out before the unit itself has passed its pre-possession inspection
+// (mirrors crmHandover.js's own Sales-Deed guard, extended one step earlier
+// in the same Closure sequence).
 router.post("/", requirePageRight("crm-possession-notice", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!deed.recordset.length || !["Executed", "Registered"].includes(deed.recordset[0].Status)) {
+      return res.status(400).json({ error: "Possession notice requires an Executed or Registered sales deed first" });
+    }
+    const pp = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!pp.recordset.length || pp.recordset[0].Status !== "Ready") {
+      return res.status(400).json({ error: "Possession notice requires the pre-possession check to be Ready first" });
+    }
+
     const noticeNo = await getNextDocNumber(pool, "PN", "PN");
 
     const result = await pool.request()

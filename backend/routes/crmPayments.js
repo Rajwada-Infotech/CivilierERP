@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
+const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -63,6 +64,12 @@ router.get("/:id/receipts", requirePageRight("crm-payments", "view"), async (req
 });
 
 // POST /:id/receipts — record a receipt against a milestone (supports partial/installment receipts)
+//
+// Workflow guard: "MILESTONE => ... NEXT MILESTONE DUE => MILESTONE WISE
+// PAYMENT" is explicit sequencing — a customer paying milestone #5 while
+// #1-4 are still outstanding would leave earlier stages permanently
+// unaccounted for. Every earlier-numbered milestone on the same booking
+// must already be Paid or Waived first.
 router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -70,6 +77,24 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
     const b = req.body;
     const amount = parseFloat(b.Amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const target = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, MilestoneNo, MilestoneName FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    if (!target.recordset.length) return res.status(404).json({ error: "Milestone not found" });
+    const targetRow = target.recordset[0];
+
+    const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
+      .query(`
+        SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+        ORDER BY MilestoneNo
+      `);
+    if (earlier.recordset.length) {
+      return res.status(400).json({ error: `Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0].MilestoneName}" is still due first` });
+    }
 
     const receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
     await pool.request()
@@ -186,6 +211,9 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
     const b = req.body;
     if (!b.MilestoneName?.trim()) return res.status(400).json({ error: "MilestoneName is required" });
 
+    const activeErr = await requireActiveBooking(pool, bid);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     // Get next MilestoneNo
     const noRes = await pool.request().input("bid", sql.Int, bid)
       .query("SELECT ISNULL(MAX(MilestoneNo),0) + 1 AS NextNo FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
@@ -197,10 +225,12 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
       .input("mname", sql.NVarChar(200), b.MilestoneName.trim())
       .input("due",   sql.Date,          b.DueDate || null)
       .input("amt",   sql.Decimal(18,2), b.AmountDue != null ? parseFloat(b.AmountDue) : 0)
+      .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
+      .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, Status, CreatedBy, CreatedAt)
-        VALUES (@bid, @mno, @mname, @due, @amt, 'Pending', @cb, SYSDATETIME())
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        VALUES (@bid, @mno, @mname, @due, @amt, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true });
   } catch (e) {
@@ -221,7 +251,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
 
     const paid = b.AmountPaid != null ? parseFloat(b.AmountPaid) : null;
 
-    await pool.request()
+    const result = await pool.request()
       .input("id",    sql.Int,           id)
       .input("mname", sql.NVarChar(200), b.MilestoneName || null)
       .input("due",   sql.Date,          b.DueDate || null)
@@ -230,6 +260,8 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       .input("pdate", sql.Date,          b.PaidDate || null)
       .input("pmode", sql.NVarChar(50),  b.PaymentMode || null)
       .input("tref",  sql.NVarChar(200), b.TransactionRef || null)
+      .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
+      .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("rem",   sql.NVarChar(sql.MAX), b.Remarks || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -241,6 +273,8 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
           PaidDate       = ISNULL(@pdate, PaidDate),
           PaymentMode    = ISNULL(@pmode, PaymentMode),
           TransactionRef = ISNULL(@tref,  TransactionRef),
+          RequiredDocuments = ISNULL(@rdocs, RequiredDocuments),
+          ResponsibleDepartment = ISNULL(@dept, ResponsibleDepartment),
           Status = CASE
             WHEN Status = 'Waived' THEN Status
             WHEN @paid IS NOT NULL AND @paid >= AmountDue THEN 'Paid'
@@ -248,8 +282,18 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
           END,
           Remarks   = @rem,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.BookingId, INSERTED.Status
         WHERE Id = @id
       `);
+
+    // Auto-flow: this milestone may have just been the last one outstanding —
+    // fire the auto-create check (no-op unless the agreement is also Executed).
+    const updated = result.recordset[0];
+    if (updated?.Status === "Paid") {
+      await maybeAutoCreateSalesDeed(pool, updated.BookingId, actorId(req));
+      await maybeAutoGenerateInvoice(pool, updated.BookingId, actorId(req));
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-payments] PUT error:", e.message);
@@ -273,18 +317,179 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
       return res.status(400).json({ error: "Cannot waive an already-paid milestone" });
     }
 
-    await pool.request()
+    const result = await pool.request()
       .input("id",  sql.Int, id)
       .input("rem", sql.NVarChar(sql.MAX), b.Reason)
       .input("ub",  sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmPaymentMilestone SET
           Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.BookingId
         WHERE Id = @id
       `);
+
+    // Auto-flow: a waived milestone can also be the last one outstanding.
+    await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
+    await maybeAutoGenerateInvoice(pool, result.recordset[0].BookingId, actorId(req));
+
     res.json({ success: true, status: "Waived" });
   } catch (e) {
     console.error("[crm-payments] waive error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /booking/:bookingId/on-account — every on-account deposit for this
+// booking, plus the balance still unapplied. Used by Welcome Call and the
+// Booking Details tab to show "customer has ₹X sitting on account" instead
+// of that money just disappearing into a milestone it wasn't actually
+// meant for yet.
+router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bid = parseInt(req.params.bookingId);
+    const result = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT o.*, cu.name AS CreatedByName
+      FROM dbo.CrmOnAccountPayment o
+      LEFT JOIN dbo.Users cu ON cu.id = o.CreatedBy
+      WHERE o.BookingId = @bid
+      ORDER BY o.CreatedAt DESC
+    `);
+    const rows = result.recordset;
+    const available = rows.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
+    res.json({ payments: rows, availableBalance: available });
+  } catch (e) {
+    console.error("[crm-payments] GET /booking/:id/on-account error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /booking/:bookingId/on-account — record a new on-account deposit.
+// Not tied to any milestone at creation time — that's the whole point;
+// it's applied later via PUT /on-account/:id/apply, possibly split across
+// several milestones as they come due.
+router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bid = parseInt(req.params.bookingId);
+    const b = req.body;
+    const amount = parseFloat(b.Amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const activeErr = await requireActiveBooking(pool, bid);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const receiptNo = await getNextDocNumber(pool, "OACC", "OACC");
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30),  receiptNo)
+      .input("bid",  sql.Int,           bid)
+      .input("amt",  sql.Decimal(18,2), amount)
+      .input("rdt",  sql.Date,          b.ReceivedDate || null)
+      .input("mode", sql.NVarChar(50),  b.PaymentMode || null)
+      .input("tref", sql.NVarChar(200), b.TransactionRef || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmOnAccountPayment
+          (ReceiptNo, BookingId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, ReceiptNo: receiptNo });
+  } catch (e) {
+    console.error("[crm-payments] POST /booking/:id/on-account error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /on-account/:id/apply — allocate (some or all of) an on-account
+// deposit's remaining balance to a specific milestone. Re-uses the exact
+// same receipt-insert + AmountPaid/Status rollup that POST /:id/receipts
+// uses, and the exact same "earlier milestones must already be Paid/
+// Waived" sequencing guard — on-account money still can't be used to skip
+// ahead in the payment plan, only to pre-fund the milestone that's
+// actually next.
+router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const onAccountId = parseInt(req.params.id);
+    const b = req.body;
+    const milestoneId = parseInt(b.MilestoneId);
+    if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required" });
+
+    const oa = await pool.request().input("id", sql.Int, onAccountId)
+      .query("SELECT BookingId, Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WHERE Id = @id");
+    if (!oa.recordset.length) return res.status(404).json({ error: "On-account payment not found" });
+    const oaRow = oa.recordset[0];
+    const remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
+
+    const target = await pool.request().input("id", sql.Int, milestoneId)
+      .query("SELECT BookingId, MilestoneNo, MilestoneName, AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    if (!target.recordset.length) return res.status(404).json({ error: "Milestone not found" });
+    const targetRow = target.recordset[0];
+    if (targetRow.BookingId !== oaRow.BookingId) {
+      return res.status(400).json({ error: "This on-account deposit belongs to a different booking" });
+    }
+
+    const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
+      .query(`
+        SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+        ORDER BY MilestoneNo
+      `);
+    if (earlier.recordset.length) {
+      return res.status(400).json({ error: `Cannot apply to "${targetRow.MilestoneName}" — "${earlier.recordset[0].MilestoneName}" is still due first` });
+    }
+
+    const milestoneBalance = Number(targetRow.AmountDue) - Number(targetRow.AmountPaid || 0);
+    const requested = b.Amount != null ? parseFloat(b.Amount) : Math.min(remaining, milestoneBalance);
+    if (!requested || requested <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+    if (requested > remaining) return res.status(400).json({ error: `Only ₹${remaining.toLocaleString("en-IN")} is available on this deposit` });
+    if (requested > milestoneBalance) return res.status(400).json({ error: `This milestone only needs ₹${milestoneBalance.toLocaleString("en-IN")} more` });
+
+    const receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
+    await pool.request()
+      .input("no",  sql.NVarChar(30),  receiptNo)
+      .input("mid", sql.Int,           milestoneId)
+      .input("amt", sql.Decimal(18,2), requested)
+      .input("oaid",sql.Int,           onAccountId)
+      .input("cb",  sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmPaymentReceipt
+          (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, Notes, OnAccountPaymentId, CreatedBy, CreatedAt)
+        VALUES (@no, @mid, @amt, CAST(SYSDATETIME() AS DATE), 'OnAccount', 'Applied from on-account deposit', @oaid, @cb, SYSDATETIME())
+      `);
+
+    await pool.request().input("id", sql.Int, milestoneId).query(`
+      UPDATE dbo.CrmPaymentMilestone SET
+        AmountPaid = (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id),
+        Status = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
+                       THEN 'Paid' ELSE Status END,
+        PaidDate = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
+                        THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
+        UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+    const newApplied = Number(oaRow.AppliedAmount) + requested;
+    await pool.request()
+      .input("id", sql.Int, onAccountId)
+      .input("applied", sql.Decimal(18,2), newApplied)
+      .input("status", sql.NVarChar(20), newApplied >= Number(oaRow.Amount) ? "Applied" : "PartiallyApplied")
+      .query("UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = @applied, Status = @status WHERE Id = @id");
+
+    const finalCheck = await pool.request().input("id", sql.Int, milestoneId).query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    if (finalCheck.recordset[0]?.Status === "Paid") {
+      await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorId(req));
+      await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorId(req));
+    }
+
+    res.json({ success: true, applied: requested, remaining: remaining - requested });
+  } catch (e) {
+    console.error("[crm-payments] PUT /on-account/:id/apply error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

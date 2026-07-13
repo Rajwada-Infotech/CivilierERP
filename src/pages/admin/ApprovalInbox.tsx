@@ -27,6 +27,7 @@ import {
   Warehouse,
   ShoppingCart,
   Building2,
+  Home,
   Car,
   ChevronDown,
   SlidersHorizontal,
@@ -186,12 +187,33 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/applications",
     label: "CRM Applications",
   },
+  "crm-bookings": {
+    icon: Home,
+    color: "text-orange-500 bg-orange-500/10",
+    navPath: "/crm/bookings",
+    apiEndpoint: "/api/crm/bookings",
+    label: "CRM Bookings",
+  },
   "crm-agreements": {
     icon: Building2,
     color: "text-indigo-500 bg-indigo-500/10",
     navPath: "/crm/agreements",
     apiEndpoint: "/api/crm/agreements",
     label: "CRM Agreements",
+  },
+  "crm-agreement-date": {
+    icon: ClipboardList,
+    color: "text-indigo-500 bg-indigo-500/10",
+    navPath: "/crm/agreements",
+    apiEndpoint: "/api/crm/agreements",
+    label: "CRM Agreement Date",
+  },
+  "crm-sales-deed-director": {
+    icon: Building2,
+    color: "text-purple-500 bg-purple-500/10",
+    navPath: "/crm/sales-deed",
+    apiEndpoint: "/api/crm/sales-deed",
+    label: "CRM Sales Deed (Director)",
   },
   "crm-brokerage": {
     icon: Receipt,
@@ -249,8 +271,16 @@ const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-applications", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+// Agreement Date and Sales Deed Director approval are narrower, separate
+// gates — super_admin only, "for now" per instruction, unlike the rest of
+// the CRM modules above. The backend enforces this independently via
+// approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
+// button visibility (and which /:id/<suffix>/approve path gets hit) here.
+const DATE_APPROVER_ROLES = ["super_admin"];
+const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
+const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
@@ -603,7 +633,12 @@ const InboxRow: React.FC<{
         status={item.Status}
         recordId={item.RecordId}
         endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        approverRoles={CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES : undefined}
+        actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
+        approverRoles={
+          SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
+          : undefined
+        }
         onSuccess={(action) => {
           if (action === "approve" || action === "reject") {
             onOptimisticUpdate(item.RecordId, item.Module);
@@ -613,7 +648,11 @@ const InboxRow: React.FC<{
       />
       {cfg?.navPath && (
         <button
-          onClick={() => navigate(cfg.navPath)}
+          onClick={() => navigate(
+            item.Module === "crm-agreements" || item.Module === "crm-agreement-date"
+              ? `${cfg.navPath}?id=${item.RecordId}`
+              : cfg.navPath
+          )}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
           title={`Go to ${item.ModuleLabel}`}
         >

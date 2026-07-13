@@ -10,6 +10,7 @@ const compression = require("compression");
 
 const { connectDB, closeDB } = require("./db");
 const { startEscalationEngine } = require("./escalationEngine");
+const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -228,7 +229,11 @@ const ALL_ROUTES = [
     file: "./routes/followupUnitSelections",
   },
   { path: "/api/followup-bookings", file: "./routes/followupBookings" },
-  { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
+  // /api/followup-agreements retired — the route module (routes/followupAgreements.js)
+  // is left on disk but no longer mounted. 0 live rows in dbo.FollowupAgreements;
+  // CRM > Documents > Agreements (crmAgreements.js) is the real, actively-developed
+  // Agreement system. The table itself stays (still read directly by other
+  // followup* routes' joins), only this CRUD endpoint is retired.
   { path: "/api/followup-noc", file: "./routes/followupNoc" },
   { path: "/api/followup-sales-deed", file: "./routes/followupSalesDeed" },
   { path: "/api/followup-handover", file: "./routes/followupHandover" },
@@ -262,8 +267,10 @@ const ALL_ROUTES = [
   { path: "/api/room-master", file: "./routes/roomMaster" },
   { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/parking-master", file: "./routes/parkingMaster" },
+  { path: "/api/parking-slot-master", file: "./routes/parkingSlotMaster" },
   { path: "/api/extra-charge-master", file: "./routes/extraChargeMaster" },
   { path: "/api/unit-matrix", file: "./routes/unitMatrix" },
+  { path: "/api/parking-matrix", file: "./routes/parkingMatrix" },
   { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/tickets", file: "./routes/ticketRoutes" },
   { path: "/api/records", file: "./routes/recordsRoutes" },
@@ -284,10 +291,10 @@ const ALL_ROUTES = [
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
   { path: "/api/lookups", file: "./routes/lookups" },
-  {
-    path: "/api/followup-agreement-workflow",
-    file: "./routes/followupagreementworkflow",
-  },
+  // /api/followup-agreement-workflow retired alongside /api/followup-agreements
+  // above — 0 live rows in dbo.FollowupAgreementWorkflows. The table stays
+  // (escalationEngine.js still reads it directly), only this CRUD endpoint
+  // is retired; nothing writes to the table anymore so it stays empty.
   {
     path: "/api/followup-document-vault",
     file: "./routes/followupDocumentVault",
@@ -315,9 +322,12 @@ const ALL_ROUTES = [
   { path: "/api/sa/role-master", file: "./routes/saRoleMaster" },
   { path: "/api/sa/notifications", file: "./routes/saNotifications" },
   // ── CRM Module ──────────────────────────────────────────────────────────────
+  { path: "/api/crm/customers",      file: "./routes/crmCustomers"      },
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
   { path: "/api/crm/welcome-calls",  file: "./routes/crmWelcomeCalls"   },
+  { path: "/api/crm/co-applicants",  file: "./routes/crmCoApplicant"    },
+  { path: "/api/crm/booking-documents", file: "./routes/crmBookingDocuments" },
   { path: "/api/crm/agreements",     file: "./routes/crmAgreements"     },
   { path: "/api/crm/payments",       file: "./routes/crmPayments"       },
   { path: "/api/crm/handover",       file: "./routes/crmHandover"       },
@@ -336,8 +346,11 @@ const ALL_ROUTES = [
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
   { path: "/api/crm/payment-plans",        file: "./routes/crmPaymentPlans"        },
   { path: "/api/crm/parking",              file: "./routes/crmParking"             },
+  { path: "/api/crm/holds",                file: "./routes/crmHolds"               },
   { path: "/api/crm/extra-charges",        file: "./routes/crmExtraCharges"        },
-  { path: "/api/crm-portal",               file: "./routes/crmPortal"              },
+  { path: "/api/crm/sla-engine",           file: "./routes/crmSlaEngine"           },
+  // /api/crm-portal is registered earlier, before the blanket authMiddleware
+  // wall (see above) — it must NOT also be registered here.
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────
@@ -477,6 +490,15 @@ async function createApp() {
   // Version number is not sensitive — served publicly so the Login/Landing
   // footers (pre-auth) can show the real DB-driven version, not "…".
   app.use("/api/app-version", require("./routes/appVersion"));
+  // Customer portal manages its own auth entirely (public /login using the
+  // separate CrmCustomerPortalUser table + JWT, then portalAuth for
+  // everything past that) — same reason /api/users is registered here
+  // rather than below. Registered before the blanket staff authMiddleware
+  // so a customer who has never held a staff session can actually reach
+  // /login; it used to sit in ALL_ROUTES below the wall, so every request —
+  // including login itself — was rejected with "No token provided" before
+  // crmPortal.js's own router ever ran.
+  app.use("/api/crm-portal", require("./routes/crmPortal"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {
@@ -591,6 +613,7 @@ async function startServer() {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
       startEscalationEngine();
+      startCrmSlaEngine();
     });
 
     setupGracefulShutdown(server, worker);
