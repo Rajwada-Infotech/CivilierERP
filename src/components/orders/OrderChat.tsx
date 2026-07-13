@@ -229,7 +229,7 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
   };
 
   return (
-    <section className={cn("flex flex-col rounded-2xl border border-border bg-card overflow-hidden", className)}>
+    <section className={cn("flex flex-col min-h-0 rounded-2xl border border-border bg-card overflow-hidden", className)}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -259,7 +259,7 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
           const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
           autoScrollRef.current = distance < 80;
         }}
-        className="flex-1 min-h-[240px] max-h-[26rem] overflow-y-auto bg-muted/10 px-4 py-5 space-y-5"
+        className="flex-1 min-h-[160px] overflow-y-auto bg-muted/10 px-4 py-5 space-y-5"
       >
         {(loading || isJoining) && (
           <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
