@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 const API = "/api/crm/sales-deed";
 const BKG_API = "/api/crm/bookings";
@@ -109,16 +110,16 @@ const CrmSalesDeed: React.FC = () => {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-muted/40 text-left">
-              {["Deed No", "Customer", "Deed Value", "Registration No", "Status", "Actions"].map((h) => (
+              {["Deed No", "Customer", "Deed Value", "Registration No", "Status", "Director Approval", "Actions"].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
             ) : deeds.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">No sale deeds</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No sale deeds</td></tr>
             ) : (deeds as any[]).map((d: any) => (
               <tr key={d.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{d.DeedNo}</td>
@@ -130,6 +131,29 @@ const CrmSalesDeed: React.FC = () => {
                 <td className="px-4 py-3 text-xs">{d.RegistrationNo || "—"}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[d.Status] || ""}`}>{d.Status}</span>
+                </td>
+                <td className="px-4 py-3">
+                  {d.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" ? (
+                    <div className="flex flex-col gap-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${
+                        d.DirectorApprovalStatus === "Approved" ? "text-green-600 bg-green-50 border-green-200"
+                        : d.DirectorApprovalStatus === "Rejected" ? "text-red-600 bg-red-50 border-red-200"
+                        : "text-orange-600 bg-orange-50 border-orange-200"
+                      }`}>{d.DirectorApprovalStatus}</span>
+                      {d.DirectorApprovalStatus === "Pending" && (
+                        <ApprovalActions
+                          status={d.DirectorApprovalStatus}
+                          recordId={d.Id}
+                          endpoint={API}
+                          actionPathSuffix="director"
+                          approverRoles={["super_admin"]}
+                          onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-sales-deed"] })}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   {d.Status !== "Registered" && d.Status !== "Cancelled" && (

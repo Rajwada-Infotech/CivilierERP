@@ -1,7 +1,8 @@
 import React from "react";
 import { useOutletContext } from "react-router-dom";
-import { CheckCircle2, Circle, Clock, CreditCard } from "lucide-react";
-import { fmtMoney, fmtDate } from "./portalApi";
+import { useQuery } from "@tanstack/react-query";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText } from "lucide-react";
+import { fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
 import { PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, serif } from "./portalTheme";
 
 type Ctx = { me: any; timeline: any };
@@ -9,6 +10,7 @@ type Ctx = { me: any; timeline: any };
 const PortalPayments: React.FC = () => {
   const { timeline } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
+  const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices"], queryFn: fetchInvoices, staleTime: 30_000 });
 
   if (!milestones.length) {
     return (
@@ -77,6 +79,21 @@ const PortalPayments: React.FC = () => {
           );
         })}
       </Card>
+
+      {invoices.length > 0 && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={FileText} title="Invoices" />
+          {invoices.map((inv: any) => (
+            <div key={inv.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: TEXT }}>{inv.InvoiceNo}</p>
+                <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}</p>
+              </div>
+              <p className="text-sm font-bold shrink-0" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   );
 };

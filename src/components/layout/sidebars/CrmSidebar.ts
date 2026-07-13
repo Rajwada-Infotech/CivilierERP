@@ -9,6 +9,7 @@ export const crmNavItems: NavItem[] = [
     label: "Pipeline",
     icon: ClipboardList,
     children: [
+      { label: "Customers",      path: "/crm/customers",      pageKey: "crm-customers"     },
       { label: "Applications",   path: "/crm/applications",   pageKey: "crm-applications"  },
       { label: "Bookings",       path: "/crm/bookings",       pageKey: "crm-bookings"      },
       { label: "Welcome Calls",  path: "/crm/welcome-calls",  pageKey: "crm-welcome-calls" },

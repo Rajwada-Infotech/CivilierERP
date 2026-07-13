@@ -12,7 +12,8 @@ router.use(authMiddleware);
 const WC_SELECT = `
   SELECT
     wc.Id, wc.BookingId, wc.CalledBy, wc.CallDate, wc.DurationSeconds,
-    wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields, wc.PreferredAgreementDate, wc.CreatedAt,
+    wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields, wc.PreferredAgreementDate,
+    wc.PaymentPlanConfirmed, wc.PaymentPlanConfirmedAt, wc.CreatedAt,
     u.name  AS CalledByName,
     b.BookingNo, b.UnitNo, b.ProjectName,
     a.ApplicantName, a.Mobile
@@ -107,6 +108,63 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
   }
 });
 
+// GET /:bookingId/call-context — everything a telecaller needs on-screen
+// DURING the call: what's outstanding, what's already been invoiced, the
+// customer's bank/loan preference on file, the assigned payment plan, and
+// any on-account credit sitting unapplied — one fetch instead of the
+// telecaller (or the page) hopping across four separate pages mid-call.
+router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes] = await Promise.all([
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingAmount, b.GrandTotal,
+               b.PaymentPlanId, pp.PlanName AS PaymentPlanName,
+               a.ApplicantName, a.Mobile, a.Email
+        FROM dbo.CrmBooking b
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
+        WHERE b.Id = @bid
+      `),
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT c.CustomerName, c.Mobile, c.Email, c.PanNo
+        FROM dbo.CrmCustomer c
+        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+        JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
+        WHERE b.Id = @bid
+      `),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT MilestoneName, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo"),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT InvoiceNo, InvoiceType, Amount, InvoiceDate FROM dbo.CrmInvoice WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT BankName, LoanAmount, SanctionStatus, LoanAccountNo FROM dbo.CrmLoanDetail WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ReceiptNo, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
+    ]);
+    if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const milestones = milRes.recordset;
+    const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
+    const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
+    const onAccountBalance = oaRes.recordset.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
+
+    res.json({
+      booking: bkRes.recordset[0],
+      customer: custRes.recordset[0] || null,
+      outstanding: { totalDue, totalPaid, balance: totalDue - totalPaid },
+      invoices: invRes.recordset,
+      loan: loanRes.recordset[0] || null,
+      onAccount: { payments: oaRes.recordset, availableBalance: onAccountBalance },
+    });
+  } catch (e) {
+    console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET / — all welcome calls
 router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
@@ -158,10 +216,13 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
       .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
+      .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed ? 1 : 0)
+      .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed ? new Date() : null)
       .input("acb",  sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmWelcomeCall (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, CreatedBy, CreatedAt)
-        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @acb, SYSDATETIME())
+        INSERT INTO dbo.CrmWelcomeCall
+          (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, CreatedBy, CreatedAt)
+        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @acb, SYSDATETIME())
       `);
 
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
@@ -237,6 +298,7 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
       .input("note", sql.NVarChar(sql.MAX), b.Notes ?? null)
       .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson ?? null)
       .input("pad",  sql.Date, b.PreferredAgreementDate || null)
+      .input("ppc",  sql.Bit,  b.PaymentPlanConfirmed != null ? (b.PaymentPlanConfirmed ? 1 : 0) : null)
       .query(`
         UPDATE dbo.CrmWelcomeCall SET
           CalledBy = ISNULL(@cb, CalledBy),
@@ -246,7 +308,9 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
           NextCallDate = @ncd,
           Notes = @note,
           CustomFields = @cf,
-          PreferredAgreementDate = @pad
+          PreferredAgreementDate = @pad,
+          PaymentPlanConfirmed = ISNULL(@ppc, PaymentPlanConfirmed),
+          PaymentPlanConfirmedAt = CASE WHEN @ppc = 1 THEN ISNULL(PaymentPlanConfirmedAt, SYSDATETIME()) ELSE PaymentPlanConfirmedAt END
         WHERE Id = @id
       `);
     res.json({ success: true });

@@ -3,10 +3,12 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId } = require("../services/saAccess");
+const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { transition: approvalTransition } = require("../services/approvalService");
+const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
 
@@ -147,6 +149,80 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
   } catch (e) {
     console.error("[crm-sales-deed] send-to-customer error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/director/approve — the third and final sign-off gate: "SALES
+// DEED -> APPROVAL FROM BOTH SIDES -> DIRECTOR APPROVAL -> SALES DEED
+// COMPLETE -> KEY HANDOVER". Restricted to super_admin only via
+// approvalService's MODULE_APPROVER_ROLE_OVERRIDES + the seeded
+// LevelsData — same "hardcoded for now, reassignable later with zero code
+// change" pattern used for Senior Approval and the Agreement Date gate.
+router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const remarks = req.body?.Remarks || null;
+    const result = await approvalTransition("crm-sales-deed-director", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === "Approved") {
+      const pool = getPool();
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("ab", sql.Int, actorId(req))
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .query(`
+          UPDATE dbo.CrmSalesDeed SET
+            DirectorApprovedBy = @ab, DirectorApprovedAt = SYSDATETIME(), DirectorApprovalRemarks = @rem
+          WHERE Id = @id
+        `);
+
+      const info = await pool.request().input("id", sql.Int, id).query(`
+        SELECT d.DeedNo, d.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+        FROM dbo.CrmSalesDeed d
+        JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE d.Id = @id
+      `);
+      const row = info.recordset[0];
+      if (row?.AssignedTo) {
+        await emitNotification(pool, row.AssignedTo, "crm_sales_deed_director_approved",
+          "Sales Deed Director-Approved",
+          `${row.DeedNo} (${row.BookingNo}) has been director-approved — handover can now be scheduled.`,
+          id, "crm_sales_deed");
+      }
+      await logCommunication(pool, {
+        bookingId: row?.BookingId, direction: "Outbound",
+        subject: `Sales deed ${row?.DeedNo} director-approved`,
+        summary: "Director approval complete — handover can now proceed.",
+        createdBy: actorId(req),
+      });
+    }
+    res.json({ success: true, status: result.newStatus, ...result });
+  } catch (e) {
+    console.error("[crm-sales-deed] director/approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/director/reject — sends it back for rework; staff must re-submit
+// once the concern is addressed (mirrors the Senior Approval reject shape).
+router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const remarks = req.body?.Remarks || null;
+    const result = await approvalTransition("crm-sales-deed-director", id, "Rejected", userEmail, req.user?.role, remarks);
+    const pool = getPool();
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("rem", sql.NVarChar(sql.MAX), remarks)
+      .query("UPDATE dbo.CrmSalesDeed SET DirectorApprovalRemarks = @rem WHERE Id = @id");
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-sales-deed] director/reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
   }
 });
 

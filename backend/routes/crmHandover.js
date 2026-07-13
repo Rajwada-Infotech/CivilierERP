@@ -84,19 +84,23 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
     }
 
-    // Workflow guard: the sales deed itself must exist and be customer-
-    // approved before handover — matching the spec's SALES DEED -> CUSTOMER
-    // APPROVAL -> TICKETS/POSSESSION ordering. An Executed agreement alone
-    // used to be enough to schedule a handover, which let staff skip past
-    // the sales deed step entirely.
+    // Workflow guard: the sales deed itself must exist, be customer-
+    // approved, AND director-approved before handover — matching the spec's
+    // SALES DEED -> APPROVAL FROM BOTH SIDES -> DIRECTOR APPROVAL -> SALES
+    // DEED COMPLETE -> KEY HANDOVER chain. An Executed agreement alone used
+    // to be enough to schedule a handover, which let staff skip past both
+    // the sales deed and director sign-off steps entirely.
     const deed = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
-      .query(`SELECT TOP 1 CustomerApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+      .query(`SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (!deed.recordset.length) {
       return res.status(400).json({ error: "Handover requires the sales deed to be created first" });
     }
     if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
       return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
+    }
+    if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Handover requires director approval of the sales deed first" });
     }
 
     // Workflow guard: if an NOC (Org or Bank) was ever requested for this

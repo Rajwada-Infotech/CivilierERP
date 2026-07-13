@@ -207,6 +207,30 @@ router.get("/timeline", async (req, res) => {
 });
 
 // GET /agreement — full agreement text/terms once it has been sent to the customer
+// GET /invoices — every invoice generated for the customer's booking(s),
+// visible the moment staff generates one (no separate "send" gate — an
+// invoice is a record of a real transaction the customer is entitled to
+// see, unlike the Agreement/Sales Deed which need a deliberate publish
+// step for a document still being negotiated).
+router.get("/invoices", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = req.portalUser.applicationId;
+    const result = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.CreatedAt,
+             b.BookingNo, b.UnitNo
+      FROM dbo.CrmInvoice inv
+      JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
+      WHERE b.ApplicationId = @aid
+      ORDER BY inv.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-portal] GET /invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/agreement", async (req, res) => {
   try {
     const pool = getPool();
@@ -587,13 +611,19 @@ router.post("/sales-deed/respond", async (req, res) => {
     const deedRow = deed.recordset[0];
 
     if (decision === "Approve") {
+      // Auto-flow: customer approval is one of the "both sides" — the
+      // moment it lands, Director approval (the next gate before Handover)
+      // opens up on its own, matching the spec's "APPROVAL FROM BOTH SIDES
+      // -> DIRECTOR APPROVAL" chain instead of waiting on a separate manual
+      // "submit for director approval" click.
       await pool.request()
         .input("id", sql.Int, deedRow.Id)
         .query(`
           UPDATE dbo.CrmSalesDeed SET
             CustomerApprovalStatus = 'Approved',
             CustomerApprovedAt = SYSDATETIME(),
-            CustomerRecheckRemarks = NULL
+            CustomerRecheckRemarks = NULL,
+            DirectorApprovalStatus = 'Pending'
           WHERE Id = @id
         `);
     } else {

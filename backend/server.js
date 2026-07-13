@@ -293,6 +293,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/role-master", file: "./routes/saRoleMaster" },
   { path: "/api/sa/notifications", file: "./routes/saNotifications" },
   // ── CRM Module ──────────────────────────────────────────────────────────────
+  { path: "/api/crm/customers",      file: "./routes/crmCustomers"      },
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
   { path: "/api/crm/welcome-calls",  file: "./routes/crmWelcomeCalls"   },

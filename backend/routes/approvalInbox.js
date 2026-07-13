@@ -578,6 +578,32 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-sales-deed-director") {
+      queries.push(`
+        SELECT
+          'crm-sales-deed-director'             AS Module,
+          'CRM Sales Deed (Director)'           AS ModuleLabel,
+          CAST(d.Id AS NVARCHAR)                AS RecordId,
+          d.DeedNo                              AS Reference,
+          d.CreatedAt                           AS RecordDate,
+          d.DirectorApprovalStatus              AS Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          d.DeedValue                           AS Amount,
+          ${NULL_EXTRA}
+          CAST(d.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(d.DirectorApprovalRemarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(d.UpdatedAt, d.CreatedAt)      AS LastModified
+        FROM dbo.CrmSalesDeed d
+        JOIN dbo.CrmBooking b     ON b.Id = d.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE d.DirectorApprovalStatus = 'Pending'
+      `);
+    }
+
     if (!module || module === "crm-brokerage") {
       queries.push(`
         SELECT

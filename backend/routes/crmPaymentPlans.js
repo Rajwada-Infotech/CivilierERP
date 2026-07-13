@@ -7,16 +7,36 @@ const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
 
+const PLAN_SELECT = `
+  SELECT p.Id, p.PlanName, p.Description, p.IsActive, p.CreatedAt,
+         p.CompanyId, p.ProjectId, p.BlockId,
+         comp.name AS CompanyName, proj.name AS ProjectName, blk.BlockName,
+         (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
+         (SELECT SUM([Percent]) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS TotalPercent
+  FROM dbo.CrmPaymentPlanTemplate p
+  LEFT JOIN dbo.enterprise comp ON comp.id = p.CompanyId AND comp.business_type = 'C'
+  LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
+`;
+
+// GET / — every plan (management page), or the plans applicable to a given
+// Company/Project/Block scope when those query params are supplied (used
+// by the Booking page's plan picker). A plan matches a scope filter if its
+// own scope column is either NULL (a wildcard/default plan available
+// everywhere) or an exact match — so a Project-specific plan only shows for
+// that project, while a global plan always shows alongside it.
 router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT p.Id, p.PlanName, p.Description, p.IsActive, p.CreatedAt,
-             (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
-             (SELECT SUM([Percent]) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS TotalPercent
-      FROM dbo.CrmPaymentPlanTemplate p
-      ORDER BY p.CreatedAt DESC
-    `);
+    const { companyId, projectId, blockId } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (companyId) { req0.input("cid", sql.Int, parseInt(companyId)); conds.push("(p.CompanyId IS NULL OR p.CompanyId = @cid)"); }
+    if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("(p.ProjectId IS NULL OR p.ProjectId = @pid)"); }
+    if (blockId)   { req0.input("bid", sql.Int, parseInt(blockId));   conds.push("(p.BlockId IS NULL OR p.BlockId = @bid)"); }
+    if (companyId || projectId || blockId) conds.push("p.IsActive = 1");
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-payment-plans] GET error:", e.message);
@@ -29,7 +49,7 @@ router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, re
     const pool = getPool();
     const id = parseInt(req.params.id);
     const [planRes, itemsRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmPaymentPlanTemplate WHERE Id = @id"),
+      pool.request().input("id", sql.Int, id).query(`${PLAN_SELECT} WHERE p.Id = @id`),
       pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id ORDER BY MilestoneNo"),
     ]);
     if (!planRes.recordset[0]) return res.status(404).json({ error: "Payment plan not found" });
@@ -40,7 +60,10 @@ router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, re
   }
 });
 
-// POST / — create a plan template with its milestone breakdown; percentages must sum to 100
+// POST / — create a plan template with its milestone breakdown; percentages
+// must sum to 100. Scope (Company/Project/Block) is optional at every
+// level — leaving all three blank creates a global default plan available
+// to any booking that doesn't have a more specific one.
 router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, res) => {
   const pool = getPool();
   const tx = pool.transaction();
@@ -56,11 +79,14 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     const planResult = await tx.request()
       .input("name", sql.NVarChar(200), b.PlanName.trim())
       .input("desc", sql.NVarChar(500), b.Description || null)
+      .input("cid",  sql.Int,           b.CompanyId ? parseInt(b.CompanyId) : null)
+      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
+      .input("bid",  sql.Int,           b.BlockId   ? parseInt(b.BlockId)   : null)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, CompanyId, ProjectId, BlockId, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@name, @desc, 1, @cb, SYSDATETIME())
+        VALUES (@name, @desc, @cid, @pid, @bid, 1, @cb, SYSDATETIME())
       `);
     const planId = planResult.recordset[0].Id;
 
@@ -80,6 +106,9 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     res.status(201).json({ success: true, id: planId });
   } catch (e) {
     await tx.rollback();
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
+      return res.status(409).json({ error: "A plan with this name already exists for this company/project/block" });
+    }
     console.error("[crm-payment-plans] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -94,9 +123,20 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       .input("id",   sql.Int,  id)
       .input("desc", sql.NVarChar(500), b.Description || null)
       .input("active", sql.Bit, b.IsActive !== false ? 1 : 0)
-      .query("UPDATE dbo.CrmPaymentPlanTemplate SET Description = @desc, IsActive = @active WHERE Id = @id");
+      .input("cid",  sql.Int,  b.CompanyId ? parseInt(b.CompanyId) : null)
+      .input("pid",  sql.Int,  b.ProjectId ? parseInt(b.ProjectId) : null)
+      .input("bid",  sql.Int,  b.BlockId   ? parseInt(b.BlockId)   : null)
+      .query(`
+        UPDATE dbo.CrmPaymentPlanTemplate SET
+          Description = @desc, IsActive = @active,
+          CompanyId = @cid, ProjectId = @pid, BlockId = @bid
+        WHERE Id = @id
+      `);
     res.json({ success: true });
   } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
+      return res.status(409).json({ error: "A plan with this name already exists for this company/project/block" });
+    }
     console.error("[crm-payment-plans] PUT error:", e.message);
     res.status(500).json({ error: e.message });
   }

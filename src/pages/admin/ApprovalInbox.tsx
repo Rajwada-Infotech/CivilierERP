@@ -199,6 +199,13 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/agreements",
     label: "CRM Agreement Date",
   },
+  "crm-sales-deed-director": {
+    icon: Building2,
+    color: "text-purple-500 bg-purple-500/10",
+    navPath: "/crm/sales-deed",
+    apiEndpoint: "/api/crm/sales-deed",
+    label: "CRM Sales Deed (Director)",
+  },
   "crm-brokerage": {
     icon: Receipt,
     color: "text-amber-500 bg-amber-500/10",
@@ -226,12 +233,14 @@ const MODULE_CONFIG: Record<
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-// Agreement Date is a narrower, separate gate — super_admin only, "for now"
-// per instruction, unlike the rest of the CRM modules above. The backend
-// enforces this independently via approvalService's
-// MODULE_APPROVER_ROLE_OVERRIDES; this only controls button visibility here.
-const DATE_APPROVAL_MODULES = new Set(["crm-agreement-date"]);
+// Agreement Date and Sales Deed Director approval are narrower, separate
+// gates — super_admin only, "for now" per instruction, unlike the rest of
+// the CRM modules above. The backend enforces this independently via
+// approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
+// button visibility (and which /:id/<suffix>/approve path gets hit) here.
 const DATE_APPROVER_ROLES = ["super_admin"];
+const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
+const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
@@ -379,9 +388,9 @@ const InboxRow: React.FC<{
         status={item.Status}
         recordId={item.RecordId}
         endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        actionPathSuffix={DATE_APPROVAL_MODULES.has(item.Module) ? "date" : undefined}
+        actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
         approverRoles={
-          DATE_APPROVAL_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }
