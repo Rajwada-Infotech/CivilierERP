@@ -246,6 +246,17 @@ function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
 }
 
 // ── Order detail popup — what procurement actually wants ───────────────────────
+function detailRows(detail: spApi.SupplierOrderDetail): { icon: React.ElementType; label: string; value: string | null }[] {
+  return [
+    { icon: Building2,     label: "Company",        value: detail.CompanyName },
+    { icon: MapPin,        label: "Project",        value: detail.ProjectName },
+    { icon: CalendarDays,  label: "PO Date",         value: fmtDate(detail.PODate) },
+    { icon: Clock,         label: "Expected By",     value: fmtDate(detail.ExpectedDeliveryDate) },
+    { icon: ClipboardList, label: "Payment Terms",   value: detail.PaymentTerms },
+    { icon: Hash,          label: "GST",             value: detail.GstType && detail.GstRate != null ? `${detail.GstType} · ${detail.GstRate}%` : null },
+  ];
+}
+
 function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () => void }) {
   const { data: detail, isLoading } = useQuery({
     queryKey: ["supplier-order-detail", orderId],
@@ -309,19 +320,12 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
               </div>
 
               <div className="space-y-2.5 text-sm">
-                {[
-                  [Building2, "Company", detail.CompanyName],
-                  [MapPin, "Project", detail.ProjectName],
-                  [CalendarDays, "PO Date", fmtDate(detail.PODate)],
-                  [Clock, "Expected By", fmtDate(detail.ExpectedDeliveryDate)],
-                  [ClipboardList, "Payment Terms", detail.PaymentTerms],
-                  [Hash, "GST", detail.GstType && detail.GstRate != null ? `${detail.GstType} · ${detail.GstRate}%` : null],
-                ].map(([Icon, label, val]) => val ? (
-                  <div key={label as string} className="flex items-start gap-2.5">
-                    {React.createElement(Icon as React.ElementType, { size: 13, className: "text-muted-foreground mt-0.5 shrink-0" })}
+                {detailRows(detail).map(({ icon: Icon, label, value }) => value ? (
+                  <div key={label} className="flex items-start gap-2.5">
+                    <Icon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
                     <div className="min-w-0">
                       <p className="text-[10px] text-muted-foreground">{label}</p>
-                      <p className="text-foreground">{val}</p>
+                      <p className="text-foreground">{value}</p>
                     </div>
                   </div>
                 ) : null)}
@@ -394,92 +398,174 @@ function OrdersSection({ orders, loading }: {
             <p className="text-sm text-muted-foreground">No orders yet. POs issued to you will appear here.</p>
           </motion.div>
         ) : (
-          <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
-            {/* Header */}
-            <div className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
-              <span>PO No.</span>
-              <span className="hidden sm:block">Description / Project</span>
-              <span>Amount</span>
-              <span>Expected By</span>
-              <span>Supplied</span>
-              <span></span>
-            </div>
+          <>
+            {/* Desktop / tablet table */}
+            <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
+              {/* Header */}
+              <div className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+                <span>PO No.</span>
+                <span>Description / Project</span>
+                <span>Amount</span>
+                <span>Expected By</span>
+                <span>Supplied</span>
+                <span></span>
+              </div>
 
-            {orders.map((o, i) => {
-              const overdue = isOverdue(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged;
-              return (
-                <motion.div key={o.PurchaseOrderID}
-                  className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors border-b border-border/60 last:border-0 cursor-pointer"
-                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
-                  onClick={() => setDetailOrderId(o.PurchaseOrderID)}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.SupplierAcknowledged ? "bg-emerald-400" : overdue ? "bg-red-400" : "bg-amber-400"}`} />
-                    <span className="text-xs font-mono font-semibold text-foreground truncate">{o.DocNo || o.PurchaseOrderNo}</span>
-                  </div>
-                  <div className="hidden sm:block min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-xs text-foreground font-medium truncate">{o.ItemDescription || "—"}</p>
-                      <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
-                        {o.SourceLabel}
-                      </span>
+              {orders.map((o, i) => {
+                const overdue = isOverdue(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged;
+                return (
+                  <motion.div key={o.PurchaseOrderID}
+                    className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors border-b border-border/60 last:border-0 cursor-pointer"
+                    initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                    onClick={() => setDetailOrderId(o.PurchaseOrderID)}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.SupplierAcknowledged ? "bg-emerald-400" : overdue ? "bg-red-400" : "bg-amber-400"}`} />
+                      <span className="text-xs font-mono font-semibold text-foreground truncate">{o.DocNo || o.PurchaseOrderNo}</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate">
-                      {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
-                    </p>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {o.TotalAmount != null ? `₹${Number(o.TotalAmount).toLocaleString("en-IN")}` : "—"}
-                  </span>
-                  <span className={`text-xs ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
-                    {fmtDate(o.ExpectedDeliveryDate)}
-                  </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-foreground font-medium truncate">{o.ItemDescription || "—"}</p>
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                          {o.SourceLabel}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {o.TotalAmount != null ? `₹${Number(o.TotalAmount).toLocaleString("en-IN")}` : "—"}
+                    </span>
+                    <span className={`text-xs ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                      {fmtDate(o.ExpectedDeliveryDate)}
+                    </span>
 
-                  {/* Checkbox — mark supplied */}
-                  <div onClick={(e) => e.stopPropagation()}>
+                    {/* Checkbox — mark supplied */}
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          if (o.SupplierAcknowledged) {
+                            ackMutation.mutate({ id: o.PurchaseOrderID, acknowledged: false });
+                          } else {
+                            setMarkSuppliedOrderId(o.PurchaseOrderID);
+                          }
+                        }}
+                        disabled={ackMutation.isPending}
+                        className="flex flex-col items-start gap-0.5 text-xs font-medium disabled:opacity-50 w-fit"
+                        title={o.SupplierAcknowledged ? "Marked as supplied" : "Mark as supplied"}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {o.SupplierAcknowledged ? (
+                            <CheckSquare size={16} className="text-emerald-500" />
+                          ) : (
+                            <Square size={16} className="text-muted-foreground" />
+                          )}
+                          <span className={o.SupplierAcknowledged ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                            {o.SupplierAcknowledged ? "Supplied" : "Mark"}
+                          </span>
+                        </span>
+                        {o.SupplierAcknowledged && <DeliveryBadge expected={o.ExpectedDeliveryDate} supplied={o.SuppliedDate} />}
+                      </button>
+                    </div>
+
+                    {/* Chat icon */}
                     <button
-                      onClick={() => {
-                        if (o.SupplierAcknowledged) {
-                          ackMutation.mutate({ id: o.PurchaseOrderID, acknowledged: false });
-                        } else {
-                          setMarkSuppliedOrderId(o.PurchaseOrderID);
-                        }
-                      }}
-                      disabled={ackMutation.isPending}
-                      className="flex flex-col items-start gap-0.5 text-xs font-medium disabled:opacity-50 w-fit"
-                      title={o.SupplierAcknowledged ? "Marked as supplied" : "Mark as supplied"}
+                      onClick={(e) => { e.stopPropagation(); setChatOrderId(o.PurchaseOrderID); }}
+                      className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                      title="Chat about this order"
                     >
-                      <span className="flex items-center gap-1.5">
+                      <MessageCircle size={15} />
+                      {o.CommentCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                          {o.CommentCount}
+                        </span>
+                      )}
+                    </button>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+
+            {/* Mobile stacked cards */}
+            <div className="sm:hidden space-y-3">
+              {orders.map((o, i) => {
+                const overdue = isOverdue(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged;
+                return (
+                  <motion.div key={o.PurchaseOrderID}
+                    className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden active:bg-emerald-500/5 transition-colors cursor-pointer"
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                    onClick={() => setDetailOrderId(o.PurchaseOrderID)}>
+                    <div className="p-4 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.SupplierAcknowledged ? "bg-emerald-400" : overdue ? "bg-red-400" : "bg-amber-400"}`} />
+                          <span className="text-xs font-mono font-semibold text-foreground truncate">{o.DocNo || o.PurchaseOrderNo}</span>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-foreground">
+                          {o.TotalAmount != null ? `₹${Number(o.TotalAmount).toLocaleString("en-IN")}` : "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs text-foreground font-medium">{o.ItemDescription || "—"}</p>
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                          {o.SourceLabel}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className={`text-[11px] ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                          Expected {fmtDate(o.ExpectedDeliveryDate)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border/60 bg-muted/20" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          if (o.SupplierAcknowledged) {
+                            ackMutation.mutate({ id: o.PurchaseOrderID, acknowledged: false });
+                          } else {
+                            setMarkSuppliedOrderId(o.PurchaseOrderID);
+                          }
+                        }}
+                        disabled={ackMutation.isPending}
+                        className="flex items-center gap-1.5 text-xs font-medium disabled:opacity-50"
+                      >
                         {o.SupplierAcknowledged ? (
                           <CheckSquare size={16} className="text-emerald-500" />
                         ) : (
                           <Square size={16} className="text-muted-foreground" />
                         )}
                         <span className={o.SupplierAcknowledged ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
-                          {o.SupplierAcknowledged ? "Supplied" : "Mark"}
+                          {o.SupplierAcknowledged ? "Supplied" : "Mark as supplied"}
                         </span>
-                      </span>
-                      {o.SupplierAcknowledged && <DeliveryBadge expected={o.ExpectedDeliveryDate} supplied={o.SuppliedDate} />}
-                    </button>
-                  </div>
+                        {o.SupplierAcknowledged && <DeliveryBadge expected={o.ExpectedDeliveryDate} supplied={o.SuppliedDate} />}
+                      </button>
 
-                  {/* Chat icon */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setChatOrderId(o.PurchaseOrderID); }}
-                    className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-                    title="Chat about this order"
-                  >
-                    <MessageCircle size={15} />
-                    {o.CommentCount > 0 && (
-                      <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
-                        {o.CommentCount}
-                      </span>
-                    )}
-                  </button>
-                </motion.div>
-              );
-            })}
-          </motion.div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setChatOrderId(o.PurchaseOrderID); }}
+                        className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground shrink-0"
+                        title="Chat about this order"
+                      >
+                        <MessageCircle size={15} />
+                        {o.CommentCount > 0 && (
+                          <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                            {o.CommentCount}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
