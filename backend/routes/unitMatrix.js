@@ -10,7 +10,7 @@ router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // GET /projects — project dropdown (mirrors unitMaster.js /projects)
-router.get("/projects", requirePageRight("followup-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {
+router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -27,7 +27,7 @@ router.get("/projects", requirePageRight("followup-unit-matrix", "view"), cache(
 });
 
 // GET /blocks?projectId= — block dropdown for the selected project
-router.get("/blocks", requirePageRight("followup-unit-matrix", "view"), async (req, res) => {
+router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, res) => {
   const projectId = parseInt(req.query.projectId, 10);
   try {
     const pool = getPool();
@@ -51,7 +51,7 @@ router.get("/blocks", requirePageRight("followup-unit-matrix", "view"), async (r
 // actual booking record: an administratively deactivated unit is Blocked,
 // one with a live (non-cancelled) booking is Booked, everything else is
 // Available.
-router.get("/", requirePageRight("followup-unit-matrix", "view"), async (req, res) => {
+router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
@@ -69,11 +69,15 @@ router.get("/", requirePageRight("followup-unit-matrix", "view"), async (req, re
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus,
-        a.ApplicantName, a.Mobile
+        a.ApplicantName, a.Mobile,
+        h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
+        ha.ApplicantName AS HoldApplicantName, ha.Mobile AS HoldMobile
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status <> 'Cancelled'
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
+      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      LEFT JOIN dbo.CrmApplication ha ON ha.Id = h.ApplicationId
       WHERE ${where}
       ORDER BY u.FloorNo, blk.BlockName, u.UnitName
     `);
@@ -84,11 +88,16 @@ router.get("/", requirePageRight("followup-unit-matrix", "view"), async (req, re
       FloorNo: r.FloorNo,
       BlockId: r.BlockId,
       BlockName: r.BlockName,
-      Status: !r.UnitIsActive ? "Blocked" : r.BookingId ? "Booked" : "Available",
+      Status: !r.UnitIsActive ? "Blocked" : r.BookingId ? "Booked" : r.HoldId ? "OnHold" : "Available",
       BookingId: r.BookingId || null,
       BookingNo: r.BookingNo || null,
       ApplicantName: r.ApplicantName || null,
       Mobile: r.Mobile || null,
+      HoldId: r.HoldId || null,
+      HoldUntil: r.HoldUntil || null,
+      HoldApplicationId: r.HoldApplicationId || null,
+      HoldApplicantName: r.HoldApplicantName || null,
+      HoldMobile: r.HoldMobile || null,
     }));
 
     res.json(units);

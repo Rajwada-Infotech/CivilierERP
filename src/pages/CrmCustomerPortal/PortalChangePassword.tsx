@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { KeyRound } from "lucide-react";
+import { INK, VIOLET_DEEP, GOLD, GOLD_SOFT, PORCELAIN, serif } from "./portalTheme";
 
 const API = "/api/crm-portal";
 
@@ -33,23 +35,40 @@ const PortalChangePassword: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/20 px-4">
-      <div className="w-full max-w-sm bg-background rounded-2xl border border-border p-6 shadow-sm">
-        <h1 className="text-xl font-bold text-center mb-1">Set Your Password</h1>
-        <p className="text-xs text-muted-foreground text-center mb-6">For security, please set a new password</p>
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: PORCELAIN }}>
+      <div className="w-full max-w-sm rounded-2xl p-7"
+        style={{
+          background: "rgba(255,255,255,0.97)",
+          border: `1px solid rgba(201,162,39,0.20)`,
+          boxShadow: "0 20px 60px rgba(30,11,66,0.08), 0 4px 20px rgba(0,0,0,0.06)",
+        }}>
+        <div className="flex flex-col items-center gap-3 mb-6">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid #E8C766` }}>
+            <KeyRound size={22} />
+          </div>
+          <div className="text-center">
+            <h1 className="text-lg font-semibold" style={{ ...serif, color: INK }}>Set Your Password</h1>
+            <p className="text-xs text-slate-400 mt-1">For security, please set a new password for future logins</p>
+          </div>
+        </div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">New Password</label>
+            <label className="text-xs text-slate-500 block mb-1">New Password</label>
             <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
+              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 outline-none transition-colors"
+              onFocus={(e) => { e.currentTarget.style.boxShadow = "0 0 0 2px rgba(201,162,39,0.35)"; e.currentTarget.style.borderColor = GOLD; }}
+              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = ""; }} />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">Confirm Password</label>
+            <label className="text-xs text-slate-500 block mb-1">Confirm Password</label>
             <input type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)}
-              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
+              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 outline-none transition-colors"
+              onFocus={(e) => { e.currentTarget.style.boxShadow = "0 0 0 2px rgba(201,162,39,0.35)"; e.currentTarget.style.borderColor = GOLD; }}
+              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = ""; }} />
           </div>
           <button type="submit" disabled={loading}
-            className="w-full py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-40">
+            className="w-full py-2.5 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-opacity"
+            style={{ background: `linear-gradient(135deg, ${INK}, ${VIOLET_DEEP})` }}>
             {loading ? "Saving..." : "Save & Continue"}
           </button>
         </form>

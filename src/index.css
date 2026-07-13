@@ -1,8 +1,46 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Customer Portal accent tokens — deliberately separate from the staff
+   app's --background/--foreground theme system above. Defaults here match
+   the "Ink & Gold" preset; portalTheme.tsx's applyPortalAccent() overrides
+   these on document.documentElement when a customer picks a different
+   accent on the Customer 360 page, and every portal component (including
+   Radix Dialogs, which portal to document.body outside the page tree)
+   reads them via var(--portal-*) so the choice reaches everywhere at once. */
+:root {
+    --portal-ink: #1E0B42;
+    --portal-violet-deep: #2E1065;
+    --portal-violet: #4C1D95;
+    --portal-violet-light: #5B21B6;
+    --portal-gold: #C9A227;
+    --portal-gold-soft: rgba(201, 162, 39, 0.10);
+
+    /* Light/Dark mode surface tokens — independent of the accent hue above.
+       applyPortalMode() in portalTheme.tsx flips these via [data-portal-mode]
+       on <html>, driven by an explicit Light/Dark choice or the OS's
+       prefers-color-scheme when set to "System". */
+    --portal-bg: #FAF8F5;
+    --portal-surface: #FFFFFF;
+    --portal-surface-alt: #FAF8F5;
+    --portal-hairline: #E8E1D3;
+    --portal-text: #1E0B42;
+    --portal-text-muted: #64748B;
+    --portal-text-faint: #94A3B8;
+}
+
+[data-portal-mode="dark"] {
+    --portal-bg: #120E1E;
+    --portal-surface: #1C1730;
+    --portal-surface-alt: #241D3B;
+    --portal-hairline: #392F52;
+    --portal-text: #F1ECFB;
+    --portal-text-muted: #B6AECD;
+    --portal-text-faint: #8B82A0;
+}
 
 @layer base {
     /* DARK THEME (default) */

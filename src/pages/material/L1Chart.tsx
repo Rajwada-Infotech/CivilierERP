@@ -161,13 +161,18 @@ export default function L1Chart() {
               value={quotationId}
               onChange={(e) => { setQuotationId(e.target.value); setWinningSupplierId(""); }}
               disabled={loadingQuotations}
+              style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
               className="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border-2 border-emerald-500/25 bg-emerald-500/5 text-foreground focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/15 transition appearance-none font-heading cursor-pointer disabled:opacity-50"
             >
-              <option value="">
+              <option value="" style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}>
                 {loadingQuotations ? "Loading quotations…" : comparableQuotations.length === 0 ? "No submitted quotations found" : "— Pick a quotation —"}
               </option>
               {comparableQuotations.map((q) => (
-                <option key={q.QuotationId} value={String(q.QuotationId)}>
+                <option
+                  key={q.QuotationId}
+                  value={String(q.QuotationId)}
+                  style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
+                >
                   {q.DocNo}  ·  {q.ProjectName ?? q.CompanyName}  [{q.Status}]
                 </option>
               ))}

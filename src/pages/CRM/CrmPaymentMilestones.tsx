@@ -3,9 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus } from "lucide-react";
+import { Search, IndianRupee, AlertCircle, CheckCircle2, Clock, Plus, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -40,9 +41,17 @@ async function fetchMilestones(bookingId: string): Promise<any> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchOnAccount(bookingId: string): Promise<any> {
+  if (!bookingId) return null;
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}/on-account`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
 const CrmPaymentMilestones: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgParam = sp.get("bookingId") || "";
   const [selectedBookingId, setSelectedBookingId] = useState(bkgParam);
@@ -50,7 +59,10 @@ const CrmPaymentMilestones: React.FC = () => {
   const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
-  const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "" });
+  const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
+  const [onAccountDialog, setOnAccountDialog] = useState(false);
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+  const [applyingId, setApplyingId] = useState<number | null>(null);
 
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: milestoneData, isLoading } = useQuery({
@@ -59,10 +71,17 @@ const CrmPaymentMilestones: React.FC = () => {
     enabled: !!selectedBookingId,
     staleTime: 30_000,
   });
+  const { data: onAccountData } = useQuery({
+    queryKey: ["crm-on-account", selectedBookingId],
+    queryFn: () => fetchOnAccount(selectedBookingId),
+    enabled: !!selectedBookingId,
+    staleTime: 15_000,
+  });
 
   const milestones: any[] = milestoneData?.milestones || [];
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
+  const onAccountBalance = onAccountData?.availableBalance || 0;
 
   const handleOpenPayment = (m: any) => {
     setEditingId(m.Id);
@@ -87,6 +106,12 @@ const CrmPaymentMilestones: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Milestone waived");
+
+      const allOthersCleared = milestones.filter((x) => x.Id !== m.Id).every((x) => ["Paid", "Waived"].includes(x.Status));
+      if (allOthersCleared) {
+        promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
+      }
+
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -110,6 +135,15 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Payment recorded");
+
+      const current = milestones.find((m) => m.Id === editingId);
+      const paidAmt = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : current?.AmountPaid;
+      const thisOneCleared = current && paidAmt != null && paidAmt >= current.AmountDue;
+      const allOthersCleared = milestones.filter((m) => m.Id !== editingId).every((m) => ["Paid", "Waived"].includes(m.Status));
+      if (thisOneCleared && allOthersCleared) {
+        promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
+      }
+
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
@@ -130,17 +164,73 @@ const CrmPaymentMilestones: React.FC = () => {
           MilestoneName: addForm.MilestoneName,
           DueDate: addForm.DueDate || null,
           AmountDue: addForm.AmountDue ? parseFloat(addForm.AmountDue) : 0,
+          ResponsibleDepartment: addForm.ResponsibleDepartment || null,
+          RequiredDocuments: addForm.RequiredDocuments || null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Milestone added");
       setAddDialog(false);
-      setAddForm({ MilestoneName: "", DueDate: "", AmountDue: "" });
+      setAddForm({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDepositOnAccount = async () => {
+    if (!selectedBookingId || !onAccountForm.Amount) return;
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}/on-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          Amount: parseFloat(onAccountForm.Amount),
+          ReceivedDate: onAccountForm.ReceivedDate || null,
+          PaymentMode: onAccountForm.PaymentMode || null,
+          TransactionRef: onAccountForm.TransactionRef || null,
+          Notes: onAccountForm.Notes || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
+      setOnAccountDialog(false);
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+      qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApplyOnAccount = async (milestone: any) => {
+    if (!onAccountData?.payments?.length) return;
+    const available = onAccountData.payments.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount) > 0);
+    if (!available) return;
+    const balance = Number(milestone.AmountDue) - Number(milestone.AmountPaid || 0);
+    const remaining = Number(available.Amount) - Number(available.AppliedAmount);
+    const amount = Math.min(balance, remaining);
+    setApplyingId(milestone.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/on-account/${available.Id}/apply`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ MilestoneId: milestone.Id, Amount: amount }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`₹${amount.toLocaleString("en-IN")} applied from on-account balance`);
+      qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setApplyingId(null);
     }
   };
 
@@ -164,10 +254,16 @@ const CrmPaymentMilestones: React.FC = () => {
           </select>
         </div>
         {selectedBookingId && (
-          <button onClick={() => setAddDialog(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
-            <Plus size={14} /> Add Milestone
-          </button>
+          <>
+            <button onClick={() => setAddDialog(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+              <Plus size={14} /> Add Milestone
+            </button>
+            <button onClick={() => setOnAccountDialog(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+              <Wallet size={14} /> Deposit On Account
+            </button>
+          </>
         )}
       </div>
 
@@ -219,19 +315,39 @@ const CrmPaymentMilestones: React.FC = () => {
             </div>
           )}
 
+          {/* On-Account balance */}
+          {onAccountData && (onAccountData.payments?.length > 0) && (
+            <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-blue-200 bg-blue-50/40" : "border-border"}`}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className="text-blue-600" /> On-Account Balance</h3>
+                <span className={`text-lg font-bold ${onAccountBalance > 0 ? "text-blue-700" : "text-muted-foreground"}`}>{fmt(onAccountBalance)}</span>
+              </div>
+              <div className="space-y-1">
+                {onAccountData.payments.map((p: any) => (
+                  <div key={p.Id} className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{p.ReceiptNo} · {fmt(p.Amount)} · {p.PaymentMode || "—"}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full border font-medium ${p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200" : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                      {p.Status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Milestone table */}
           <div className="rounded-xl border border-border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/40 text-left">
-                  {["#", "Milestone", "Due Date", "Amount Due", "Amount Paid", "Balance", "Status", "Payment Mode", "Ref", ""].map((h) => (
+                  {["#", "Milestone", "Dept", "Due Date", "Amount Due", "Amount Paid", "Balance", "Status", "Payment Mode", "Ref", ""].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {milestones.length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-sm">No milestones found</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground text-sm">No milestones found</td></tr>
                 ) : milestones.map((m: any) => {
                   const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
                   const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
@@ -239,7 +355,15 @@ const CrmPaymentMilestones: React.FC = () => {
                   return (
                     <tr key={m.Id} className={`border-t border-border hover:bg-muted/10 transition-colors ${isOverdue ? "bg-red-50/30" : ""}`}>
                       <td className="px-4 py-3 text-muted-foreground">{m.MilestoneNo}</td>
-                      <td className="px-4 py-3 font-medium">{m.MilestoneName}</td>
+                      <td className="px-4 py-3 font-medium">
+                        {m.MilestoneName}
+                        {m.RequiredDocuments && (
+                          <div className="text-[10px] text-muted-foreground font-normal mt-0.5" title={m.RequiredDocuments}>
+                            Docs: {m.RequiredDocuments}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{m.ResponsibleDepartment || "—"}</td>
                       <td className="px-4 py-3 text-xs">
                         {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
                         {isOverdue && <span className="ml-1 text-red-500 text-[10px]">OVERDUE</span>}
@@ -261,6 +385,12 @@ const CrmPaymentMilestones: React.FC = () => {
                               className="text-xs text-primary hover:underline">
                               Record Payment
                             </button>
+                            {onAccountBalance > 0 && (
+                              <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
+                                className="text-xs text-blue-600 hover:underline disabled:opacity-40">
+                                {applyingId === m.Id ? "Applying..." : "Apply On-Account"}
+                              </button>
+                            )}
                             <button onClick={() => handleWaive(m)}
                               className="text-xs text-muted-foreground hover:underline">
                               Waive
@@ -345,6 +475,20 @@ const CrmPaymentMilestones: React.FC = () => {
                 onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Responsible Department</label>
+              <input type="text" value={addForm.ResponsibleDepartment}
+                onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder="e.g. Construction, Legal, Sales" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Required Documents</label>
+              <input type="text" value={addForm.RequiredDocuments}
+                onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder="e.g. Completion Certificate" />
+            </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setAddDialog(false)}
@@ -352,6 +496,56 @@ const CrmPaymentMilestones: React.FC = () => {
             <button onClick={handleAddMilestone} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Adding..." : "Add Milestone"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Deposit On Account Dialog */}
+      <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Deposit On Account</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due — held as a credit and applied to milestones as they come up, in order.</p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
+              <input type="number" value={onAccountForm.Amount}
+                onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
+                <input type="date" value={onAccountForm.ReceivedDate}
+                  onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
+                <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">Select mode</option>
+                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
+              <input type="text" value={onAccountForm.TransactionRef}
+                onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
+                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => setOnAccountDialog(false)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleDepositOnAccount} disabled={saving || !onAccountForm.Amount}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Recording..." : "Record Deposit"}
             </button>
           </div>
         </DialogContent>
