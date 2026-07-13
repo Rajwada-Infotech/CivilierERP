@@ -89,6 +89,10 @@ export interface ExpenseRecord {
   companyId: number | null;
   poId: string | null;
   supplier: string;
+  /** AccountHeadMaster.LHeadId for `supplier` — only meaningful for direct/manual
+   *  (non PO/WO/GRN-linked) bookings, where the backend has no source document to
+   *  derive the supplier from and relies on this instead (ExpenseBooking.LHeadId). */
+  supplierLHeadId?: number | null;
   projectSite: string;
   materialCategory: string;
   invoiceReference: string;
@@ -99,6 +103,9 @@ export interface ExpenseRecord {
   emi: EmiConfig;
   /** Payment mode derived from EMI flag. */
   paymentType?: "full" | "partial";
+  /** For paymentType "partial" — the amount paid up-front; EMI is generated
+   *  against the remainder (netAmount - partialAmount), not the full net. */
+  partialAmount?: number;
   netAmount: number | null;
   /** Live GRN incl-GST total for GRN-linked bookings; null for others. */
   grnTotalAmount: number | null;
@@ -223,4 +230,193 @@ export interface GrnGstData {
     receivedQty: number;
   };
   lines: GrnGstLine[];
+}
+
+// ─── Document Selector types (PO / WO / WO_PO / TOD / GRN / Work Done picker) ──
+
+export interface CompanyOption {
+  id: number;
+  label: string;
+}
+export interface ProjectOption {
+  id: number;
+  label: string;
+  company_id?: number | null;
+}
+export interface GSTConfig {
+  applicable: boolean;
+  type: "none" | "cgst_sgst" | "igst";
+  rate: number;
+}
+export interface POItem {
+  PurchaseOrderID: number;
+  PurchaseOrderNo: string;
+  DocNo?: string;
+  PODate: string;
+  ItemDescription?: string;
+  SupplierName?: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  TotalAmount?: number;
+  Status: string;
+  GST?: GSTConfig | null;
+  SourceWOId?: number | null;
+  SourceWODocNo?: string | null;
+  SourceWDId?: number | null;
+  SourceWDDocNo?: string | null;
+  POType?: string | null;
+  POItems?: Record<string, unknown>[];
+}
+export interface WOItem {
+  Id: number;
+  DocumentNumber: string;
+  DocNo?: string;
+  DocumentDate: string;
+  ContractorName?: string;
+  Remarks?: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  TotalAmount?: number;
+  Status: string;
+  GST?: GSTConfig | null;
+}
+export interface WorkDoneItem {
+  ID: number;
+  DocNo?: string;
+  DocDate?: string;
+  FinYear?: string | null;
+  ContractorName?: string;
+  SupplierId?: number;
+  SupplierName?: string;
+  DescriptionOfWork?: string;
+  CertifiedAmount?: number;
+  Status: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  WorkOrderID?: number;
+  WorkOrderNo?: string;
+  GST?: GSTConfig | null;
+}
+export interface TodItem {
+  TypeOfDocId: number;
+  Prefix: string;
+  FullPrefix?: string;
+  Description: string;
+  EntryType?: string;
+}
+export type SourceKind = "PO" | "WO" | "WO_PO" | "TOD" | "GRN" | "WORK_DONE";
+
+export interface GRNItemLine {
+  itemName?: string;
+  itemId?: string;
+  orderedQty: number;
+  receivedQty: number;
+  remainingQty: number;
+  uom?: string;
+  rate?: number;
+  quantity?: number;
+  totalAmount?: number;
+  // GST breakdown fields (populated after /gst-breakdown fetch)
+  hsnCode?: string;
+  cgstRate?: number;
+  sgstRate?: number;
+  igstRate?: number;
+  baseAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
+  gstAmount?: number;
+  totalAmountInclGST?: number;
+}
+
+export interface SelectedDoc {
+  kind: SourceKind;
+  docNo: string;
+  sourceId: number;
+  nameLabel?: string;
+  vendorLabel?: string;
+  companyId?: number;
+  projectId?: number;
+  amount?: number;
+  /** Pre-tax subtotal (sum of qty × rate across all line items) — populated for PO / WO_PO */
+  subtotal?: number;
+  /** CGST rate derived from PO line items (weighted avg) */
+  derivedCgstRate?: number;
+  /** SGST rate derived from PO line items (weighted avg) */
+  derivedSgstRate?: number;
+  status?: string;
+  date?: string;
+  gst?: GSTConfig | null;
+  grnItems?: GRNItemLine[];
+}
+
+export interface GRNItem {
+  GRNID: number;
+  GRNNo: string;
+  DocNo?: string;
+  GRNDate: string;
+  SupplierName?: string;
+  PONumber?: string;
+  POID?: number;
+  CompanyId?: number;
+  ProjectId?: number;
+  FinYear?: string;
+  Status?: string;
+  TotalItems?: number;
+  Remarks?: string;
+  GRNItems?: string | GRNItemLine[];
+  ParentGST?: GSTConfig | string | null;
+}
+
+export interface BillingTermOption {
+  BillingTermID: number;
+  Name: string;
+  Description?: string;
+  Type?: string;
+  GST?: string;
+  IsActive?: boolean;
+}
+export interface TCOption {
+  Id: number;
+  Name: string;
+  TermsAndCondition?: string;
+}
+export interface CostCenterOption {
+  id: number;
+  label: string;
+  code: string;
+  projectId: number | null;
+}
+
+export interface DocSelectorProps {
+  poList: POItem[];
+  woPOList: POItem[];
+  workDoneList: WorkDoneItem[];
+  todList: TodItem[];
+  grnList: GRNItem[];
+  loadingPO: boolean;
+  loadingWorkDone: boolean;
+  loadingWOPO: boolean;
+  loadingTOD: boolean;
+  loadingGRN: boolean;
+
+  // GRN filtering (suppliers-based picker)
+  companyOptions: CompanyOption[];
+  projectOptions: ProjectOption[];
+  suppliers: { id: number; label: string }[];
+
+  selected: SelectedDoc | null;
+  finYear?: string;
+  filterCompanyId?: number | null;
+  filterProjectId?: number | null;
+  filterFinYear?: string | null;
+  filterSupplier?: string | null;
+  /** IDs already booked — excludes them from picker (except the one being edited) */
+  bookedPOIds?: Set<number>;
+  bookedWorkDoneIds?: Set<number>;
+  bookedWOPOIds?: Set<number>;
+  bookedGRNIds?: Set<number>;
+  onSelect: (doc: SelectedDoc) => void;
+  onClear: () => void;
+  onTodSelected?: (tod: TodItem | null) => void;
 }
