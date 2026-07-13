@@ -9,6 +9,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -104,8 +105,12 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
 
-    const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const agr = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
     if (!agr.recordset.length) {
       return res.status(400).json({ error: "NOC requires an agreement to exist for this booking first" });

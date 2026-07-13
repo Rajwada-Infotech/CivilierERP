@@ -45,10 +45,15 @@ async function fetchPaymentPlans(): Promise<any[]> {
   try { const r = await fetchWithAuth(PLAN_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
+// This management page still needs to see and filter to Cancelled/Rejected
+// bookings for record-keeping (its own Status filter includes them) — every
+// other page's booking-selector dropdown deliberately gets the narrower
+// default (see crmBookings.js GET /), so only this one opts back in.
 async function fetchBookings(applicationId?: string): Promise<any[]> {
   try {
-    const url = applicationId ? `${API}?applicationId=${applicationId}` : API;
-    const res = await fetchWithAuth(url);
+    const params = new URLSearchParams({ includeCancelled: "1" });
+    if (applicationId) params.set("applicationId", applicationId);
+    const res = await fetchWithAuth(`${API}?${params}`);
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }

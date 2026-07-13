@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -65,6 +65,9 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     const bid = parseInt(req.params.bookingId);
     const b = req.body;
     const actor = actorId(req);
+
+    const activeErr = await requireActiveBooking(pool, bid);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const existing = await pool.request().input("bid", sql.Int, bid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
 

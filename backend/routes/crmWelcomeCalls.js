@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
@@ -131,6 +131,8 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
 

@@ -6,7 +6,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -80,6 +80,9 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
       .query("SELECT BookingId, MilestoneNo, MilestoneName FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (!target.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     const targetRow = target.recordset[0];
+
+    const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
@@ -206,9 +209,8 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
     const b = req.body;
     if (!b.MilestoneName?.trim()) return res.status(400).json({ error: "MilestoneName is required" });
 
-    const bk = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
-    if (!bk.recordset.length) return res.status(400).json({ error: "Selected booking does not exist" });
+    const activeErr = await requireActiveBooking(pool, bid);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Get next MilestoneNo
     const noRes = await pool.request().input("bid", sql.Int, bid)

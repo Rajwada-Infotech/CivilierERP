@@ -21,6 +21,26 @@ function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
 }
 
+// Server-side backstop for "a cancelled booking must be released from every
+// workflow action, not just hidden from dropdowns" — a stale client-side
+// list, a deep link, or a direct API call could otherwise still reach a
+// create/action endpoint for a booking that's already Cancelled/Rejected.
+// Every lifecycle POST (Legal Milestone, NOC, Sales Deed, Pre-Possession,
+// Possession Notice, Brokerage, Handover, Welcome Call, Bank Details,
+// Service Tickets, Payments) calls this first and 400s with the message
+// below if it fails. Returns null when the booking is fine to act on.
+async function requireActiveBooking(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
+  if (!row.recordset.length) return "Booking not found";
+  const b = row.recordset[0];
+  if (!b.IsActive) return "This booking is no longer active";
+  if (["Cancelled", "Rejected"].includes(b.Status)) {
+    return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
+  }
+  return null;
+}
+
 async function getBookingWorkflowContext(pool, bookingId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT
@@ -357,4 +377,5 @@ module.exports = {
   maybeResolveAgreementDate,
   finalizeAgreementDate,
   syncLegalMilestoneStep,
+  requireActiveBooking,
 };

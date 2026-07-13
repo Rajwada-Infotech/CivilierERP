@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, AlertTriangle, CheckCircle2, Landmark } from "lucide-react";
+import { Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate } from "react-router-dom";
@@ -42,6 +42,12 @@ const CrmNoc: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  // Auto-fetched bank fields are locked (read-only) by default — they come
+  // from a trusted source (KYC + real payment ledger), not free-typed, so
+  // locking prevents an accidental edit that silently drifts from the
+  // source of truth. Staff can still unlock to correct it (e.g. the loan
+  // bank genuinely differs from the customer's personal on-file bank).
+  const [bankFieldsLocked, setBankFieldsLocked] = useState(true);
 
   const { data: nocs = [], isLoading } = useQuery({ queryKey: ["crm-noc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -52,6 +58,21 @@ const CrmNoc: React.FC = () => {
   });
   const hasAgreement = !!context?.agreement;
   const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
+
+  // Auto-fill Bank NOC fields from data the system already has, the moment
+  // both the booking context and "Bank" type are in place — no click
+  // required. Only fills fields still blank, so it never clobbers something
+  // staff already typed (e.g. after switching booking mid-edit).
+  useEffect(() => {
+    if (form.NocType !== "Bank" || !context) return;
+    setForm((f) => ({
+      ...f,
+      BankName: f.BankName || context.customerBankDetail?.BankName || "",
+      LoanAccountNo: f.LoanAccountNo || context.customerBankDetail?.AccountNo || "",
+      LoanAmount: f.LoanAmount || (context.outstandingBalance != null ? String(Math.round(context.outstandingBalance)) : ""),
+    }));
+    setBankFieldsLocked(true);
+  }, [form.NocType, context]);
 
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
@@ -158,9 +179,9 @@ const CrmNoc: React.FC = () => {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request NOC</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
               <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
@@ -172,36 +193,21 @@ const CrmNoc: React.FC = () => {
               </select>
             </div>
 
-            {form.BookingId && contextLoading && (
-              <div className="text-xs text-muted-foreground px-1">Loading booking details...</div>
-            )}
-
             {form.BookingId && !contextLoading && context && (
-              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{context.booking.ApplicantName}</span>
-                  <span className="text-muted-foreground">{context.booking.Mobile}</span>
+              <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed">
+                <div className="font-medium text-foreground">
+                  {context.booking.ApplicantName} <span className="text-muted-foreground font-normal">· {context.booking.Mobile} · {context.booking.BookingNo} · {context.booking.UnitNo}</span>
                 </div>
-                <div className="text-muted-foreground">{context.booking.BookingNo} · {context.booking.UnitNo}</div>
-
                 {hasAgreement ? (
-                  <div className="flex items-center gap-1.5 text-green-700">
-                    <CheckCircle2 size={13} />
-                    Agreement {context.agreement.AgreementNo} — {context.agreement.Status}
+                  <div className="flex items-center gap-1 text-green-700">
+                    <CheckCircle2 size={11} /> {context.agreement.AgreementNo} — {context.agreement.Status}
+                    {context.existingNocs?.length > 0 && (
+                      <span className="text-muted-foreground">· {context.existingNocs.map((n: any) => `${n.NocType}: ${n.Status}`).join(", ")}</span>
+                    )}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1.5 text-red-600 font-medium">
-                    <AlertTriangle size={13} />
-                    No agreement yet — NOC cannot be requested for this booking
-                  </div>
-                )}
-
-                {context.existingNocs?.length > 0 && (
-                  <div className="pt-1 border-t border-border/60">
-                    <span className="text-muted-foreground">Existing NOCs: </span>
-                    {context.existingNocs.map((n: any) => (
-                      <span key={n.Id} className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-border">{n.NocType} · {n.Status}</span>
-                    ))}
+                  <div className="flex items-center gap-1 text-red-600 font-medium">
+                    <AlertTriangle size={11} /> No agreement yet — NOC cannot be requested
                   </div>
                 )}
               </div>
@@ -215,41 +221,33 @@ const CrmNoc: React.FC = () => {
               </select>
             </div>
             {form.NocType === "Bank" && (
-              <>
-                {context?.customerBankDetail?.BankName && (
-                  <button type="button"
-                    onClick={() => setForm((f) => ({
-                      ...f,
-                      BankName: context.customerBankDetail.BankName || f.BankName,
-                      LoanAccountNo: context.customerBankDetail.AccountNo || f.LoanAccountNo,
-                    }))}
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline">
-                    <Landmark size={12} /> Use customer's on-file bank ({context.customerBankDetail.BankName}) — verify this matches their loan bank
+              <div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                  <span className="flex items-center gap-1">
+                    <Landmark size={11} /> {bankFieldsLocked ? "Auto-filled from customer KYC & balance due" : "Editing — override the auto-filled values"}
+                  </span>
+                  <button type="button" onClick={() => setBankFieldsLocked((l) => !l)}
+                    className="flex items-center gap-1 text-primary hover:underline shrink-0">
+                    {bankFieldsLocked ? <><Pencil size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
                   </button>
-                )}
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Bank Name</label>
-                  <input type="text" value={form.BankName} onChange={(e) => setForm((f) => ({ ...f, BankName: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Loan A/C No.</label>
-                    <input type="text" value={form.LoanAccountNo} onChange={(e) => setForm((f) => ({ ...f, LoanAccountNo: e.target.value }))}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Loan Amount</label>
-                    <input type="number" value={form.LoanAmount} onChange={(e) => setForm((f) => ({ ...f, LoanAmount: e.target.value }))}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="text" placeholder="Bank Name" value={form.BankName} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, BankName: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
+                  <input type="text" placeholder="Loan A/C No." value={form.LoanAccountNo} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, LoanAccountNo: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
+                  <input type="number" placeholder="Loan Amount" value={form.LoanAmount} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, LoanAmount: e.target.value }))}
+                    className={`text-sm border border-border rounded px-2 py-1.5 col-span-1 ${bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background"}`} />
                 </div>
-              </>
+              </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Reason / Purpose</label>
               <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                placeholder="Reason / purpose (optional)"
+                rows={1} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

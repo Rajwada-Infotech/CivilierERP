@@ -58,14 +58,26 @@ const BOOKING_SELECT = `
   LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
 `;
 
-// GET / — all bookings
+// GET / — all bookings. By default, Cancelled/Rejected bookings are
+// excluded — every "select a booking" dropdown across the CRM (Legal
+// Milestones, NOC, Sales Deed, Pre-Possession, Possession Notice, Payments,
+// Service Tickets, Brokerage, Communication Log, Handover) calls this with
+// no params and previously kept offering cancelled bookings as if they were
+// still live. The main Bookings management page (which needs to show and
+// filter to Cancelled/Rejected for record-keeping) passes
+// ?includeCancelled=1 to opt back in; an explicit ?status=X always wins.
 router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, applicationId } = req.query;
+    const { status, applicationId, includeCancelled } = req.query;
     const req0 = pool.request();
     const conds = ["b.IsActive = 1"];
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("b.Status = @st"); }
+    if (status) {
+      req0.input("st", sql.NVarChar(30), status);
+      conds.push("b.Status = @st");
+    } else if (!includeCancelled) {
+      conds.push("b.Status NOT IN ('Cancelled', 'Rejected')");
+    }
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
     const result = await req0.query(`${BOOKING_SELECT} WHERE ${conds.join(" AND ")} ORDER BY b.CreatedAt DESC`);
     res.json(result.recordset);

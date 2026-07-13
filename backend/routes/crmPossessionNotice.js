@@ -5,6 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -37,6 +38,9 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);

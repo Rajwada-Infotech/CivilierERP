@@ -8,6 +8,7 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve brokerage on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 
@@ -97,6 +98,9 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
+
+    const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
       .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
