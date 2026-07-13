@@ -469,6 +469,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
     // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
     partyId,
+    // "Keep the balance on his on account" checkbox — see migration 188.
+    oaSkipAutoApply,
   } = req.body;
 
   try {
@@ -603,6 +605,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
+      .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply ? 1 : 0)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -614,7 +617,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId, PPartyId,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -625,7 +628,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
@@ -708,6 +711,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
+    // "Keep the balance on his on account" checkbox — see migration 188.
+    oaSkipAutoApply,
   } = req.body;
 
   try {
@@ -782,6 +787,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
       .input("PCardReference", sql.NVarChar(100), PCardReference || null)
       .input("PCardId", sql.Int, PCardId || null)
+      .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
@@ -808,7 +814,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PRtgsReference       = @PRtgsReference,
           PImpsReference       = @PImpsReference,
           PCardReference       = @PCardReference,
-          PCardId              = @PCardId
+          PCardId              = @PCardId,
+          OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply)
         WHERE PPaymentID = @PPaymentID
       `);
 
@@ -987,7 +994,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo, OASkipAutoApply FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1019,11 +1026,13 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               const afterApproval = parseFloat(eb.ERemainingAmount ?? 0); // remaining AFTER this approval
               const finalDocNo = approvedRow.DocNo || "";
 
-              // DEBIT: if invoice still has remaining balance, apply existing OA
-              if (afterApproval > 0.005) {
+              // DEBIT: if invoice still has remaining balance, apply existing OA —
+              // unless the payer explicitly asked to keep the balance untouched
+              // (OASkipAutoApply, set from the payment form's checkbox).
+              if (afterApproval > 0.005 && !approvedRow.OASkipAutoApply) {
                 const oaBalRes = await pool.request()
                   .input("PartyId", sql.Int, party.partyId)
-                  .query(`SELECT ISNULL(SUM(CASE WHEN TxnType='CREDIT' THEN Amount ELSE -Amount END),0) AS bal FROM dbo.OnAccountLedger WHERE PartyId=@PartyId`);
+                  .query(`SELECT ISNULL(OnAccountBalance, 0) AS bal FROM dbo.AccountHeadMaster WHERE LHeadId=@PartyId`);
                 const oaBal = parseFloat(oaBalRes.recordset[0]?.bal ?? 0);
                 if (oaBal > 0.005) {
                   const applyAmt = Math.min(oaBal, afterApproval);
@@ -1045,7 +1054,10 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                       INSERT INTO dbo.OnAccountLedger
                         (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
                       VALUES
-                        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+                        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+                      UPDATE dbo.AccountHeadMaster
+                        SET OnAccountBalance = OnAccountBalance - @Amount
+                        WHERE LHeadId = @PartyId;
                     `);
                   await _syncBillStatus(pool, effectiveRef || approvedRef);
                 }
@@ -1073,7 +1085,10 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                     INSERT INTO dbo.OnAccountLedger
                       (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
                     VALUES
-                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy)
+                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+                    UPDATE dbo.AccountHeadMaster
+                      SET OnAccountBalance = OnAccountBalance + @Amount
+                      WHERE LHeadId = @PartyId;
                   `);
               }
             }

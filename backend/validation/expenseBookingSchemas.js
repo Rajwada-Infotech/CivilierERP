@@ -95,6 +95,15 @@ const expenseBookingBodySchema = z.object({
   ),
   ECgstRate: optCoerceNumber.pipe(z.number().min(0).max(100).optional()),
   ESgstRate: optCoerceNumber.pipe(z.number().min(0).max(100).optional()),
+  EIgstRate: optCoerceNumber.pipe(z.number().min(0).max(100).optional()),
+  EPaymentType: z.preprocess(
+    (v) => (v === "partial" ? "partial" : "full"),
+    z.enum(["full", "partial"]),
+  ),
+  EPartialAmount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().min(0).optional(),
+  ),
   EDiscountData: optJsonPassthrough,
   EDocNo: optStr(100),
   EEmiPayment: z.coerce.boolean().optional(),
@@ -146,6 +155,13 @@ const expenseBookingBodySchema = z.object({
   EWorkDoneRef: z.preprocess(
     (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
     z.number().optional(),
+  ),
+  // AccountHeadMaster.LHeadId for the supplier chosen directly on the form —
+  // only actually consulted by the backend when the booking has no PO/WO/GRN
+  // source document to derive the supplier from (direct/manual bookings).
+  LHeadId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().positive().optional(),
   ),
 });
 
