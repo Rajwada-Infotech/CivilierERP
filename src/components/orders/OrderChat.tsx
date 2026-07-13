@@ -214,11 +214,20 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
       const savedComment = payload?.comment;
       if (!savedComment) throw new Error("Invalid comment response");
 
+      // The live socket echo of this same comment can arrive before this REST
+      // response resolves, inserting its own copy (matched by real Id, since
+      // the server never learns our tempId). Drop both our optimistic
+      // placeholder and any such echo, then insert exactly one authoritative
+      // copy — regardless of which arrived first.
       setMessages((current) => {
-        const next = current.map((m) => (m.tempId === tempId ? { ...savedComment, pending: false } : m));
-        return next.some((m) => (m.Id ?? m.id) === (savedComment.Id ?? savedComment.id))
-          ? next.filter((m) => m.tempId !== tempId || (m.Id ?? m.id) === (savedComment.Id ?? savedComment.id))
-          : next;
+        const savedId = savedComment.Id ?? savedComment.id;
+        const withoutDupes = current.filter((m) => {
+          if (m.tempId === tempId) return false;
+          const mId = m.Id ?? m.id;
+          if (savedId != null && mId === savedId) return false;
+          return true;
+        });
+        return [...withoutDupes, { ...savedComment, pending: false }];
       });
     } catch (err) {
       setMessages((current) => current.filter((m) => m.tempId !== tempId));
