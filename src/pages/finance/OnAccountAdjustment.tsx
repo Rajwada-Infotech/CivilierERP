@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { FinanceShell, FinanceGlassCard } from "@/components/finance/FinanceShell";
 import { getInvoicesForParty, applyOAAdjustment } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
-import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+import { previewOAAdjustment, excludeOriginatingInvoice } from "@/api/onAccountAdjustment";
 import { toast } from "sonner";
 
 interface PartySummary {
@@ -90,7 +90,14 @@ function AdjustDialog({
       .finally(() => setLoading(false));
   }, [entry.PartyId]);
 
-  const selected = invoices.find((i) => i.docNo === selectedDoc);
+  // The invoice that generated this on-account credit in the first place
+  // shouldn't be offered as a target to adjust the same credit back onto.
+  const adjustableInvoices = useMemo(
+    () => excludeOriginatingInvoice(invoices, entry.InvoiceRef),
+    [invoices, entry.InvoiceRef],
+  );
+
+  const selected = adjustableInvoices.find((i) => i.docNo === selectedDoc);
   const invoiceRemaining = selected ? (selected.remaining > 0 ? selected.remaining : selected.invoiceAmount) : 0;
 
   // Pre-fill amount: as much as this adjustment can cover
@@ -175,8 +182,8 @@ function AdjustDialog({
               </label>
               {loading ? (
                 <div className="h-10 rounded-lg bg-muted/40 animate-pulse" />
-              ) : invoices.length === 0 ? (
-                <p className="text-xs text-muted-foreground py-2">No invoices found for this supplier.</p>
+              ) : adjustableInvoices.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">No other invoices found for this supplier.</p>
               ) : (
                 <div className="relative">
                   <button
@@ -193,7 +200,7 @@ function AdjustDialog({
                   </button>
                   {dropdownOpen && (
                     <div className="absolute top-full left-0 right-0 mt-1 z-20 rounded-xl border border-border bg-card shadow-xl overflow-hidden max-h-56 overflow-y-auto">
-                      {invoices.map((inv) => (
+                      {adjustableInvoices.map((inv) => (
                         <button
                           key={inv.docNo}
                           type="button"
