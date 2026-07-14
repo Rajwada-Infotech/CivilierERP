@@ -463,7 +463,9 @@ router.get("/options", async (req, res) => {
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
           -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
-          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
+          -- SupplierID; WORK_DONE -> the WorkDone's contractor. Direct/manual
+          -- (TOD etc.) bookings resolve via ExpenseBooking.LHeadId — the
+          -- supplier chosen directly on the booking form. EName (the
           -- booking/item label) is only ever a last-resort fallback — it
           -- must never stand in for an actual supplier/contractor.
           CASE
@@ -471,11 +473,10 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WORK_DONE'                              THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WO'                                     THEN ISNULL(wo_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            -- Direct/manual (TOD etc.) bookings carry no supplier link; when the
-            -- caller scopes by @PartyId (On A/C Adjustment flow) the invoice only
-            -- reached this row via that party's payment history, so label it with
-            -- the party's name rather than the generic EName.
-            ELSE ISNULL(party_opt.LHeadName, ISNULL(eb.EName, ''))
+            -- direct_supp_opt covers current bookings (LHeadId set on save);
+            -- party_opt is a fallback for older bookings saved before that
+            -- fix, matched via the On A/C Adjustment @PartyId scope.
+            ELSE ISNULL(direct_supp_opt.LHeadName, ISNULL(party_opt.LHeadName, ISNULL(eb.EName, '')))
           END                             AS supplierName,
           -- Party/supplier LHeadId behind supplierName above — lets the
           -- frontend auto-select the Payee/Party dropdown on invoice pick.
@@ -535,6 +536,7 @@ router.get("/options", async (req, res) => {
           ON eb.ESourceType = 'WO' AND wo_supp_opt_wo.Id = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wo_supp_opt
           ON wo_supp_opt.LHeadId = COALESCE(wo_supp_opt_wo.SupplierId, wo_supp_opt_wo.ContractorId)
+        LEFT JOIN dbo.AccountHeadMaster direct_supp_opt ON direct_supp_opt.LHeadId = eb.LHeadId
         LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
@@ -597,7 +599,7 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_emi.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_emi.LHeadName, ISNULL(eb.EName, ''))
-            ELSE ISNULL(eb.EName, '')
+            ELSE ISNULL(direct_supp_emi.LHeadName, ISNULL(eb.EName, ''))
           END                          AS supplierName,
           -- Party/supplier LHeadId behind supplierName above — lets the
           -- frontend auto-select the Payee/Party dropdown on invoice pick.
@@ -633,6 +635,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.WorkDone wd_supp_emi_wd
           ON eb.ESourceType = 'WORK_DONE' AND wd_supp_emi_wd.ID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wd_supp_emi ON wd_supp_emi.LHeadId = wd_supp_emi_wd.SupplierId
+        LEFT JOIN dbo.AccountHeadMaster direct_supp_emi ON direct_supp_emi.LHeadId = eb.LHeadId
         WHERE
           eb.EEmiPayment = 1
           AND eb.EStatus = 'Approved'
