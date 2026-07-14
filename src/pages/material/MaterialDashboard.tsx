@@ -685,7 +685,7 @@ export default function MaterialDashboard() {
   const { data: stockData, isLoading: stockLoading } = useQuery<any[]>({
     queryKey: ["modalStock"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/stock-ledger?page=1&limit=200");
+      const res = await fetchWithAuth("/api/stock-transfers?page=1&limit=200");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json().catch(() => ({}));
       return Array.isArray(json) ? json : (json.data ?? []);
@@ -1327,7 +1327,7 @@ export default function MaterialDashboard() {
               )}
               {openModal === "stock" && (
                 <>
-                  <Layers size={16} className="text-teal-600" /> Stock Movements{" "}
+                  <Layers size={16} className="text-teal-600" /> Stock Transfers{" "}
                   {stockData && (
                     <span className="ml-1 text-xs font-normal text-muted-foreground">
                       ({stockData.length} records)
@@ -1425,81 +1425,22 @@ export default function MaterialDashboard() {
               (stockLoading ? (
                 <TableSkeleton rows={6} cols={5} />
               ) : !stockData?.length ? (
-                <EmptyState label="No stock movements found" />
+                <EmptyState label="No stock transfers found" />
               ) : (
                 <DataTable
                   data={stockData}
                   columns={[
                     {
-                      accessorKey: "ItemName",
-                      header: "Item Name",
-                      cell: ({ getValue }: any) => (
-                        <span className="text-xs font-medium">
-                          {(getValue() as string) || "—"}
-                        </span>
-                      ),
-                    },
-                    {
-                      accessorKey: "ItemGroupName",
-                      header: "Group",
-                      cell: ({ getValue }: any) => (
-                        <span className="text-xs text-muted-foreground">
-                          {(getValue() as string) || "—"}
-                        </span>
-                      ),
-                    },
-                    {
-                      accessorKey: "Type",
-                      header: "Type",
-                      cell: ({ getValue }: any) => {
-                        const v = getValue() as string;
-                        return (
-                          <span
-                            className={`text-xs font-semibold ${v === "IN" ? "text-emerald-600" : "text-red-500"}`}
-                          >
-                            {v || "—"}
-                          </span>
-                        );
-                      },
-                    },
-                    {
-                      accessorKey: "Qty",
-                      header: "Qty",
-                      cell: ({ getValue }: any) => (
-                        <span className="text-xs font-medium">
-                          {getValue() as number}
-                        </span>
-                      ),
-                    },
-                    {
-                      accessorKey: "UOMSymbol",
-                      header: "UOM",
-                      cell: ({ getValue }: any) => (
-                        <span className="text-xs text-muted-foreground">
-                          {(getValue() as string) || "—"}
-                        </span>
-                      ),
-                    },
-                    {
-                      accessorKey: "GodownName",
-                      header: "Godown",
-                      cell: ({ getValue }: any) => (
-                        <span className="text-xs text-muted-foreground">
-                          {(getValue() as string) || "—"}
-                        </span>
-                      ),
-                    },
-                    {
                       accessorKey: "DocNo",
-                      header: "Ref Doc",
+                      header: "Doc No",
                       cell: ({ getValue }: any) => (
-                        <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                        <span className="font-mono text-xs text-teal-600 dark:text-teal-400">
                           {(getValue() as string) || "—"}
                         </span>
                       ),
                     },
                     {
-                      accessorKey: "LedgerDate",
+                      accessorKey: "TransferDate",
                       header: "Date",
                       cell: ({ getValue }: any) => (
                         <span className="text-xs text-muted-foreground">
@@ -1507,10 +1448,67 @@ export default function MaterialDashboard() {
                         </span>
                       ),
                     },
+                    {
+                      accessorKey: "FromGodownName",
+                      header: "From Godown",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs font-medium">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "ToGodownName",
+                      header: "To Godown",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs font-medium">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "TransferItems",
+                      header: "Items",
+                      cell: ({ getValue }: any) => {
+                        const items = getValue();
+                        const arr = Array.isArray(items)
+                          ? items
+                          : typeof items === "string" && items.trim()
+                            ? (() => { try { return JSON.parse(items); } catch { return []; } })()
+                            : [];
+                        return (
+                          <span className="text-xs text-muted-foreground">
+                            {arr.length} {arr.length === 1 ? "item" : "items"}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      accessorKey: "Status",
+                      header: "Status",
+                      cell: ({ getValue }: any) => {
+                        const v = (getValue() as string) || "";
+                        const color =
+                          v === "Approved" ? "text-emerald-600 dark:text-emerald-400"
+                          : v === "Pending" ? "text-amber-600 dark:text-amber-400"
+                          : v === "Rejected" ? "text-red-500"
+                          : "text-muted-foreground";
+                        return <span className={`text-xs font-semibold ${color}`}>{v || "—"}</span>;
+                      },
+                    },
+                    {
+                      accessorKey: "CreatedBy",
+                      header: "Created By",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs text-muted-foreground">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
                   ]}
                   searchable
                   paginated
-                  emptyMessage="No stock records found."
+                  emptyMessage="No stock transfers found."
                 />
               ))}
             {/* Issues */}

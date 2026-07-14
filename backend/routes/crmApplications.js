@@ -2,12 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
-const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { validateSourceChain } = require("../services/sourceChain");
-const { logStatusChange, advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
+const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 // The generic multi-module approval engine — Submit/Approve/Reject go through
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
@@ -15,6 +15,7 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { createCrmApplicationRecord, CrmCreationError } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // Mirrors SaLead.SourceType so source values stay consistent across the
 // whole system, not just this module.

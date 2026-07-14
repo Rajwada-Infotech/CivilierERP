@@ -1,4 +1,4 @@
--- Migration 163: CRM sales deed customer approval fields.
+-- Migration 187: CRM sales deed customer approval fields.
 -- Sales deed now mirrors the customer-facing approval loop used by agreements,
 -- without exposing any internal brokerage/payment-to-broker information.
 

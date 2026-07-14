@@ -3,14 +3,16 @@ import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
   { label: "Proceeding", icon: Chart2, path: "/finance", pageKey: "finance-dashboard", isDashboard: true },
+  { label: "Contract", icon: DocumentText, path: "/finance/contracts", pageKey: "finance-contracts" },
   {
     label: "Transaction",
     icon: Bank,
     children: [
       { label: "Invoice",          path: "/finance/invoice",   pageKey: "expense-booking" },
-      { label: "Payment",          path: "/payments",          pageKey: "new-payment" },
-      { label: "Received Payment", path: "/received-payments", pageKey: "received-payment" },
-      { label: "BRS",              path: "/brs",               pageKey: "brs" },
+      { label: "Payment",           path: "/payments",               pageKey: "new-payment" },
+      { label: "On A/C Adjustment", path: "/on-account-adjustment",  pageKey: "on-account-adjustment" },
+      { label: "Received Payment",  path: "/received-payments",      pageKey: "received-payment" },
+      { label: "BRS",               path: "/brs",                    pageKey: "brs" },
     ],
   },
   { label: "Journal Voucher", icon: DocumentText, path: "/journal-voucher", pageKey: "journal-voucher" },
@@ -18,7 +20,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
     label: "Query",
     icon: Judge,
     children: [
-      { label: "Trial Balance", path: "/trial-balance", pageKey: "trial-balance" },
+      { label: "Trial Balance",      path: "/trial-balance",       pageKey: "trial-balance" },
     ],
   },
 ];

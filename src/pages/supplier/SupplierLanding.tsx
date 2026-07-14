@@ -3,12 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as spApi from "@/api/supplierPortalApi";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import {
   FileText, Bell, CheckCircle, Clock, ChevronRight,
   IndianRupee, Building2, AlertCircle,
   Package, Search, Save, Edit3, X,
+  Truck, MessageCircle, CheckSquare, Square,
+  CalendarDays, Hash, ClipboardList, MapPin,
 } from "lucide-react";
+import { OrderChat } from "@/components/orders/OrderChat";
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const fmtDate = (d?: string | null) =>
@@ -28,38 +33,44 @@ const fade = (delay = 0) => ({
 function WelcomeHero({ name, total, pending, submitted, loading }: {
   name: string; total: number; pending: number; submitted: number; loading: boolean;
 }) {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <section className="px-6 sm:px-10 py-8 sm:py-10 font-body"
-      style={{ background: "linear-gradient(160deg, #ecfdf5 0%, #f0fdf4 50%, #ffffff 100%)", borderBottom: "1px solid #e7f5ef" }}>
+    <section className="px-6 sm:px-10 py-8 sm:py-10 font-body border-b border-border"
+      style={{
+        background: isDark
+          ? "linear-gradient(160deg, rgba(6,78,59,0.18) 0%, rgba(5,46,22,0.10) 50%, transparent 100%)"
+          : "linear-gradient(160deg, #ecfdf5 0%, #f0fdf4 50%, #ffffff 100%)",
+      }}>
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
         <div>
-          <motion.p className="text-sm font-medium text-emerald-600 flex items-center gap-1.5 mb-1" {...fade(0)}>
+          <motion.p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mb-1" {...fade(0)}>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
             {greeting}
           </motion.p>
-          <motion.h1 className="font-heading text-2xl sm:text-3xl font-bold text-slate-900 leading-tight" {...fade(0.08)}>
+          <motion.h1 className="font-heading text-2xl sm:text-3xl font-bold text-foreground leading-tight" {...fade(0.08)}>
             {name}
           </motion.h1>
-          <motion.p className="text-sm text-slate-500 mt-1.5" {...fade(0.14)}>
+          <motion.p className="text-sm text-muted-foreground mt-1.5" {...fade(0.14)}>
             Respond to open RFQs, manage your price catalog and track submissions.
           </motion.p>
         </div>
 
         <motion.div className="flex items-center gap-5 sm:gap-7 shrink-0" {...fade(0.18)}>
           {[
-            { icon: FileText, label: "Total RFQs", val: loading ? "…" : String(total), col: "text-blue-600", bg: "bg-blue-50" },
-            { icon: Clock, label: "Pending", val: loading ? "…" : String(pending), col: "text-amber-600", bg: "bg-amber-50" },
-            { icon: CheckCircle, label: "Submitted", val: loading ? "…" : String(submitted), col: "text-emerald-600", bg: "bg-emerald-50" },
+            { icon: FileText, label: "Total RFQs", val: loading ? "…" : String(total), col: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
+            { icon: Clock, label: "Pending", val: loading ? "…" : String(pending), col: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
+            { icon: CheckCircle, label: "Submitted", val: loading ? "…" : String(submitted), col: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
           ].map((s) => (
             <div key={s.label} className="flex flex-col items-center text-center min-w-[56px]">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-1.5 ${s.bg}`}>
                 <s.icon size={17} className={s.col} />
               </div>
-              <span className="text-xl font-heading font-bold text-slate-800">{s.val}</span>
-              <span className="text-[10px] text-slate-400 mt-0.5">{s.label}</span>
+              <span className="text-xl font-heading font-bold text-foreground">{s.val}</span>
+              <span className="text-[10px] text-muted-foreground mt-0.5">{s.label}</span>
             </div>
           ))}
         </motion.div>
@@ -73,18 +84,18 @@ function StatusBadge({ status, due }: { status: string; due?: string | null }) {
   const overdue = isOverdue(due);
   const soon = isDueSoon(due);
   if (status === "Submitted") return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Submitted</span>
+    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Submitted</span>
   );
   if (overdue) return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600 flex items-center gap-1 w-fit">
+    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 flex items-center gap-1 w-fit">
       <AlertCircle size={10} /> Overdue
     </span>
   );
   if (soon) return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Due Soon</span>
+    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit">Due Soon</span>
   );
   return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">Open</span>
+    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 w-fit">Open</span>
   );
 }
 
@@ -102,11 +113,11 @@ function QuotationsSection({ quotations, loading }: {
       <div className="max-w-6xl mx-auto">
         <motion.div className="flex items-center justify-between mb-5" {...fade(0)}>
           <div>
-            <h2 className="font-heading text-lg font-bold text-slate-900">Active Quotations</h2>
-            <p className="text-xs text-slate-400 mt-0.5">RFQs you have been tagged on</p>
+            <h2 className="font-heading text-lg font-bold text-foreground">Active Quotations</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">RFQs you have been tagged on</p>
           </div>
           <button onClick={() => navigate("/supplier")}
-            className="flex items-center gap-1 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
+            className="flex items-center gap-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors">
             View all <ChevronRight size={14} />
           </button>
         </motion.div>
@@ -114,27 +125,26 @@ function QuotationsSection({ quotations, loading }: {
         {loading ? (
           <div className="space-y-2.5">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-12 rounded-xl bg-slate-100 animate-pulse" />
+              <div key={i} className="h-12 rounded-xl bg-muted animate-pulse" />
             ))}
           </div>
         ) : quotations.length === 0 ? (
-          <motion.div className="text-center py-12 rounded-2xl border border-dashed border-slate-200" {...fade(0.1)}>
-            <Package size={28} className="mx-auto text-slate-300 mb-2" />
-            <p className="text-sm text-slate-400">No quotations yet. You'll be notified when an RFQ arrives.</p>
+          <motion.div className="text-center py-12 rounded-2xl border border-dashed border-border" {...fade(0.1)}>
+            <Package size={28} className="mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">No quotations yet. You'll be notified when an RFQ arrives.</p>
           </motion.div>
         ) : (
-          <motion.div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm" {...fade(0.1)}>
+          <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
             {/* Tabs */}
-            <div className="flex border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500">
-              <div className="px-5 py-2.5 border-b-2 border-emerald-500 text-emerald-600">
+            <div className="flex border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+              <div className="px-5 py-2.5 border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400">
                 Pending ({pending.length})
               </div>
               <div className="px-5 py-2.5">Submitted ({submitted.length})</div>
             </div>
 
             {/* Header */}
-            <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
-              style={{ background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+            <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
               <span>RFQ No.</span>
               <span className="hidden sm:block">Description / Project</span>
               <span>Company</span>
@@ -144,20 +154,20 @@ function QuotationsSection({ quotations, loading }: {
 
             {quotations.slice(0, 8).map((q, i) => (
               <motion.div key={q.QuotationId}
-                className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-50/40 transition-colors cursor-pointer border-b border-slate-50 last:border-0"
+                className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors cursor-pointer border-b border-border/60 last:border-0"
                 initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
                 onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
                 <div className="flex items-center gap-2 min-w-0">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
-                  <span className="text-xs font-mono font-semibold text-slate-700 truncate">{q.DocNo}</span>
+                  <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
                 </div>
                 <div className="hidden sm:block min-w-0">
-                  <p className="text-xs text-slate-700 font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
-                  <p className="text-[10px] text-slate-400 truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
+                  <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
                 </div>
-                <span className="text-xs text-slate-500 truncate">{q.CompanyName ?? "—"}</span>
-                <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 font-semibold" : "text-slate-500"}`}>
+                <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
+                <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
                   {fmtDate(q.DueDate)}
                 </span>
                 <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
@@ -166,6 +176,437 @@ function QuotationsSection({ quotations, loading }: {
           </motion.div>
         )}
       </div>
+    </section>
+  );
+}
+
+// ── Orders section ─────────────────────────────────────────────────────────────
+// Purchase Orders addressed to this supplier — generated from the L1 Chart flow
+// once a supplier is picked. Suppliers acknowledge dispatch via the checkbox
+// and can chat with procurement about the order (mirrors the Ticket module's
+// chat pattern — see src/components/orders/OrderChat.tsx).
+// Expected - Supplied, in whole days. Positive = delivered before the
+// expected date, negative = delivered after it.
+function deliveryDeltaDays(expected?: string | null, supplied?: string | null): number | null {
+  if (!expected || !supplied) return null;
+  const e = new Date(expected); e.setHours(0, 0, 0, 0);
+  const s = new Date(supplied); s.setHours(0, 0, 0, 0);
+  return Math.round((e.getTime() - s.getTime()) / 86_400_000);
+}
+
+function DeliveryBadge({ expected, supplied }: { expected?: string | null; supplied?: string | null }) {
+  const delta = deliveryDeltaDays(expected, supplied);
+  if (delta == null) return null;
+  if (delta === 0) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Delivered on time</span>;
+  if (delta > 0) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Delivered {delta}d early</span>;
+  return <span className="text-[10px] text-amber-600 dark:text-amber-400">Delivered {Math.abs(delta)}d late</span>;
+}
+
+// ── Mark-as-supplied confirm popup (optional challan number) ───────────────────
+function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
+  order: spApi.SupplierOrderSummary;
+  onClose: () => void;
+  onConfirm: (challanNumber: string) => void;
+  submitting: boolean;
+}) {
+  const [challan, setChallan] = useState("");
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
+        className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <p className="text-sm font-heading font-bold text-foreground">Mark as supplied</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">{order.DocNo || order.PurchaseOrderNo} — {order.ItemDescription}</p>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="block text-xs font-medium text-muted-foreground">Challan / DC Number <span className="text-muted-foreground/60">(optional)</span></label>
+          <input
+            autoFocus
+            value={challan}
+            onChange={(e) => setChallan(e.target.value)}
+            placeholder="e.g. DC-2026-0042"
+            className="w-full h-10 px-3 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          />
+          <p className="text-[11px] text-muted-foreground">Today's date will be recorded as the supplied date.</p>
+        </div>
+        <div className="px-5 py-4 border-t border-border flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+          <button
+            onClick={() => onConfirm(challan.trim())}
+            disabled={submitting}
+            className="h-9 px-4 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          >
+            {submitting ? "Saving…" : "Confirm Supplied"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Order detail popup — what procurement actually wants ───────────────────────
+function detailRows(detail: spApi.SupplierOrderDetail): { icon: React.ElementType; label: string; value: string | null }[] {
+  return [
+    { icon: Building2,     label: "Company",        value: detail.CompanyName },
+    { icon: MapPin,        label: "Project",        value: detail.ProjectName },
+    { icon: CalendarDays,  label: "PO Date",         value: fmtDate(detail.PODate) },
+    { icon: Clock,         label: "Expected By",     value: fmtDate(detail.ExpectedDeliveryDate) },
+    { icon: ClipboardList, label: "Payment Terms",   value: detail.PaymentTerms },
+    { icon: Hash,          label: "GST",             value: detail.GstType && detail.GstRate != null ? `${detail.GstType} · ${detail.GstRate}%` : null },
+  ];
+}
+
+function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () => void }) {
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ["supplier-order-detail", orderId],
+    queryFn: () => spApi.getSupplierOrderDetail(orderId),
+  });
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
+        className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between shrink-0">
+          <div className="min-w-0">
+            <p className="text-sm font-heading font-bold text-foreground truncate">{detail?.DocNo || detail?.PurchaseOrderNo || "Order"}</p>
+            <p className="text-[11px] text-muted-foreground">Order details</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors shrink-0">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-5 space-y-4">
+          {isLoading || !detail ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => <div key={i} className="h-8 rounded-lg bg-muted animate-pulse" />)}
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">{detail.SourceLabel}</span>
+                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400">{detail.Status}</span>
+                {detail.SupplierAcknowledged && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle size={10} /> Supplied
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">What's needed</p>
+                <p className="text-sm text-foreground font-medium">{detail.ItemDescription || "—"}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-muted/40 p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Quantity</p>
+                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.Quantity ?? "—"} {detail.Unit ?? ""}</p>
+                </div>
+                <div className="rounded-lg bg-muted/40 p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate</p>
+                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.Rate != null ? `₹${Number(detail.Rate).toLocaleString("en-IN")}` : "—"}</p>
+                </div>
+                <div className="rounded-lg bg-muted/40 p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Subtotal</p>
+                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.SubtotalAmount != null ? `₹${Number(detail.SubtotalAmount).toLocaleString("en-IN")}` : "—"}</p>
+                </div>
+                <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total (incl. GST)</p>
+                  <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{detail.TotalAmount != null ? `₹${Number(detail.TotalAmount).toLocaleString("en-IN")}` : "—"}</p>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 text-sm">
+                {detailRows(detail).map(({ icon: Icon, label, value }) => value ? (
+                  <div key={label} className="flex items-start gap-2.5">
+                    <Icon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-muted-foreground">{label}</p>
+                      <p className="text-foreground">{value}</p>
+                    </div>
+                  </div>
+                ) : null)}
+              </div>
+
+              {detail.Remarks && (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Remarks</p>
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{detail.Remarks}</p>
+                </div>
+              )}
+
+              {detail.SupplierAcknowledged && (
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wide font-semibold">Supplied</p>
+                  <p className="text-sm text-foreground">{fmtDate(detail.SuppliedDate)}</p>
+                  <DeliveryBadge expected={detail.ExpectedDeliveryDate} supplied={detail.SuppliedDate} />
+                  {detail.ChallanNumber && <p className="text-xs text-muted-foreground">Challan: <span className="font-mono text-foreground">{detail.ChallanNumber}</span></p>}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function OrdersSection({ orders, loading }: {
+  orders: spApi.SupplierOrderSummary[]; loading: boolean;
+}) {
+  const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  const [chatOrderId, setChatOrderId] = useState<number | null>(null);
+  const [detailOrderId, setDetailOrderId] = useState<number | null>(null);
+  const [markSuppliedOrderId, setMarkSuppliedOrderId] = useState<number | null>(null);
+
+  const ackMutation = useMutation({
+    mutationFn: ({ id, acknowledged, challanNumber }: { id: number; acknowledged: boolean; challanNumber?: string }) =>
+      spApi.acknowledgeSupplierOrder(id, acknowledged, challanNumber),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.acknowledged ? "Marked as supplied" : "Unmarked");
+      qc.invalidateQueries({ queryKey: ["supplier-orders"] });
+      qc.invalidateQueries({ queryKey: ["supplier-order-detail", vars.id] });
+      setMarkSuppliedOrderId(null);
+    },
+    onError: (err: any) => toast.error(err.message ?? "Failed to update"),
+  });
+
+  const chatOrder = orders.find((o) => o.PurchaseOrderID === chatOrderId) ?? null;
+  const markSuppliedOrder = orders.find((o) => o.PurchaseOrderID === markSuppliedOrderId) ?? null;
+
+  return (
+    <section className="px-6 sm:px-10 pt-16 sm:pt-20 pb-8 font-body bg-background border-t border-border">
+      <div className="max-w-6xl mx-auto">
+        <motion.div className="flex items-center justify-between mb-5" {...fade(0)}>
+          <div>
+            <h2 className="font-heading text-lg font-bold text-foreground">Orders</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Purchase Orders issued to you — confirm dispatch &amp; chat with procurement</p>
+          </div>
+        </motion.div>
+
+        {loading ? (
+          <div className="space-y-2.5">
+            {[1, 2, 3].map((i) => <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />)}
+          </div>
+        ) : orders.length === 0 ? (
+          <motion.div className="text-center py-12 rounded-2xl border border-dashed border-border" {...fade(0.1)}>
+            <Truck size={28} className="mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">No orders yet. POs issued to you will appear here.</p>
+          </motion.div>
+        ) : (
+          <>
+            {/* Desktop / tablet table */}
+            <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
+              {/* Header */}
+              <div className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+                <span>PO No.</span>
+                <span>Description / Project</span>
+                <span>Amount</span>
+                <span>Expected By</span>
+                <span>Supplied</span>
+                <span></span>
+              </div>
+
+              {orders.map((o, i) => {
+                const overdue = isOverdue(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged;
+                return (
+                  <motion.div key={o.PurchaseOrderID}
+                    className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors border-b border-border/60 last:border-0 cursor-pointer"
+                    initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                    onClick={() => setDetailOrderId(o.PurchaseOrderID)}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.SupplierAcknowledged ? "bg-emerald-400" : overdue ? "bg-red-400" : "bg-amber-400"}`} />
+                      <span className="text-xs font-mono font-semibold text-foreground truncate">{o.DocNo || o.PurchaseOrderNo}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-foreground font-medium truncate">{o.ItemDescription || "—"}</p>
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                          {o.SourceLabel}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {o.TotalAmount != null ? `₹${Number(o.TotalAmount).toLocaleString("en-IN")}` : "—"}
+                    </span>
+                    <span className={`text-xs ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                      {fmtDate(o.ExpectedDeliveryDate)}
+                    </span>
+
+                    {/* Checkbox — mark supplied */}
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          if (o.SupplierAcknowledged) {
+                            ackMutation.mutate({ id: o.PurchaseOrderID, acknowledged: false });
+                          } else {
+                            setMarkSuppliedOrderId(o.PurchaseOrderID);
+                          }
+                        }}
+                        disabled={ackMutation.isPending}
+                        className="flex flex-col items-start gap-0.5 text-xs font-medium disabled:opacity-50 w-fit"
+                        title={o.SupplierAcknowledged ? "Marked as supplied" : "Mark as supplied"}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {o.SupplierAcknowledged ? (
+                            <CheckSquare size={16} className="text-emerald-500" />
+                          ) : (
+                            <Square size={16} className="text-muted-foreground" />
+                          )}
+                          <span className={o.SupplierAcknowledged ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                            {o.SupplierAcknowledged ? "Supplied" : "Mark"}
+                          </span>
+                        </span>
+                        {o.SupplierAcknowledged && <DeliveryBadge expected={o.ExpectedDeliveryDate} supplied={o.SuppliedDate} />}
+                      </button>
+                    </div>
+
+                    {/* Chat icon */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setChatOrderId(o.PurchaseOrderID); }}
+                      className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                      title="Chat about this order"
+                    >
+                      <MessageCircle size={15} />
+                      {o.CommentCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                          {o.CommentCount}
+                        </span>
+                      )}
+                    </button>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+
+            {/* Mobile stacked cards */}
+            <div className="sm:hidden space-y-3">
+              {orders.map((o, i) => {
+                const overdue = isOverdue(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged;
+                return (
+                  <motion.div key={o.PurchaseOrderID}
+                    className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden active:bg-emerald-500/5 transition-colors cursor-pointer"
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                    onClick={() => setDetailOrderId(o.PurchaseOrderID)}>
+                    <div className="p-4 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.SupplierAcknowledged ? "bg-emerald-400" : overdue ? "bg-red-400" : "bg-amber-400"}`} />
+                          <span className="text-xs font-mono font-semibold text-foreground truncate">{o.DocNo || o.PurchaseOrderNo}</span>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-foreground">
+                          {o.TotalAmount != null ? `₹${Number(o.TotalAmount).toLocaleString("en-IN")}` : "—"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs text-foreground font-medium">{o.ItemDescription || "—"}</p>
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                          {o.SourceLabel}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className={`text-[11px] ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                          Expected {fmtDate(o.ExpectedDeliveryDate)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border/60 bg-muted/20" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          if (o.SupplierAcknowledged) {
+                            ackMutation.mutate({ id: o.PurchaseOrderID, acknowledged: false });
+                          } else {
+                            setMarkSuppliedOrderId(o.PurchaseOrderID);
+                          }
+                        }}
+                        disabled={ackMutation.isPending}
+                        className="flex items-center gap-1.5 text-xs font-medium disabled:opacity-50"
+                      >
+                        {o.SupplierAcknowledged ? (
+                          <CheckSquare size={16} className="text-emerald-500" />
+                        ) : (
+                          <Square size={16} className="text-muted-foreground" />
+                        )}
+                        <span className={o.SupplierAcknowledged ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                          {o.SupplierAcknowledged ? "Supplied" : "Mark as supplied"}
+                        </span>
+                        {o.SupplierAcknowledged && <DeliveryBadge expected={o.ExpectedDeliveryDate} supplied={o.SuppliedDate} />}
+                      </button>
+
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setChatOrderId(o.PurchaseOrderID); }}
+                        className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground shrink-0"
+                        title="Chat about this order"
+                      >
+                        <MessageCircle size={15} />
+                        {o.CommentCount > 0 && (
+                          <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                            {o.CommentCount}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Order detail popup */}
+      {detailOrderId && (
+        <OrderDetailDialog orderId={detailOrderId} onClose={() => setDetailOrderId(null)} />
+      )}
+
+      {/* Mark-as-supplied popup */}
+      {markSuppliedOrder && (
+        <MarkSuppliedDialog
+          order={markSuppliedOrder}
+          onClose={() => setMarkSuppliedOrderId(null)}
+          submitting={ackMutation.isPending}
+          onConfirm={(challanNumber) => ackMutation.mutate({ id: markSuppliedOrder.PurchaseOrderID, acknowledged: true, challanNumber })}
+        />
+      )}
+
+      {/* Chat slide-over */}
+      {chatOrder && currentUser && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="flex-1 bg-black/40" onClick={() => setChatOrderId(null)} />
+          <div className="w-full max-w-md shrink-0 bg-background border-l border-border flex flex-col shadow-2xl">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <p className="text-sm font-heading font-bold text-foreground">{chatOrder.DocNo || chatOrder.PurchaseOrderNo}</p>
+                <p className="text-[11px] text-muted-foreground">{chatOrder.ItemDescription}</p>
+              </div>
+              <button onClick={() => setChatOrderId(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <OrderChat
+              poId={chatOrder.PurchaseOrderID}
+              apiBase="/api/supplier-portal/orders"
+              currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
+              className="flex-1 rounded-none border-0"
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -222,25 +663,25 @@ function PriceCatalogSection({ catalog, loading }: {
   };
 
   return (
-    <section className="px-6 sm:px-10 py-8 font-body bg-white border-t border-slate-100">
+    <section className="px-6 sm:px-10 py-8 font-body bg-background border-t border-border">
       <div className="max-w-6xl mx-auto">
         <motion.div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5" {...fade(0)}>
           <div>
-            <h2 className="font-heading text-lg font-bold text-slate-900">Price Catalog</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Set your rates for each item — shown to procurement during L1 comparison</p>
+            <h2 className="font-heading text-lg font-bold text-foreground">Price Catalog</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Set your rates for each item — shown to procurement during L1 comparison</p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {/* Coverage */}
             <div className="flex items-center gap-2">
-              <div className="w-28 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="w-28 h-1.5 rounded-full bg-muted overflow-hidden">
                 <motion.div className="h-full rounded-full bg-emerald-500"
                   initial={{ width: 0 }} animate={{ width: `${pct}%` }}
                   transition={{ duration: 0.8, delay: 0.2 }} />
               </div>
-              <span className="text-xs font-semibold text-emerald-600">{pct}% covered</span>
+              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{pct}% covered</span>
             </div>
             <button onClick={() => navigate("/supplier/catalog")}
-              className="flex items-center gap-1 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
+              className="flex items-center gap-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors">
               Full view <ChevronRight size={14} />
             </button>
           </div>
@@ -248,21 +689,20 @@ function PriceCatalogSection({ catalog, loading }: {
 
         {/* Search */}
         <motion.div className="relative mb-4" {...fade(0.06)}>
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           <input value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search items…"
-            className="w-full sm:w-72 pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:bg-white transition-all" />
+            className="w-full sm:w-72 pl-8 pr-3 py-2 text-xs rounded-xl border border-border bg-muted/40 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:bg-background transition-all" />
         </motion.div>
 
         {loading ? (
           <div className="space-y-2">
-            {[1, 2, 3, 4].map((i) => <div key={i} className="h-10 rounded-xl bg-slate-100 animate-pulse" />)}
+            {[1, 2, 3, 4].map((i) => <div key={i} className="h-10 rounded-xl bg-muted animate-pulse" />)}
           </div>
         ) : (
-          <motion.div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm" {...fade(0.1)}>
+          <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
             {/* Header */}
-            <div className="grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
-              style={{ background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+            <div className="grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
               <span>Item Name</span>
               <span>UOM</span>
               <span>Your Rate (₹)</span>
@@ -275,17 +715,17 @@ function PriceCatalogSection({ catalog, loading }: {
                 const hasRate = item.Rate !== null;
                 return (
                   <div key={item.ItemId}
-                    className={`grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 transition-colors ${isEditing ? "bg-emerald-50/50" : "hover:bg-slate-50"}`}>
+                    className={`grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 items-center border-b border-border/60 last:border-0 transition-colors ${isEditing ? "bg-emerald-500/5" : "hover:bg-muted/30"}`}>
                     <div className="flex items-center gap-2 min-w-0">
                       {!hasRate && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
-                      <span className="text-xs text-slate-700 truncate font-medium">{item.ItemName}</span>
+                      <span className="text-xs text-foreground truncate font-medium">{item.ItemName}</span>
                     </div>
-                    <span className="text-xs text-slate-400">{item.UOMCode ?? "—"}</span>
+                    <span className="text-xs text-muted-foreground">{item.UOMCode ?? "—"}</span>
                     <div className="flex items-center gap-1.5">
                       {isEditing ? (
                         <>
                           <div className="relative flex items-center">
-                            <span className="absolute left-2.5 text-xs text-slate-400">₹</span>
+                            <span className="absolute left-2.5 text-xs text-muted-foreground">₹</span>
                             <input
                               autoFocus
                               type="number"
@@ -294,7 +734,7 @@ function PriceCatalogSection({ catalog, loading }: {
                               value={edits[item.ItemId] ?? ""}
                               onChange={(e) => setEdits((p) => ({ ...p, [item.ItemId]: e.target.value }))}
                               onKeyDown={(e) => { if (e.key === "Enter") saveRate(item); if (e.key === "Escape") setEditingId(null); }}
-                              className="w-28 pl-6 pr-2 py-1 text-xs border border-emerald-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-white"
+                              className="w-28 pl-6 pr-2 py-1 text-xs border border-emerald-500/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-background text-foreground"
                               placeholder="0.00"
                             />
                           </div>
@@ -302,23 +742,23 @@ function PriceCatalogSection({ catalog, loading }: {
                             className="p-1 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50">
                             <Save size={11} />
                           </button>
-                          <button onClick={() => setEditingId(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
+                          <button onClick={() => setEditingId(null)} className="p-1 rounded-lg text-muted-foreground hover:text-foreground transition-colors">
                             <X size={11} />
                           </button>
                         </>
                       ) : (
                         <button
                           onClick={() => { setEditingId(item.ItemId); setEdits((p) => ({ ...p, [item.ItemId]: item.Rate !== null ? String(item.Rate) : "" })); }}
-                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg transition-colors ${hasRate ? "text-slate-700 hover:bg-slate-100" : "text-amber-600 bg-amber-50 hover:bg-amber-100 font-semibold"}`}>
+                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg transition-colors ${hasRate ? "text-foreground hover:bg-muted" : "text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15 font-semibold"}`}>
                           {hasRate ? (
-                            <><IndianRupee size={10} className="text-slate-400" />{Number(item.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2 })}<Edit3 size={10} className="text-slate-300 ml-1" /></>
+                            <><IndianRupee size={10} className="text-muted-foreground" />{Number(item.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2 })}<Edit3 size={10} className="text-muted-foreground/50 ml-1" /></>
                           ) : (
                             <><Edit3 size={10} />Set rate</>
                           )}
                         </button>
                       )}
                     </div>
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-[10px] text-muted-foreground">
                       {item.UpdatedAt ? fmtDate(item.UpdatedAt) : "—"}
                     </span>
                   </div>
@@ -327,9 +767,9 @@ function PriceCatalogSection({ catalog, loading }: {
             </div>
 
             {filtered.length > 30 && (
-              <div className="px-4 py-2.5 text-center border-t border-slate-50">
+              <div className="px-4 py-2.5 text-center border-t border-border/60">
                 <button onClick={() => navigate("/supplier/catalog")}
-                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors">
+                  className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors">
                   View all {catalog.length} items in full catalog →
                 </button>
               </div>
@@ -352,7 +792,7 @@ function QuickActions() {
   }[] = [
     {
       icon: FileText, label: "My Quotations", desc: "View & respond to RFQs",
-      col: "text-blue-600", bg: "bg-blue-50",
+      col: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10",
       onClick: () => {
         const el = document.getElementById("quotations-section");
         el ? el.scrollIntoView({ behavior: "smooth", block: "start" }) : navigate("/supplier");
@@ -360,41 +800,41 @@ function QuickActions() {
     },
     {
       icon: IndianRupee, label: "Price Catalog", desc: "Update your rates",
-      col: "text-emerald-600", bg: "bg-emerald-50",
+      col: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10",
       onClick: () => navigate("/supplier/catalog"),
     },
     {
       icon: Building2, label: "Company Profile", desc: "Contact & address details",
-      col: "text-violet-600", bg: "bg-violet-50",
+      col: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10",
       onClick: () => navigate("/supplier/profile"),
     },
     {
       icon: Bell, label: "Notifications", desc: "Alerts & reminders",
-      col: "text-amber-600", bg: "bg-amber-50",
+      col: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10",
       onClick: () => navigate("/supplier/notifications"),
     },
   ];
 
   return (
-    <section className="px-6 sm:px-10 py-8 font-body border-t border-slate-100">
+    <section className="px-6 sm:px-10 py-8 font-body border-t border-border">
       <div className="max-w-6xl mx-auto">
-        <motion.h2 className="font-heading text-lg font-bold text-slate-900 mb-4" {...fade(0)}>Quick Actions</motion.h2>
+        <motion.h2 className="font-heading text-lg font-bold text-foreground mb-4" {...fade(0)}>Quick Actions</motion.h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {actions.map((a, i) => (
             <motion.button key={a.label} onClick={a.onClick}
-              className="relative flex flex-col items-start p-4 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
+              className="relative flex flex-col items-start p-4 rounded-2xl border border-border bg-card hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 + i * 0.06, duration: 0.4 }}>
               {a.badge && (
-                <span className="absolute top-3 right-3 text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                <span className="absolute top-3 right-3 text-[9px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                   {a.badge}
                 </span>
               )}
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${a.bg}`}>
                 <a.icon size={16} className={a.col} />
               </div>
-              <p className="text-sm font-heading font-semibold text-slate-800">{a.label}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">{a.desc}</p>
+              <p className="text-sm font-heading font-semibold text-foreground">{a.label}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{a.desc}</p>
             </motion.button>
           ))}
         </div>
@@ -423,11 +863,17 @@ export default function SupplierLanding() {
     staleTime: 2 * 60_000,
   });
 
+  const { data: orders = [], isLoading: loadingO } = useQuery({
+    queryKey: ["supplier-orders"],
+    queryFn: spApi.getSupplierOrders,
+    refetchInterval: 60_000,
+  });
+
   const pending = quotations.filter((q) => q.MySubmissionStatus === "Pending").length;
   const submitted = quotations.filter((q) => q.MySubmissionStatus === "Submitted").length;
 
   return (
-    <div className="min-h-screen font-body" style={{ background: "#f8fafc" }}>
+    <div className="min-h-screen font-body bg-background">
       <WelcomeHero
         name={profile?.Name ?? "Supplier"}
         total={quotations.length}
@@ -435,8 +881,9 @@ export default function SupplierLanding() {
         submitted={submitted}
         loading={loadingQ}
       />
-      <div className="bg-white">
+      <div className="bg-background">
         <QuotationsSection quotations={quotations} loading={loadingQ} />
+        <OrdersSection orders={orders} loading={loadingO} />
         <PriceCatalogSection catalog={catalog} loading={loadingC} />
         <QuickActions />
       </div>

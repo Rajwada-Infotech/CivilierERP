@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -181,6 +182,9 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc.BounceReason         AS BounceReason,
           brc.BounceRemarks        AS BounceRemarks,
           brc.BRSID                AS BRSID,
+          -- Clearing timestamp: FORMAT() returns a plain string so mssql does not
+          -- reinterpret the IST DATETIME2 value as UTC (which would add +5:30 in the browser).
+          CASE WHEN brc.IsMatched = 1 THEN FORMAT(brc.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
           -- Re-issue chain: DocNo of the payment that replaced this one (if any)
           repl.DocNo               AS ReplacementDocNo,
           repl.PPaymentID          AS ReplacementPaymentId,
@@ -246,6 +250,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc2.BounceReason        AS BounceReason,
           brc2.BounceRemarks       AS BounceRemarks,
           brc2.BRSID               AS BRSID,
+          CASE WHEN brc2.IsMatched = 1 THEN FORMAT(brc2.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
           CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
           CAST(NULL AS INT)           AS ReplacementPaymentId,
           CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
@@ -324,6 +329,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.ReplacementPaymentId,
         u.OriginalDocNo,
         u.OriginalPaymentId,
+        u.ClearingDate,
         u.CreatedAt
       FROM UnifiedPayments u
       ${where}
@@ -380,12 +386,25 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
           SET IsMatched = 1, UpdatedAt = GETDATE()
           WHERE SourceType = @SourceType AND SourceID = @SourceID
         ELSE
-          INSERT INTO BankReconciliation (SourceType, SourceID, IsMatched, CreatedAt)
-          VALUES (@SourceType, @SourceID, 1, GETDATE())
+          INSERT INTO BankReconciliation (SourceType, SourceID, IsMatched, CreatedAt, UpdatedAt)
+          VALUES (@SourceType, @SourceID, 1, GETDATE(), GETDATE())
       `);
 
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as clear" });
+
+    // Fire-and-forget — update invoice balance after responding so UI isn't blocked
+    if (sourceType === "PAYMENT") {
+      const pool2 = getPool();
+      pool2.request()
+        .input("PPaymentID", sql.Int, parseInt(sourceId))
+        .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")
+        .then((refRes) => {
+          const expenseRef = refRes.recordset[0]?.PExpenseRef;
+          if (expenseRef) return syncBillStatus(pool2, sql, expenseRef);
+        })
+        .catch((err) => console.warn("syncBillStatus after clear failed:", err.message));
+    }
   } catch (err) {
     console.error("BRS clear error:", err);
     res.status(500).json({ error: "Failed to mark as clear" });
@@ -461,6 +480,19 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
 
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as bounced" });
+
+    // Fire-and-forget — bounced cheques must not count as paid, update after responding
+    if (sourceType === "PAYMENT") {
+      const pool2 = getPool();
+      pool2.request()
+        .input("PPaymentID", sql.Int, parseInt(sourceId))
+        .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")
+        .then((refRes) => {
+          const expenseRef = refRes.recordset[0]?.PExpenseRef;
+          if (expenseRef) return syncBillStatus(pool2, sql, expenseRef);
+        })
+        .catch((err) => console.warn("syncBillStatus after bounce failed:", err.message));
+    }
   } catch (err) {
     console.error("BRS bounce error:", err);
     res.status(500).json({ error: "Failed to mark as bounced" });

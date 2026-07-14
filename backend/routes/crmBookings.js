@@ -5,10 +5,10 @@ const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { emitNotification } = require("../services/notify");
 const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -20,6 +20,7 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, validatePaymentPlanScope } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-booking-attachments");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });

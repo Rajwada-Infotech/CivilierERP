@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import type {
   DiscountConfig,
   EmiConfig,
@@ -5,6 +6,8 @@ import type {
   ExpenseRecord,
   GrnGstData,
   PriceBreakdown,
+  SelectedDoc,
+  GRNItemLine,
 } from "./types";
 
 export function fmt(n: number) {
@@ -255,16 +258,19 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     companyId: null,
     poId: null,
     supplier: "",
+    supplierLHeadId: null,
     projectSite: "",
     materialCategory: "",
     invoiceReference: "",
     basicAmount: 0,
     cgstRate: 0,
     sgstRate: 0,
+    igstRate: 0,
     discount: defaultDiscount(),
     emi: defaultEmi(),
     /** Default payment type for new bookings. */
     paymentType: "full",
+    partialAmount: 0,
     netAmount: null,
     grnTotalAmount: null,
     status: "Draft",
@@ -368,6 +374,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     companyName: row.ECompanyName ?? "",
     poId: null,
     supplier: row.ESupplierName ?? row.EName ?? "",
+    supplierLHeadId: row.ESupplierId ?? row.LHeadId ?? null,
     projectSite: projectEnterpriseIdValid ? String(projectEnterpriseId) : "",
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
@@ -377,8 +384,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     basicAmount: parseFloat(row.EAmount) || 0,
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
+    igstRate: row.EIgstRate ? parseFloat(row.EIgstRate) : 0,
     discount,
     emi,
+    paymentType: row.EPaymentType === "partial" ? "partial" : "full",
+    partialAmount: row.EPartialAmount ? parseFloat(row.EPartialAmount) : 0,
     // For GRN-linked bookings, prefer the stored ENetAmount (net after billing terms).
     // Fall back to EGrnTotalAmount (incl-GST, before terms) if ENetAmount not set,
     // then fall back to EAmount for non-GRN / very old records.
@@ -459,6 +469,10 @@ export function recordToDb(
 
   return {
     EName: eName,
+    // Supplier chosen directly on the form — only actually used by the backend
+    // when the booking has no PO/WO/GRN source to derive the supplier from
+    // (direct/manual "Other Expenses" bookings); harmless to always send it.
+    LHeadId: form.supplierLHeadId ?? null,
     // projectSite holds the enterprise ID string (e.g. "42") for the project site
     EProjectName: form.projectSite || null,
     EDocumentType: form.materialCategory || null,
@@ -468,6 +482,10 @@ export function recordToDb(
     ENetAmount: Math.round((Number(netAmount) || 0) * 100) / 100,
     ECgstRate: Number(form.cgstRate) || 0,
     ESgstRate: Number(form.sgstRate) || 0,
+    EIgstRate: Number(form.igstRate) || 0,
+    EPaymentType: form.paymentType === "partial" ? "partial" : "full",
+    EPartialAmount:
+      form.paymentType === "partial" ? Number(form.partialAmount) || 0 : null,
     EDiscountData: JSON.stringify(form.discount),
     EBillingTermsData: JSON.stringify(form.billingTerms ?? []),
     EDocNo: form.bookingReference || null,
@@ -499,4 +517,91 @@ export function recordToDb(
     EWorkDoneRef: form.workDoneRef || null,
     PaymentTermId: form.paymentTermId ?? null,
   };
+}
+
+// ─── Document-selector helpers ─────────────────────────────────────────────────
+
+export function resolveGstRates(
+  doc: SelectedDoc,
+  fallbackCgst: number,
+  fallbackSgst: number,
+) {
+  if (doc.kind === "GRN") return { cgst: 0, sgst: 0 };
+
+  if (doc.kind === "PO" || doc.kind === "WORK_DONE" || doc.kind === "WO_PO") {
+    // Prefer rates derived from PO line items
+    if (
+      doc.derivedCgstRate != null &&
+      (doc.derivedCgstRate > 0 || doc.derivedSgstRate != null)
+    ) {
+      return {
+        cgst: doc.derivedCgstRate ?? 0,
+        sgst: doc.derivedSgstRate ?? 0,
+      };
+    }
+    // Fall back to top-level GST blob
+    if (doc.gst?.applicable) {
+      const { type, rate } = doc.gst;
+      if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
+      if (type === "igst") return { cgst: rate, sgst: 0 };
+    }
+    return { cgst: 0, sgst: 0 };
+  }
+
+  return { cgst: fallbackCgst, sgst: fallbackSgst };
+}
+
+/** Derives pre-tax subtotal and weighted-average CGST/SGST rates from PO line items */
+export function derivePOGst(poItems: any[]): {
+  subtotal: number;
+  cgstRate: number;
+  sgstRate: number;
+} {
+  if (!Array.isArray(poItems) || poItems.length === 0)
+    return { subtotal: 0, cgstRate: 0, sgstRate: 0 };
+
+  let subtotal = 0;
+  let totalCgstAmt = 0;
+  let totalSgstAmt = 0;
+
+  for (const item of poItems) {
+    const qty = Number(item.quantity ?? item.Quantity ?? 0);
+    const rate = Number(item.rate ?? item.Rate ?? 0);
+    const base = Math.round(qty * rate * 100) / 100;
+
+    // per-item GST rate stored as total % (e.g. 28 means 14+14)
+    const totalGstRate = Number(
+      item.gstRate ?? item.GstRate ?? item.tax ?? item.Tax ?? 0,
+    );
+    // prefer stored split; fall back to half/half
+    const cgst = Number(item.cgstRate ?? item.CgstRate ?? totalGstRate / 2);
+    const sgst = Number(item.sgstRate ?? item.SgstRate ?? totalGstRate / 2);
+
+    subtotal += base;
+    totalCgstAmt += Math.round(((base * cgst) / 100) * 100) / 100;
+    totalSgstAmt += Math.round(((base * sgst) / 100) * 100) / 100;
+  }
+
+  subtotal = Math.round(subtotal * 100) / 100;
+  // Weighted average rates
+  const cgstRate =
+    subtotal > 0 ? Math.round((totalCgstAmt / subtotal) * 100 * 100) / 100 : 0;
+  const sgstRate =
+    subtotal > 0 ? Math.round((totalSgstAmt / subtotal) * 100 * 100) / 100 : 0;
+
+  return { subtotal, cgstRate, sgstRate };
+}
+
+export function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
+  try {
+    if (Array.isArray(raw)) return raw as GRNItemLine[];
+    if (typeof raw === "string" && raw.trim()) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
+    }
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Something went wrong");
+    /* fall through */
+  }
+  return [];
 }

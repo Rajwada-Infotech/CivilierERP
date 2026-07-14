@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -8,6 +9,7 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal from the
 // live allotment/extra-charge rows — never trust an incrementally maintained

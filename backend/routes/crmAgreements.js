@@ -5,6 +5,7 @@ const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -28,6 +29,7 @@ const AGREEMENT_TRANSITIONS = {
 };
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });

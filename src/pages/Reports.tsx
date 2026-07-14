@@ -1,6 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { exportToCsv } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -41,6 +47,7 @@ import {
   Settings2,
   Warehouse,
   XCircle,
+  Wallet,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -826,6 +833,32 @@ const ALL_REPORTS: ReportDef[] = [
       },
     ],
   },
+  {
+    id: "on-account-report",
+    label: "On Account",
+    description: "Excess payment credits stored & adjusted per party",
+    icon: Wallet,
+    color: "#10b981",
+    apiPath: "/api/on-account/report",
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Date",     accessor: (r) => (r.TxnDate ? String(r.TxnDate).slice(0, 10) : "—") },
+      { header: "Party",    accessor: (r) => (r.PartyName ?? "—") as string },
+      { header: "Type",     accessor: (r) => (r.PartyType ?? "—") as string },
+      { header: "Txn Type", accessor: (r) => (r.TxnType === "CREDIT" ? "Stored" : "Adjusted") },
+      { header: "Credit",   accessor: (r) => (Number(r.OnAccountCreated) > 0 ? fmt(r.OnAccountCreated as number) : "—") },
+      { header: "Debit",    accessor: (r) => (Number(r.OnAccountAdjusted) > 0 ? fmt(r.OnAccountAdjusted as number) : "—") },
+      { header: "Balance",  accessor: (r) => fmt(r.RunningBalance as number) },
+      { header: "Ref Doc",  accessor: (r) => (r.RefDocNo ?? "—") as string },
+      { header: "Notes",    accessor: (r) => (r.Notes ?? "—") as string },
+    ],
+  },
 ];
 
 const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
@@ -848,6 +881,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "brs-report",
       "ledger-report",
       "journal-voucher-report",
+      "on-account-report",
     ],
   },
   {
@@ -1062,6 +1096,7 @@ const ReportTable: React.FC<{
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
   const PAGE_SIZE = 20;
 
   // ── Godown switcher (stock-summary only) ─────────────────────────────────
@@ -1169,6 +1204,7 @@ const ReportTable: React.FC<{
   };
 
   return (
+    <>
     <div
       className="rounded-xl border border-border bg-card overflow-hidden"
       style={{ borderTopWidth: 2, borderTopColor: report.color }}
@@ -1292,7 +1328,11 @@ const ReportTable: React.FC<{
               </thead>
               <tbody className="divide-y divide-border/40">
                 {pageRows.map((row, i) => (
-                  <tr key={i} className="hover:bg-muted/20 transition-colors">
+                  <tr
+                    key={i}
+                    onClick={() => setSelectedRow(row)}
+                    className="hover:bg-muted/20 transition-colors cursor-pointer"
+                  >
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </td>
@@ -1339,6 +1379,39 @@ const ReportTable: React.FC<{
         </>
       )}
     </div>
+
+    {/* ── Row detail card ── */}
+    <Dialog open={!!selectedRow} onOpenChange={(o) => { if (!o) setSelectedRow(null); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${report.color}18` }}>
+              <report.icon size={14} style={{ color: report.color }} />
+            </div>
+            {report.label}
+          </DialogTitle>
+        </DialogHeader>
+        {selectedRow && (
+          <div className="divide-y divide-border">
+            {report.columns.map((col) => {
+              const val = cell(selectedRow, col);
+              if (!val || val === "—") return null;
+              return (
+                <div key={col.header} className="flex items-start justify-between gap-6 py-2.5">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-28 pt-0.5">
+                    {col.header}
+                  </span>
+                  <span className="text-sm text-foreground text-right break-all">
+                    {val}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 

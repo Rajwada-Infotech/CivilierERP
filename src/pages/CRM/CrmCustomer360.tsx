@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search, Phone, FileText, Home, IndianRupee, MessageSquare, Wrench } from "lucide-react";
+import { Search, Phone, FileText, Home, MessageSquare, Wrench } from "lucide-react";
 
 const API = "/api/crm/customer-360";
 

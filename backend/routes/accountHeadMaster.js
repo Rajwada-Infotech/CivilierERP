@@ -16,6 +16,12 @@ const adminOnly = allowRoles("admin", "super_admin");
 // not introducing a second constant that could silently drift out of sync.
 const SALT_ROUNDS = 12;
 
+// Default Supplier Portal login password applied when an admin creates a
+// supplier without setting one explicitly — never blocks creation on
+// picking a password up front. Always changeable afterwards via the edit
+// endpoint's optional SupplierPassword field.
+const DEFAULT_SUPPLIER_PASSWORD = "123456";
+
 // ── Auto-generate a unique Supplier Portal login email ─────────────────────
 // Format: <sanitized supplier name>@civilier.in. Collisions (two suppliers
 // with the same/very similar name) get a numeric suffix before the @ —
@@ -266,11 +272,14 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       return res.status(400).json({ error: "LHeadName is required." });
     }
 
-    // ── Supplier login password is mandatory ──
-    if (LHeadType === "S" && !(supplierPasswordPlain && supplierPasswordPlain.length >= 6)) {
+    // ── Supplier login password — defaults to "123456" when not supplied,
+    // so creating a supplier never blocks on picking a password up front.
+    // An admin can still set/override it here or change it later via the
+    // edit endpoint below. Only validated (min length) when explicitly given.
+    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
       return res.status(400).json({
-        error: "Supplier password is required and must be at least 6 characters.",
-        code: "MISSING_SUPPLIER_PASSWORD",
+        error: "Supplier password must be at least 6 characters.",
+        code: "INVALID_SUPPLIER_PASSWORD",
       });
     }
 
@@ -315,7 +324,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     let supplierPasswordHash = null;
     if (LHeadType === "S") {
       supplierLoginEmail = await generateSupplierLoginEmail(pool, LHeadName);
-      supplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
+      supplierPasswordHash = await bcrypt.hash(supplierPasswordPlain || DEFAULT_SUPPLIER_PASSWORD, SALT_ROUNDS);
     }
 
     const tx = pool.transaction();
@@ -448,6 +457,9 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       message: "Ledger head added successfully",
       LHeadId: newLHeadId,
       ...(supplierLoginEmail ? { SupplierLoginEmail: supplierLoginEmail } : {}),
+      ...(LHeadType === "S" && !supplierPasswordPlain
+        ? { SupplierPasswordDefaulted: true, SupplierDefaultPassword: DEFAULT_SUPPLIER_PASSWORD }
+        : {}),
     });
   } catch (err) {
     console.error("INSERT ERROR:", err.message);

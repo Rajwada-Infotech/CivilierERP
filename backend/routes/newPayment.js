@@ -15,6 +15,7 @@ const {
   backPatchRecordId,
   resolveDocTypeId,
 } = require("../utils/docNumberLock");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 
 router.use(checkPermissionForMethod("Finance", "Payments"));
 
@@ -32,58 +33,9 @@ function normalizeBankId(value) {
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
 }
 
-// ── syncBillStatus — recalculate and persist EBillStatus on ExpenseBooking ────
-// Called after any payment is created or approved against an expense booking.
-// Matches via PExpenseRef = EDocNo (approved payments only).
-async function syncBillStatus(pool, expenseRef) {
-  if (!expenseRef) return;
-  try {
-    // Find the matching ExpenseBooking by EDocNo
-    const ebRes = await pool
-      .request()
-      .input("EDocNo", sql.NVarChar(100), expenseRef)
-      .query(
-        "SELECT Eid, ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo",
-      );
-    if (!ebRes.recordset.length) return;
-
-    const { Eid, ENetAmount, EAmount } = ebRes.recordset[0];
-    const netAmount = parseFloat(ENetAmount ?? EAmount ?? 0) || 0;
-
-    // Sum only Approved payments
-    const payRes = await pool
-      .request()
-      .input("PExpenseRef", sql.NVarChar(100), expenseRef)
-      .query(
-        "SELECT ISNULL(SUM(PAmount), 0) AS TotalPaid FROM dbo.NewPayment WHERE PExpenseRef = @PExpenseRef AND Status = 'Approved'",
-      );
-    const totalPaid = parseFloat(payRes.recordset[0].TotalPaid) || 0;
-    const remaining = Math.max(0, netAmount - totalPaid);
-
-    let billStatus;
-    if (totalPaid <= 0) {
-      billStatus = "Payment Due";
-    } else if (totalPaid >= netAmount) {
-      billStatus = "Paid";
-    } else {
-      billStatus = "Partially Paid";
-    }
-
-    await pool
-      .request()
-      .input("Eid", sql.Int, Eid)
-      .input("EBillStatus", sql.NVarChar(20), billStatus)
-      .input("ETotalPaid", sql.Decimal(18, 2), totalPaid)
-      .input("ERemainingAmount", sql.Decimal(18, 2), remaining)
-      .query(
-        "UPDATE dbo.ExpenseBooking SET EBillStatus=@EBillStatus, ETotalPaid=@ETotalPaid, ERemainingAmount=@ERemainingAmount WHERE Eid=@Eid",
-      );
-
-    await bumpCacheVersion("expense-booking");
-  } catch (err) {
-    console.warn("syncBillStatus failed:", err.message);
-  }
-}
+// syncBillStatus is imported from ../utils/syncBillStatus
+// Wrap to match existing call sites that pass (pool, expenseRef) without sql
+const _syncBillStatus = (pool, expenseRef) => syncBillStatus(pool, sql, expenseRef);
 
 // ── GET all payments ──────────────────────────────────────────────────────────
 router.get("/", cache("new-payment", 300), async (req, res) => {
@@ -186,6 +138,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
           ELSE grn2_sup.LHeadName
         END                                                AS PSupplierName,
+        -- Supplier contact person
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+          ELSE grn2_sup.LHeadContactPerson
+        END                                                AS PSupplierContact,
         -- Net Payable (the payment amount already on np.PAmount, but also expose EB net for reference)
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         -- Tax amount: computed as (ENetAmount - EAmount) when both are set, else 0
@@ -212,12 +170,44 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(eb.EFinYear, '')                            AS EBFinYear,
         -- Ref Doc = the ExpenseBooking DocNo
         eb.EDocNo                                          AS RefDoc,
+        -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
+        eb.Eid                                             AS PExpenseId,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set
         cmast.card_number                                  AS PCardNumber,
         cmast.card_network                                 AS PCardNetwork,
-        cmast.card_holder_name                              AS PCardHolderName
+        cmast.card_holder_name                              AS PCardHolderName,
+        -- BRS state
+        COALESCE(brc_list.IsMatched, 0)                    AS IsMatched,
+        COALESCE(brc_list.IsBounced, 0)                    AS IsBounced,
+        brc_list.BounceDate,
+        brc_list.BounceReason,
+        -- Computed display status (derived from approval status + BRS state + replacement chain)
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM dbo.NewPayment r2
+            WHERE r2.ReplacesPaymentId = np.PPaymentID
+              AND r2.Status NOT IN ('Rejected', 'Deleted')
+          ) THEN 'Reissued'
+          WHEN COALESCE(brc_list.IsBounced, 0) = 1
+            THEN 'Cheque Bounced'
+          WHEN COALESCE(brc_list.IsMatched, 0) = 1
+            AND np.PMode IN ('Cheque', 'Post-Dated Cheque')
+            THEN 'Cheque Cleared'
+          WHEN np.Status = 'Approved'
+            AND np.PMode IN ('Cheque', 'Post-Dated Cheque')
+            THEN 'Cheque Issued'
+          WHEN np.Status = 'Approved'
+            THEN 'Success'
+          WHEN np.Status = 'Pending'
+            THEN 'Pending'
+          WHEN np.Status = 'Rejected'
+            THEN 'Failed'
+          WHEN np.Status = 'Deleted'
+            THEN 'Cancelled'
+          ELSE np.Status
+        END                                                AS DisplayStatus
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -245,6 +235,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup
         ON grn2_sup.LHeadId = grn2.SupplierID
+      -- BRS state for DisplayStatus
+      LEFT JOIN dbo.BankReconciliation brc_list
+        ON  brc_list.SourceType = 'PAYMENT'
+        AND brc_list.SourceID   = np.PPaymentID
       ${whereClause}
       ORDER BY np.PPaymentID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -344,6 +338,7 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
         LEFT JOIN dbo.BankReconciliation brc
           ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
         WHERE np.PChequeLotId = @PChequeLotId AND np.PChequeNo IS NOT NULL
+          AND np.Status NOT IN ('Rejected', 'Deleted')
       `);
     const usedSet    = new Set(usedRes.recordset.map((r) => String(r.PChequeNo)));
     const bouncedSet = new Set(
@@ -401,6 +396,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
       .input("PChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
         SELECT COUNT(*) AS cnt FROM dbo.NewPayment
         WHERE PChequeLotId = @PChequeLotId AND PChequeNo = @PChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
       `);
 
     if (dupRes.recordset[0].cnt > 0) {
@@ -409,11 +405,12 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in another payment" });
     }
 
-    // Count remaining available cheques
+    // Count remaining available cheques (exclude Rejected/Deleted)
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
       .query(`
       SELECT COUNT(*) AS usedCount FROM dbo.NewPayment
       WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
+        AND Status NOT IN ('Rejected', 'Deleted')
     `);
     const totalCheques = lot.ChequeEndNumber - lot.ChequeStartNumber + 1;
     const usedCount = usedRes.recordset[0].usedCount;
@@ -469,6 +466,11 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     BounceCharge,
     // Contract Master (Migration 176) — see services/contractLedger.js
     ContractId,
+    // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
+    // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
+    partyId,
+    // "Keep the balance on his on account" checkbox — see migration 188.
+    oaSkipAutoApply,
   } = req.body;
 
   try {
@@ -568,7 +570,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(req.body.PBankID ?? PBankID))
-      .input("PBankName", sql.VarChar, req.body.PBankName || PBankName || "N/A")
+      .input("PBankName", sql.VarChar, req.body.PBankName || PBankName || null)
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
@@ -602,6 +604,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("ReplacesPaymentId", sql.Int, ReplacesPaymentId ? parseInt(ReplacesPaymentId) : null)
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
+      .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
+      .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply ? 1 : 0)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
@@ -613,7 +617,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
@@ -624,7 +628,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
@@ -633,7 +637,11 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newId);
 
     // Sync bill status on the referenced expense booking
-    if (PExpenseRef) await syncBillStatus(pool, PExpenseRef);
+    if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
+
+    // NOTE: On Account hooks (excess credit / OA debit) fire on APPROVE, not here.
+    // A Pending payment has not moved funds yet, so recording OA at creation would
+    // create balances that may never materialise (if the payment is rejected).
 
     // Contract Master: record as an advance ONLY when this payment isn't
     // already tied to an Expense Booking — a payment against a real
@@ -703,6 +711,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
+    // "Keep the balance on his on account" checkbox — see migration 188.
+    oaSkipAutoApply,
   } = req.body;
 
   try {
@@ -752,7 +762,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
-      .input("PBankName", sql.VarChar, PBankName || "N/A")
+      .input("PBankName", sql.VarChar, PBankName || null)
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
@@ -777,6 +787,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
       .input("PCardReference", sql.NVarChar(100), PCardReference || null)
       .input("PCardId", sql.Int, PCardId || null)
+      .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
@@ -803,7 +814,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PRtgsReference       = @PRtgsReference,
           PImpsReference       = @PImpsReference,
           PCardReference       = @PCardReference,
-          PCardId              = @PCardId
+          PCardId              = @PCardId,
+          OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply)
         WHERE PPaymentID = @PPaymentID
       `);
 
@@ -811,7 +823,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const updatedRef = await pool.request().input("id", sql.Int, id)
       .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @id");
     if (updatedRef.recordset[0]?.PExpenseRef) {
-      await syncBillStatus(pool, updatedRef.recordset[0].PExpenseRef);
+      await _syncBillStatus(pool,updatedRef.recordset[0].PExpenseRef);
     }
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment updated successfully" });
@@ -860,7 +872,7 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "Payment not found" });
     }
-    if (expenseRef) await syncBillStatus(pool, expenseRef);
+    if (expenseRef) await _syncBillStatus(pool,expenseRef);
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment deleted successfully" });
   } catch (err) {
@@ -976,21 +988,114 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       bumpCacheVersion("brs"),
     ]);
 
-    // Sync bill status on approval — fetch PExpenseRef and recalculate
+    // Sync bill status on approval — fetch full payment record and recalculate
     try {
       const approvedPayRec = await pool
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo, OASkipAutoApply FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
-      const approvedRef = approvedPayRec.recordset[0]?.PExpenseRef;
-      if (approvedRef && !/-EMI-\d+$/.test(approvedRef)) {
-        await syncBillStatus(pool, approvedRef);
-      } else if (approvedRef && /-EMI-\d+$/.test(approvedRef)) {
-        // For EMI payments, sync the parent booking by matching EDocNo prefix
-        const parentRef = approvedRef.replace(/-EMI-\d+$/, "");
-        await syncBillStatus(pool, parentRef);
+      const approvedRow = approvedPayRec.recordset[0];
+      const approvedRef = approvedRow?.PExpenseRef;
+      const effectiveRef = approvedRef && /-EMI-\d+$/.test(approvedRef)
+        ? approvedRef.replace(/-EMI-\d+$/, "")
+        : approvedRef;
+
+      if (effectiveRef) {
+        await _syncBillStatus(pool, effectiveRef);
+      }
+
+      // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
+      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
+        try {
+          const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
+          const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+          const party = await resolvePartyFromRef(pool, approvedRef);
+          if (party?.partyId) {
+            // Read invoice AFTER syncBillStatus so ERemainingAmount is current
+            const ebRes = await pool.request()
+              .input("EDocNo", sql.NVarChar(100), effectiveRef || approvedRef)
+              .query(`SELECT TOP 1 ERemainingAmount, ENetAmount, ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+            if (ebRes.recordset.length) {
+              const eb = ebRes.recordset[0];
+              const netPayable = parseFloat(eb.ENetAmount ?? 0);
+              const payAmt     = parseFloat(approvedRow.PAmount) || 0;
+              const bounceAmt  = parseFloat(approvedRow.BounceCharge ?? 0);
+              const netPaid    = payAmt - bounceAmt;
+              const afterApproval = parseFloat(eb.ERemainingAmount ?? 0); // remaining AFTER this approval
+              const finalDocNo = approvedRow.DocNo || "";
+
+              // DEBIT: if invoice still has remaining balance, apply existing OA —
+              // unless the payer explicitly asked to keep the balance untouched
+              // (OASkipAutoApply, set from the payment form's checkbox).
+              if (afterApproval > 0.005 && !approvedRow.OASkipAutoApply) {
+                const oaBalRes = await pool.request()
+                  .input("PartyId", sql.Int, party.partyId)
+                  .query(`SELECT ISNULL(OnAccountBalance, 0) AS bal FROM dbo.AccountHeadMaster WHERE LHeadId=@PartyId`);
+                const oaBal = parseFloat(oaBalRes.recordset[0]?.bal ?? 0);
+                if (oaBal > 0.005) {
+                  const applyAmt = Math.min(oaBal, afterApproval);
+                  await pool.request()
+                    .input("PartyId",     sql.Int,           party.partyId)
+                    .input("PartyType",   sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
+                    .input("TxnDate",     sql.Date,          approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+                    .input("TxnType",     sql.NVarChar(10),  "DEBIT")
+                    .input("Amount",      sql.Decimal(18,2), applyAmt)
+                    .input("RefType",     sql.NVarChar(30),  "Invoice")
+                    .input("RefDocNo",    sql.NVarChar(100), approvedRef)
+                    .input("RefId",       sql.Int,           id)
+                    .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
+                    .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
+                    .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
+                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${approvedRef} via ${finalDocNo}`)
+                    .input("CreatedBy",   sql.NVarChar(150), req.user?.email || "system")
+                    .query(`
+                      INSERT INTO dbo.OnAccountLedger
+                        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
+                      VALUES
+                        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+                      UPDATE dbo.AccountHeadMaster
+                        SET OnAccountBalance = OnAccountBalance - @Amount
+                        WHERE LHeadId = @PartyId;
+                    `);
+                  await _syncBillStatus(pool, effectiveRef || approvedRef);
+                }
+              }
+
+              // CREDIT: if paid amount exceeds net payable, store excess as OA balance
+              // pre_remaining = what was owed before this payment = afterApproval + netPaid (capped at netPayable)
+              const preRemaining = Math.min(netPayable, afterApproval + netPaid);
+              const excess = Math.max(0, netPaid - preRemaining);
+              if (excess > 0.005) {
+                await pool.request()
+                  .input("PartyId",   sql.Int,           party.partyId)
+                  .input("PartyType", sql.NVarChar(20),  partyTypeLabel[party.partyType] ?? party.partyType)
+                  .input("TxnDate",   sql.Date,          approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+                  .input("TxnType",   sql.NVarChar(10),  "CREDIT")
+                  .input("Amount",    sql.Decimal(18,2), excess)
+                  .input("RefType",   sql.NVarChar(30),  "Payment")
+                  .input("RefDocNo",  sql.NVarChar(100), finalDocNo)
+                  .input("RefId",     sql.Int,           id)
+                  .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
+                  .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
+                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess} from ${finalDocNo} on invoice ${approvedRef}`)
+                  .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
+                  .query(`
+                    INSERT INTO dbo.OnAccountLedger
+                      (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+                    VALUES
+                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+                    UPDATE dbo.AccountHeadMaster
+                      SET OnAccountBalance = OnAccountBalance + @Amount
+                      WHERE LHeadId = @PartyId;
+                  `);
+              }
+            }
+          }
+        } catch (oaErr) {
+          console.warn("[OA] On Account hook on approve failed (non-fatal):", oaErr.message);
+        }
       }
     } catch (syncErr) {
       console.warn("Bill status sync after approve failed:", syncErr.message);
@@ -1049,6 +1154,11 @@ router.get("/:id", async (req, res) => {
           WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
           ELSE grn2_sup.LHeadName
         END                                                AS PSupplierName,
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+          ELSE grn2_sup.LHeadContactPerson
+        END                                                AS PSupplierContact,
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         CASE
           WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
@@ -1089,6 +1199,482 @@ router.get("/:id", async (req, res) => {
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("[new-payment/:id]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /recalculate-balances — fix stale EBillStatus on all invoices ────────
+// One-time utility: recalculates ETotalPaid / ERemainingAmount / EBillStatus for
+// every ExpenseBooking that has at least one NewPayment, using the bounce-aware logic.
+router.post("/recalculate-balances", async (req, res) => {
+  try {
+    const pool = getPool();
+    const refs = await pool.request().query(`
+      SELECT DISTINCT PExpenseRef FROM dbo.NewPayment
+      WHERE PExpenseRef IS NOT NULL AND PExpenseRef <> ''
+    `);
+    const expenseRefs = refs.recordset.map((r) => r.PExpenseRef);
+    let updated = 0;
+    for (const ref of expenseRefs) {
+      try {
+        await syncBillStatus(pool, sql, ref);
+        updated++;
+      } catch (e) {
+        console.warn("recalc failed for", ref, e.message);
+      }
+    }
+    return res.json({ ok: true, processed: expenseRefs.length, updated });
+  } catch (err) {
+    console.error("recalculate-balances error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /detail/:id — single payment by PPaymentID (used by ApprovalActions) ──
+router.get("/detail/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(404).json({ error: "Not found" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("PPaymentID", sql.Int, id)
+      .query(`
+        SELECT np.*, eb.EDocNo AS RefDoc, eb.Eid AS PExpenseId,
+          COALESCE(brc_list.IsMatched, 0) AS IsMatched,
+          COALESCE(brc_list.IsBounced, 0) AS IsBounced,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM dbo.NewPayment r2 WHERE r2.ReplacesPaymentId = np.PPaymentID AND r2.Status NOT IN ('Rejected','Deleted')) THEN 'Reissued'
+            WHEN COALESCE(brc_list.IsBounced, 0) = 1 THEN 'Cheque Bounced'
+            WHEN COALESCE(brc_list.IsMatched, 0) = 1 AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Cleared'
+            WHEN np.Status = 'Approved' AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Issued'
+            WHEN np.Status = 'Approved' THEN 'Success'
+            WHEN np.Status = 'Pending' THEN 'Pending'
+            WHEN np.Status = 'Rejected' THEN 'Failed'
+            WHEN np.Status = 'Deleted' THEN 'Cancelled'
+            ELSE np.Status
+          END AS DisplayStatus
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        LEFT JOIN dbo.BankReconciliation brc_list
+          ON brc_list.SourceType = 'PAYMENT' AND brc_list.SourceID = np.PPaymentID
+        WHERE np.PPaymentID = @PPaymentID
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    return res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("[GET /new-payment/:id]", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /chain/:expenseRef — all payment attempts for one invoice ─────────────
+router.get("/chain/:expenseRef", async (req, res) => {
+  const expenseRef = req.params.expenseRef;
+  if (!expenseRef) return res.status(400).json({ error: "expenseRef is required" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("ExpenseRef", sql.NVarChar(100), expenseRef)
+      .query(`
+        SELECT
+          np.PPaymentID,
+          np.DocNo,
+          np.PDate,
+          np.PAmount,
+          np.PMode,
+          np.Status,
+          np.PChequeNo,
+          np.PChequeLotNumber,
+          np.PChequeDate,
+          np.PChequeIfsc,
+          np.PBankName,
+          np.ReplacesPaymentId,
+          np.BounceCharge,
+          np.PCreatedBy,
+          np.PCreatedAt,
+          np.PApprovedBy,
+          -- BRS state
+          COALESCE(brc.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc.IsBounced, 0)  AS IsBounced,
+          brc.BounceDate,
+          brc.BounceReason,
+          brc.BounceRemarks,
+          -- Chain links
+          repl.DocNo        AS ReplacementDocNo,
+          repl.PPaymentID   AS ReplacementPaymentId,
+          orig.DocNo        AS OriginalDocNo,
+          -- Computed display status
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM dbo.NewPayment r2
+              WHERE r2.ReplacesPaymentId = np.PPaymentID
+                AND r2.Status NOT IN ('Rejected', 'Deleted')
+            ) THEN 'Reissued'
+            WHEN COALESCE(brc.IsBounced, 0) = 1
+              THEN 'Cheque Bounced'
+            WHEN COALESCE(brc.IsMatched, 0) = 1
+              AND np.PMode IN ('Cheque', 'Post-Dated Cheque')
+              THEN 'Cheque Cleared'
+            WHEN np.Status = 'Approved'
+              AND np.PMode IN ('Cheque', 'Post-Dated Cheque')
+              THEN 'Cheque Issued'
+            WHEN np.Status = 'Approved'
+              THEN 'Success'
+            WHEN np.Status = 'Pending'
+              THEN 'Pending'
+            WHEN np.Status = 'Rejected'
+              THEN 'Failed'
+            WHEN np.Status = 'Deleted'
+              THEN 'Cancelled'
+            ELSE np.Status
+          END AS DisplayStatus
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.NewPayment repl
+          ON  repl.ReplacesPaymentId = np.PPaymentID
+          AND repl.Status NOT IN ('Rejected', 'Deleted')
+        LEFT JOIN dbo.NewPayment orig
+          ON  orig.PPaymentID = np.ReplacesPaymentId
+        LEFT JOIN dbo.BankReconciliation brc
+          ON  brc.SourceType = 'PAYMENT'
+          AND brc.SourceID   = np.PPaymentID
+        WHERE np.PExpenseRef = @ExpenseRef
+        ORDER BY np.PCreatedAt ASC
+      `);
+
+    // Also return the invoice summary from ExpenseBooking
+    const ebRes = await pool
+      .request()
+      .input("EDocNo", sql.NVarChar(100), expenseRef)
+      .query(`
+        SELECT
+          eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType,
+          eb.ETotalPaid, eb.ERemainingAmount, eb.EBillStatus,
+          COALESCE(proj.name, eb.EProjectName, '') AS ProjectName,
+          eb.EName AS PartyName,
+          grn.TotalAmount AS GrnTotalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        WHERE eb.EDocNo = @EDocNo
+      `);
+
+    res.json({
+      invoice: ebRes.recordset[0] ?? null,
+      payments: result.recordset,
+    });
+  } catch (err) {
+    console.error("[payment-chain]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Chain-wide Posting: all payments for an invoice ────────────────────────
+router.get("/chain-posting/:expenseRef", async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params.expenseRef);
+  if (!expenseRef) return res.status(400).json({ error: "No expenseRef" });
+  try {
+    const pool = getPool();
+
+    // All approved payments for this invoice
+    const pmtRes = await pool.request()
+      .input("PExpenseRef", sql.NVarChar(100), expenseRef)
+      .query(`
+        SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount,
+               ISNULL(np.BounceCharge, 0) AS BounceCharge,
+               np.PMode, np.Status,
+               np.PBankID, np.PBankName,
+               bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
+               ISNULL(brc.IsBounced, 0) AS IsBounced,
+               brc.BounceDate, brc.BounceReason
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.AccountHeadMaster bank ON bank.LHeadId = np.PBankID
+        LEFT JOIN dbo.BankReconciliation brc
+          ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
+        WHERE np.PExpenseRef = @PExpenseRef AND np.Status = 'Approved'
+        ORDER BY np.PDate ASC, np.PPaymentID ASC
+      `);
+
+    // Invoice net payable
+    const ebRes = await pool.request()
+      .input("EDocNo", sql.NVarChar(100), expenseRef)
+      .query(`SELECT TOP 1 ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+    const eb = ebRes.recordset[0];
+    const invoiceTotal = parseFloat(eb?.ENetAmount ?? eb?.EAmount ?? 0) || 0;
+
+    // GL accounts
+    const ledRes = await pool.request().query(`
+      SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster
+      WHERE LHeadStatus = 1 AND (
+        (LHeadType = 'GL' AND IsSystemGenerated = 1)
+        OR LHeadName LIKE '%Bank Charge%'
+        OR LHeadName LIKE '%bank charge%'
+      )
+    `);
+    const leds = ledRes.recordset;
+    const findLed = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
+    const supplierLed = findLed((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const bankChargesLed = findLed((l) => l.LHeadName.toLowerCase().includes("bank charge"));
+
+    // Check posted status for payment and bounce-charge entries
+    const pmtIds = pmtRes.recordset.map((p) => p.PPaymentID);
+    const postedMap = {};
+    const bouncePostedMap = {};
+    if (pmtIds.length) {
+      const pIds = pmtIds.join(",");
+      const postedRes = await pool.request().query(
+        `SELECT SourceId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId IN (${pIds}) AND IsReversed=0`
+      );
+      postedRes.recordset.forEach((r) => { postedMap[r.SourceId] = r.VoucherNo; });
+
+      const bPostedRes = await pool.request().query(
+        `SELECT SourceId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='BounceChargePosting' AND SourceId IN (${pIds}) AND IsReversed=0`
+      );
+      bPostedRes.recordset.forEach((r) => { bouncePostedMap[r.SourceId] = r.VoucherNo; });
+    }
+
+    const toDateStr = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
+
+    const entries = [];
+    for (const p of pmtRes.recordset) {
+      const bankLed = p.PBankID
+        ? { id: p.PBankID, label: p.BankLedgerName || p.PBankName, code: p.BankLedgerCode ?? null }
+        : null;
+      const pmtAmt = parseFloat(p.PAmount) || 0;
+      const bounceCharge = parseFloat(p.BounceCharge) || 0;
+      const netAmt = Math.max(0, pmtAmt - bounceCharge);
+
+      // Always include payment entry — isBounced flag controls frontend postability
+      entries.push({
+        date: toDateStr(p.PDate),
+        docNo: p.DocNo,
+        pmtId: p.PPaymentID,
+        type: "payment",
+        amount: netAmt,
+        mode: p.PMode,
+        isBounced: !!p.IsBounced,
+        bounceReason: p.BounceReason ?? null,
+        accounts: { supplier: supplierLed, bank: bankLed },
+        isPosted: !!postedMap[p.PPaymentID],
+        jvNo: postedMap[p.PPaymentID] ?? null,
+      });
+
+      // Bounce charge: Bank Charges Dr / Bank Cr (on bounce date)
+      if (bounceCharge > 0) {
+        entries.push({
+          date: toDateStr(p.BounceDate) ?? toDateStr(p.PDate),
+          docNo: p.DocNo,
+          pmtId: p.PPaymentID,
+          type: "bounce_charge",
+          amount: bounceCharge,
+          mode: p.PMode,
+          bounceReason: p.BounceReason,
+          accounts: { bankCharges: bankChargesLed, bank: bankLed },
+          isPosted: !!bouncePostedMap[p.PPaymentID],
+          jvNo: bouncePostedMap[p.PPaymentID] ?? null,
+        });
+      }
+    }
+
+    // Sort all entries by date ascending
+    entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.pmtId - b.pmtId);
+
+    res.json({ expenseRef, invoiceTotal, entries });
+  } catch (err) {
+    console.error("Chain posting error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Bounce Charge: post to GL ────────────────────────────────────────────────
+router.post("/:id/post-bounce-charge-to-gl", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const { postVoucher } = require("../services/generalLedger");
+
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PExpenseRef, np.PBankID, np.PBankName,
+             ISNULL(np.BounceCharge, 0) AS BounceCharge,
+             brc.BounceDate,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.BankReconciliation brc ON brc.SourceType='PAYMENT' AND brc.SourceID=np.PPaymentID
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    const bounceCharge = parseFloat(pmt.BounceCharge) || 0;
+    if (bounceCharge <= 0) return res.status(400).json({ error: "No bounce charge to post." });
+
+    const already = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='BounceChargePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (already.recordset.length) return res.status(409).json({ error: "Bounce charge already posted." });
+
+    const ledRes = await pool.request().query(`
+      SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster
+      WHERE LHeadStatus=1 AND (LHeadName LIKE '%Bank Charge%' OR LHeadName LIKE '%bank charge%')
+    `);
+    const bankChargesId = ledRes.recordset[0]?.LHeadId;
+    if (!bankChargesId) return res.status(422).json({ error: "Bank Charges ledger not configured." });
+
+    const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+    if (!bankId) return res.status(422).json({ error: "No bank account on this payment." });
+
+    const narration = `Bounce charge: ${pmt.DocNo}`;
+    const legs = [
+      { lheadId: bankChargesId, debit: bounceCharge, credit: 0, narration },
+      { lheadId: bankId,        debit: 0, credit: bounceCharge, narration },
+    ];
+
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+
+    await postVoucher(pool, { sourceType: "BounceChargePosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+
+    res.json({ jvNo: finalDocNo, message: "Bounce charge posted." });
+  } catch (err) {
+    console.error("Bounce charge posting error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Payment Posting: preview ────────────────────────────────────────────────
+router.get("/:id/posting", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+
+    // Payment row + bank ledger
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+             np.PBankID, np.PBankName,
+             bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
+             np.Status
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.AccountHeadMaster bank ON bank.LHeadId = np.PBankID
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    // Determine payment type: "on-account" if no invoice ref, else "direct"
+    const isOnAccount = !pmt.PExpenseRef;
+
+    // Invoice details (if linked)
+    let invoiceTotal = parseFloat(pmt.PAmount) || 0;
+    let supplierName = null;
+    if (!isOnAccount) {
+      const ebRes = await pool.request().input("EDocNo", sql.NVarChar(100), pmt.PExpenseRef).query(`
+        SELECT TOP 1 eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId, eb.EName,
+                     grn.TotalAmount AS GrnTotalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType='GRN' AND grn.GRNID=TRY_CAST(eb.ESourceId AS INT)
+        WHERE eb.EDocNo = @EDocNo
+      `);
+      if (ebRes.recordset.length) {
+        const eb = ebRes.recordset[0];
+        supplierName = eb.EName;
+        const grnTotal = eb.ESourceType === "GRN" && parseFloat(eb.GrnTotalAmount) > 0
+          ? parseFloat(eb.GrnTotalAmount)
+          : parseFloat(eb.ENetAmount || eb.EAmount || 0);
+        invoiceTotal = grnTotal || parseFloat(pmt.PAmount) || 0;
+      }
+    }
+
+    // System ledgers: Supplier/Creditor
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
+    const accounts = {
+      supplier: find((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor")),
+      bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
+    };
+
+    // Check if already posted
+    const postedRes = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
+    const isPosted = postedRes.recordset.length > 0;
+
+    res.json({
+      isOnAccount,
+      amount: parseFloat(pmt.PAmount) || 0,
+      invoiceTotal,
+      paymentMode: pmt.PMode,
+      expenseRef: pmt.PExpenseRef,
+      supplierName,
+      accounts,
+      isPosted,
+      jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+    });
+  } catch (err) {
+    console.error("Payment posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Payment Posting: post to GL ─────────────────────────────────────────────
+router.post("/:id/post-to-gl", async (req, res) => {
+  const pmtId = parseInt(req.params.id, 10);
+  if (!pmtId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const { postVoucher } = require("../services/generalLedger");
+
+    const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+             np.PBankID, np.PBankName,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
+    const pmt = pmtRes.recordset[0];
+
+    // Already posted?
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, pmtId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This payment has already been posted to GL." });
+
+    const amount = parseFloat(pmt.PAmount) || 0;
+    if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
+
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const findId = (fn) => leds.find(fn)?.LHeadId;
+    const supplierId = findId((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+
+    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    if (!bankId) return res.status(422).json({ error: "No bank account linked to this payment." });
+
+    const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
+    const legs = [
+      { lheadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
+      { lheadId: bankId,     debit: 0, credit: amount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+    ];
+
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+
+    await postVoucher(pool, { sourceType: "PaymentPosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+
+    res.json({ jvNo: finalDocNo, message: "Posted successfully." });
+  } catch (err) {
+    console.error("Payment post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

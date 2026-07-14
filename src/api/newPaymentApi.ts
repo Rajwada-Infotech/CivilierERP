@@ -113,3 +113,68 @@ export const deletePayment = async (id: string | number) => {
   if (!res.ok) throw new Error(await parseError(res, "DELETE failed"));
   return res.json().catch(() => ({}));
 };
+
+export type DisplayStatus =
+  | "Success"
+  | "Pending"
+  | "Cheque Issued"
+  | "Cheque Cleared"
+  | "Cheque Bounced"
+  | "Reissued"
+  | "Failed"
+  | "Cancelled"
+  | "Partial"
+  | string;
+
+export interface PaymentChainItem {
+  PPaymentID: number;
+  DocNo: string | null;
+  PDate: string | null;
+  PAmount: number | null;
+  PMode: string | null;
+  Status: string;
+  PChequeNo: string | null;
+  PChequeLotNumber: string | null;
+  PChequeDate: string | null;
+  PChequeIfsc: string | null;
+  PBankName: string | null;
+  ReplacesPaymentId: number | null;
+  BounceCharge: number | null;
+  PCreatedBy: string | null;
+  PCreatedAt: string;
+  PApprovedBy: string | null;
+  IsMatched: number;
+  IsBounced: number;
+  BounceDate: string | null;
+  BounceReason: string | null;
+  BounceRemarks: string | null;
+  ReplacementDocNo: string | null;
+  ReplacementPaymentId: number | null;
+  OriginalDocNo: string | null;
+  DisplayStatus: DisplayStatus;
+}
+
+export interface PaymentChainInvoice {
+  Eid: number;
+  EDocNo: string | null;
+  ENetAmount: number | null;
+  EAmount: number | null;
+  ESourceType: string | null;
+  GrnTotalAmount: number | null;
+  ETotalPaid: number | null;
+  ERemainingAmount: number | null;
+  EBillStatus: string | null;
+  ProjectName: string | null;
+  PartyName: string | null;
+}
+
+export interface PaymentChainResponse {
+  invoice: PaymentChainInvoice | null;
+  payments: PaymentChainItem[];
+}
+
+export const getPaymentChain = async (expenseRef: string): Promise<PaymentChainResponse> => {
+  const res = await fetchWithAuth(`${BASE_URL}/chain/${encodeURIComponent(expenseRef)}`);
+  if (!res.ok) throw new Error(await parseError(res, "Failed to fetch payment chain"));
+  return res.json();
+};

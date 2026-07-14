@@ -3,14 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, X, Check, FileText, Upload, Eye,
-  ChevronDown, RefreshCw, Search, Trash2, ArrowLeft,
+  RefreshCw, Search, Trash2, ArrowLeft, ChevronDown,
 } from "lucide-react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getFinYears } from "@/api/finYearApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import {
-  getContracts, getContract, getContactPersons,
+  getContracts, getContract,
   createContract, updateContract, deleteContract,
   type ContractListItem, type ContractDetail, type Attachment,
 } from "@/api/contractApi";
@@ -19,6 +19,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -40,6 +41,7 @@ function ensureArray<T>(v: unknown): T[] {
 }
 
 interface TCRecord { id: number; name: string; terms: string; }
+interface PartyPill { type: "Supplier" | "Contractor" | "Applicant"; id: number; name: string; }
 
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return "—";
@@ -141,6 +143,10 @@ export default function Contract() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [docTypeLoading, setDocTypeLoading] = useState(false);
+  const [contactPersonOpen, setContactPersonOpen] = useState(false);
+  const [selectedParties, setSelectedParties] = useState<PartyPill[]>([]);
+  const [partyTab, setPartyTab] = useState<"Supplier" | "Contractor" | "Applicant">("Supplier");
+  const [partySearch, setPartySearch] = useState("");
 
   const setField = <K extends keyof ReturnType<typeof emptyForm>>(
     k: K, v: ReturnType<typeof emptyForm>[K],
@@ -152,9 +158,14 @@ export default function Contract() {
     queryFn: () => getContracts(),
   });
 
-  const { data: enterprises = [] } = useQuery({
-    queryKey: ["enterprise-options"],
-    queryFn: () => getEnterpriseOptions(),
+  const { data: companies = [] } = useQuery({
+    queryKey: ["enterprise-options-C"],
+    queryFn: () => getEnterpriseOptions(undefined, "C"),
+  });
+
+  const { data: allProjects = [] } = useQuery({
+    queryKey: ["enterprise-options-P"],
+    queryFn: () => getEnterpriseOptions(undefined, "P"),
   });
 
   const { data: finYears = [] } = useQuery({
@@ -162,15 +173,20 @@ export default function Contract() {
     queryFn: getFinYears,
   });
 
-  const { data: contactPersonsRaw = [] } = useQuery({
+  const { data: contactPersonsRaw = [] } = useQuery<{
+    name: string; type: string; partyId: number; partyName: string;
+    partyCode: string; phone: string | null; email: string | null;
+    address: string | null; gst: string | null; pan: string | null;
+  }[]>({
     queryKey: ["contract-contact-persons"],
-    queryFn: getContactPersons,
+    queryFn: () => fetchWithAuth("/api/contract/contact-persons").then((r) => r.json()),
   });
 
   const { data: tcRaw = [] } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
   });
+
 
   const contracts = useMemo(() =>
     ensureArray<ContractListItem>(rawContracts).filter(
@@ -181,25 +197,35 @@ export default function Contract() {
     [rawContracts, searchQ]
   );
 
-  const companies = useMemo(
-    () => ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(enterprises)
-          .filter((e) => !e.belongs_to || e.belongs_to === null),
-    [enterprises]
-  );
-
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(enterprises)
-      .filter((e) => e.company_id === Number(form.companyId) || String(e.belongs_to) === String(form.companyId));
-  }, [enterprises, form.companyId]);
+    return ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(allProjects)
+      .filter((e) => e.company_id === Number(form.companyId));
+  }, [allProjects, form.companyId]);
 
-  const tcRecords = useMemo(
-    () => ensureArray<TCRecord>(tcRaw).filter((t) => (t as { isActive?: boolean }).isActive !== false),
-    [tcRaw]
+  const tcRecords = useMemo(() => {
+    // Backend returns PascalCase columns: Id, Name, TermsAndCondition, isActive
+    type RawTC = { Id?: number; id?: number; Name?: string; name?: string; TermsAndCondition?: string; terms?: string; isActive?: boolean };
+    return ensureArray<RawTC>(tcRaw)
+      .filter((t) => t.isActive !== false)
+      .map((t): TCRecord => ({
+        id:    (t.Id    ?? t.id    ?? 0),
+        name:  (t.Name  ?? t.name  ?? ""),
+        terms: (t.TermsAndCondition ?? t.terms ?? ""),
+      }));
+  }, [tcRaw]);
+
+  const selectedContactDetail = useMemo(
+    () => contactPersonsRaw.find((p) => p.name === form.contactPerson) ?? null,
+    [contactPersonsRaw, form.contactPerson]
   );
 
   const fyOptions = useMemo(
-    () => ensureArray<{ id: number; fy_label: string; is_active: boolean }>(finYears).filter((f) => f.is_active),
+    () => ensureArray<Record<string, unknown>>(finYears).map((f) => ({
+      id:       (f.FId      ?? f.id)       as number,
+      fy_label: (f.FName    ?? f.fy_label) as string,
+      is_active: f.FStatus === 1 || f.FStatus === true || f.is_active === true,
+    })).filter((f) => f.is_active),
     [finYears]
   );
 
@@ -218,6 +244,7 @@ export default function Contract() {
         projectId: form.projectId ? Number(form.projectId) : undefined,
         finYear: form.finYear || undefined,
         contactPerson: form.contactPerson || undefined,
+        contactPartyId: selectedContactDetail?.partyId ?? undefined,
         reason: form.reason || undefined,
         natureOfContract: form.natureOfContract || undefined,
         contractAmount: form.contractAmount !== "" ? Number(form.contractAmount) : undefined,
@@ -226,6 +253,7 @@ export default function Contract() {
         attachments: attachments.length > 0 ? attachments : undefined,
         termsAndConditions: tc,
         remarks: form.remarks || undefined,
+        parties: selectedParties.length > 0 ? selectedParties : undefined,
       };
       if (editingId) {
         await updateContract(editingId, payload);
@@ -259,6 +287,9 @@ export default function Contract() {
     setForm({ ...emptyForm(), finYear: ctxFinYear || "" });
     setSelectedTCs([]);
     setAttachments([]);
+    setSelectedParties([]);
+    setPartySearch("");
+    setContactPersonOpen(false);
     setEditingId(null);
   };
 
@@ -271,9 +302,11 @@ export default function Contract() {
       setDocTypes(types);
       if (types.length > 0) {
         const first = types[0];
-        const preview = await fetchNextDocNumber(first.TypeOfDocId, ctxFinYear || "");
+        const fy = ctxFinYear || "";
+        const preview = await fetchNextDocNumber(first.TypeOfDocId, fy);
         setField("docTypeId", first.TypeOfDocId);
         setField("docNo", preview);
+        if (fy) setField("finYear", fy);
       }
     } catch { /* silent */ }
     setDocTypeLoading(false);
@@ -286,8 +319,7 @@ export default function Contract() {
     try { existingAttachments = detail.Attachments ? JSON.parse(detail.Attachments) : []; } catch { /* */ }
     let existingTCs: TCRecord[] = [];
     if (detail.TermsAndConditions) {
-      const allTCs = ensureArray<TCRecord>(tcRaw);
-      existingTCs = allTCs.filter((t) => detail.TermsAndConditions!.includes(t.name));
+      existingTCs = tcRecords.filter((t) => detail.TermsAndConditions!.includes(t.name));
     }
     setForm({
       docTypeId: null,
@@ -305,10 +337,13 @@ export default function Contract() {
       contractEndDate: detail.ContractEndDate?.slice(0, 10) || "",
       remarks: (detail as ContractDetail).Remarks || "",
     });
+    let existingParties: PartyPill[] = [];
+    try { existingParties = detail.Parties ? JSON.parse(detail.Parties) : []; } catch { /* */ }
     setAttachments(existingAttachments);
     setSelectedTCs(existingTCs);
+    setSelectedParties(existingParties);
     setViewMode("form");
-  }, [tcRaw]);
+  }, [tcRecords]);
 
   const openDetail = async (c: ContractListItem) => {
     const detail = await getContract(c.ContractId);
@@ -411,8 +446,16 @@ export default function Contract() {
       id: "status",
       accessorKey: "Status",
       header: "Status",
-      size: 100,
-      cell: ({ getValue }: any) => <StatusBadge status={getValue() as string} />,
+      size: 160,
+      cell: ({ getValue, row }: any) => (
+        <div className="flex items-center">
+          <ApprovalStatusChain
+            table="Contract"
+            recordId={(row.original as ContractListItem).ContractId}
+            fallback={<StatusBadge status={getValue() as string} />}
+          />
+        </div>
+      ),
     },
     {
       id: "actions",
@@ -562,25 +605,9 @@ export default function Contract() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Document Type</label>
-                      {docTypeLoading ? (
-                        <div className={`${inputCls} text-muted-foreground`}>Loading types…</div>
-                      ) : (
-                        <select
-                          value={form.docTypeId ?? ""}
-                          onChange={async (e) => {
-                            const id = parseInt(e.target.value, 10);
-                            setField("docTypeId", id);
-                            const preview = await fetchNextDocNumber(id, form.finYear || ctxFinYear || "");
-                            setField("docNo", preview);
-                          }}
-                          className={inputCls}
-                        >
-                          <option value="">Select type…</option>
-                          {docTypes.map((t) => (
-                            <option key={t.TypeOfDocId} value={t.TypeOfDocId}>{t.Description}</option>
-                          ))}
-                        </select>
-                      )}
+                      <div className={`${inputCls} bg-muted/30 text-muted-foreground cursor-not-allowed select-none`}>
+                        {docTypeLoading ? "Loading…" : (docTypes[0]?.Description || "Contract")}
+                      </div>
                     </div>
                     <div>
                       <label className={labelCls}>Document No.</label>
@@ -631,7 +658,7 @@ export default function Contract() {
                       className={inputCls}
                     >
                       <option value="">Select company…</option>
-                      {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      {ensureArray<{ id: number; label: string }>(companies).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                     </select>
                   </div>
                   <div>
@@ -669,13 +696,129 @@ export default function Contract() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                <div>
+                <div className="relative">
                   <label className={labelCls}>Contact Person</label>
-                  <select value={form.contactPerson} onChange={(e) => setField("contactPerson", e.target.value)} className={inputCls}>
-                    <option value="">Select contact person…</option>
-                    {contactPersonsRaw.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setContactPersonOpen((o) => !o)}
+                    className={`${inputCls} flex items-center justify-between text-left`}
+                  >
+                    <span className={form.contactPerson ? "text-foreground" : "text-muted-foreground/40"}>
+                      {form.contactPerson || "Select contact person…"}
+                    </span>
+                    <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${contactPersonOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {contactPersonOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setContactPersonOpen(false)} />
+                      <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                        {/* Category tabs */}
+                        <div className="flex border-b border-border">
+                          {(["S", "C", "A"] as const).map((typeCode) => {
+                            const label = typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant";
+                            const count = contactPersonsRaw.filter((p) => p.type === typeCode).length;
+                            const isActive = partyTab === (typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant");
+                            return (
+                              <button key={typeCode} type="button"
+                                onClick={() => setPartyTab(typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant")}
+                                className={`flex-1 py-2 text-xs font-semibold transition-colors border-b-2 ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                              >
+                                {label} <span className="opacity-60">({count})</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Search */}
+                        <div className="p-2.5 border-b border-border">
+                          <div className="relative">
+                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                              autoFocus
+                              type="text"
+                              value={partySearch}
+                              onChange={(e) => setPartySearch(e.target.value)}
+                              placeholder={`Search ${partyTab.toLowerCase()}s…`}
+                              className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                          </div>
+                        </div>
+                        {/* List */}
+                        <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
+                          {(() => {
+                            const typeCode = partyTab === "Supplier" ? "S" : partyTab === "Contractor" ? "C" : "A";
+                            const filtered = contactPersonsRaw
+                              .filter((p) => p.type === typeCode && p.name.toLowerCase().includes(partySearch.toLowerCase()));
+                            if (!filtered.length) return (
+                              <div className="px-4 py-6 text-center text-xs text-muted-foreground">No matches found</div>
+                            );
+                            return filtered.map((p) => (
+                              <button key={p.name} type="button"
+                                onClick={() => { setField("contactPerson", p.name); setContactPersonOpen(false); setPartySearch(""); }}
+                                className={`w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-muted/60 transition-colors text-sm ${form.contactPerson === p.name ? "bg-primary/5 text-primary font-medium" : "text-foreground"}`}
+                              >
+                                <Check size={13} className={`shrink-0 ${form.contactPerson === p.name ? "opacity-100 text-primary" : "opacity-0"}`} />
+                                {p.name}
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
+
+                {selectedContactDetail && (
+                  <div className="rounded-xl border border-border bg-muted/10 px-4 py-3 space-y-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{selectedContactDetail.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{selectedContactDetail.partyName}
+                          {selectedContactDetail.partyCode && <span className="ml-1.5 text-[10px] font-mono opacity-60">({selectedContactDetail.partyCode})</span>}
+                        </p>
+                      </div>
+                      {(() => {
+                        const t = selectedContactDetail.type;
+                        const cfg = t === "S"
+                          ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                          : t === "C"
+                          ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                          : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                        const lbl = t === "S" ? "Supplier" : t === "C" ? "Contractor" : "Applicant";
+                        return (
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${cfg}`}>{lbl}</span>
+                        );
+                      })()}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                      {selectedContactDetail.phone && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <span className="opacity-50">📞</span> {selectedContactDetail.phone}
+                        </div>
+                      )}
+                      {selectedContactDetail.email && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground truncate">
+                          <span className="opacity-50">✉️</span> {selectedContactDetail.email}
+                        </div>
+                      )}
+                      {selectedContactDetail.address && (
+                        <div className="flex items-start gap-1.5 text-muted-foreground col-span-full">
+                          <span className="opacity-50 mt-0.5">📍</span> {selectedContactDetail.address}
+                        </div>
+                      )}
+                      {selectedContactDetail.gst && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <span className="opacity-50 text-[10px] font-bold">GST</span> {selectedContactDetail.gst}
+                        </div>
+                      )}
+                      {selectedContactDetail.pan && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <span className="opacity-50 text-[10px] font-bold">PAN</span> {selectedContactDetail.pan}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className={labelCls}>Reason for Contract</label>
@@ -846,6 +989,8 @@ export default function Contract() {
     const c = viewingContract;
     let atts: Attachment[] = [];
     try { atts = c.Attachments ? JSON.parse(c.Attachments) : []; } catch { /* */ }
+    let detailParties: PartyPill[] = [];
+    try { detailParties = c.Parties ? JSON.parse(c.Parties) : []; } catch { /* */ }
 
     return (
       <>
@@ -860,10 +1005,12 @@ export default function Contract() {
                 className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
                 <ArrowLeft size={14} /> Back
               </button>
-              <button onClick={() => goToEdit(c)}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
-                Edit
-              </button>
+              {c.Status !== "Pending" && c.Status !== "Approved" && (
+                <button onClick={() => goToEdit(c)}
+                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
+                  Edit
+                </button>
+              )}
               <button
                 onClick={() => setDeleteConfirmId(c.ContractId)}
                 className="h-9 px-4 rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition">
@@ -876,7 +1023,14 @@ export default function Contract() {
             {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                ["Status", <StatusBadge key="s" status={c.Status} />],
+                ["Status", (
+                  <ApprovalStatusChain
+                    key="s"
+                    table="Contract"
+                    recordId={c.ContractId}
+                    fallback={<StatusBadge status={c.Status} />}
+                  />
+                )],
                 ["Doc Date", fmtDate(c.DocDate)],
                 ["Contract Date", fmtDate(c.ContractDate)],
                 ["Financial Year", c.FinYear || "—"],
@@ -933,6 +1087,33 @@ export default function Contract() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Parties */}
+            {detailParties.length > 0 && (
+              <Card className="border-border shadow-sm">
+                <CardHeader className="pb-3 border-b border-border">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Parties</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="flex flex-wrap gap-2">
+                    {detailParties.map((p, i) => {
+                      const colorCfg =
+                        p.type === "Supplier"   ? "bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-800" :
+                        p.type === "Contractor" ? "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-800" :
+                                                  "bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-800";
+                      const dotColor = p.type === "Supplier" ? "bg-blue-500" : p.type === "Contractor" ? "bg-amber-500" : "bg-emerald-500";
+                      return (
+                        <span key={i} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${colorCfg}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                          <span className="text-[10px] opacity-60 uppercase tracking-wider">{p.type}</span>
+                          <span>{p.name}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Attachments */}
             {atts.length > 0 && (

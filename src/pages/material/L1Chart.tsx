@@ -147,28 +147,58 @@ export default function L1Chart() {
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 bg-card border border-border rounded-xl px-4 py-3">
         {/* Quotation picker */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap shrink-0">
-            Quotation
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60 px-0.5">
+            Select Quotation
           </span>
-          <div className="relative flex-1 min-w-0">
+          <div className="relative">
+            {/* Left icon */}
+            <BarChart3
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500/70 pointer-events-none z-10"
+            />
             <select
               value={quotationId}
               onChange={(e) => { setQuotationId(e.target.value); setWinningSupplierId(""); }}
-              className={selectCls}
               disabled={loadingQuotations}
+              style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
+              className="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border-2 border-emerald-500/25 bg-emerald-500/5 text-foreground focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/15 transition appearance-none font-heading cursor-pointer disabled:opacity-50"
             >
-              <option value="">
-                {loadingQuotations ? "Loading…" : comparableQuotations.length === 0 ? "No sent quotations yet" : "Select quotation…"}
+              <option value="" style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}>
+                {loadingQuotations ? "Loading quotations…" : comparableQuotations.length === 0 ? "No submitted quotations found" : "— Pick a quotation —"}
               </option>
               {comparableQuotations.map((q) => (
-                <option key={q.QuotationId} value={String(q.QuotationId)}>
-                  {q.DocNo} · {q.ProjectName ?? q.CompanyName} ({q.Status})
+                <option
+                  key={q.QuotationId}
+                  value={String(q.QuotationId)}
+                  style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
+                >
+                  {q.DocNo}  ·  {q.ProjectName ?? q.CompanyName}  [{q.Status}]
                 </option>
               ))}
             </select>
-            <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500/60 pointer-events-none" />
+            {/* Selected indicator */}
+            {quotationId && (
+              <span className="absolute right-8 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-emerald-500 pointer-events-none" />
+            )}
           </div>
+          {quotationId && (() => {
+            const sel = comparableQuotations.find((q) => String(q.QuotationId) === quotationId);
+            return sel ? (
+              <div className="flex items-center gap-2 px-1 pt-0.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {sel.ProjectName ?? sel.CompanyName}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-heading font-medium">
+                  {sel.Status}
+                </span>
+                {sel.DocNo && (
+                  <span className="text-[10px] font-mono text-muted-foreground/50 ml-auto">{sel.DocNo}</span>
+                )}
+              </div>
+            ) : null;
+          })()}
         </div>
 
         {/* Add supplier */}

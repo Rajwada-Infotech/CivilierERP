@@ -113,10 +113,10 @@ export function PageHeader({ eyebrow, title, subtitle }: { eyebrow: string; titl
   );
 }
 
-export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Card({ children, className = "", style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
     <div className={`rounded-2xl ${className}`}
-      style={{ background: SURFACE, border: `1px solid ${HAIRLINE}`, boxShadow: "0 1px 2px rgba(30,11,66,0.05)" }}>
+      style={{ background: SURFACE, border: `1px solid ${HAIRLINE}`, boxShadow: "0 1px 2px rgba(30,11,66,0.05)", ...style }}>
       {children}
     </div>
   );
