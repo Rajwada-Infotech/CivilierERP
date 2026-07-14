@@ -5,7 +5,7 @@ import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FileSpreadsheet, ListChecks, Building2, Bell, Truck } from "lucide-react";
+import { FileSpreadsheet, ListChecks, Building2, Bell } from "lucide-react";
 import { Logout } from "iconsax-react";
 import { useQuery } from "@tanstack/react-query";
 import * as spApi from "@/api/supplierPortalApi";
@@ -135,7 +135,6 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { label: "Quotations", to: "/supplier", icon: FileSpreadsheet, exact: true },
-    { label: "Received by Customer", to: "/supplier/received-goods", icon: Truck, exact: false },
     { label: "Price Catalog", to: "/supplier/catalog", icon: ListChecks, exact: false },
   ];
 
