@@ -532,4 +532,70 @@ router.post("/orders/:id/comment", async (req, res) => {
   }
 });
 
+// ── GET /grns — "Received by Customer": per-order goods-received progress ───
+// One row per PO that has at least one item with GRN activity recorded
+// against it (PurchaseOrderItems.ReceivedQty synced by grns.js on every
+// Approved GRN). isFullyReceived flips true once every line's ReceivedQty
+// has caught up to its ordered Quantity — the frontend renders a tick for
+// that order and, while any item still has a shortfall, surfaces it as a
+// reminder (see /grns/reminders below).
+router.get("/grns", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("supplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
+          co.name AS CompanyName, pr.name AS ProjectName,
+          poi.Id AS ItemId, poi.ItemName, poi.Quantity AS OrderedQty,
+          ISNULL(poi.ReceivedQty, 0) AS ReceivedQty, poi.UomName
+        FROM dbo.PurchaseOrders po
+        JOIN dbo.PurchaseOrderItems poi ON poi.PurchaseOrderID = po.PurchaseOrderID
+        LEFT JOIN dbo.enterprise co ON co.id = po.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = po.ProjectId
+        WHERE po.SupplierID = @supplierId
+          AND po.Status NOT IN ('Draft', 'Rejected')
+          AND EXISTS (
+            SELECT 1 FROM dbo.PurchaseOrderItems x
+            WHERE x.PurchaseOrderID = po.PurchaseOrderID AND ISNULL(x.ReceivedQty, 0) > 0
+          )
+        ORDER BY po.PODate DESC, po.PurchaseOrderID DESC, poi.SortOrder ASC
+      `);
+
+    const byOrder = new Map();
+    for (const row of result.recordset) {
+      if (!byOrder.has(row.PurchaseOrderID)) {
+        byOrder.set(row.PurchaseOrderID, {
+          purchaseOrderId: row.PurchaseOrderID,
+          purchaseOrderNo: row.PurchaseOrderNo,
+          docNo: row.DocNo || row.PurchaseOrderNo,
+          poDate: row.PODate,
+          status: row.Status,
+          companyName: row.CompanyName,
+          projectName: row.ProjectName,
+          items: [],
+        });
+      }
+      byOrder.get(row.PurchaseOrderID).items.push({
+        itemId: row.ItemId,
+        itemName: row.ItemName,
+        orderedQty: Number(row.OrderedQty) || 0,
+        receivedQty: Number(row.ReceivedQty) || 0,
+        remainingQty: Math.max(0, (Number(row.OrderedQty) || 0) - (Number(row.ReceivedQty) || 0)),
+        uom: row.UomName,
+      });
+    }
+
+    const orders = Array.from(byOrder.values()).map((o) => {
+      const totalRemaining = o.items.reduce((s, i) => s + i.remainingQty, 0);
+      return { ...o, isFullyReceived: totalRemaining <= 0, totalRemaining };
+    });
+
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
