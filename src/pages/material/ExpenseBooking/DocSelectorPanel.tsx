@@ -17,7 +17,6 @@ import {
   User,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { apiFetch } from "./apiFetch";
 import { EmptyState, PickerRow, InfoPill } from "./PickerPrimitives";
 import { fmt, fmtQty, round3, derivePOGst } from "./helpers";
