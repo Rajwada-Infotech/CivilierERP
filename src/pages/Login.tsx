@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Truck, Building2, ArrowUpRight } from "lucide-react";
 import {
   motion,
   AnimatePresence,
@@ -837,20 +837,62 @@ export default function Login() {
                 <p className="text-center text-[10px] text-white/20 mt-5">
                   Secure access · Role-based permissions · v{appVersion}
                 </p>
-                <p className="text-center text-[11px] text-white/30 mt-2">
-                  Are you a supplier?{" "}
-                  <button onClick={() => navigate("/supplier-login")}
-                    className="text-violet-400 hover:text-violet-300 font-medium transition-colors underline underline-offset-2">
-                    Sign in to Supplier Portal
-                  </button>
-                </p>
-                <p className="text-center text-[11px] text-white/30 mt-1.5">
-                  Are you a customer?{" "}
-                  <button onClick={() => navigate("/crm-client-portal/login")}
-                    className="text-violet-400 hover:text-violet-300 font-medium transition-colors underline underline-offset-2">
-                    Sign in to Customer Portal
-                  </button>
-                </p>
+
+                {/* Other portals */}
+                <div className="mt-5 pt-5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p className="text-center text-[10px] font-semibold tracking-wider uppercase text-white/25 mb-3">
+                    Looking for a different portal?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <motion.button
+                      type="button"
+                      onClick={() => navigate("/supplier-login")}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="group relative flex flex-col items-start gap-2 rounded-xl p-3 text-left overflow-hidden transition-colors"
+                      style={{
+                        background: "rgba(139,92,246,0.06)",
+                        border: "1px solid rgba(139,92,246,0.18)",
+                      }}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
+                          style={{ background: "rgba(139,92,246,0.15)" }}>
+                          <Truck size={14} className="text-violet-300" />
+                        </span>
+                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-violet-300 transition-colors" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/80">Supplier</p>
+                        <p className="text-[10px] text-white/35">Vendor &amp; order portal</p>
+                      </div>
+                    </motion.button>
+
+                    <motion.button
+                      type="button"
+                      onClick={() => navigate("/crm-client-portal/login")}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="group relative flex flex-col items-start gap-2 rounded-xl p-3 text-left overflow-hidden transition-colors"
+                      style={{
+                        background: "rgba(139,92,246,0.06)",
+                        border: "1px solid rgba(139,92,246,0.18)",
+                      }}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
+                          style={{ background: "rgba(139,92,246,0.15)" }}>
+                          <Building2 size={14} className="text-violet-300" />
+                        </span>
+                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-violet-300 transition-colors" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/80">Customer</p>
+                        <p className="text-[10px] text-white/35">Booking &amp; owner portal</p>
+                      </div>
+                    </motion.button>
+                  </div>
+                </div>
               </div>
             </TiltCard>
           </div>

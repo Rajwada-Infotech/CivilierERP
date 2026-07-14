@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -764,6 +764,7 @@ const SupplierMaster: React.FC = () => {
   const canSave =
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
+    !!form.LBelongsTo &&
     (form.LGSTType !== "Registered" || form.LGST.trim() !== "") &&
     // Password is optional — left blank on create, the backend defaults the
     // login to "123456" (changeable later from this form); on edit, blank
@@ -830,7 +831,7 @@ const SupplierMaster: React.FC = () => {
     }
   };
 
-  const handlePrint = (s: Supplier) => {
+  const handlePrint = useCallback((s: Supplier) => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
     win.document.write(safeHtml`
@@ -856,7 +857,7 @@ const SupplierMaster: React.FC = () => {
     `);
     win.document.close();
     win.print();
-  };
+  }, [accountGroups]);
 
   // ── Columns ────────────────────────────────────────────────────────────────
   const columns = useMemo(() => {
@@ -886,8 +887,7 @@ const SupplierMaster: React.FC = () => {
       rights.canPrint,
     );
   },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm, rights.canEdit, rights.canDelete, rights.canPrint],
+    [editingId, deleteConfirm, startEdit, handlePrint, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────

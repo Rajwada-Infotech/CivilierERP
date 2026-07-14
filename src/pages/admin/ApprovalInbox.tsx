@@ -415,17 +415,53 @@ const ModuleTab: React.FC<{
 // if the detail fetch fails, so the popup never comes up empty.
 
 // Keys hidden from the generic "Full Record" dump: already surfaced in the
-// header/summary grid above it, or too heavy/internal to render as a plain
-// key-value row (JSON blobs, line-item arrays, audit timestamps).
+// header/summary grid above it, or too internal/raw to be worth a row.
+// Matched after stripDbPrefix() strips each module's column-prefix
+// convention, so "companyid" here also catches "ECompanyId".
 const PREVIEW_HIDDEN_KEYS = new Set([
   "id", "_id", "attachments", "parties", "lineitems", "items", "poitems",
   "billingtermsdata", "termsandconditions", "createdat", "updatedat",
-  "approvedat", "rejectedat", "docnumber", "companyid", "projectid",
-  "supplierid", "contractorid", "customerid", "belongsto",
+  "approvedat", "rejectedat", "docnumber", "belongsto",
+  // *By fields carry a raw numeric user id, not a name — the summary grid
+  // above already shows the resolved Created/Approved/Rejected By names.
+  "createdby", "updatedby", "approvedby", "rejectedby",
+  // ProjectName in several modules actually stores the project's numeric
+  // enterprise id (legacy column reuse), not a readable name — the
+  // resolved sibling (ProjectDisplayName, ProjectName from a join, ...)
+  // covers this instead.
+  "projectname",
 ]);
 
+// Most modules prefix every one of their own columns with a single
+// module-specific letter (ExpenseBooking: EName, ECompanyId, ECreatedAt, ...)
+// which defeats both the hidden-key match above and plain-English labels.
+// Strip a single leading capital letter when it's immediately followed by
+// another capital letter (i.e. it's a prefix, not the start of a real word).
+function stripDbPrefix(key: string): string {
+  return key.replace(/^[A-Z](?=[A-Z])/, "");
+}
+
+// Every module names its foreign keys differently (ECompanyId, SupplierID,
+// ContractorId, LHeadId, PurchaseOrderID, ...) so a fixed key list above
+// can never keep up. Any field whose name ends in "Id" is a raw internal
+// reference, not something a reviewer can read — hide it here and let its
+// resolved sibling (CompanyName, SupplierName, ProjectName, ...), which the
+// record's own GET /:id endpoint already returns, show through instead.
+function isIdField(key: string): boolean {
+  return /id$/i.test(key);
+}
+
+// Serialized JSON blobs (billing terms, EMI config, discount config, ...)
+// read as noise dumped raw — hide any string value that's actually JSON
+// rather than trying to name every such column across every module.
+function isJsonBlob(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const s = value.trim();
+  return (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
+}
+
 function labelizeKey(key: string): string {
-  return key
+  return stripDbPrefix(key)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/^./, (c) => c.toUpperCase())
     .trim();
@@ -491,7 +527,9 @@ const RecordPreviewModal: React.FC<{
   const extraFields = detail
     ? Object.entries(detail).filter(
         ([k, v]) =>
-          !PREVIEW_HIDDEN_KEYS.has(k.toLowerCase()) &&
+          !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
+          !isIdField(k) &&
+          !isJsonBlob(v) &&
           !(Array.isArray(v) && v.length === 0) &&
           typeof v !== "object",
       )

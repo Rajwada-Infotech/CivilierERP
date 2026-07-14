@@ -7,7 +7,6 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");
 const portalAuth = require("../middleware/crmPortalAuth");
-const { logCrmAudit } = require("../services/crmAudit");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
 const { maybeResolveAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");

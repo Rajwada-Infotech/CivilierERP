@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search, IndianRupee, AlertCircle, CheckCircle2, Clock, Plus, Wallet } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";

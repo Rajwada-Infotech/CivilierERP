@@ -18,7 +18,6 @@ import {
 import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getOABalanceByRef } from "@/api/onAccountApi";
-import { getBanks } from "@/api/bankMasterApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
@@ -53,7 +52,6 @@ import {
   TrendingUp,
   Truck,
   Hash,
-  Smartphone,
   BookOpen,
   CalendarClock,
   AlertTriangle,
@@ -61,10 +59,8 @@ import {
   Eye,
   Printer,
   ArrowRight,
-  CreditCard,
   RefreshCw,
   History,
-  Info,
   Users,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
@@ -103,7 +99,6 @@ import {
   ReadOnlyField,
   AutoFillBanner,
   ModeBadge,
-  InputField,
 } from "./payment/components/FormFields";
 import { FilterBar } from "./payment/components/FilterBar";
 import { ExpenseBookingPicker } from "./payment/components/ExpenseBookingPicker";
