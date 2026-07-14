@@ -188,7 +188,6 @@ const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
 const SupplierCatalog = lazy(() => import("./pages/supplier/SupplierCatalog"));
-const SupplierReceivedGoods = lazy(() => import("./pages/supplier/SupplierReceivedGoods"));
 const SupplierCompanyProfile = lazy(() => import("./pages/supplier/SupplierCompanyProfile"));
 const SupplierNotifications = lazy(() => import("./pages/supplier/SupplierNotifications"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
@@ -2088,20 +2087,6 @@ function AppRoutes() {
               <RouteErrorBoundary>
                 <Suspense fallback={<PageSkeleton />}>
                   <SupplierCatalog />
-                </Suspense>
-              </RouteErrorBoundary>
-            </SupplierLayout>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/supplier/received-goods"
-        element={
-          <RequireAuth>
-            <SupplierLayout>
-              <RouteErrorBoundary>
-                <Suspense fallback={<PageSkeleton />}>
-                  <SupplierReceivedGoods />
                 </Suspense>
               </RouteErrorBoundary>
             </SupplierLayout>
