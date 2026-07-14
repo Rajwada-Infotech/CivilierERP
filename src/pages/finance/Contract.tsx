@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -41,7 +41,6 @@ function ensureArray<T>(v: unknown): T[] {
 }
 
 interface TCRecord { id: number; name: string; terms: string; }
-interface PartyOption { id: number; name: string; code?: string; }
 interface PartyPill { type: "Supplier" | "Contractor" | "Applicant"; id: number; name: string; }
 
 const fmtDate = (d: string | null | undefined) => {
@@ -148,7 +147,6 @@ export default function Contract() {
   const [selectedParties, setSelectedParties] = useState<PartyPill[]>([]);
   const [partyTab, setPartyTab] = useState<"Supplier" | "Contractor" | "Applicant">("Supplier");
   const [partySearch, setPartySearch] = useState("");
-  const [partyDropOpen, setPartyDropOpen] = useState(false);
 
   const setField = <K extends keyof ReturnType<typeof emptyForm>>(
     k: K, v: ReturnType<typeof emptyForm>[K],
@@ -189,18 +187,6 @@ export default function Contract() {
     queryFn: getTCRecords,
   });
 
-  const { data: suppliersRaw = [] } = useQuery<PartyOption[]>({
-    queryKey: ["contract-meta-suppliers"],
-    queryFn: () => fetchWithAuth("/api/contract/meta/suppliers").then((r) => r.json()),
-  });
-  const { data: contractorsRaw = [] } = useQuery<PartyOption[]>({
-    queryKey: ["contract-meta-contractors"],
-    queryFn: () => fetchWithAuth("/api/contract/meta/contractors").then((r) => r.json()),
-  });
-  const { data: applicantsRaw = [] } = useQuery<PartyOption[]>({
-    queryKey: ["contract-meta-customers"],
-    queryFn: () => fetchWithAuth("/api/contract/meta/customers").then((r) => r.json()),
-  });
 
   const contracts = useMemo(() =>
     ensureArray<ContractListItem>(rawContracts).filter(
@@ -303,7 +289,6 @@ export default function Contract() {
     setAttachments([]);
     setSelectedParties([]);
     setPartySearch("");
-    setPartyDropOpen(false);
     setContactPersonOpen(false);
     setEditingId(null);
   };
