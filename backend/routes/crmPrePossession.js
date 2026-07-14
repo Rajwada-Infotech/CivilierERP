@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -7,6 +8,7 @@ const { actorId } = require("../services/saAccess");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const PP_SELECT = `
   SELECT p.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
@@ -73,9 +75,6 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
-    // Derive overall status once all four checks pass
-    const allChecked = [b.DuesClearedCheck, b.DocumentationCheck, b.QualityInspectionCheck, b.UtilityReadinessCheck]
-      .every((v) => v === true || v === undefined);
     const result = await pool.request()
       .input("id",   sql.Int, id)
       .input("dues", sql.Bit, b.DuesClearedCheck ? 1 : (b.DuesClearedCheck === false ? 0 : null))

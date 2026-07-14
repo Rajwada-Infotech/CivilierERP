@@ -140,7 +140,15 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/civilworkdpr")) {
       setActiveModuleState("civilworkdpr");
       localStorage.setItem("activeModule", "civilworkdpr");
-    } else if (pathname.startsWith("/finance") || pathname === "/finance") {
+    } else if (
+      pathname.startsWith("/finance") ||
+      pathname === "/finance" ||
+      pathname.startsWith("/brs") ||
+      pathname.startsWith("/payments") ||
+      pathname.startsWith("/received-payments") ||
+      pathname.startsWith("/journal-voucher") ||
+      pathname.startsWith("/trial-balance")
+    ) {
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
     } else if (pathname === "/home" || pathname === "/") {

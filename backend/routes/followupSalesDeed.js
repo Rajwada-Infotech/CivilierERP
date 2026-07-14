@@ -1,6 +1,7 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { logAudit } = require("../utils/auditLog");
 
@@ -49,6 +50,7 @@ const LIST_COLUMNS = `
 const STATUS_OPTIONS = ["Draft", "Executed", "Registered", "Overdue", "Cancelled"];
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 router.use(checkPermissionForMethod("Followup", "SalesDeed"));
 
 function requireUserName(req, res) {

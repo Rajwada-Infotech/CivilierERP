@@ -219,6 +219,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
     WorkDone: { workflowId: "WorkDone" },
     SaleOrders: { workflowId: "SaleOrder" },
     VehicleInOut: { workflowId: "VehicleInOut" },
+    Contract: { workflowId: "Contract" },
   };
 
   const entry = MODULE_TABLE_MAP[module];

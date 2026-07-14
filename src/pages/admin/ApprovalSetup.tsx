@@ -111,6 +111,12 @@ const MODULE_OPTIONS = [
     desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
   },
   {
+    id: "Contract",
+    label: "Contract",
+    icon: "📄",
+    desc: "Auto-submitted for approval as soon as it's created — no Draft step",
+  },
+  {
     id: "crm-agreements",
     label: "CRM Agreement (Senior Approval)",
     icon: "📝",
@@ -138,7 +144,7 @@ const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "JournalVoucher"],
+    modules: ["NewPayment", "JournalVoucher", "Contract"],
   },
   {
     id: "engineering",

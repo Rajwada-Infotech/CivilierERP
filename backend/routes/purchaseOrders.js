@@ -581,6 +581,10 @@ async function getPOSelect(pool) {
     po.SourceSaleInvoiceId,
     po.SourceSaleInvoiceDocNo,
     po.POType,
+    po.SupplierAcknowledged,
+    po.SupplierAcknowledgedAt,
+    po.SuppliedDate,
+    po.ChallanNumber,
     ${hasCC ? "po.CostCenterId" : "CAST(NULL AS INT) AS CostCenterId"},
     ${hasVID ? "po.VendorInvoiceDate" : "CAST(NULL AS DATE) AS VendorInvoiceDate"},
     ${hasVIN ? "po.VendorInvoiceNo" : "CAST(NULL AS NVARCHAR(100)) AS VendorInvoiceNo"},
@@ -1296,6 +1300,122 @@ router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (re
     res
       .status(err.message.includes("not authorized") ? 403 : 400)
       .json({ error: err.message });
+  }
+});
+
+// ── Item type check for direct invoice restriction ───────────────────────────
+// Returns whether this PO contains any Goods-type items (blocks direct invoice).
+router.get("/:id/item-types", async (req, res) => {
+  const poId = parseInt(req.params.id, 10);
+  if (!poId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const poRes = await pool.request().input("POID", sql.Int, poId)
+      .query(`SELECT POItems FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID`);
+    if (!poRes.recordset.length) return res.status(404).json({ error: "PO not found" });
+
+    const rawItems = (() => {
+      try { return JSON.parse(poRes.recordset[0].POItems || "[]"); } catch { return []; }
+    })();
+
+    // Collect item IDs from PO items JSON
+    const itemIds = rawItems
+      .map((it) => String(it.itemId ?? it.ItemId ?? it.M_Id ?? "").trim())
+      .filter(Boolean);
+
+    if (!itemIds.length) {
+      // No item IDs — can't determine type, allow through
+      return res.json({ hasGoods: false, hasServices: false, itemTypes: [] });
+    }
+
+    const mReq = pool.request();
+    const ph = itemIds.map((id, i) => { mReq.input(`iid${i}`, sql.NVarChar(100), id); return `@iid${i}`; }).join(",");
+    const mRes = await mReq.query(`
+      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_Name, ISNULL(M_Type, '') AS M_Type
+      FROM dbo.Item_Master_Group
+      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})
+    `);
+
+    const itemTypes = mRes.recordset.map((r) => ({ id: r.M_Id, name: r.M_Name, type: r.M_Type }));
+    const hasGoods    = itemTypes.some((it) => it.type.toLowerCase() === "goods");
+    const hasServices = itemTypes.some((it) => it.type.toLowerCase() === "service" || it.type.toLowerCase() === "services");
+
+    res.json({ hasGoods, hasServices, itemTypes });
+  } catch (err) {
+    console.error("PO item-types check error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Lazy Socket.IO handle (mirrors ticketRoutes.js's pattern) ───────────────
+let _getIo = null;
+function getIo() {
+  if (!_getIo) _getIo = require("../socket").getIo;
+  return _getIo();
+}
+function emitPOMessage(poId, comment) {
+  try {
+    getIo().to(`po:${poId}`).emit("po:message", { poId, comment });
+  } catch (err) {
+    console.warn(`[purchaseOrders] Socket emit failed for poId="${poId}": ${err?.message || err}`);
+  }
+}
+
+// ── GET /:id/comments — PO<->supplier chat thread (staff side) ──────────────
+router.get("/:id/comments", async (req, res) => {
+  const poId = parseInt(req.params.id, 10);
+  if (!poId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("POID", sql.Int, poId).query(`
+      SELECT Id, PurchaseOrderId, Comment AS comment, AuthorName AS author_name,
+             AuthorId AS author_id, AuthorRole AS author_role, CreatedAt AS created_at
+      FROM dbo.PurchaseOrderComments
+      WHERE PurchaseOrderId = @POID
+      ORDER BY CreatedAt ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/comment — reply in the PO<->supplier chat (staff side) ────────
+router.post("/:id/comment", async (req, res) => {
+  const poId = parseInt(req.params.id, 10);
+  if (!poId) return res.status(400).json({ error: "Invalid id" });
+  const comment = (req.body?.comment || "").trim();
+  if (!comment) return res.status(400).json({ error: "Comment is required" });
+
+  try {
+    const pool = getPool();
+    const exists = await pool.request().input("POID", sql.Int, poId)
+      .query(`SELECT 1 FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID`);
+    if (!exists.recordset.length) return res.status(404).json({ error: "PO not found" });
+
+    const authorName = req.user?.name ?? req.user?.username ?? "Staff";
+    const authorId = req.user?.userId ?? req.user?.id ?? null;
+    const authorRole = req.user?.role ?? "staff";
+
+    const insert = await pool.request()
+      .input("POID",       sql.Int,           poId)
+      .input("Comment",    sql.NVarChar(sql.MAX), comment)
+      .input("AuthorName", sql.NVarChar(200), authorName)
+      .input("AuthorId",   sql.Int,           authorId)
+      .input("AuthorRole", sql.NVarChar(50),  authorRole)
+      .query(`
+        INSERT INTO dbo.PurchaseOrderComments (PurchaseOrderId, Comment, AuthorName, AuthorId, AuthorRole)
+        OUTPUT INSERTED.Id, INSERTED.PurchaseOrderId, INSERTED.Comment AS comment,
+               INSERTED.AuthorName AS author_name, INSERTED.AuthorId AS author_id,
+               INSERTED.AuthorRole AS author_role, INSERTED.CreatedAt AS created_at
+        VALUES (@POID, @Comment, @AuthorName, @AuthorId, @AuthorRole)
+      `);
+
+    const saved = insert.recordset[0];
+    res.json({ comment: saved });
+    emitPOMessage(poId, saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

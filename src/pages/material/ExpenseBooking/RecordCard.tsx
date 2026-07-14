@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, Edit, Trash2, CreditCard } from "lucide-react";
+import { Eye, Edit, Trash2, CreditCard, Clock } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
@@ -112,7 +112,19 @@ export function RecordCard({
           </p>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} compact />
+          <ApprovalStatusChain
+            table="ExpenseBooking"
+            recordId={rec.id}
+            compact
+            fallback={
+              rec.status === "Pending" ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800">
+                  <Clock size={10} />
+                  Pending
+                </span>
+              ) : null
+            }
+          />
           <div className="flex items-center gap-1">
             <ApprovalActions
               status={rec.status}

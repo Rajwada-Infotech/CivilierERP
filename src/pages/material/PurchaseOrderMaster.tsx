@@ -94,8 +94,11 @@ import {
   Download,
   Upload,
   Loader2 as Loader2Icon,
+  MessageCircle,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { useAuth } from "@/contexts/AuthContext";
+import { OrderChat } from "@/components/orders/OrderChat";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const PO_TEMPLATE_COLUMNS = [
@@ -385,6 +388,8 @@ const PurchaseOrderMaster: React.FC = () => {
     useState<CompanyDetails | null>(null);
   const [viewingPOProject, setViewingPOProject] =
     useState<CompanyDetails | null>(null);
+  const [viewingTab, setViewingTab] = useState<"details" | "supplier">("details");
+  const { currentUser } = useAuth();
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
@@ -1709,7 +1714,6 @@ const PurchaseOrderMaster: React.FC = () => {
     const poNumberEsc = escapeHtml(String(poNumber));
     const poDateEsc = escapeHtml(String(poDate));
     const expectedDateEsc = escapeHtml(String(expectedDate));
-    const poStatusEsc = escapeHtml(String(poStatus));
     const remarksEsc = escapeHtml(String(remarks));
     const payTermsEsc = escapeHtml(String(payTerms));
 
@@ -2387,6 +2391,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           />
                           <button
                             onClick={async () => {
+                              setViewingTab("details");
                               try {
                                 const full = await getPurchaseOrderById(item._id);
                                 setViewingPO(full);
@@ -2705,6 +2710,26 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 </div>
               </div>
 
+              {/* Tab strip */}
+              <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card">
+                {(["details", "supplier"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setViewingTab(tab)}
+                    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors
+                        ${
+                          viewingTab === tab
+                            ? "border-primary text-primary bg-primary/5"
+                            : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                        }`}
+                  >
+                    {tab === "details" ? <FileText size={12} /> : <MessageCircle size={12} />}
+                    {tab === "details" ? "Details" : "Supplier"}
+                  </button>
+                ))}
+              </div>
+
+              {viewingTab === "details" && (
               <div className="p-5 space-y-5">
                 {/* Order details grid */}
                 <div>
@@ -3128,6 +3153,74 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   </div>
                 )}
               </div>
+              )}
+
+              {viewingTab === "supplier" && (
+                <div className="p-5 space-y-5">
+                  {/* Dispatch status */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <Truck size={10} className="text-emerald-500" /> Dispatch Status
+                    </p>
+                    {viewingPO.SupplierAcknowledged ? (
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={15} className="text-emerald-500" />
+                          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Supplier marked this as supplied</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Supplied Date</p>
+                            <p className="text-sm font-medium text-foreground mt-0.5">
+                              {viewingPO.SuppliedDate ? new Date(viewingPO.SuppliedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Challan Number</p>
+                            <p className="text-sm font-medium text-foreground mt-0.5 font-mono">
+                              {viewingPO.ChallanNumber || <span className="text-muted-foreground/60 font-sans italic">Not provided</span>}
+                            </p>
+                          </div>
+                          {viewingPO.ExpectedDeliveryDate && viewingPO.SuppliedDate && (() => {
+                            const e = new Date(viewingPO.ExpectedDeliveryDate); e.setHours(0, 0, 0, 0);
+                            const s = new Date(viewingPO.SuppliedDate); s.setHours(0, 0, 0, 0);
+                            const delta = Math.round((e.getTime() - s.getTime()) / 86_400_000);
+                            return (
+                              <div>
+                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Vs. Expected</p>
+                                <p className={`text-sm font-medium mt-0.5 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                  {delta === 0 ? "On time" : delta > 0 ? `${delta}d early` : `${Math.abs(delta)}d late`}
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4 text-center">
+                        <p className="text-xs text-muted-foreground">Not yet marked as supplied by the supplier.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Chat log */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <MessageCircle size={10} className="text-emerald-500" /> Conversation
+                    </p>
+                    <div className="rounded-xl border border-border overflow-hidden h-[420px] flex flex-col">
+                      {currentUser && (
+                        <OrderChat
+                          poId={viewingPO.PurchaseOrderID ?? Number(viewingPO._id)}
+                          apiBase="/api/purchase-orders"
+                          currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
+                          className="flex-1 rounded-none border-0"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

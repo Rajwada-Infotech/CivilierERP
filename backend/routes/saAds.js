@@ -1,14 +1,14 @@
+const crypto = require("crypto");
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const rateLimit = require("express-rate-limit");
 const {
   syncAdToPlatform,
-  fetchAdMetrics,
-  fetchLeadsFromPlatform,
   normalizeImportedLeads,
   providerLabel,
 } = require("../services/saAdPlatformService");
@@ -17,6 +17,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 bumpCacheVersion("sa-ads").catch(() => {});
 
@@ -408,7 +409,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
         skipped += 1;
         continue;
       }
-      const uid = `LEAD-${Date.now()}-${Math.random().toString(16).slice(2, 8).toUpperCase()}`;
+      const uid = `LEAD-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
       const sourcePayload = JSON.stringify(lead.SourcePayload || {});
       const result = await pool.request()
         .input("LeadUid", sql.NVarChar(50), uid)

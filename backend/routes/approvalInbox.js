@@ -682,6 +682,30 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "contracts") {
+      queries.push(`
+        SELECT
+          'contracts'                           AS Module,
+          'Contract'                            AS ModuleLabel,
+          CAST(c.ContractId AS NVARCHAR)        AS RecordId,
+          ISNULL(c.DocNo, CONCAT('CON#', CAST(c.ContractId AS NVARCHAR))) AS Reference,
+          c.DocDate                             AS RecordDate,
+          c.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          c.ContactPerson                       AS SupplierName,
+          c.ContractAmount                      AS Amount,
+          ${NULL_EXTRA}
+          CAST(c.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(c.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(c.UpdatedAt, c.CreatedAt)      AS LastModified
+        FROM dbo.Contract c
+        WHERE c.Status = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -727,7 +751,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

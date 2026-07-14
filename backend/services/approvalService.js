@@ -97,6 +97,7 @@ const MODULE_MAP = {
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
+  contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
   // column, so this shares level-count history with any other gate on
   // CrmSalesDeed — harmless since this is single-level too.
@@ -211,6 +212,7 @@ const WORKFLOW_ID_MAP = {
   "vehicle-in-out": "VehicleInOut",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
+  contracts: "Contract",
 };
 
 /**

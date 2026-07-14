@@ -390,11 +390,11 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground hidden md:table-cell">
-                      {(row as any).CustomerRate != null ? `₹${fmtNum((row as any).CustomerRate)}` : "—"}
+                      {row.CustomerRate != null ? `₹${fmtNum(row.CustomerRate)}` : "—"}
                     </td>
-                    <td className={`px-4 py-2.5 text-right hidden sm:table-cell ${(row as any).CustomerRate != null && row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}>
-                      {(row as any).CustomerRate != null && row.ClosingStock !== 0
-                        ? `₹${fmtNum(row.ClosingStock * (row as any).CustomerRate)}`
+                    <td className={`px-4 py-2.5 text-right hidden sm:table-cell ${row.CustomerRate != null && row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                      {row.CustomerRate != null && row.ClosingStock !== 0
+                        ? `₹${fmtNum(row.ClosingStock * row.CustomerRate)}`
                         : "—"}
                     </td>
                   </tr>
@@ -424,7 +424,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell" />
                   <td className="px-4 py-3 text-right font-bold text-foreground hidden sm:table-cell">
-                    ₹{fmtNum(rows.reduce((s, r) => s + ((r as any).CustomerRate != null ? r.ClosingStock * (r as any).CustomerRate : 0), 0))}
+                    ₹{fmtNum(rows.reduce((s, r) => s + (r.CustomerRate != null ? r.ClosingStock * r.CustomerRate : 0), 0))}
                   </td>
                 </tr>
               </tfoot>
@@ -495,7 +495,7 @@ export default function Stock() {
         setSelectedGodownId(filteredGodowns[0]?.GodownID ?? null);
       }
     }
-  }, [filteredGodowns]);
+  }, [filteredGodowns, selectedGodownId]);
 
   const selectedGodown = godowns.find((g) => g.GodownID === selectedGodownId);
 

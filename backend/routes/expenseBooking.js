@@ -18,6 +18,8 @@ const {
   emiToggleSchema,
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
+const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
+const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
@@ -442,12 +444,19 @@ router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
     const finYear = (req.query.finYear || "").toString().trim() || null;
+    // When "Pay Remaining" navigates to a payment that's already marked Paid,
+    // include that specific invoice regardless of EBillStatus so the form can pre-fill.
+    const includeRef = (req.query.includeRef || "").toString().trim() || null;
+    // When navigating from On A/C Adjustment, filter invoices to the selected party only.
+    const partyId = parseInt(req.query.partyId || "", 10) || null;
 
     // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
     // and exclude any already linked to an active DebitNote
     const bookingsResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("IncludeRef", sql.NVarChar(100), includeRef)
+      .input("PartyId", sql.Int, partyId).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -455,15 +464,30 @@ router.get("/options", async (req, res) => {
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
           -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
-          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
+          -- SupplierID; WORK_DONE -> the WorkDone's contractor. Direct/manual
+          -- (TOD etc.) bookings resolve via ExpenseBooking.LHeadId — the
+          -- supplier chosen directly on the booking form. EName (the
           -- booking/item label) is only ever a last-resort fallback — it
           -- must never stand in for an actual supplier/contractor.
           CASE
-            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
-            ELSE ISNULL(eb.EName, '')
+            WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName,        ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN ISNULL(po_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WORK_DONE'                              THEN ISNULL(wd_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            WHEN eb.ESourceType = 'WO'                                     THEN ISNULL(wo_supp_opt.LHeadName, ISNULL(eb.EName, ''))
+            -- direct_supp_opt covers current bookings (LHeadId set on save);
+            -- party_opt is a fallback for older bookings saved before that
+            -- fix, matched via the On A/C Adjustment @PartyId scope.
+            ELSE ISNULL(direct_supp_opt.LHeadName, ISNULL(party_opt.LHeadName, ISNULL(eb.EName, '')))
           END                             AS supplierName,
+          -- Party/supplier LHeadId behind supplierName above — lets the
+          -- frontend auto-select the Payee/Party dropdown on invoice pick.
+          CASE
+            WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ahm.LHeadId
+            WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN po_supp_opt.LHeadId
+            WHEN eb.ESourceType = 'WORK_DONE'                              THEN wd_supp_opt.LHeadId
+            WHEN eb.ESourceType = 'WO'                                     THEN wo_supp_opt.LHeadId
+            ELSE eb.LHeadId
+          END                             AS supplierId,
           -- Use live GRN total when available so the amount in the picker is accurate
           CASE
             WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
@@ -474,6 +498,15 @@ router.get("/options", async (req, res) => {
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
           eb.EEmiPayment                  AS emiEnabled,
+          ISNULL(eb.EBillStatus, 'Payment Due') AS billStatus,
+          ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
+          ISNULL(eb.ERemainingAmount,
+            CASE
+              WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+              THEN grn.TotalAmount
+              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+            END
+          )                               AS remainingAmount,
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
@@ -500,22 +533,57 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.WorkDone wd_supp_opt_wd
           ON eb.ESourceType = 'WORK_DONE' AND wd_supp_opt_wd.ID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wd_supp_opt ON wd_supp_opt.LHeadId = wd_supp_opt_wd.SupplierId
+        LEFT JOIN dbo.WorkOrderHeader wo_supp_opt_wo
+          ON eb.ESourceType = 'WO' AND wo_supp_opt_wo.Id = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster wo_supp_opt
+          ON wo_supp_opt.LHeadId = COALESCE(wo_supp_opt_wo.SupplierId, wo_supp_opt_wo.ContractorId)
+        LEFT JOIN dbo.AccountHeadMaster direct_supp_opt ON direct_supp_opt.LHeadId = eb.LHeadId
+        LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND eb.EStatus = 'Approved'
-          AND ISNULL(eb.EBillStatus, '') <> 'Paid'
+          AND (
+            ISNULL(eb.EBillStatus, '') <> 'Paid'
+            OR (@IncludeRef IS NOT NULL AND eb.EDocNo = @IncludeRef)
+          )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@PartyId IS NULL OR (
+            (eb.ESourceType = 'GRN'       AND ahm.LHeadId        = @PartyId)
+            OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_opt.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE'     AND wd_supp_opt.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WO'            AND wo_supp_opt.LHeadId = @PartyId)
+            OR eb.LHeadId = @PartyId
+            -- Payment-history link: direct/manual invoices (TOD etc.) have no
+            -- supplier column, so treat an invoice as belonging to @PartyId when
+            -- that party has previously paid against it (OnAccountLedger -> the
+            -- payment's PExpenseRef). This is the linkage the On A/C Adjustment
+            -- flow relies on.
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
+            OR EXISTS (
+              SELECT 1 FROM dbo.NewPayment np
+              WHERE np.PExpenseRef = eb.EDocNo
+                AND np.PPartyId    = @PartyId
+                AND np.Status      = 'Approved'
+            )
+          ))
         ORDER BY eb.Eid DESC
       `);
 
     // EMI installments: only show Pending ones
     const emiResult = await pool
       .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      .input("FinYear", sql.NVarChar(20), finYear)
+      .input("PartyId", sql.Int, partyId).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -532,8 +600,16 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_emi.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_emi.LHeadName, ISNULL(eb.EName, ''))
-            ELSE ISNULL(eb.EName, '')
+            ELSE ISNULL(direct_supp_emi.LHeadName, ISNULL(eb.EName, ''))
           END                          AS supplierName,
+          -- Party/supplier LHeadId behind supplierName above — lets the
+          -- frontend auto-select the Payee/Party dropdown on invoice pick.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ahm2.LHeadId
+            WHEN eb.ESourceType IN ('PO','WO_PO') THEN po_supp_emi.LHeadId
+            WHEN eb.ESourceType = 'WORK_DONE' THEN wd_supp_emi.LHeadId
+            ELSE eb.LHeadId
+          END                          AS supplierId,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
           ISNULL(eb.EFinYear, '')      AS financialYear,
@@ -560,6 +636,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.WorkDone wd_supp_emi_wd
           ON eb.ESourceType = 'WORK_DONE' AND wd_supp_emi_wd.ID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster wd_supp_emi ON wd_supp_emi.LHeadId = wd_supp_emi_wd.SupplierId
+        LEFT JOIN dbo.AccountHeadMaster direct_supp_emi ON direct_supp_emi.LHeadId = eb.LHeadId
         WHERE
           eb.EEmiPayment = 1
           AND eb.EStatus = 'Approved'
@@ -569,6 +646,18 @@ router.get("/options", async (req, res) => {
             WHERE dn.bill_id = ei.Id AND dn.is_active = 1
           )
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@PartyId IS NULL OR (
+            (eb.ESourceType = 'GRN' AND ahm2.LHeadId = @PartyId)
+            OR (eb.ESourceType IN ('PO','WO_PO') AND po_supp_emi.LHeadId = @PartyId)
+            OR (eb.ESourceType = 'WORK_DONE' AND wd_supp_emi.LHeadId = @PartyId)
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.OnAccountLedger oal
+              JOIN dbo.NewPayment np_hist ON np_hist.DocNo = oal.RefDocNo
+              WHERE oal.PartyId = @PartyId
+                AND np_hist.PExpenseRef = eb.EDocNo
+            )
+          ))
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
@@ -582,6 +671,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       partyName: r.partyName || "",
       supplierName: r.supplierName || "",
+      partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
@@ -601,6 +691,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       partyName: r.partyName || "",
       supplierName: r.supplierName || "",
+      partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
@@ -637,6 +728,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const offset = (page - 1) * limit;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
+    const ebSupplierList = expenseBookingSupplierSql("eb", "lsup");
 
     // Run status counts and paginated list in parallel
     const [countResult, result] = await Promise.all([
@@ -666,6 +758,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
           eb.EAmount, eb.ENetAmount, eb.ECgstRate, eb.ESgstRate,
+          eb.EIgstRate, eb.EPaymentType, eb.EPartialAmount,
           eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
@@ -690,16 +783,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
             ELSE NULL
           END AS sourceDocNo,
-          -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
-          -- SupplierID; WORK_DONE -> the WorkDone's contractor. EName (the
-          -- booking/item label) only as a last-resort fallback — never the
-          -- supplier itself.
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN ISNULL(grn_supp_list.LHeadName, eb.EName)
-            WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_list.LHeadName, eb.EName)
-            WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_list.LHeadName, eb.EName)
-            ELSE eb.EName
-          END AS ESupplierName,
+          -- Supplier name/id: resolved via the shared expenseBookingSupplierSql
+          -- helper (GRN/PO/WO_PO/WORK_DONE/WO -> source doc's supplier;
+          -- direct/manual bookings -> eb.LHeadId). EName is only ever the
+          -- last-resort fallback baked into the helper's expression — never
+          -- the supplier itself.
+          ${ebSupplierList.nameExpr} AS ESupplierName,
+          ${ebSupplierList.idExpr} AS ESupplierId,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
           -- Frontend uses this as the authoritative Net Amt for GRN rows.
           CASE
@@ -716,15 +806,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         -- GRN join for sourceDocNo and project fallback
         LEFT JOIN dbo.GoodsReceiptNotes grn_list
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
-        LEFT JOIN dbo.PurchaseOrders po_supp_list_po
-          ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_list_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster po_supp_list ON po_supp_list.LHeadId = po_supp_list_po.SupplierID
-        LEFT JOIN dbo.WorkDone wd_supp_list_wd
-          ON eb.ESourceType = 'WORK_DONE' AND wd_supp_list_wd.ID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster wd_supp_list ON wd_supp_list.LHeadId = wd_supp_list_wd.SupplierId
+        ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid DESC
@@ -768,11 +852,14 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
+      // One-and-done: any non-Deleted booking (including Draft — e.g. one whose
+      // auto-submit-to-Pending transition failed) still counts as "invoiced"
+      // and must keep the source document out of the picker. Only a hard
+      // delete of the booking reopens the source.
       const result = await pool.request().query(`
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
         WHERE EStatus != 'Deleted'
-          AND EStatus != 'Draft'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
 
@@ -835,7 +922,7 @@ router.get("/by-source", async (req, res) => {
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = @ESourceType
           AND eb.ESourceId = @ESourceId
-          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND ISNULL(eb.EStatus, '') <> 'Deleted'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid ASC
       `);
@@ -853,6 +940,21 @@ router.get("/:id/can-delete", async (req, res) => {
 
   try {
     const pool = getPool();
+
+    // ── 0. EMI guard ──────────────────────────────────────────────────────────
+    // EMI-enabled bookings cannot be deleted at all — deleting one would both
+    // orphan its EmiInstallments schedule and silently reopen the source
+    // document (GRN/PO/Work Done) for re-invoicing, breaking one-and-done.
+    const emiCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT EEmiPayment FROM dbo.ExpenseBooking WHERE Eid = @Eid
+    `);
+    if (emiCheck.recordset[0]?.EEmiPayment) {
+      return res.json({
+        deletable: false,
+        reason:
+          "This is an EMI booking and cannot be deleted. EMI entries are permanent once created.",
+      });
+    }
 
     // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const dnCheck = await pool.request().input("Eid", sql.Int, id).query(`
@@ -965,6 +1067,7 @@ router.get("/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const ebSupplierDet = expenseBookingSupplierSql("eb", "dsup");
     const result = await pool.request().input("Eid", sql.Int, id).query(`
         SELECT eb.*,
                eb.Eid AS id,
@@ -979,16 +1082,12 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
                  ELSE NULL
                END AS sourceDocNo,
-               -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's
-               -- own SupplierID; WORK_DONE -> the WorkDone's contractor.
-               -- EName (the booking/item label) only as a last-resort
-               -- fallback — never the supplier itself.
-               CASE
-                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN ISNULL(grn_supp_det.LHeadName, eb.EName)
-                 WHEN eb.ESourceType IN ('PO','WO_PO') THEN ISNULL(po_supp_det.LHeadName, eb.EName)
-                 WHEN eb.ESourceType = 'WORK_DONE' THEN ISNULL(wd_supp_det.LHeadName, eb.EName)
-                 ELSE eb.EName
-               END AS ESupplierName,
+               -- Supplier name/id: resolved via the shared expenseBookingSupplierSql
+               -- helper (GRN/PO/WO_PO/WORK_DONE/WO -> source doc's supplier;
+               -- direct/manual bookings -> eb.LHeadId). EName is only ever the
+               -- last-resort fallback baked into the helper's expression.
+               ${ebSupplierDet.nameExpr} AS ESupplierName,
+               ${ebSupplierDet.idExpr} AS ESupplierId,
                -- Live GRN total (incl. GST) so detail modal always shows current value
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
@@ -1010,11 +1109,7 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.PurchaseOrders po_direct
           ON eb.ESourceType IN ('PO','WO_PO') AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.enterprise epo_direct ON epo_direct.id = po_direct.ProjectId
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_det ON grn_supp_det.LHeadId = grn_det.SupplierID
-        LEFT JOIN dbo.AccountHeadMaster po_supp_det ON po_supp_det.LHeadId = po_direct.SupplierID
-        LEFT JOIN dbo.WorkDone wd_det
-          ON eb.ESourceType = 'WORK_DONE' AND wd_det.ID = TRY_CAST(eb.ESourceId AS INT)
-        LEFT JOIN dbo.AccountHeadMaster wd_supp_det ON wd_supp_det.LHeadId = wd_det.SupplierId
+        ${ebSupplierDet.joins}
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)
@@ -1259,9 +1354,11 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         throw err;
       }
 
-      // Enforce: only one active expense booking per GRN at a time.
+      // Enforce: only one active expense booking per GRN, ever — one-and-done.
       // If the previous booking was deleted (hard-deleted), no row remains, so
-      // this check passes and a fresh booking is allowed.
+      // this check passes and a fresh booking is allowed. A Draft booking
+      // (e.g. one whose auto-submit-to-Pending transition failed) still
+      // counts — it must be deleted, not silently bypassed, before rebooking.
       const dupCheck = await transaction
         .request()
         .input("DupGRNId", sql.Int, grnId).query(`
@@ -1269,7 +1366,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'GRN'
             AND ESourceId = @DupGRNId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {
         const err = new Error(
@@ -1574,6 +1671,13 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EProjectName,
     EDocumentType,
     EDocDate,
+    EAmount: EAmountBody,
+    ENetAmount: ENetAmountBody,
+    ECgstRate: ECgstRateBody,
+    ESgstRate: ESgstRateBody,
+    EIgstRate: EIgstRateBody,
+    EPaymentType,
+    EPartialAmount,
     EDiscountData,
     EDocNo,
     EEmiPayment,
@@ -1604,6 +1708,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     PaymentTermId,
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
+    LHeadId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -1634,6 +1739,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   let bookingNetAmount;
   let bookingCgstRate;
   let bookingSgstRate;
+  let bookingIgstRate;
 
   try {
     await transaction.begin();
@@ -1664,9 +1770,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per GRN at a time.
+      // Enforce: only one active expense booking per GRN, ever — one-and-done.
       // If the previous booking was deleted (hard-deleted), no row remains, so
-      // this check passes and a fresh booking is allowed.
+      // this check passes and a fresh booking is allowed. A Draft booking
+      // (e.g. one whose auto-submit-to-Pending transition failed) still
+      // counts — it must be deleted, not silently bypassed, before rebooking.
       const dupCheck = await transaction
         .request()
         .input("DupGRNId", sql.Int, grnId).query(`
@@ -1674,7 +1782,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'GRN'
             AND ESourceId = @DupGRNId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -1695,6 +1803,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingNetAmount = grnGst.totals.netAmount;
       bookingCgstRate = grnGst.cgstRate;
       bookingSgstRate = grnGst.sgstRate;
+      bookingIgstRate = 0;
       // Apply billing terms on top of the GRN gross amount
       bookingNetAmount = applyBillingTermsToAmount(
         bookingNetAmount,
@@ -1737,7 +1846,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per PO at a time.
+      // Enforce: only one active expense booking per PO, ever — one-and-done.
       const poDupCheck = await transaction
         .request()
         .input("DupPOId", sql.Int, poId)
@@ -1746,7 +1855,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = @DupPOSourceType
             AND ESourceId = @DupPOId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(poDupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -1784,7 +1893,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         });
       }
 
-      // Enforce: only one active expense booking per Work Done entry at a time.
+      // Enforce: only one active expense booking per Work Done entry, ever — one-and-done.
       const wdDupCheck = await transaction
         .request()
         .input("DupWDId", sql.BigInt, workDoneId).query(`
@@ -1792,7 +1901,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           FROM dbo.ExpenseBooking
           WHERE ESourceType = 'WORK_DONE'
             AND ESourceId = @DupWDId
-            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+            AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(wdDupCheck.recordset[0]?.cnt) > 0) {
         await transaction.rollback();
@@ -1801,6 +1910,26 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
             "An expense booking already exists for this Work Done entry. Delete the existing booking before creating a new one.",
         });
       }
+    }
+
+    // For direct invoices (TOD or no linked source), amounts and the
+    // supplier link come from the request body — see buildDirectExpenseBooking.
+    if (bookingAmount == null) {
+      const direct = buildDirectExpenseBooking({
+        EAmount: EAmountBody,
+        ENetAmount: ENetAmountBody,
+        ECgstRate: ECgstRateBody,
+        ESgstRate: ESgstRateBody,
+        EIgstRate: EIgstRateBody,
+        EPaymentType,
+        EPartialAmount,
+        LHeadId,
+      });
+      bookingAmount = direct.bookingAmount;
+      bookingNetAmount = direct.bookingNetAmount;
+      bookingCgstRate = direct.bookingCgstRate;
+      bookingSgstRate = direct.bookingSgstRate;
+      bookingIgstRate = direct.bookingIgstRate;
     }
 
     if (EDocTypeId) {
@@ -1954,6 +2083,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
       .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
+      .input("EIgstRate", sql.Decimal(5, 2), bookingIgstRate ?? 0)
+      .input("EPaymentType", sql.NVarChar(20), EPaymentType === "partial" ? "partial" : "full")
+      .input("EPartialAmount", sql.Decimal(18, 2), EPartialAmount != null ? Number(EPartialAmount) : null)
       .input(
         "EDiscountData",
         sql.NVarChar(sql.MAX),
@@ -2017,7 +2149,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
-      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
+      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -2025,7 +2158,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
-          ECgstRate, ESgstRate, EDiscountData, EDocNo,
+          ECgstRate, ESgstRate, EIgstRate, EPaymentType, EPartialAmount, EDiscountData, EDocNo,
           EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
@@ -2034,11 +2167,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef, ContractId
+          ECostCenter, EGLAccount, EWorkDoneRef, ContractId, LHeadId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
-          @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
+          @ECgstRate, @ESgstRate, @EIgstRate, @EPaymentType, @EPartialAmount, @EDiscountData, @EDocNo,
           @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
@@ -2047,7 +2180,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId
+          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId, @LHeadId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
@@ -2102,7 +2235,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
             .input("PDate", sql.Date, new Date())
             .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
             .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
-            .input("PProject", sql.VarChar, EProjectName || "")
+            .input("PProject", sql.VarChar, EProjectName)
             .input("PCompany", sql.VarChar, "")
             .input("PExpenseRef", sql.NVarChar(100), finalDocNo)
             .input("DocNo", sql.NVarChar(100), syntheticDocNo)
@@ -2572,6 +2705,9 @@ router.put(
       ENetAmount,
       ECgstRate,
       ESgstRate,
+      EIgstRate,
+      EPaymentType,
+      EPartialAmount,
       EDiscountData,
       EDocNo,
       EEmiPayment,
@@ -2600,6 +2736,7 @@ router.put(
       EGLAccount,
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
+      LHeadId,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -2622,10 +2759,24 @@ router.put(
     try {
       const pool = getPool();
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
-      let bookingAmount = EAmount;
-      let bookingNetAmount = ENetAmount;
-      let bookingCgstRate = ECgstRate;
-      let bookingSgstRate = ESgstRate;
+      // Default to a direct/manual booking's own amounts + supplier link;
+      // the GRN branch below overrides amounts/GST (never IGST — GRN
+      // bookings are always CGST/SGST) with the live GRN totals instead.
+      const direct = buildDirectExpenseBooking({
+        EAmount,
+        ENetAmount,
+        ECgstRate,
+        ESgstRate,
+        EIgstRate,
+        EPaymentType,
+        EPartialAmount,
+        LHeadId,
+      });
+      let bookingAmount = direct.bookingAmount;
+      let bookingNetAmount = direct.bookingNetAmount;
+      let bookingCgstRate = direct.bookingCgstRate;
+      let bookingSgstRate = direct.bookingSgstRate;
+      let bookingIgstRate = direct.bookingIgstRate;
 
       if (ESourceType === "GRN") {
         const grnId = parseInt(ESourceId, 10);
@@ -2647,6 +2798,7 @@ router.put(
         bookingNetAmount = grnGst.totals.netAmount;
         bookingCgstRate = grnGst.cgstRate;
         bookingSgstRate = grnGst.sgstRate;
+        bookingIgstRate = 0;
         // Apply billing terms on top of the GRN gross amount
         bookingNetAmount = applyBillingTermsToAmount(
           bookingNetAmount,
@@ -2681,6 +2833,9 @@ router.put(
         )
         .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
         .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
+        .input("EIgstRate", sql.Decimal(5, 2), bookingIgstRate ?? 0)
+        .input("EPaymentType", sql.NVarChar(20), EPaymentType === "partial" ? "partial" : "full")
+        .input("EPartialAmount", sql.Decimal(18, 2), EPartialAmount != null ? Number(EPartialAmount) : null)
         .input(
           "EDiscountData",
           sql.NVarChar(sql.MAX),
@@ -2740,7 +2895,8 @@ router.put(
         )
         .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
-        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
+        .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
+        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
 
@@ -2748,6 +2904,7 @@ router.put(
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
+          EIgstRate=@EIgstRate, EPaymentType=@EPaymentType, EPartialAmount=@EPartialAmount,
           EDiscountData=@EDiscountData, EDocNo=@EDocNo, EEmiPayment=@EEmiPayment,
           EEmiData=@EEmiData, EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount,
           EEmiStartDate=@EEmiStartDate, EReminder=@EReminder, ERemarks=@ERemarks,
@@ -2759,7 +2916,8 @@ router.put(
           ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
-          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef
+          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef,
+          LHeadId=@LHeadId
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
         WHERE Eid = @Eid
       `);
@@ -2831,6 +2989,19 @@ router.delete("/:id", requirePageRight("expense-booking", "delete"), async (req,
 
   try {
     const pool = getPool();
+
+    // ── 0. EMI guard ──────────────────────────────────────────────────────────
+    // EMI-enabled bookings are permanent — deleting one would orphan its
+    // EmiInstallments schedule and silently reopen the source document for
+    // re-invoicing, breaking the one-and-done policy.
+    const emiCheck = await pool.request().input("Eid", sql.Int, numericId).query(`
+      SELECT EEmiPayment FROM dbo.ExpenseBooking WHERE Eid = @Eid
+    `);
+    if (emiCheck.recordset[0]?.EEmiPayment) {
+      const message =
+        "This is an EMI booking and cannot be deleted. EMI entries are permanent once created.";
+      return res.status(409).json({ error: message, message });
+    }
 
     // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const refCheck = await pool.request().input("Eid", sql.Int, numericId)
@@ -2995,7 +3166,7 @@ router.get("/:id/payment-summary", async (req, res) => {
           eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           -- GRN info
-          grn.GRNNo, grn.GRNID,
+          grn.GRNNo, grn.GRNID, grn.TotalAmount AS GrnTotalAmount,
           -- PO info via GRN or direct
           po.PurchaseOrderNo, po.PurchaseOrderID,
           po.SourceMRDocNo, po.SupplierID,
@@ -3024,18 +3195,26 @@ router.get("/:id/payment-summary", async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const eb = ebRes.recordset[0];
-    const netAmount = parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
+    // ENetAmount is the finalized net payable (base + GST + billing terms adjustments).
+    // Never use GrnTotalAmount — it is the pre-tax GRN base, not the net payable.
+    const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0
+      ? parseFloat(eb.ENetAmount)
+      : parseFloat(eb.EAmount ?? 0) || 0;
 
-    // Fetch approved payments against this booking
+    // Fetch approved payments against this booking, joining BRS to detect bounced cheques
     const payRes = await pool
       .request()
       .input("PExpenseRef", sql.NVarChar(100), eb.EDocNo).query(`
         SELECT
-          PPaymentID, DocNo, PDate, PMode, PAmount, Status,
-          PPaymentName, PChequeNo, PNeftNumber, PUpiTransactionId
-        FROM dbo.NewPayment
-        WHERE PExpenseRef = @PExpenseRef
-        ORDER BY PPaymentID ASC
+          np.PPaymentID, np.DocNo, np.PDate, np.PMode, np.PAmount, np.Status,
+          np.PPaymentName, np.PChequeNo, np.PNeftNumber, np.PUpiTransactionId,
+          ISNULL(np.BounceCharge, 0) AS BounceCharge,
+          ISNULL(br.IsBounced, 0) AS IsBounced
+        FROM dbo.NewPayment np
+        LEFT JOIN dbo.BankReconciliation br
+          ON br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID
+        WHERE np.PExpenseRef = @PExpenseRef
+        ORDER BY np.PPaymentID ASC
       `);
 
     const payments = payRes.recordset.map((p) => ({
@@ -3044,12 +3223,19 @@ router.get("/:id/payment-summary", async (req, res) => {
       date: p.PDate ? String(p.PDate).slice(0, 10) : null,
       mode: p.PMode,
       amount: parseFloat(p.PAmount) || 0,
+      bounceCharge: parseFloat(p.BounceCharge) || 0,
       status: p.Status,
+      isBounced: !!p.IsBounced,
       ref: p.PChequeNo || p.PNeftNumber || p.PUpiTransactionId || null,
     }));
 
-    const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
-    const remaining = parseFloat(eb.ERemainingAmount ?? netAmount) || 0;
+    // Compute totalPaid live: only Approved, non-bounced payments count.
+    // Bounce charges are paid to the bank, not the supplier — exclude them from
+    // the invoice-clearing amount so remaining balance stays correct.
+    const totalPaid = payments
+      .filter((p) => p.status === 'Approved' && !p.isBounced)
+      .reduce((sum, p) => sum + p.amount - p.bounceCharge, 0);
+    const remaining = Math.max(0, Math.round((netAmount - totalPaid) * 100) / 100);
 
     res.json({
       expenseId: eb.Eid,
@@ -3163,6 +3349,211 @@ router.get("/:id/grns", async (req, res) => {
     res.json(grnResult.recordset);
   } catch (err) {
     console.error("Expense GRNs error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Invoice Posting: preview ────────────────────────────────────────────────
+router.get("/:id/posting", async (req, res) => {
+  const ebId = parseInt(req.params.id, 10);
+  if (!ebId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+
+    const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
+      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
+             eb.EName AS SupplierName
+      FROM dbo.ExpenseBooking eb
+      WHERE eb.Eid = @Eid
+    `);
+    if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const eb = ebRes.recordset[0];
+
+    // Determine if GRN-linked
+    const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0;
+
+    if (isGrnLinked) {
+      // Pull totalInclGST from GRN breakdown
+      const grnId = parseInt(eb.ESourceId, 10);
+      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
+        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
+      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+      let tBase = 0, tGST = 0;
+      if (received.length) {
+        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+        let masterMap = {};
+        if (itemIds.length) {
+          const mReq = pool.request();
+          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
+        }
+        for (const it of received) {
+          const itemId = String(it.itemId||it.ItemId||"");
+          const qty = Number(it.receivedQty||it.ReceivedQty||0);
+          const rate = Number(it.rate||it.Rate||0);
+          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+          tBase += base;
+          tGST += base*(totalGSTRate/100);
+        }
+      }
+      baseAmount = Math.round(tBase*100)/100;
+      taxAmount = Math.round(tGST*100)/100;
+      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+    } else {
+      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+      baseAmount = totalAmount;
+    }
+
+    // System ledgers
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName } : null; };
+    const accounts = {
+      purchase:  find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
+      pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
+      supplier:  find((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor")),
+    };
+
+    // Check if already posted
+    const postedRes = await pool.request().input("SrcId", sql.Int, ebId)
+      .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    const isPosted = postedRes.recordset.length > 0;
+
+    res.json({
+      isGrnLinked: !!isGrnLinked,
+      baseAmount, taxAmount, totalAmount,
+      supplierName: eb.SupplierName,
+      accounts,
+      isPosted,
+      jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+      jvId: isPosted ? postedRes.recordset[0].EntryId : null,
+    });
+  } catch (err) {
+    console.error("Invoice posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Invoice Posting: post to GL ─────────────────────────────────────────────
+router.post("/:id/post-to-gl", async (req, res) => {
+  const ebId = parseInt(req.params.id, 10);
+  if (!ebId) return res.status(400).json({ error: "Invalid id" });
+  const userEmail = req.user?.email || req.user?.upn || "system";
+  try {
+    const pool = getPool();
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
+    const { postVoucher } = require("../services/generalLedger");
+
+    const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
+      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+      FROM dbo.ExpenseBooking eb WHERE eb.Eid = @Eid
+    `);
+    if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const eb = ebRes.recordset[0];
+
+    // Check already posted
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
+      .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This invoice has already been posted to GL." });
+
+    const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0;
+
+    if (isGrnLinked) {
+      const grnId = parseInt(eb.ESourceId, 10);
+      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
+        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
+      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+      let tBase = 0, tGST = 0;
+      if (received.length) {
+        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+        let masterMap = {};
+        if (itemIds.length) {
+          const mReq = pool.request();
+          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
+        }
+        for (const it of received) {
+          const itemId = String(it.itemId||it.ItemId||"");
+          const qty = Number(it.receivedQty||it.ReceivedQty||0);
+          const rate = Number(it.rate||it.Rate||0);
+          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+          tBase += base;
+          tGST += base*(totalGSTRate/100);
+        }
+      }
+      baseAmount = Math.round(tBase*100)/100;
+      taxAmount = Math.round(tGST*100)/100;
+      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+    } else {
+      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+    }
+
+    if (totalAmount <= 0) return res.status(400).json({ error: "No amount to post." });
+
+    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
+    const leds = ledRes.recordset;
+    const findId = (fn) => leds.find(fn)?.LHeadId;
+    const purchaseId  = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
+    const pgrnId      = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
+    const supplierId  = findId((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor"));
+    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
+    if (!isGrnLinked && !purchaseId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+
+    const lines = isGrnLinked
+      ? [
+          { LHeadId: pgrnId,     DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal)` },
+          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+        ]
+      : [
+          { LHeadId: purchaseId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Purchase` },
+          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+        ];
+
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, eb.CompanyId, eb.ProjectId).catch(() => ({ finalDocNo: null }));
+    const insertHdr = await pool.request()
+      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
+      .input("JVDate", sql.Date, new Date())
+      .input("Narration", sql.NVarChar(500), `Invoice Posting: ${eb.EDocNo}`)
+      .input("CompanyId", sql.Int, eb.CompanyId || null)
+      .input("ProjectId", sql.Int, eb.ProjectId || null)
+      .input("DocTypeId", sql.Int, dtId || null)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
+    const jvId = insertHdr.recordset[0].JVID;
+
+    let sortOrder = 0;
+    for (const line of lines) {
+      await pool.request()
+        .input("JVID", sql.Int, jvId)
+        .input("LHeadId", sql.Int, line.LHeadId)
+        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
+        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
+        .input("Narration", sql.NVarChar(500), line.Narration)
+        .input("SortOrder", sql.Int, ++sortOrder)
+        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
+    }
+
+    await postVoucher(pool, { sourceType: "InvoicePosting", sourceId: ebId, legs: lines.map((l) => ({ lheadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })) });
+
+    res.json({ jvId, jvNo: finalDocNo, message: "Posted successfully." });
+  } catch (err) {
+    console.error("Invoice post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

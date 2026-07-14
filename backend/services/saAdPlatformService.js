@@ -53,11 +53,6 @@ function cleanCustomerId(value) {
   return String(value || "").replace(/^customers\//, "").replace(/-/g, "").trim();
 }
 
-function toMicros(value) {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? Math.round(n * 1000000) : 0;
-}
-
 function statusToGoogle(status) {
   return String(status || "").toLowerCase() === "active" ? "ENABLED" : "PAUSED";
 }

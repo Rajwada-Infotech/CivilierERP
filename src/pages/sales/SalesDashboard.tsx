@@ -193,7 +193,7 @@ const SalesDashboard = () => {
           icon={ShoppingCart}
           accentColor="#a855f7"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <StatCardSkeleton key={i} />
@@ -245,7 +245,7 @@ const SalesDashboard = () => {
           icon={Clock}
           accentColor="#a855f7"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <StatCardSkeleton key={i} />

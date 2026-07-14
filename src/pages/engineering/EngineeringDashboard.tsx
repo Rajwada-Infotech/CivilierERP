@@ -309,7 +309,7 @@ export default function EngineeringDashboard() {
 
         {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
         <GlassSection title="Overview" icon={HardHat} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {isLoading
               ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
               : [

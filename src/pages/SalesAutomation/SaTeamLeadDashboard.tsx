@@ -33,7 +33,7 @@ const SaTeamLeadDashboard: React.FC = () => {
     <SalesAutoShell title="Team Leader Dashboard" subtitle="Lead distribution and salesperson performance overview" icon={GitBranch}>
       <div className="space-y-6">
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <StatCard icon={Users} label="Leads Received" value={data?.leadsReceived ?? 0} />
           <StatCard icon={GitBranch} label="Leads Distributed" value={data?.leadsAssigned ?? 0} />
           <StatCard icon={Clock} label="Pending Distribution" value={data?.pendingDistribution ?? 0} />

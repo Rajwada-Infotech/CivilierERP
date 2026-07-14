@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -7,6 +8,7 @@ const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // GET / — every Approved booking with its live KYC-completeness status, so
 // the list page can group by Pending/Complete without a per-row fetch.

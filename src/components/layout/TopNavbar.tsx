@@ -30,6 +30,7 @@ import {
   Activity,
   ChevronDown,
   ClipboardList,
+  Cpu,
   Ruler,
   SlidersHorizontal,
   DoorOpen,
@@ -292,6 +293,13 @@ const materialSetupItems = [
     path: "/material/inventory-master",
     color: "text-sky-400",
     pageKey: "inventory-master",
+  },
+  {
+    icon: Cpu,
+    label: "Depreciation",
+    path: "/material/setup/depreciation",
+    color: "text-violet-500",
+    pageKey: "depreciation-setup",
   },
 ];
 

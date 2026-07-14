@@ -1,6 +1,7 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
@@ -37,6 +38,7 @@ const LIST_COLUMNS = `
 const STATUS_OPTIONS = ["Reserved", "Negotiation", "Confirmed", "Released"];
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 router.use(checkPermissionForMethod("Followup", "UnitSelections"));
 
 function requireUserName(req, res) {

@@ -31,7 +31,16 @@ import {
   Car,
   ChevronDown,
   SlidersHorizontal,
+  Eye,
+  FileText,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ApprovalStatusChain, type ApprovalTable } from "@/components/ApprovalStatusChain";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -227,6 +236,37 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/noc",
     label: "CRM NOC",
   },
+  // Was missing entirely — without this, ApprovalActions fell back to
+  // `/api/${item.Module}` = "/api/contracts" (plural), a 404: the route is
+  // mounted at "/api/contract" (singular). Approve/Reject on Contract rows
+  // silently failed until this entry existed.
+  contracts: {
+    icon: FileText,
+    color: "text-purple-500 bg-purple-500/10",
+    navPath: "/finance/contracts",
+    apiEndpoint: "/api/contract",
+    label: "Contracts",
+  },
+};
+
+// Module → ApprovalAuditLog TableName, only for modules the backend's
+// /api/approval-workflows/trail endpoint actually recognises (see
+// MODULE_TABLE_MAP in backend/routes/approvalWorkflows.js). Modules not
+// listed here (journal-voucher, inter-company-transfer, received-payment,
+// crm-*) simply don't render the chain badge in the preview modal.
+const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
+  "goods-receipt": "GoodsReceiptNotes",
+  "purchase-orders": "PurchaseOrders",
+  "work-orders": "WorkOrderHeader",
+  "expense-booking": "ExpenseBooking",
+  payments: "NewPayment",
+  "material-issues": "MaterialIssues",
+  "material-requests": "MaterialRequests",
+  boq: "BOQ",
+  "work-done": "WorkDone",
+  "sale-orders": "SaleOrders",
+  "vehicle-in-out": "VehicleInOut",
+  contracts: "Contract",
 };
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
@@ -325,6 +365,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
+  contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
 };
 
 const ModuleTab: React.FC<{
@@ -365,6 +406,240 @@ const ModuleTab: React.FC<{
   );
 };
 
+// ─── Detail preview modal ───────────────────────────────────────────────────
+// Fetches the record's own detail endpoint (same GET /:id convention every
+// module page already uses, e.g. getPurchaseOrderById) so the popup shows
+// every field, not just the handful summarised on the inbox row — same
+// interaction pattern as the Eye/"View details" preview used on PO, GRN,
+// Material Request, etc. Falls back to the inbox row's own summary fields
+// if the detail fetch fails, so the popup never comes up empty.
+
+// Keys hidden from the generic "Full Record" dump: already surfaced in the
+// header/summary grid above it, or too internal/raw to be worth a row.
+// Matched after stripDbPrefix() strips each module's column-prefix
+// convention, so "companyid" here also catches "ECompanyId".
+const PREVIEW_HIDDEN_KEYS = new Set([
+  "id", "_id", "attachments", "parties", "lineitems", "items", "poitems",
+  "billingtermsdata", "termsandconditions", "createdat", "updatedat",
+  "approvedat", "rejectedat", "docnumber", "belongsto",
+  // *By fields carry a raw numeric user id, not a name — the summary grid
+  // above already shows the resolved Created/Approved/Rejected By names.
+  "createdby", "updatedby", "approvedby", "rejectedby",
+  // ProjectName in several modules actually stores the project's numeric
+  // enterprise id (legacy column reuse), not a readable name — the
+  // resolved sibling (ProjectDisplayName, ProjectName from a join, ...)
+  // covers this instead.
+  "projectname",
+]);
+
+// Most modules prefix every one of their own columns with a single
+// module-specific letter (ExpenseBooking: EName, ECompanyId, ECreatedAt, ...)
+// which defeats both the hidden-key match above and plain-English labels.
+// Strip a single leading capital letter when it's immediately followed by
+// another capital letter (i.e. it's a prefix, not the start of a real word).
+function stripDbPrefix(key: string): string {
+  return key.replace(/^[A-Z](?=[A-Z])/, "");
+}
+
+// Every module names its foreign keys differently (ECompanyId, SupplierID,
+// ContractorId, LHeadId, PurchaseOrderID, ...) so a fixed key list above
+// can never keep up. Any field whose name ends in "Id" is a raw internal
+// reference, not something a reviewer can read — hide it here and let its
+// resolved sibling (CompanyName, SupplierName, ProjectName, ...), which the
+// record's own GET /:id endpoint already returns, show through instead.
+function isIdField(key: string): boolean {
+  return /id$/i.test(key);
+}
+
+// Serialized JSON blobs (billing terms, EMI config, discount config, ...)
+// read as noise dumped raw — hide any string value that's actually JSON
+// rather than trying to name every such column across every module.
+function isJsonBlob(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const s = value.trim();
+  return (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
+}
+
+function labelizeKey(key: string): string {
+  return stripDbPrefix(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase())
+    .trim();
+}
+
+function formatPreviewValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return value.toLocaleString("en-IN");
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "object") return "—";
+  const str = String(value);
+  // ISO-ish date strings render as a readable date; everything else as-is.
+  if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    }
+  }
+  return str;
+}
+
+const RecordPreviewModal: React.FC<{
+  item: InboxItem;
+  open: boolean;
+  onClose: () => void;
+}> = ({ item, open, onClose }) => {
+  const navigate = useNavigate();
+  const cfg = MODULE_CONFIG[item.Module];
+  const Icon = cfg?.icon ?? ClipboardCheck;
+  const approvalTable = MODULE_APPROVAL_TABLE[item.Module];
+
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [fetchFailed, setFetchFailed] = useState(false);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setDetail(null);
+    setFetchFailed(false);
+    if (!cfg?.apiEndpoint) return;
+    setLoading(true);
+    fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => {
+        if (!cancelled) setDetail(data && typeof data === "object" ? data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, item.Module, item.RecordId, cfg?.apiEndpoint]);
+
+  const effectiveAmount = getEffectiveAmount(item);
+  const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
+
+  const extraFields = detail
+    ? Object.entries(detail).filter(
+        ([k, v]) =>
+          !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
+          !isIdField(k) &&
+          !isJsonBlob(v) &&
+          !(Array.isArray(v) && v.length === 0) &&
+          typeof v !== "object",
+      )
+    : [];
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+              <Icon size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-sm font-semibold truncate">
+                {item.ModuleLabel}
+              </DialogTitle>
+              <p className="text-[11px] text-muted-foreground font-mono truncate">
+                {item.Reference || `#${item.RecordId}`}
+              </p>
+            </div>
+            <StatusBadge status={item.Status} />
+          </div>
+        </DialogHeader>
+
+        {approvalTable && (
+          <div className="flex items-center gap-2 -mt-1">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Approval chain
+            </span>
+            <ApprovalStatusChain table={approvalTable} recordId={item.RecordId} />
+          </div>
+        )}
+
+        {/* Summary grid — always available from the inbox item itself */}
+        <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-muted/20 p-3">
+          {[
+            ["Date", fmtDate(item.RecordDate)],
+            ["Party", party],
+            ["Amount", fmtAmount(effectiveAmount)],
+            ["Created By", item.CreatedBy || "—"],
+            ["Approved By", item.ApprovedBy || "—"],
+            ["Rejected By", item.RejectedBy || "—"],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                {label}
+              </p>
+              <p className="text-xs text-foreground truncate">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {item.RejectionNote && (
+          <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
+              Rejection Note
+            </p>
+            <p className="text-xs text-foreground">{item.RejectionNote}</p>
+          </div>
+        )}
+
+        {/* Full record — everything the record's own detail endpoint returns */}
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+            Full Record
+          </p>
+          {loading ? (
+            <div className="space-y-1.5">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-3 w-full rounded bg-muted animate-pulse" />
+              ))}
+            </div>
+          ) : fetchFailed || extraFields.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {fetchFailed
+                ? "Couldn't load the full record — showing summary only."
+                : "No additional fields."}
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border p-3">
+              {extraFields.map(([k, v]) => (
+                <div key={k} className="min-w-0">
+                  <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 truncate">
+                    {labelizeKey(k)}
+                  </p>
+                  <p className="text-xs text-foreground truncate">{formatPreviewValue(v)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {cfg?.navPath && (
+          <button
+            onClick={() => {
+              onClose();
+              navigate(cfg.navPath);
+            }}
+            className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <ArrowUpRight size={13} />
+            Open in {item.ModuleLabel}
+          </button>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
 const InboxRow: React.FC<{
@@ -381,9 +656,17 @@ const InboxRow: React.FC<{
   const party =
     item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const effectiveAmount = getEffectiveAmount(item);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const actions = (
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
+      <button
+        onClick={() => setPreviewOpen(true)}
+        className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
+        title="Preview details"
+      >
+        <Eye size={14} />
+      </button>
       <ApprovalActions
         status={item.Status}
         recordId={item.RecordId}
@@ -419,6 +702,13 @@ const InboxRow: React.FC<{
 
   return (
     <div>
+      {previewOpen && (
+        <RecordPreviewModal
+          item={item}
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
       {/* ── Mobile card (< md) ─────────────────────────────────────────── */}
       <div className="md:hidden border-b border-border last:border-0 px-4 py-3.5 space-y-3">
         {/* Row 1: module + status */}

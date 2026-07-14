@@ -13,6 +13,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
@@ -128,6 +129,8 @@ const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
+const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
+const OnAccountAdjustment = lazy(() => import("./pages/finance/OnAccountAdjustment"));
 
 // Task Detail
 const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
@@ -162,6 +165,8 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
+const FixedAssetRecord = lazy(() => import("./pages/material/FixedAssetRecord"));
+const DepreciationSetup = lazy(() => import("./pages/material/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
@@ -663,9 +668,13 @@ function AppRoutes() {
       <Route
         path="/"
         element={
-          <ProtectedRoute>
-            <Home />
-          </ProtectedRoute>
+          currentUser ? (
+            <ProtectedRoute>
+              <Home />
+            </ProtectedRoute>
+          ) : (
+            <Landing />
+          )
         }
       />
       <Route
@@ -689,6 +698,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="trial-balance">
             <TrialBalance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/on-account-report"
+        element={
+          <ProtectedRoute pageKey="on-account-report">
+            <OnAccountReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/on-account-adjustment"
+        element={
+          <ProtectedRoute pageKey="on-account-adjustment">
+            <OnAccountAdjustment />
           </ProtectedRoute>
         }
       />
@@ -1245,6 +1270,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="vehicle-in-out">
             <VehicleInOut />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/fixed-asset-record"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-record">
+            <FixedAssetRecord />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/setup/depreciation"
+        element={
+          <ProtectedRoute pageKey="depreciation-setup">
+            <DepreciationSetup />
           </ProtectedRoute>
         }
       />

@@ -316,7 +316,94 @@ export default function JournalVoucher() {
 
         {/* ── Table ── */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
+
+          {/* ── Mobile cards (< md) ─────────────────────────────────────────── */}
+          <div className="md:hidden divide-y divide-border">
+            {loading ? (
+              <div className="py-16 text-center">
+                <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
+                <p className="text-sm text-muted-foreground mt-2">Loading vouchers…</p>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-20 text-center">
+                <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                  <Scale size={36} className="opacity-20" />
+                  <p className="text-sm font-medium">
+                    {search ? "No vouchers match your search" : "No journal vouchers yet"}
+                  </p>
+                  {search && (
+                    <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">Clear search</button>
+                  )}
+                  {!search && rights.canCreate && (
+                    <button
+                      onClick={() => setDialogOpen(true)}
+                      className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                    >
+                      <Plus size={12} /> Create First Voucher
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              filtered.map((v) => (
+                <div key={v.JVID} className="px-4 py-3.5 hover:bg-muted/20 transition-colors">
+                  {/* Row 1: JV No + date + amount */}
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
+                        {v.JVNo || `JV-${v.JVID}`}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
+                    </div>
+                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
+                      {formatINR(v.TotalAmount || 0)}
+                    </span>
+                  </div>
+                  {/* Row 2: company / project */}
+                  {v.CompanyName && (
+                    <div className="mb-1.5">
+                      <p className="text-xs font-medium text-foreground">{v.CompanyName}</p>
+                      {v.ProjectName && <p className="text-[11px] text-muted-foreground">{v.ProjectName}</p>}
+                    </div>
+                  )}
+                  {/* Row 3: narration */}
+                  {v.Narration && (
+                    <p className="text-[11px] text-muted-foreground mb-2 line-clamp-2">{v.Narration}</p>
+                  )}
+                  {/* Row 4: badges + actions */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <StatusBadge status={v.Status} />
+                      <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
+                    </div>
+                    {v.Status === "Pending" && rights.canEdit && (
+                      <div className="flex gap-1">
+                        <button
+                          disabled={acting?.id === v.JVID}
+                          onClick={() => handleApprove(v.JVID)}
+                          title="Approve"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                        >
+                          {acting?.id === v.JVID && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                        <button
+                          disabled={acting?.id === v.JVID}
+                          onClick={() => handleReject(v.JVID)}
+                          title="Reject"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                        >
+                          {acting?.id === v.JVID && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* ── Desktop table (md+) ─────────────────────────────────────────── */}
+          <table className="w-full text-sm hidden md:table">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">JV No</th>

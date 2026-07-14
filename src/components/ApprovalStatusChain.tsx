@@ -27,7 +27,8 @@ export type ApprovalTable =
   | "BOQ"
   | "WorkDone"
   | "SaleOrders"
-  | "VehicleInOut";
+  | "VehicleInOut"
+  | "Contract";
 
 interface Approver {
   email: string | null;
@@ -65,6 +66,11 @@ interface Props {
   recordId: string | number | null | undefined;
   compact?: boolean; // kept for compat, no-op
   className?: string;
+  /** Rendered instead of null when there's no workflow/trail yet for this
+   *  record (e.g. no active workflow configured, or steps haven't started).
+   *  Lets callers show a plain status pill as a graceful fallback rather
+   *  than an empty cell. */
+  fallback?: React.ReactNode;
 }
 
 function fmtDate(iso: string | null) {
@@ -98,7 +104,7 @@ function tooltipText(step: TrailStep): string {
   return label ? `${label}${when}` : step.label;
 }
 
-export function ApprovalStatusChain({ table, recordId, className }: Props) {
+export function ApprovalStatusChain({ table, recordId, className, fallback = null }: Props) {
   const [trail, setTrail] = useState<TrailData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -130,11 +136,11 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
     );
   }
 
-  if (!trail) return null;
+  if (!trail) return <>{fallback}</>;
 
   // Filter out Level 0 (submission marker) — resilient even if backend sends it
   const steps = trail.steps.filter((s) => s.level > 0);
-  if (steps.length === 0) return null;
+  if (steps.length === 0) return <>{fallback}</>;
 
   const fullyApproved = steps.every((s) => s.status === "Approved");
   const rejectedStep = steps.find((s) => s.status === "Rejected");

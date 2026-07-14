@@ -89,44 +89,48 @@ function printRoutesSummary(results, logger = console) {
     grey:   "\x1b[90m",
   };
 
-  const symbol = { ok: "✔", warn: "◆", fail: "✘", bullet: "›" };
+  const W = 38;
+  const border = `  +${"-".repeat(W)}+`;
 
-  // ── Header ──────────────────────────────────────────────────────────────
+  const row = (content) => {
+    const visible = content.replace(/\x1b\[[0-9;]*m/g, "");
+    const padding = Math.max(0, W - 2 - visible.length);
+    return `  | ${content}${" ".repeat(padding)} |`;
+  };
+
+  const statRow = (col, label, val) => {
+    const labelStr = `${c.dim}${label}${c.reset}`;
+    const valStr   = `${c.bold}${col}${val}${c.reset}`;
+    const visLen   = label.length + String(val).length + 3;
+    const padding  = Math.max(0, W - 2 - visLen);
+    return `  | ${labelStr}   ${valStr}${" ".repeat(padding)} |`;
+  };
+
   const lines = [
     "",
-    `  ${c.bold}${c.cyan}CIVILIER ERP${c.reset}  ${c.grey}·${c.reset}  Route Boot`,
-    `  ${c.grey}${"─".repeat(36)}${c.reset}`,
-    "",
+    border,
+    row(`${c.bold}${c.cyan}CIVILIER ERP${c.reset}  Route Boot`),
+    border,
+    statRow(c.green,  "loaded ",  loaded.length),
+    statRow(c.yellow, "skipped",  skipped.length),
+    statRow(c.red,    "failed ",  failed.length),
+    border,
+    row(`total  ${c.bold}${c.white}${total}${c.reset}  ${c.grey}routes registered${c.reset}`),
+    border,
   ];
 
-  // ── Stats row ────────────────────────────────────────────────────────────
-  const stat = (col, sym, label, val) =>
-    `  ${col}${sym}${c.reset}  ${c.dim}${label}${c.reset}   ${c.bold}${col}${val}${c.reset}`;
-
-  lines.push(stat(c.green,  symbol.ok,   "loaded  ", loaded.length));
-  lines.push(stat(c.yellow, symbol.warn, "skipped ", skipped.length));
-  lines.push(stat(c.red,    symbol.fail, "failed  ", failed.length));
-  lines.push("");
-  lines.push(`  ${c.grey}${"─".repeat(36)}${c.reset}`);
-  lines.push(
-    `  ${c.grey}total${c.reset}  ${c.bold}${c.white}${total}${c.reset}` +
-    `  ${c.grey}routes registered${c.reset}`,
-  );
-
-  // ── Failed detail ─────────────────────────────────────────────────────
   if (hasFail) {
     lines.push("", `  ${c.red}${c.bold}Failed routes${c.reset}`);
     failed.forEach(({ label, error }) => {
-      lines.push(`  ${c.red}${symbol.bullet}${c.reset}  ${c.bold}${label}${c.reset}`);
-      lines.push(`     ${c.dim}${error}${c.reset}`);
+      lines.push(`  - ${c.bold}${label}${c.reset}`);
+      lines.push(`    ${c.dim}${error}${c.reset}`);
     });
   }
 
-  // ── Skipped detail ───────────────────────────────────────────────────
   if (skipped.length > 0) {
     lines.push("", `  ${c.yellow}${c.bold}Skipped routes${c.reset}`);
     skipped.forEach(({ label, reason }) => {
-      lines.push(`  ${c.yellow}${symbol.bullet}${c.reset}  ${c.bold}${label}${c.reset}  ${c.dim}(${reason})${c.reset}`);
+      lines.push(`  - ${c.bold}${label}${c.reset}  ${c.dim}(${reason})${c.reset}`);
     });
   }
 
