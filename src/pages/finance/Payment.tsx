@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -1165,6 +1165,34 @@ const Payment: React.FC = () => {
       .catch(() => setOaBalance(0));
   }, [form.expenseRef]);
 
+  // Invoice outstanding before any on-account offset — same computation the
+  // "On Account Balance" card's preview uses, hoisted here so the actual
+  // Amount field (what gets paid via this bank/cheque transaction) can react
+  // to it too instead of only the informational preview text reacting.
+  const oaInvoiceRemaining = useMemo(() => {
+    if (!form.expenseRef) return 0;
+    const opt = expenseOptions.find(
+      (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+    );
+    const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+    const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
+    return resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
+  }, [form.expenseRef, form.expenseId, expenseOptions, grnGstBreakdown, formLiveRemaining, formKnownTotalPaid]);
+
+  const oaPreview = useMemo(
+    () => (oaBalance > 0.01 ? previewOAAdjustment(oaBalance, oaInvoiceRemaining) : null),
+    [oaBalance, oaInvoiceRemaining],
+  );
+
+  // Real-time: the actual bank/cheque Amount due is the invoice outstanding
+  // minus whatever on-account credit is being applied — recompute the moment
+  // the toggle changes (or the balance/invoice does), not just the preview text.
+  useEffect(() => {
+    if (!form.expenseRef || !oaPreview || oaPreview.applyAmount <= 0) return;
+    const target = useOnAccountBalance ? oaPreview.invoiceRemainingAfter : oaInvoiceRemaining;
+    setForm((prev) => (prev.amount === target ? prev : { ...prev, amount: target }));
+  }, [useOnAccountBalance, oaPreview, oaInvoiceRemaining, form.expenseRef]);
+
   // Fetch payment chain for the form view whenever an invoice is linked
   useEffect(() => {
     if (!form.expenseRef) {
@@ -2106,12 +2134,8 @@ const Payment: React.FC = () => {
 
               {/* ── On Account Balance section ── */}
               {form.expenseRef && oaBalance > 0.01 && (() => {
-                const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
-                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
-                const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
-                const invoiceRemaining = resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
-                const preview = previewOAAdjustment(oaBalance, invoiceRemaining);
-                if (preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
+                const preview = oaPreview;
+                if (!preview || preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
 
                 return (
                   <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.07] via-emerald-500/[0.03] to-transparent overflow-hidden shadow-sm">
