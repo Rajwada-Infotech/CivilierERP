@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { loginUser } from "../api/authApi";
 import { getUsers } from "../api/userApi";
@@ -222,9 +223,19 @@ export const AuthProvider = ({
     };
   }, [currentUser?.id, currentUser?.role]);
 
+  const queryClient = useQueryClient();
+
   const login = useCallback(async (email: string, password: string) => {
     try {
       const data = await loginUser(email, password);
+
+      // A new identity is signing in — any react-query cache from a
+      // previous session (e.g. a different supplier/customer on a shared
+      // browser tab) must not leak into this one. Query keys like
+      // "supplier-profile" aren't scoped by user id, so without this a
+      // second supplier logging in on the same tab would see the first
+      // supplier's cached name/data until every query happened to refetch.
+      queryClient.clear();
 
       const userWithInitials = {
         ...data.user,
@@ -312,7 +323,7 @@ export const AuthProvider = ({
           "Login failed. Please check your credentials.",
       };
     }
-  }, []);
+  }, [queryClient]);
 
   // ── LOGOUT ─────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
@@ -340,7 +351,8 @@ export const AuthProvider = ({
     disconnectSocket();
     setCurrentUser(null);
     setUsers([]);
-  }, [currentUser, onLogoutSuccess, recordLogout]);
+    queryClient.clear();
+  }, [currentUser, onLogoutSuccess, recordLogout, queryClient]);
 
   // ── USER MANAGEMENT ────────────────────────────────────────────────────────
   const addUser = useCallback(
