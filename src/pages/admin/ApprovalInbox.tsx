@@ -420,9 +420,18 @@ const ModuleTab: React.FC<{
 const PREVIEW_HIDDEN_KEYS = new Set([
   "id", "_id", "attachments", "parties", "lineitems", "items", "poitems",
   "billingtermsdata", "termsandconditions", "createdat", "updatedat",
-  "approvedat", "rejectedat", "docnumber", "companyid", "projectid",
-  "supplierid", "contractorid", "customerid", "belongsto",
+  "approvedat", "rejectedat", "docnumber", "belongsto",
 ]);
+
+// Every module names its foreign keys differently (ECompanyId, SupplierID,
+// ContractorId, LHeadId, PurchaseOrderID, ...) so a fixed key list above
+// can never keep up. Any field whose name ends in "Id" is a raw internal
+// reference, not something a reviewer can read — hide it here and let its
+// resolved sibling (CompanyName, SupplierName, ProjectName, ...), which the
+// record's own GET /:id endpoint already returns, show through instead.
+function isIdField(key: string): boolean {
+  return /id$/i.test(key);
+}
 
 function labelizeKey(key: string): string {
   return key
@@ -492,6 +501,7 @@ const RecordPreviewModal: React.FC<{
     ? Object.entries(detail).filter(
         ([k, v]) =>
           !PREVIEW_HIDDEN_KEYS.has(k.toLowerCase()) &&
+          !isIdField(k) &&
           !(Array.isArray(v) && v.length === 0) &&
           typeof v !== "object",
       )

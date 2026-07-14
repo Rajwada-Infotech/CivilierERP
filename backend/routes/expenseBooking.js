@@ -19,6 +19,7 @@ const {
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
+const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
@@ -1911,13 +1912,24 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       }
     }
 
-    // For direct invoices (TOD or no linked source), amounts come from the request body
+    // For direct invoices (TOD or no linked source), amounts and the
+    // supplier link come from the request body — see buildDirectExpenseBooking.
     if (bookingAmount == null) {
-      bookingAmount = EAmountBody != null ? Number(EAmountBody) : 0;
-      bookingNetAmount = ENetAmountBody != null ? Number(ENetAmountBody) : bookingAmount;
-      bookingCgstRate = ECgstRateBody ?? 0;
-      bookingSgstRate = ESgstRateBody ?? 0;
-      bookingIgstRate = EIgstRateBody ?? 0;
+      const direct = buildDirectExpenseBooking({
+        EAmount: EAmountBody,
+        ENetAmount: ENetAmountBody,
+        ECgstRate: ECgstRateBody,
+        ESgstRate: ESgstRateBody,
+        EIgstRate: EIgstRateBody,
+        EPaymentType,
+        EPartialAmount,
+        LHeadId,
+      });
+      bookingAmount = direct.bookingAmount;
+      bookingNetAmount = direct.bookingNetAmount;
+      bookingCgstRate = direct.bookingCgstRate;
+      bookingSgstRate = direct.bookingSgstRate;
+      bookingIgstRate = direct.bookingIgstRate;
     }
 
     if (EDocTypeId) {
@@ -2747,11 +2759,24 @@ router.put(
     try {
       const pool = getPool();
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
-      let bookingAmount = EAmount;
-      let bookingNetAmount = ENetAmount;
-      let bookingCgstRate = ECgstRate;
-      let bookingSgstRate = ESgstRate;
-      let bookingIgstRate = EIgstRate;
+      // Default to a direct/manual booking's own amounts + supplier link;
+      // the GRN branch below overrides amounts/GST (never IGST — GRN
+      // bookings are always CGST/SGST) with the live GRN totals instead.
+      const direct = buildDirectExpenseBooking({
+        EAmount,
+        ENetAmount,
+        ECgstRate,
+        ESgstRate,
+        EIgstRate,
+        EPaymentType,
+        EPartialAmount,
+        LHeadId,
+      });
+      let bookingAmount = direct.bookingAmount;
+      let bookingNetAmount = direct.bookingNetAmount;
+      let bookingCgstRate = direct.bookingCgstRate;
+      let bookingSgstRate = direct.bookingSgstRate;
+      let bookingIgstRate = direct.bookingIgstRate;
 
       if (ESourceType === "GRN") {
         const grnId = parseInt(ESourceId, 10);
