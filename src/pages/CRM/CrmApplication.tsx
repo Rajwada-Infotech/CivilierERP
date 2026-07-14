@@ -52,7 +52,6 @@ const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
 type Stage = typeof STAGES[number];
 const stageLabel: Record<Stage, string> = { InProcess: "In Process", Converted: "Converted", NotConverted: "Not Converted" };
 const stageIcon: Record<Stage, any> = { InProcess: Clock, Converted: CheckCircle2, NotConverted: XCircle };
-const stageDot: Record<Stage, string> = { InProcess: "bg-blue-400", Converted: "bg-green-500", NotConverted: "bg-red-400" };
 async function fetchCustomers(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(CUSTOMER_API);

@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  X, User, Building2, IndianRupee, Paperclip, FileText, Upload, Download,
+  Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
