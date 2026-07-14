@@ -123,6 +123,28 @@ export interface SupplierOrderDetail extends Omit<SupplierOrderSummary, "Comment
   POItems: any[];
 }
 
+export interface SupplierGrnItem {
+  itemId: number;
+  itemName: string;
+  orderedQty: number;
+  receivedQty: number;
+  remainingQty: number;
+  uom: string | null;
+}
+
+export interface SupplierGrnOrder {
+  purchaseOrderId: number;
+  purchaseOrderNo: string | null;
+  docNo: string | null;
+  poDate: string | null;
+  status: string;
+  companyName: string | null;
+  projectName: string | null;
+  items: SupplierGrnItem[];
+  isFullyReceived: boolean;
+  totalRemaining: number;
+}
+
 export interface OrderChatMessage {
   Id: number;
   PurchaseOrderId: number;
@@ -212,3 +234,6 @@ export const postSupplierOrderComment = (id: number | string, comment: string) =
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ comment }),
   }).then((r) => handleResponse<{ comment: OrderChatMessage }>(r));
+
+export const getSupplierGrnSummary = () =>
+  fetchWithAuth(`${BASE}/grns`).then((r) => handleResponse<SupplierGrnOrder[]>(r));

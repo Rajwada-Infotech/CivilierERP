@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as spApi from "@/api/supplierPortalApi";
@@ -262,6 +262,11 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
     queryKey: ["supplier-order-detail", orderId],
     queryFn: () => spApi.getSupplierOrderDetail(orderId),
   });
+  const { data: grnOrders = [] } = useQuery({
+    queryKey: ["supplier-grns"],
+    queryFn: spApi.getSupplierGrnSummary,
+  });
+  const grnOrder = grnOrders.find((o) => o.purchaseOrderId === orderId);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
@@ -346,6 +351,52 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                   {detail.ChallanNumber && <p className="text-xs text-muted-foreground">Challan: <span className="font-mono text-foreground">{detail.ChallanNumber}</span></p>}
                 </div>
               )}
+
+              {grnOrder && (
+                <div
+                  className={`rounded-lg border p-3 space-y-2 ${
+                    grnOrder.isFullyReceived
+                      ? "border-emerald-500/20 bg-emerald-500/5"
+                      : "border-amber-500/25 bg-amber-500/5"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p
+                      className={`text-[10px] uppercase tracking-wide font-semibold ${
+                        grnOrder.isFullyReceived
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-amber-700 dark:text-amber-400"
+                      }`}
+                    >
+                      Received by Customer
+                    </p>
+                    {grnOrder.isFullyReceived ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle size={11} /> Complete
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                        {grnOrder.totalRemaining} remaining
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    {grnOrder.items.map((it) => (
+                      <div key={it.itemId} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground truncate">{it.itemName}</span>
+                        <span className="font-mono text-muted-foreground shrink-0 ml-2">
+                          {it.receivedQty}/{it.orderedQty} {it.uom ?? ""}
+                          {it.remainingQty > 0 && (
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                              {" "}(−{it.remainingQty})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -354,13 +405,13 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
   );
 }
 
-function OrdersSection({ orders, loading }: {
-  orders: spApi.SupplierOrderSummary[]; loading: boolean;
+function OrdersSection({ orders, loading, initialOrderId }: {
+  orders: spApi.SupplierOrderSummary[]; loading: boolean; initialOrderId?: number | null;
 }) {
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   const [chatOrderId, setChatOrderId] = useState<number | null>(null);
-  const [detailOrderId, setDetailOrderId] = useState<number | null>(null);
+  const [detailOrderId, setDetailOrderId] = useState<number | null>(initialOrderId ?? null);
   const [markSuppliedOrderId, setMarkSuppliedOrderId] = useState<number | null>(null);
 
   const ackMutation = useMutation({
@@ -845,6 +896,13 @@ function QuickActions() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function SupplierLanding() {
+  const [searchParams] = useSearchParams();
+  const deepLinkOrderId = (() => {
+    const raw = searchParams.get("order");
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  })();
+
   const { data: profile } = useQuery({
     queryKey: ["supplier-profile"],
     queryFn: spApi.getSupplierProfile,
@@ -883,7 +941,7 @@ export default function SupplierLanding() {
       />
       <div className="bg-background">
         <QuotationsSection quotations={quotations} loading={loadingQ} />
-        <OrdersSection orders={orders} loading={loadingO} />
+        <OrdersSection orders={orders} loading={loadingO} initialOrderId={deepLinkOrderId} />
         <PriceCatalogSection catalog={catalog} loading={loadingC} />
         <QuickActions />
       </div>
