@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Building2, Layers } from "lucide-react";
+import { Plus, Trash2, Building2, Layers, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
@@ -28,10 +28,15 @@ async function fetchProjects(): Promise<any[]> {
 async function fetchBlocks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BLOCK_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchPlanDetail(id: number): Promise<any> {
+  const r = await fetchWithAuth(`${API}/${id}`);
+  return r.ok ? r.json() : null;
+}
 
 const CrmPaymentPlans: React.FC = () => {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
   const [description, setDescription] = useState("");
   const [companyId, setCompanyId] = useState("");
@@ -57,17 +62,37 @@ const CrmPaymentPlans: React.FC = () => {
   const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
   const resetForm = () => {
+    setEditingId(null);
     setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId("");
     setItems([{ MilestoneName: "Booking", Percent: "" }]);
   };
 
-  const handleCreate = async () => {
+  const openEdit = async (id: number) => {
+    const detail = await fetchPlanDetail(id);
+    if (!detail) { toast.error("Could not load plan"); return; }
+    const { plan, items: planItems } = detail;
+    setEditingId(id);
+    setPlanName(plan.PlanName);
+    setDescription(plan.Description || "");
+    setCompanyId(plan.CompanyId ? String(plan.CompanyId) : "");
+    setProjectId(plan.ProjectId ? String(plan.ProjectId) : "");
+    setBlockId(plan.BlockId ? String(plan.BlockId) : "");
+    setItems(
+      (planItems as any[]).length
+        ? planItems.map((i: any) => ({ MilestoneName: i.MilestoneName, Percent: String(i.Percent) }))
+        : [{ MilestoneName: "Booking", Percent: "" }],
+    );
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
     if (!planName.trim()) { toast.error("Plan name is required"); return; }
     if (Math.round(totalPct * 100) !== 10000) { toast.error(`Percentages must sum to 100 (currently ${totalPct})`); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
+      const isEdit = editingId != null;
+      const res = await fetchWithAuth(isEdit ? `${API}/${editingId}` : API, {
+        method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlanName: planName, Description: description, Items: items,
@@ -76,7 +101,14 @@ const CrmPaymentPlans: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success("Payment plan created");
+      if (isEdit && data.bookingsUsingPlan > 0) {
+        toast.success(
+          `Payment plan updated. Note: ${data.bookingsUsingPlan} existing booking(s) already generated their schedule from the old split and are unaffected — only new bookings use the updated split.`,
+          { duration: 7000 },
+        );
+      } else {
+        toast.success(isEdit ? "Payment plan updated" : "Payment plan created");
+      }
       setDialogOpen(false);
       resetForm();
       qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
@@ -107,9 +139,14 @@ const CrmPaymentPlans: React.FC = () => {
           <div key={p.Id} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between mb-1">
               <span className="font-medium">{p.PlanName}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${p.IsActive ? "text-green-600 bg-green-50 border-green-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-                {p.IsActive ? "Active" : "Inactive"}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${p.IsActive ? "text-green-600 bg-green-50 border-green-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
+                  {p.IsActive ? "Active" : "Inactive"}
+                </span>
+                <button onClick={() => openEdit(p.Id)} className="p-1 text-muted-foreground hover:text-primary" title="Edit plan">
+                  <Pencil size={13} />
+                </button>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground mb-2">{p.Description || "—"}</p>
             <div className="flex items-center gap-1.5 text-xs mb-2">
@@ -128,7 +165,7 @@ const CrmPaymentPlans: React.FC = () => {
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-heading">New Payment Plan</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Edit Payment Plan" : "New Payment Plan"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Plan Name *</label>
@@ -187,9 +224,9 @@ const CrmPaymentPlans: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving}
+            <button onClick={handleSave} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Creating..." : "Create"}
+              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
             </button>
           </div>
         </DialogContent>

@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold } = require("../services/crmHoldService");
@@ -60,6 +60,24 @@ const ALLOTMENT_SELECT = `
   LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
 `;
 
+// GET / — every parking allotment system-wide (both unit-linked and
+// standalone sales) for the dedicated Parking Booking page. Optional
+// ?status= filters by PaymentStatus.
+router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const req0 = pool.request();
+    const conds = ["pa.IsActive = 1"];
+    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("pa.PaymentStatus = @st"); }
+    const result = await req0.query(`${ALLOTMENT_SELECT} WHERE ${conds.join(" AND ")} ORDER BY pa.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-parking] GET / error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:bookingId — list parking allotments for a booking (unit-linked view)
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
@@ -77,7 +95,7 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 // GET /application/:applicationId — every parking allotment a customer
 // holds, whether sold alongside a unit booking or bought standalone. This
 // is the "one customer, unit + parking together" view.
-router.get("/application/:applicationId", requirePageRight("crm-bookings", "view"), async (req, res) => {
+router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const applicationId = parseInt(req.params.applicationId);
@@ -177,7 +195,7 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 // POST /standalone — buy parking only, no unit booking involved at all.
 // Payment is tracked directly on the allotment row (PaymentStatus) since
 // there's no CrmBooking/CrmPaymentMilestone schedule to hang it off of.
-router.post("/standalone", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -243,7 +261,7 @@ router.post("/standalone", requirePageRight("crm-bookings", "edit"), async (req,
 // PUT /:id/mark-paid — record payment for a standalone (non-unit-linked)
 // parking sale. Unit-linked allotments are paid through the booking's own
 // CrmPaymentMilestone instead — this is only for the standalone path.
-router.put("/:id/mark-paid", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -267,7 +285,7 @@ router.put("/:id/mark-paid", requirePageRight("crm-bookings", "edit"), async (re
 // already been paid blocks the release so money already collected can't
 // silently vanish. For a standalone sale, an already-Paid allotment is
 // blocked the same way.
-router.delete("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);

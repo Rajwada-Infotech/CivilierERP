@@ -211,13 +211,38 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
   if (!milestones?.length) milestones = DEFAULT_MILESTONES;
 
+  // Milestone #1 gets a real DueDate (the booking date). Every milestone
+  // after that used to be inserted with DueDate = NULL and nothing else in
+  // the codebase ever back-filled it (except a one-off for a milestone
+  // literally named 'Agreement', in finalizeAgreementDate()) — meaning the
+  // overdue/SLA detectors in crmSlaEngine.js and crmDashboard.js, which key
+  // off `DueDate < today`, could structurally never flag anything past
+  // Booking/Agreement as overdue, for any booking, ever. A construction
+  // milestone (Foundation, Slab Casting, ...) doesn't have a real calendar
+  // trigger yet in this system (that would come from crmConstructionUpdates.js
+  // events, which aren't wired to milestones), so there's no principled date
+  // to compute here — but leaving it permanently NULL is strictly worse than
+  // a placeholder default, since staff can already edit any milestone's
+  // DueDate by hand (crmPayments.js PUT /:id). Default: 30 days after the
+  // previous milestone's due date, chained forward from the booking date.
+  const MILESTONE_DEFAULT_INTERVAL_DAYS = 30;
+  let runningDue = bookingDate ? new Date(bookingDate) : new Date();
+
   for (const m of milestones) {
+    let dueDate;
+    if (m.no === 1) {
+      dueDate = runningDue;
+    } else {
+      runningDue = new Date(runningDue);
+      runningDue.setDate(runningDue.getDate() + MILESTONE_DEFAULT_INTERVAL_DAYS);
+      dueDate = runningDue;
+    }
     await pool.request()
       .input("bid",  sql.Int,           bookingId)
       .input("mno",  sql.Int,           m.no)
       .input("mname",sql.NVarChar(200), m.name)
       .input("amt",  sql.Decimal(18,2), Math.round(totalValue * m.pct) / 100)
-      .input("due",  sql.Date,          m.no === 1 ? (bookingDate || new Date()) : null)
+      .input("due",  sql.Date,          dueDate)
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
@@ -247,6 +272,43 @@ async function validatePaymentPlanScope(pool, planId, { companyId, projectId, bl
   if (p.BlockId && blockId && p.BlockId !== blockId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
   }
+}
+
+// CrmCustomer's inline CoApplicantName/Mobile/PanNo/Relation fields are an
+// intake-time convenience capture (there's no booking yet at Customer/
+// Application stage). Once a booking exists, dbo.CrmCoApplicant — a proper
+// multi-row per-booking table — is the single source of truth (Welcome
+// Call's checklist and Booking Details both read from it). This seeds one
+// CrmCoApplicant row from the customer's intake data so that data isn't
+// silently lost, without making CrmCustomer's fields independently
+// authoritative going forward. Idempotent: skipped if the booking already
+// has any co-applicant rows, or if the customer never entered one.
+async function seedPrimaryCoApplicantFromCustomer(pool, bookingId, applicationId, actorUserId) {
+  const cust = await pool.request().input("appId", sql.Int, applicationId).query(`
+    SELECT c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation
+    FROM dbo.CrmCustomer c
+    JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+    WHERE a.Id = @appId
+  `);
+  const row = cust.recordset[0];
+  if (!row?.CoApplicantName?.trim()) return;
+
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Id FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1");
+  if (existing.recordset.length) return;
+
+  await pool.request()
+    .input("bid",  sql.Int, bookingId)
+    .input("name", sql.NVarChar(200), row.CoApplicantName.trim())
+    .input("rel",  sql.NVarChar(50), row.CoApplicantRelation || null)
+    .input("mob",  sql.NVarChar(20), row.CoApplicantMobile || null)
+    .input("pan",  sql.NVarChar(20), row.CoApplicantPanNo || null)
+    .input("note", sql.NVarChar(sql.MAX), "Auto-seeded from customer intake")
+    .input("cb",   sql.Int, actorUserId)
+    .query(`
+      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, CreatedBy, CreatedAt)
+      VALUES (@bid, @name, @rel, @mob, @pan, @note, @cb, SYSDATETIME())
+    `);
 }
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
@@ -332,12 +394,33 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const bookingId = result.recordset[0].Id;
 
+  await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
+
   await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId);
 
   await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
     `Auto-approved: booking ${bookingNo} created`, actorUserId, { force: true });
 
-  return { id: bookingId, BookingNo: bookingNo };
+  const tokenWarning = await checkTokenVsFirstMilestone(pool, bookingId, bookingAmount);
+
+  return { id: bookingId, BookingNo: bookingNo, tokenWarning };
+}
+
+// The Booking form's own TokenType/TokenValue (-> BookingAmount) and the
+// attached payment plan's own milestone #1 are computed completely
+// independently — a salesperson can record a 5% token while the plan bills
+// 10% "at booking," and nothing previously flagged the mismatch. Same
+// resolution as the broker-payment finding: a soft, non-blocking warning
+// rather than a hard gate, since real negotiated deals can legitimately
+// differ from a plan's default first-stage amount.
+async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
+  if (!bookingAmount) return null;
+  const m1 = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+  const firstMilestoneAmount = m1.recordset[0]?.AmountDue;
+  if (firstMilestoneAmount == null) return null;
+  if (Math.abs(Number(firstMilestoneAmount) - Number(bookingAmount)) < 1) return null;
+  return `Booking token amount (₹${Number(bookingAmount).toLocaleString("en-IN")}) doesn't match the payment plan's first milestone (₹${Number(firstMilestoneAmount).toLocaleString("en-IN")}) — the milestone amount is what invoicing/payments will actually track.`;
 }
 
 module.exports = {

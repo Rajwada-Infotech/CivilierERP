@@ -74,7 +74,20 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
       .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
-    const deductionPct = b.DeductionPercent != null ? parseFloat(b.DeductionPercent) : 10; // default 10% cancellation charge
+    // Default 10% cancellation charge if the requester doesn't override it.
+    // No per-project/per-plan cancellation policy exists yet to validate
+    // against, but the proposed number must still be a sane percentage —
+    // previously this was taken straight from req.body with only a numeric
+    // parse, so anyone with create rights could pass a negative or >100%
+    // value at request time (the real approve/reject gate is later, but the
+    // *proposed* record itself was unconstrained).
+    let deductionPct = 10;
+    if (b.DeductionPercent != null) {
+      deductionPct = parseFloat(b.DeductionPercent);
+      if (!Number.isFinite(deductionPct) || deductionPct < 0 || deductionPct > 100) {
+        return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
+      }
+    }
     const deductionAmt = Math.round(totalPaid * deductionPct) / 100;
     const refundAmt = Math.max(0, totalPaid - deductionAmt);
     const cancellationNo = await getNextDocNumber(pool, "CXL", "CXL");

@@ -151,6 +151,7 @@ const ExtraChargeMaster = lazy(
 );
 const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
 const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
+const CrmParkingBookingPage = lazy(() => import("./pages/CRM/CrmParkingBooking"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -306,21 +307,11 @@ const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 
-const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
-const FollowupUnitSelection = lazy(
-  () => import("./pages/followup/UnitSelection"),
-);
+// BookingsPage / FollowupUnitSelection / FollowupApplications / WelcomeCallsPage retired below
+// (0 live rows, duplicate CRM entry points — see server.js ALL_ROUTES comment for details).
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
 const ApplicantTimeline = lazy(
   () => import("./pages/followup/ApplicantTimeline"),
-);
-const FollowupApplications = lazy(
-  () => import("./pages/followup/Applications"),
-);
-const WelcomeCallsPage = lazy(() =>
-  import("./pages/followup/WelcomeCalls").then((module) => ({
-    default: module.WelcomeCallsPage,
-  })),
 );
 const NocPage = lazy(() =>
   import("./pages/followup/NOC").then((module) => ({
@@ -345,9 +336,7 @@ const HandoverPage = lazy(() =>
 const ConstructionUpdatesPage = lazy(
   () => import("./pages/followup/ConstructionUpdates"),
 );
-const LegalMilestonesPage = lazy(
-  () => import("./pages/followup/LegalMilestones"),
-);
+// LegalMilestonesPage retired below (0 live rows, duplicate of crmLegalMilestones.js).
 const PrePossessionPage = lazy(
   () => import("./pages/followup/PrePossessionClearance"),
 );
@@ -1015,38 +1004,8 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/followup/sales/applications"
-        element={
-          <ProtectedRoute pageKey="followup-applications">
-            <FollowupApplications />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/bookings"
-        element={
-          <ProtectedRoute pageKey="followup-bookings">
-            <BookingsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/unit-selection"
-        element={
-          <ProtectedRoute pageKey="followup-unit-selections">
-            <FollowupUnitSelection />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/welcome-calls"
-        element={
-          <ProtectedRoute pageKey="followup-welcome-calls">
-            <WelcomeCallsPage />
-          </ProtectedRoute>
-        }
-      />
+      {/* Applications / Bookings / Unit Selection / Welcome Calls list routes retired —
+          0 live rows, superseded by the real CRM system (see server.js ALL_ROUTES comment). */}
       <Route
         path="/followup/closure/noc"
         element={
@@ -1079,14 +1038,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/followup/legal/milestones"
-        element={
-          <ProtectedRoute pageKey="followup-legal-milestones">
-            <LegalMilestonesPage />
-          </ProtectedRoute>
-        }
-      />
+      {/* Legal Milestones list route retired — 0 live rows, superseded by crmLegalMilestones.js. */}
       <Route
         path="/followup/closure/pre-possession"
         element={
@@ -2203,6 +2155,7 @@ function AppRoutes() {
       <Route path="/crm/payment-plans"         element={<ProtectedRoute pageKey="crm-payment-plans"><CrmPaymentPlans /></ProtectedRoute>} />
       <Route path="/masters/brokers"           element={<ProtectedRoute pageKey="broker-master"><CrmBrokerMaster /></ProtectedRoute>} />
       <Route path="/crm/broker-payments"       element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerPayments /></ProtectedRoute>} />
+      <Route path="/crm/parking-booking"       element={<ProtectedRoute pageKey="crm-parking-booking"><CrmParkingBookingPage /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

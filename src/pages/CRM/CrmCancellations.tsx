@@ -169,7 +169,7 @@ const CrmCancellations: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Cancellation Charge (%)</label>
-              <input type="number" value={form.DeductionPercent}
+              <input type="number" min={0} max={100} step="0.01" value={form.DeductionPercent}
                 onChange={(e) => setForm((f) => ({ ...f, DeductionPercent: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>

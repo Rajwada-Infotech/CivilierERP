@@ -178,7 +178,20 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
       VALUES (@agid, 'IdentityProof', 'Identity Proof (PAN / Aadhaar copy)', 1, 'Requested', 'Customer', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
     `);
 
-  const portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
+  // The agreement (and its identity-proof document request) are already
+  // committed above by this point — portal provisioning is a "nice to have
+  // in parallel" step per the workflow spec, not a prerequisite for the
+  // agreement itself. Guarded separately so a portal-provisioning hiccup
+  // (e.g. a transient DB error) can't turn into a 500 on whatever unrelated
+  // action actually triggered this — logging a welcome call or saving bank
+  // details — when that action itself already succeeded and committed.
+  let portalInfo = null;
+  try {
+    portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
+  } catch (e) {
+    console.error("[maybeAutoCreateAgreement] portal provisioning failed:", e.message);
+    portalInfo = { created: false, error: e.message };
+  }
 
   if (prereq.booking.AssignedTo) {
     await emitNotification(pool, prereq.booking.AssignedTo, "crm_agreement_ready",
