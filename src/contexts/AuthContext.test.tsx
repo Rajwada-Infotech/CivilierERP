@@ -1,7 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./AuthContext";
+
+// AuthProvider calls useQueryClient() (to clear cached queries on login/
+// logout — see AuthContext.tsx) so it must be rendered under a real
+// QueryClientProvider, same as it always is in the actual app tree.
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 /**
  * Verifies the fix for "rights changes aren't real-time": AuthContext used
@@ -69,7 +82,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
   it("subscribes to permissions:updated on mount for a non-privileged user", () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ rightsJson: [] }), { status: 200 })) as any;
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <TestConsumer />
       </AuthProvider>,
@@ -94,7 +107,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
       return new Response(JSON.stringify({}), { status: 200 });
     }) as any;
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <TestConsumer />
       </AuthProvider>,
@@ -133,7 +146,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
     );
     global.fetch = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })) as any;
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <TestConsumer />
       </AuthProvider>,
@@ -148,7 +161,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
   it("cleans up the socket listener on unmount", () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })) as any;
 
-    const { unmount } = render(
+    const { unmount } = renderWithProviders(
       <AuthProvider>
         <TestConsumer />
       </AuthProvider>,
