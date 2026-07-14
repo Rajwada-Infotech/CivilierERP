@@ -265,8 +265,8 @@ export default function FixedAssetRecord() {
   const [form,       setForm]       = useState<FormState>(emptyForm(activeFinYear));
 
   // ── filters ──
-  const [filterCompany,  setFilterCompany]  = useState("");
-  const [filterProject,  setFilterProject]  = useState("");
+  const [filterCompany] = useState("");
+  const [filterProject] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus,   setFilterStatus]   = useState("");
   const [filterFinYear,  setFilterFinYear]  = useState("");

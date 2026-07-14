@@ -6,7 +6,6 @@ import React, {
   useMemo,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -37,13 +36,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { format, parseISO } from "date-fns";
-import {
   Plus,
   Trash2,
   ArrowLeft,
@@ -51,7 +43,6 @@ import {
   CalendarDays,
   FileText,
   CreditCard,
-  Search,
   ChevronDown,
   Loader2,
   User,
@@ -65,11 +56,14 @@ import {
   Building2,
   FolderKanban,
   SlidersHorizontal,
+  ClipboardList,
+  X,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
+import { Field } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
@@ -82,10 +76,8 @@ import {
   computeGrnNetWithTerms,
   dbToRecord,
   fmt,
-  fmtQty,
   generateEmiSchedule,
   recordToDb,
-  round3,
 } from "./ExpenseBooking/helpers";
 import type {
   BookingStatus,
@@ -99,7 +91,6 @@ import { API, apiFetch } from "./ExpenseBooking/apiFetch";
 import {
   PAGE_SIZE,
   INVOICE_TEMPLATE_COLUMNS,
-  inputCls,
   selectCls,
   selectTriggerCls,
 } from "./ExpenseBooking/constants";
@@ -118,7 +109,7 @@ import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
-import { resolveGstRates, derivePOGst, parseGRNItemsFromRaw } from "./ExpenseBooking/helpers";
+import { resolveGstRates, parseGRNItemsFromRaw } from "./ExpenseBooking/helpers";
 import type {
   CompanyOption,
   ProjectOption,
@@ -236,6 +227,8 @@ export default function MaterialExpenseBooking() {
   >([]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
+  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
+  const [tcLoading, setTcLoading] = useState(true);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
 
@@ -451,7 +444,13 @@ export default function MaterialExpenseBooking() {
       });
     apiFetch("/api/tc-master")
       .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          "Could not load Terms & Conditions: " +
+            (err instanceof Error ? err.message : "Something went wrong"),
+        );
+      })
+      .finally(() => setTcLoading(false));
     apiFetch("/api/cost-center/options")
       .then((list: CostCenterOption[]) =>
         setCostCenterOptions(Array.isArray(list) ? list : []),
@@ -553,42 +552,53 @@ export default function MaterialExpenseBooking() {
 
     const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
     const autoCostCenter = resolveCostCenterForProject(doc.projectId);
-    setForm((prev) => ({
-      ...prev,
-      bookingReference: doc.docNo,
-      bookingName: doc.nameLabel ?? prev.bookingName,
-      basicAmount:
-        doc.kind === "GRN"
-          ? prev.basicAmount
-          : doc.kind === "PO" || doc.kind === "WO_PO"
-            ? (doc.subtotal ?? doc.amount ?? prev.basicAmount)
-            : (doc.amount ?? prev.basicAmount),
-      companyId: doc.companyId ?? prev.companyId,
-      projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
-      ...linkSupplierToInvoice(doc, {
+    setForm((prev) => {
+      const linkedSupplier = linkSupplierToInvoice(doc, {
         supplier: prev.supplier,
         supplierLHeadId: prev.supplierLHeadId ?? null,
-      }),
-      costCenter: autoCostCenter || prev.costCenter,
-      materialCategory:
-        doc.kind === "PO"
-          ? "PO"
-          : doc.kind === "WORK_DONE"
-            ? "WORK_DONE"
-            : doc.kind === "WO_PO"
-              ? "WO_PO"
-              : doc.kind === "GRN"
-                ? "GRN"
-                : doc.docNo.split("/")[0],
-      cgstRate: cgst,
-      sgstRate: sgst,
-      workDoneRef:
-        doc.kind === "WORK_DONE"
-          ? doc.docNo
-          : doc.kind === "WO_PO" && (doc as any).sourcWDDocNo
-            ? (doc as any).sourceWDDocNo
-            : undefined,
-    }));
+      });
+      return {
+        ...prev,
+        bookingReference: doc.docNo,
+        // Other Expenses (TOD) bookings have no descriptive source document —
+        // name them by their supplier instead of the generic doc-type label.
+        // PO/WO/GRN-linked bookings keep using the source doc's own label.
+        bookingName:
+          doc.kind === "TOD"
+            ? linkedSupplier.supplier
+              ? `Payment for ${linkedSupplier.supplier}`
+              : prev.bookingName
+            : (doc.nameLabel ?? prev.bookingName),
+        basicAmount:
+          doc.kind === "GRN"
+            ? prev.basicAmount
+            : doc.kind === "PO" || doc.kind === "WO_PO"
+              ? (doc.subtotal ?? doc.amount ?? prev.basicAmount)
+              : (doc.amount ?? prev.basicAmount),
+        companyId: doc.companyId ?? prev.companyId,
+        projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
+        ...linkedSupplier,
+        costCenter: autoCostCenter || prev.costCenter,
+        materialCategory:
+          doc.kind === "PO"
+            ? "PO"
+            : doc.kind === "WORK_DONE"
+              ? "WORK_DONE"
+              : doc.kind === "WO_PO"
+                ? "WO_PO"
+                : doc.kind === "GRN"
+                  ? "GRN"
+                  : doc.docNo.split("/")[0],
+        cgstRate: cgst,
+        sgstRate: sgst,
+        workDoneRef:
+          doc.kind === "WORK_DONE"
+            ? doc.docNo
+            : doc.kind === "WO_PO" && (doc as any).sourcWDDocNo
+              ? (doc as any).sourceWDDocNo
+              : undefined,
+      };
+    });
   };
 
   const clearDoc = () => {
@@ -917,7 +927,6 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
-  const hasParentGST = isPOorWO;
   const editingIdNum = editingId ? parseInt(editingId, 10) : null;
   const bookedPOIds = new Set<number>();
   const bookedWorkDoneIds = new Set<number>();
@@ -1168,6 +1177,12 @@ export default function MaterialExpenseBooking() {
                           set("supplier", name);
                           const head = name ? supplierHeads.find((s) => s.label === name) : undefined;
                           set("supplierLHeadId", head?.id ?? null);
+                          // Other Expenses (TOD) bookings have no source-doc
+                          // label to name themselves after — keep the
+                          // booking name in sync with the chosen supplier.
+                          if (name && selectedDoc?.kind === "TOD") {
+                            set("bookingName", `Payment for ${name}`);
+                          }
                           if (!name) return;
                           if (head?.paymentTerms) {
                             const termStr = head.paymentTerms.trim().toLowerCase();
@@ -1498,23 +1513,32 @@ export default function MaterialExpenseBooking() {
                   <SectionHeader label="EMI / Installment Options" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Field label="Payment Type" required>
-                      <div className="relative">
-                        <select
-                          value={form.paymentType || "full"}
-                          onChange={(e) => {
-                            const val = e.target.value as "full" | "partial";
-                            set("paymentType", val);
-                            if (val === "full") set("partialAmount", 0);
-                          }}
-                          className={selectCls}
-                        >
-                          <option value="full">Full payment</option>
-                          <option value="partial">Partial payment (EMI)</option>
-                        </select>
-                        <ChevronDown
-                          size={13}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        {(
+                          [
+                            { value: "full", label: "Full payment" },
+                            { value: "partial", label: "Partial payment (EMI)" },
+                          ] as const
+                        ).map((opt) => {
+                          const active = (form.paymentType || "full") === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => {
+                                set("paymentType", opt.value);
+                                if (opt.value === "full") set("partialAmount", 0);
+                              }}
+                              className={`px-3 py-2.5 rounded-lg border text-sm font-medium text-center transition-colors ${
+                                active
+                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                  : "border-border text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </Field>
                     {form.paymentType === "partial" && (
@@ -1581,46 +1605,119 @@ export default function MaterialExpenseBooking() {
 
               {/* ── 6. Terms & Conditions ─────────────────────────────── */}
               <div className="space-y-3">
-                <SectionHeader label="Terms & Conditions" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="T&C Template"
-                    hint="Select a Terms & Conditions template to attach"
-                  >
-                    <div className="relative">
-                      <select
-                        value={form.tcId ? String(form.tcId) : ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          const tc = tcOptions.find((t) => String(t.Id) === v);
-                          set("tcId", tc ? tc.Id : null);
-                          set("tcName", tc?.Name ?? "");
-                          set("tcText", tc?.TermsAndCondition ?? "");
-                        }}
-                        className={selectCls}
-                      >
-                        <option value="">None</option>
-                        {tcOptions.map((t) => (
-                          <option key={t.Id} value={String(t.Id)}>
-                            {t.Name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
-                  </Field>
+                <div className="flex items-center justify-between">
+                  <SectionHeader label="Terms & Conditions" />
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setTcDropdownOpen((o) => !o)}
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
+                    >
+                      <Plus size={13} />
+                      {form.tcId ? "Change T&C" : "Add T&C"}
+                    </button>
+                    {tcDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setTcDropdownOpen(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                          <div className="px-3 py-2 border-b border-border">
+                            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              Select Terms &amp; Conditions
+                            </p>
+                          </div>
+                          <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                            {tcLoading ? (
+                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                                Loading&hellip;
+                              </p>
+                            ) : tcOptions.length === 0 ? (
+                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                                No T&amp;C records found
+                              </p>
+                            ) : (
+                              tcOptions.map((tc) => {
+                                const isSelected = form.tcId === tc.Id;
+                                return (
+                                  <button
+                                    key={tc.Id}
+                                    type="button"
+                                    onClick={() => {
+                                      set("tcId", isSelected ? null : tc.Id);
+                                      set("tcName", isSelected ? "" : (tc.Name ?? ""));
+                                      set("tcText", isSelected ? "" : (tc.TermsAndCondition ?? ""));
+                                      setTcDropdownOpen(false);
+                                    }}
+                                    className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
+                                  >
+                                    <span
+                                      className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}
+                                    >
+                                      {isSelected && (
+                                        <Check size={10} className="text-primary-foreground" />
+                                      )}
+                                    </span>
+                                    <span className="flex-1 min-w-0">
+                                      <span className="block text-sm font-medium text-foreground truncate">
+                                        {tc.Name}
+                                      </span>
+                                      <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                        {tc.TermsAndCondition}
+                                      </span>
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div className="px-3 py-2 border-t border-border">
+                            <button
+                              type="button"
+                              onClick={() => setTcDropdownOpen(false)}
+                              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
-                {form.tcText && (
-                  <div className="rounded-xl border border-border bg-muted/20 p-4">
-                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-2">
-                      T&amp;C Preview
-                    </p>
-                    <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-                      {form.tcText}
-                    </p>
+
+                {form.tcId ? (
+                  <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                      1
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        {form.tcName}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                        {form.tcText}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        set("tcId", null);
+                        set("tcName", "");
+                        set("tcText", "");
+                      }}
+                      className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-5 text-muted-foreground text-xs">
+                    <ClipboardList size={14} className="opacity-40" />
+                    <span>
+                      No terms selected — click <strong>Add T&amp;C</strong> to add from master
+                    </span>
                   </div>
                 )}
               </div>
@@ -1951,6 +2048,14 @@ export default function MaterialExpenseBooking() {
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
+                                      fallback={
+                                        rec.status === "Pending" ? (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800">
+                                            <Clock size={10} />
+                                            Pending
+                                          </span>
+                                        ) : null
+                                      }
                                     />
                                   </TableCell>
                                   <TableCell className="py-3">

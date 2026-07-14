@@ -75,9 +75,6 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
-    // Derive overall status once all four checks pass
-    const allChecked = [b.DuesClearedCheck, b.DocumentationCheck, b.QualityInspectionCheck, b.UtilityReadinessCheck]
-      .every((v) => v === true || v === undefined);
     const result = await pool.request()
       .input("id",   sql.Int, id)
       .input("dues", sql.Bit, b.DuesClearedCheck ? 1 : (b.DuesClearedCheck === false ? 0 : null))

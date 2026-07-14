@@ -53,7 +53,6 @@ import {
   TrendingUp,
   Truck,
   Hash,
-  Smartphone,
   BookOpen,
   CalendarClock,
   AlertTriangle,
@@ -61,10 +60,8 @@ import {
   Eye,
   Printer,
   ArrowRight,
-  CreditCard,
   RefreshCw,
   History,
-  Info,
   Users,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
