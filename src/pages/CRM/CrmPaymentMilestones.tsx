@@ -133,8 +133,12 @@ const CrmPaymentMilestones: React.FC = () => {
           Remarks:       payForm.Remarks       || undefined,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       toast.success("Payment recorded");
+      if (data.brokerWarning) {
+        toast.warning(data.brokerWarning, { duration: 8000 });
+      }
 
       const current = milestones.find((m) => m.Id === editingId);
       const paidAmt = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : current?.AmountPaid;

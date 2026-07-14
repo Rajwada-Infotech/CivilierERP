@@ -1,4 +1,4 @@
-import { ClipboardList, BookOpen, Phone, FileText, IndianRupee, Key, Wrench, XCircle, Users, Scale, HardHat, LayoutDashboard, MessageSquare, Grid3x3 } from "lucide-react";
+import { ClipboardList, BookOpen, Phone, FileText, IndianRupee, Key, Wrench, XCircle, Users, Scale, HardHat, LayoutDashboard, MessageSquare, Grid3x3, Car } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const crmNavItems: NavItem[] = [
@@ -12,6 +12,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Customers",      path: "/crm/customers",      pageKey: "crm-customers"     },
       { label: "Applications",   path: "/crm/applications",   pageKey: "crm-applications"  },
       { label: "Bookings",       path: "/crm/bookings",       pageKey: "crm-bookings"      },
+      { label: "Parking Booking",    path: "/crm/parking-booking",pageKey: "crm-parking-booking" },
       { label: "Welcome Calls",  path: "/crm/welcome-calls",  pageKey: "crm-welcome-calls" },
       { label: "Communication Log", path: "/crm/communication", pageKey: "crm-communication" },
       { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },

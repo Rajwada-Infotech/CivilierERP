@@ -78,287 +78,6 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—";
 
-const inr = (n: number | null | undefined) =>
-  n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
-
-async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchExtraCharges(bookingId: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchParkingRates(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/parking-master"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAvailableParkingSlots(projectId: number, blockId: number | null): Promise<any[]> {
-  try {
-    const params = new URLSearchParams({ projectId: String(projectId) });
-    if (blockId) params.set("blockId", String(blockId));
-    const r = await fetchWithAuth(`/api/parking-matrix?${params}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
-}
-async function fetchExtraChargeTypes(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/extra-charge-master"); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-// Booking-scoped Parking + Extra Charges panel — Parking rates and Extra
-// Charge types are read-only here (they're maintained in their Setup
-// masters); this dialog only allots/removes them against this booking.
-const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
-  const qc = useQueryClient();
-  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
-  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
-  const [saving, setSaving] = useState(false);
-
-  const { data: parking = [] } = useQuery({
-    queryKey: ["crm-parking", booking.Id],
-    queryFn: () => fetchParkingAllotments(booking.Id),
-  });
-  const { data: extras = [] } = useQuery({
-    queryKey: ["crm-extra-charges", booking.Id],
-    queryFn: () => fetchExtraCharges(booking.Id),
-  });
-  const { data: parkingRates = [] } = useQuery({
-    queryKey: ["parking-master-all"],
-    queryFn: fetchParkingRates,
-    staleTime: 5 * 60_000,
-  });
-  const { data: parkingSlots = [] } = useQuery({
-    queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId],
-    queryFn: () => fetchAvailableParkingSlots(booking.ProjectId, booking.BlockId),
-    enabled: !!booking.ProjectId,
-    staleTime: 30_000,
-  });
-  const { data: chargeTypes = [] } = useQuery({
-    queryKey: ["extra-charge-master-all"],
-    queryFn: fetchExtraChargeTypes,
-    staleTime: 5 * 60_000,
-  });
-
-  const applicableRates = (parkingRates as any[]).filter(
-    (r: any) => r.IsActive && r.ProjectId === booking.ProjectId && (!r.BlockId || r.BlockId === booking.BlockId)
-  );
-  const selectedRate = applicableRates.find((r: any) => String(r.Id) === parkingForm.ParkingMasterId);
-  const availableSlots = (parkingSlots as any[]).filter(
-    (s: any) => s.Status === "Available" && (!selectedRate || s.ParkingType === selectedRate.ParkingType)
-  );
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["crm-parking", booking.Id] });
-    qc.invalidateQueries({ queryKey: ["crm-extra-charges", booking.Id] });
-    qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-  };
-
-  const handleAddParking = async () => {
-    if (!parkingForm.ParkingMasterId) { toast.error("Select a parking rate"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`/api/crm/parking/${booking.Id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ParkingMasterId: parkingForm.ParkingMasterId,
-          ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
-          ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
-          Quantity: parseInt(parkingForm.Quantity) || 1,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Parking allotted — ${inr(data.TotalAmount)}`);
-      setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
-      qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId] });
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveParking = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Parking allotment removed");
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
-
-  const handleAddExtra = async () => {
-    if (!extraForm.Description.trim() || !extraForm.Amount) { toast.error("Description and Amount are required"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${booking.Id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
-          Description: extraForm.Description.trim(),
-          Amount: parseFloat(extraForm.Amount),
-          GstRate: parseFloat(extraForm.GstRate) || 0,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Charge added — ${inr(data.TotalAmount)}`);
-      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveExtra = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Charge removed");
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
-
-  const parkingTotal = (parking as any[]).reduce((s, p) => s + p.TotalAmount, 0);
-  const extraTotal = (extras as any[]).reduce((s, e) => s + e.TotalAmount, 0);
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="font-heading">Charges — {booking.BookingNo}</DialogTitle>
-        </DialogHeader>
-
-        {/* Grand total breakdown */}
-        <div className="rounded-lg bg-muted/40 border border-border p-3 grid grid-cols-4 gap-2 text-center text-xs">
-          <div><div className="text-muted-foreground">Unit Value</div><div className="font-semibold">{inr(booking.TotalValue)}</div></div>
-          <div><div className="text-muted-foreground">Parking</div><div className="font-semibold">{inr(parkingTotal)}</div></div>
-          <div><div className="text-muted-foreground">Extra Charges</div><div className="font-semibold">{inr(extraTotal)}</div></div>
-          <div><div className="text-muted-foreground">Grand Total</div><div className="font-bold text-primary">{inr((booking.TotalValue || 0) + parkingTotal + extraTotal)}</div></div>
-        </div>
-
-        {/* Parking */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Parking Allotment</h3>
-          {(parking as any[]).length > 0 && (
-            <div className="rounded-lg border border-border overflow-hidden">
-              {(parking as any[]).map((p) => (
-                <div key={p.Id} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0 text-sm">
-                  <div>
-                    <span className="font-medium">{p.CurrentParkingType}</span>
-                    {p.ParkingSlotNo && <span className="text-xs text-muted-foreground"> · {p.ParkingSlotNo}</span>}
-                    <span className="text-xs text-muted-foreground"> · Qty {p.Quantity}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold">{inr(p.TotalAmount)}</span>
-                    <button onClick={() => handleRemoveParking(p.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-4 gap-2">
-            <select value={parkingForm.ParkingMasterId}
-              onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
-              className="col-span-2 text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Select parking rate</option>
-              {applicableRates.map((r: any) => (
-                <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — {inr(r.Charge)} (+{r.GstRate}% GST)</option>
-              ))}
-            </select>
-            {availableSlots.length > 0 ? (
-              <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                className="text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select slot (optional)</option>
-                {availableSlots.map((s: any) => (
-                  <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
-                ))}
-              </select>
-            ) : (
-              <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
-                onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-                className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            )}
-            <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
-              onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <button onClick={handleAddParking} disabled={saving}
-            className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-            + Allot Parking
-          </button>
-          {applicableRates.length === 0 && (
-            <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
-          )}
-          {applicableRates.length > 0 && availableSlots.length === 0 && (
-            <p className="text-xs text-muted-foreground">No numbered slot inventory set up for this project/block yet — enter a slot number manually, or add slots in Setup → Parking Slot Master.</p>
-          )}
-        </div>
-
-        {/* Extra Charges */}
-        <div className="space-y-2 pt-2 border-t border-border">
-          <h3 className="text-sm font-semibold">Extra Charges (Custom Requirements)</h3>
-          {(extras as any[]).length > 0 && (
-            <div className="rounded-lg border border-border overflow-hidden">
-              {(extras as any[]).map((c) => (
-                <div key={c.Id} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0 text-sm">
-                  <div className="font-medium">{c.Description}</div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold">{inr(c.TotalAmount)}</span>
-                    <button onClick={() => handleRemoveExtra(c.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <select value={extraForm.ExtraChargeMasterId}
-              onChange={(e) => {
-                const master = (chargeTypes as any[]).find((c) => String(c.Id) === e.target.value);
-                setExtraForm((f) => ({
-                  ...f,
-                  ExtraChargeMasterId: e.target.value,
-                  Description: master ? master.ChargeName : f.Description,
-                  Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
-                  GstRate: master ? String(master.GstRate) : f.GstRate,
-                }));
-              }}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Custom (type below)</option>
-              {(chargeTypes as any[]).filter((c) => c.IsActive).map((c) => (
-                <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
-              ))}
-            </select>
-            <input placeholder="Description" value={extraForm.Description}
-              onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
-              onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <input type="number" placeholder="GST %" value={extraForm.GstRate}
-              onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <button onClick={handleAddExtra} disabled={saving}
-            className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-            + Add Charge
-          </button>
-        </div>
-
-        <div className="flex justify-end pt-2 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 // The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
 // approvals) -> Payments. Only ever surface the ONE step the booking is
 // actually sitting at right now — never let staff jump ahead to a later
@@ -386,7 +105,6 @@ const CrmBooking: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
-  const [chargesBooking, setChargesBooking] = useState<any | null>(null);
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
 
   const { data: bookings = [], isLoading } = useQuery({
@@ -465,6 +183,9 @@ const CrmBooking: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create booking");
       toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
+      if (data.tokenWarning) {
+        toast.warning(data.tokenWarning, { duration: 8000 });
+      }
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM, ApplicationId: appFilter });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
@@ -622,7 +343,6 @@ const CrmBooking: React.FC = () => {
                           <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setChargesBooking(b)}>Charges</DropdownMenuItem>
                           {b.Status !== "Cancelled" && (
                             <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
                               Change Unit
@@ -773,10 +493,6 @@ const CrmBooking: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {chargesBooking && (
-        <ChargesDialog booking={chargesBooking} onClose={() => setChargesBooking(null)} />
-      )}
 
       {viewingBookingId && (
         <CrmBookingDetail bookingId={viewingBookingId} onClose={() => setViewingBookingId(null)} />

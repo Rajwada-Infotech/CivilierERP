@@ -10,6 +10,35 @@ const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, requireActiveBooking
 
 router.use(authMiddleware);
 
+// Spec: "BROKER PAYMENT -> NEXT MILESTONE DUE". Business confirmed this should
+// be a soft warning, not a hard block (a customer's payment must never be
+// refused over unrelated broker bookkeeping) — so this fires alongside the
+// milestone being marked Paid rather than gating it. Returns a short string
+// for the caller's response (surfaced as a toast) and also drops a proactive
+// reminder notification into the bell for whoever registered the brokerage,
+// since they're the one who'd action the actual payout.
+async function warnIfBrokerUnpaid(pool, bookingId, actorUserId) {
+  const br = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id, BrokerName, Status, CreatedBy
+    FROM dbo.CrmBrokerageMaster
+    WHERE BookingId = @bid AND Status IN ('Pending', 'Approved')
+    ORDER BY CreatedAt DESC
+  `);
+  if (!br.recordset.length) return null;
+  const row = br.recordset[0];
+
+  const warning = `Broker ${row.BrokerName || ""} has not been fully paid yet (brokerage status: ${row.Status}) — the next milestone is now due regardless, but broker payout is outstanding.`.trim();
+
+  if (row.CreatedBy) {
+    await emitNotification(
+      pool, row.CreatedBy, "brokerage_payment_reminder",
+      "Broker payment still pending",
+      warning, row.Id, "crm-brokerage",
+    );
+  }
+  return warning;
+}
+
 // POST /:id/demand — raise a payment demand for a milestone, notifying the applicant's assignee
 router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req, res) => {
   try {
@@ -287,12 +316,14 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // Auto-flow: this milestone may have just been the last one outstanding —
     // fire the auto-create check (no-op unless the agreement is also Executed).
     const updated = result.recordset[0];
+    let brokerWarning = null;
     if (updated?.Status === "Paid") {
       await maybeAutoCreateSalesDeed(pool, updated.BookingId, actorId(req));
       await maybeAutoGenerateInvoice(pool, updated.BookingId, actorId(req));
+      brokerWarning = await warnIfBrokerUnpaid(pool, updated.BookingId, actorId(req));
     }
 
-    res.json({ success: true });
+    res.json({ success: true, brokerWarning });
   } catch (e) {
     console.error("[crm-payments] PUT error:", e.message);
     res.status(500).json({ error: e.message });

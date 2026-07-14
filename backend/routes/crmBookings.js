@@ -125,7 +125,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const [bkRes, milRes, wcRes, agRes, custRes] = await Promise.all([
+    const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
       pool.request().input("id", sql.Int, id).query(
         `SELECT * FROM dbo.CrmPaymentMilestone WHERE BookingId = @id ORDER BY MilestoneNo`),
@@ -140,6 +140,14 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
         JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
         WHERE b.Id = @id
       `),
+      // The per-booking CrmCoApplicant table (not CrmCustomer's inline
+      // CoApplicant* fields) is the authoritative source once a booking
+      // exists — createCrmBookingRecord() seeds a row here from the
+      // customer's intake-time co-applicant data, and Welcome Call's
+      // checklist already counts against this table. Booking Details
+      // should show the same list, not the intake-time snapshot.
+      pool.request().input("id", sql.Int, id).query(
+        `SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @id AND IsActive = 1 ORDER BY CreatedAt`),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
     const milestones = milRes.recordset;
@@ -151,6 +159,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       welcomeCalls: wcRes.recordset,
       agreement: agRes.recordset[0] || null,
       customer: custRes.recordset[0] || null,
+      coApplicants: coAppRes.recordset,
       paymentSummary: { totalDue, totalPaid, balance: totalDue - totalPaid },
     });
   } catch (e) {
@@ -170,8 +179,8 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const { id: bookingId, BookingNo: bookingNo } = await createCrmBookingRecord(pool, req.body, actorId(req));
-    res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo });
+    const { id: bookingId, BookingNo: bookingNo, tokenWarning } = await createCrmBookingRecord(pool, req.body, actorId(req));
+    res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo, tokenWarning });
   } catch (e) {
     if (e instanceof CrmCreationError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-bookings] POST error:", e.message);
