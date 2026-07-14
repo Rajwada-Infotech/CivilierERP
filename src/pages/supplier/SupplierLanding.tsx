@@ -663,6 +663,128 @@ function OrdersSection({ orders, loading, initialOrderId }: {
 }
 
 // ── Price catalog section (inline editable) ───────────────────────────────────
+function ReceivedByCustomerSection() {
+  const navigate = useNavigate();
+  const { data: orders = [], isLoading } = useQuery({
+    queryKey: ["supplier-grns"],
+    queryFn: spApi.getSupplierGrnSummary,
+    refetchInterval: 60_000,
+  });
+
+  const pending = orders.filter((o) => !o.isFullyReceived);
+  const complete = orders.filter((o) => o.isFullyReceived);
+  const sorted = [...pending, ...complete];
+
+  return (
+    <section className="px-6 sm:px-10 pt-8 pb-16 sm:pb-20 font-body bg-background border-t border-border">
+      <div className="max-w-6xl mx-auto">
+        <motion.div className="flex items-center justify-between mb-5" {...fade(0)}>
+          <div>
+            <h2 className="font-heading text-lg font-bold text-foreground flex items-center gap-2">
+              <Truck size={18} className="text-emerald-500" /> Received by Customer
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {pending.length === 0
+                ? "All shipments fully received"
+                : `${pending.length} order${pending.length !== 1 ? "s" : ""} still awaiting the remaining quantity`}
+            </p>
+          </div>
+        </motion.div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {[1, 2].map((i) => <div key={i} className="h-32 rounded-xl bg-muted animate-pulse" />)}
+          </div>
+        ) : sorted.length === 0 ? (
+          <motion.div className="text-center py-12 rounded-2xl border border-dashed border-border" {...fade(0.1)}>
+            <Package size={28} className="mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">
+              No goods receipts yet. Once the customer logs a GRN against one of your orders, its receipt progress will show up here.
+            </p>
+          </motion.div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {sorted.map((o, i) => (
+              <motion.button
+                key={o.purchaseOrderId}
+                {...fade(0.06 + i * 0.04)}
+                onClick={() => navigate(`/supplier?order=${o.purchaseOrderId}`)}
+                className={`w-full text-left px-4 py-4 rounded-xl border transition-all hover:shadow-sm ${
+                  o.isFullyReceived
+                    ? "border-emerald-500/20 bg-card hover:bg-card/80"
+                    : "border-amber-500/25 bg-amber-500/[0.03] hover:bg-amber-500/[0.06]"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                        o.isFullyReceived ? "bg-emerald-500/10" : "bg-amber-500/10"
+                      }`}
+                    >
+                      {o.isFullyReceived ? (
+                        <CheckCircle size={16} className="text-emerald-500" />
+                      ) : (
+                        <Clock size={16} className="text-amber-500" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground truncate">
+                          {o.docNo}
+                        </span>
+                        {o.isFullyReceived ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20">
+                            Complete
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                            {o.totalRemaining} remaining
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {o.companyName ?? "Company"}
+                        {o.projectName ? ` · ${o.projectName}` : ""} · {fmtDate(o.poDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-muted-foreground/40 shrink-0 mt-2" />
+                </div>
+
+                <div className="mt-3 space-y-1.5">
+                  {o.items.map((it) => {
+                    const pct =
+                      it.orderedQty > 0
+                        ? Math.min(100, (it.receivedQty / it.orderedQty) * 100)
+                        : 100;
+                    return (
+                      <div key={it.itemId}>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-foreground truncate">{it.itemName}</span>
+                          <span className="font-mono text-muted-foreground shrink-0 ml-2">
+                            {it.receivedQty}/{it.orderedQty} {it.uom ?? ""}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${it.remainingQty > 0 ? "bg-amber-500" : "bg-emerald-500"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function PriceCatalogSection({ catalog, loading }: {
   catalog: spApi.SupplierCatalogItem[]; loading: boolean;
 }) {
@@ -942,6 +1064,7 @@ export default function SupplierLanding() {
       <div className="bg-background">
         <QuotationsSection quotations={quotations} loading={loadingQ} />
         <OrdersSection orders={orders} loading={loadingO} initialOrderId={deepLinkOrderId} />
+        <ReceivedByCustomerSection />
         <PriceCatalogSection catalog={catalog} loading={loadingC} />
         <QuickActions />
       </div>
