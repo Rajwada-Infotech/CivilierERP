@@ -5,6 +5,8 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
+const { postSaCommissionToGL } = require("../services/saLedger");
+const { recordGLPosting } = require("../services/approvalService");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -153,6 +155,22 @@ router.put("/:id", requirePageRight("sa-commissions", "edit"), async (req, res) 
           ${approveClause}
         WHERE Id = @id
       `);
+
+    // "PAID -> REAL DISBURSEMENT" — a commission being marked Paid is real
+    // cash leaving the company; post it to GL instead of leaving it as a
+    // dead-end status flag. Never blocks the status update if GL posting
+    // fails — same try/catch + recordGLPosting pattern used across CRM.
+    if (b.Status === "Paid") {
+      const actorEmail = req.user?.name || req.user?.email || "system";
+      try {
+        const outcome = await postSaCommissionToGL(pool, id, actorEmail);
+        await recordGLPosting("sa-commission", id, outcome, actorEmail);
+      } catch (glErr) {
+        console.error("[sa-commissions] GL posting failed:", glErr.message);
+        await recordGLPosting("sa-commission", id, { failed: true, reason: glErr.message }, actorEmail);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[sa-commissions] PUT error:", e.message);

@@ -1,4 +1,7 @@
 const crypto = require("crypto");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -20,6 +23,26 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 bumpCacheVersion("sa-ads").catch(() => {});
+
+const UPLOAD_DIR = path.join(__dirname, "../uploads/sa-ad-creatives");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const creativeStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
+  },
+});
+const uploadCreative = multer({
+  storage: creativeStorage,
+  limits: { fileSize: 100 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/quicktime", "video/webm"];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("Only image (jpeg/png/webp/gif) or video (mp4/mov/webm) files are allowed"));
+  },
+});
 
 // GET /
 router.get(
@@ -72,7 +95,7 @@ router.get(
           a.CreativeRef,
           a.AdType,
           -- Creative / copy
-          a.Headline, a.Description, a.CtaText, a.ImageUrl, a.VideoUrl, a.MediaUrls,
+          a.Headline, a.Description, a.CtaText, a.ImageUrl, a.VideoUrl, a.MediaUrls, a.Keypoints,
           -- Targeting
           a.TargetAgeMin, a.TargetAgeMax, a.TargetGender,
           a.TargetLocations, a.TargetRadiusKm, a.TargetInterests,
@@ -207,6 +230,7 @@ router.post(
         .input("ImageUrl",            sql.NVarChar(2000), b.ImageUrl || null)
         .input("VideoUrl",            sql.NVarChar(2000), b.VideoUrl || null)
         .input("MediaUrls",           sql.NVarChar(sql.MAX), b.MediaUrls || null)
+        .input("Keypoints",           sql.NVarChar(sql.MAX), b.Keypoints || null)
         // Targeting
         .input("TargetAgeMin",        sql.Int,            b.TargetAgeMin || null)
         .input("TargetAgeMax",        sql.Int,            b.TargetAgeMax || null)
@@ -240,7 +264,7 @@ router.post(
         .query(`
           INSERT INTO dbo.SaAd
             (AdCode, CampaignId, Name, CreativeRef, AdType,
-             Headline, Description, CtaText, ImageUrl, VideoUrl, MediaUrls,
+             Headline, Description, CtaText, ImageUrl, VideoUrl, MediaUrls, Keypoints,
              TargetAgeMin, TargetAgeMax, TargetGender, TargetLocations, TargetRadiusKm,
              TargetInterests, TargetBehaviors, TargetLanguages,
              ScheduledStartAt, ScheduledEndAt, PlatformPlacement, Objective,
@@ -250,7 +274,7 @@ router.post(
              CreatedBy, CreatedAt)
           VALUES
             (@AdCode, @CampaignId, @Name, @CreativeRef, @AdType,
-             @Headline, @Description, @CtaText, @ImageUrl, @VideoUrl, @MediaUrls,
+             @Headline, @Description, @CtaText, @ImageUrl, @VideoUrl, @MediaUrls, @Keypoints,
              @TargetAgeMin, @TargetAgeMax, @TargetGender, @TargetLocations, @TargetRadiusKm,
              @TargetInterests, @TargetBehaviors, @TargetLanguages,
              @ScheduledStartAt, @ScheduledEndAt, @PlatformPlacement, @Objective,
@@ -507,6 +531,7 @@ router.put("/:id", requirePageRight("sa-ads", "edit"), async (req, res) => {
       .input("ImageUrl",             sql.NVarChar(2000), b.ImageUrl || null)
       .input("VideoUrl",             sql.NVarChar(2000), b.VideoUrl || null)
       .input("MediaUrls",            sql.NVarChar(sql.MAX), b.MediaUrls || null)
+      .input("Keypoints",            sql.NVarChar(sql.MAX), b.Keypoints || null)
       .input("TargetAgeMin",         sql.Int,            b.TargetAgeMin || null)
       .input("TargetAgeMax",         sql.Int,            b.TargetAgeMax || null)
       .input("TargetGender",         sql.NVarChar(20),   b.TargetGender || null)
@@ -543,6 +568,7 @@ router.put("/:id", requirePageRight("sa-ads", "edit"), async (req, res) => {
           ImageUrl          = ISNULL(@ImageUrl,          ImageUrl),
           VideoUrl          = ISNULL(@VideoUrl,          VideoUrl),
           MediaUrls         = ISNULL(@MediaUrls,         MediaUrls),
+          Keypoints         = ISNULL(@Keypoints,         Keypoints),
           TargetAgeMin      = @TargetAgeMin,
           TargetAgeMax      = @TargetAgeMax,
           TargetGender      = @TargetGender,
@@ -615,5 +641,98 @@ router.delete(
     }
   },
 );
+
+// ── Ad creatives (image/video upload) ────────────────────────────────────
+// GET /:id/creatives — list uploaded creatives for an ad
+router.get("/:id/creatives", requirePageRight("sa-ads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT c.Id, c.MediaType, c.Label, c.FileName, c.FileSize, c.MimeType, c.UploadedAt, u.name AS UploadedByName
+      FROM dbo.SaAdCreative c
+      LEFT JOIN dbo.Users u ON u.id = c.UploadedBy
+      WHERE c.AdId = @id
+      ORDER BY c.UploadedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[sa-ads] GET /:id/creatives error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/creatives — upload one or more image/video creatives
+router.post("/:id/creatives", requirePageRight("sa-ads", "edit"), uploadCreative.array("files", 10), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: "No files uploaded" });
+
+    const inserted = [];
+    for (const file of files) {
+      const mediaType = file.mimetype.startsWith("video/") ? "Video" : "Image";
+      const result = await pool.request()
+        .input("aid",   sql.Int,           id)
+        .input("type",  sql.NVarChar(20),  mediaType)
+        .input("label", sql.NVarChar(200), req.body.Label || null)
+        .input("fname", sql.NVarChar(300), file.originalname)
+        .input("sname", sql.NVarChar(300), file.filename)
+        .input("fsize", sql.Int,           file.size)
+        .input("mime",  sql.NVarChar(150), file.mimetype)
+        .input("cb",    sql.Int,           req.user?.userId || null)
+        .query(`
+          INSERT INTO dbo.SaAdCreative (AdId, MediaType, Label, FileName, StoredName, FileSize, MimeType, UploadedBy, UploadedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@aid, @type, @label, @fname, @sname, @fsize, @mime, @cb, SYSDATETIME())
+        `);
+      inserted.push(result.recordset[0].Id);
+    }
+    res.status(201).json({ success: true, ids: inserted });
+  } catch (e) {
+    console.error("[sa-ads] POST /:id/creatives error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/creatives/file/:creativeId — stream/download a stored creative
+router.get("/:id/creatives/file/:creativeId", requirePageRight("sa-ads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const creativeId = parseInt(req.params.creativeId);
+    const result = await pool.request().input("id", sql.Int, creativeId)
+      .query("SELECT StoredName, FileName, MimeType FROM dbo.SaAdCreative WHERE Id = @id");
+    if (!result.recordset.length) return res.status(404).json({ error: "Creative not found" });
+    const row = result.recordset[0];
+    const resolvedPath = path.resolve(UPLOAD_DIR, row.StoredName);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
+    res.setHeader("Content-Type", row.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${row.FileName.replace(/"/g, "")}"`);
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (e) {
+    console.error("[sa-ads] GET /:id/creatives/file/:creativeId error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id/creatives/:creativeId
+router.delete("/:id/creatives/:creativeId", requirePageRight("sa-ads", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const creativeId = parseInt(req.params.creativeId);
+    const result = await pool.request().input("id", sql.Int, creativeId)
+      .query("SELECT StoredName FROM dbo.SaAdCreative WHERE Id = @id");
+    if (!result.recordset.length) return res.status(404).json({ error: "Creative not found" });
+    await pool.request().input("id", sql.Int, creativeId).query("DELETE FROM dbo.SaAdCreative WHERE Id = @id");
+    const resolvedPath = path.resolve(UPLOAD_DIR, result.recordset[0].StoredName);
+    if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolvedPath, () => {});
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[sa-ads] DELETE /:id/creatives/:creativeId error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;

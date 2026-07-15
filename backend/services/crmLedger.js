@@ -17,6 +17,30 @@ const { sql } = require("../db");
 const { getGLHeadId, postVoucher, hasPosting } = require("./generalLedger");
 
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
+const CRM_STAMP_DUTY_ACCOUNT = "Stamp Duty & Registration Expense";
+const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
+
+/**
+ * Live GST rate for a booking, resolved from its HsnCode against dbo.HSN —
+ * never hardcoded, always re-read at posting time so a rate change in the
+ * HSN master takes effect immediately. Same CGST+SGST-preferred-over-IGST
+ * precedence buildGrnGstData.js already uses elsewhere in this codebase.
+ * Returns 0 (no split) if the booking has no HsnCode or the code isn't
+ * found — pricing is still treated as GST-inclusive, just with the GST
+ * portion left un-split, same as before this feature existed.
+ */
+async function getGstRateForBooking(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT h.HCGST, h.HSGST, h.HIGST
+    FROM dbo.CrmBooking b
+    JOIN dbo.HSN h ON h.HCode = b.HsnCode AND h.HStatus = 1
+    WHERE b.Id = @bid
+  `);
+  const row = r.recordset[0];
+  if (!row) return 0;
+  const cgstSgst = (Number(row.HCGST) || 0) + (Number(row.HSGST) || 0);
+  return cgstSgst || Number(row.HIGST) || 0;
+}
 
 let _sundryDebtorsGroupId;
 /** ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY DEBTORS (migration
@@ -80,6 +104,37 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
 }
 
 /**
+ * Push an edit on CrmCustomer (the canonical identity record) out to its
+ * synced AccountHeadMaster row — the same "Customer Master" ledger head
+ * used by the Sales module's Customer Sale Orders and Finance's Trial
+ * Balance/ledger reports. Without this, a correction made in CRM (name typo,
+ * updated phone, new PAN) would silently leave that ledger head — and
+ * therefore every Sales-module screen reading it — pointing at the stale
+ * value, the exact same drift class already fixed for CrmApplication.
+ * No-ops quietly if the customer has no ledger head yet (nothing to sync).
+ */
+async function syncCrmCustomerLedgerHead(pool, crmCustomerId, fields) {
+  const code = `CRMCUST-${crmCustomerId}`;
+  await pool.request()
+    .input("code",   sql.NVarChar(20), code)
+    .input("name",   sql.NVarChar(200), fields.CustomerName || null)
+    .input("phone",  sql.NVarChar(50), fields.Mobile || null)
+    .input("email",  sql.NVarChar(100), fields.Email ?? null)
+    .input("addr",   sql.VarChar(300), fields.Address || null)
+    .input("pan",    sql.NVarChar(50), fields.PanNo || null)
+    .query(`
+      UPDATE dbo.AccountHeadMaster SET
+        LHeadName          = ISNULL(@name, LHeadName),
+        LHeadContactPerson = ISNULL(@name, LHeadContactPerson),
+        LHeadPhone         = ISNULL(@phone, LHeadPhone),
+        LHeadEmail         = @email,
+        LHeadAddress       = ISNULL(@addr, LHeadAddress),
+        LHeadPan           = ISNULL(@pan, LHeadPan)
+      WHERE LHeadCode = @code
+    `);
+}
+
+/**
  * A milestone payment receipt actually being cash in hand.
  *   Dr CRM Collections A/c ... cash comes in
  *   Cr Customer ............... reduces what they owe us
@@ -95,7 +150,7 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, receiptId).query(`
     SELECT r.Id, r.ReceiptNo, r.Amount, r.ReceivedDate, r.PaymentMode, r.OnAccountPaymentId,
-           b.CompanyId, b.ProjectId, a.CustomerId
+           b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmPaymentReceipt r
     JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
     JOIN dbo.CrmBooking b ON b.Id = m.BookingId
@@ -115,6 +170,24 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
 
+  // Pricing is GST-inclusive — back-calculate the GST portion from the live
+  // HSN rate rather than storing/hardcoding one. A booking with no HsnCode
+  // (or an unresolvable one) posts exactly as before this feature existed:
+  // the full amount credited to the customer, no GST leg.
+  const gstRate = await getGstRateForBooking(pool, row.BookingId);
+  const legs = [
+    { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
+  ];
+  if (gstRate > 0) {
+    const gstAmount = Math.round((amount - amount / (1 + gstRate / 100)) * 100) / 100;
+    const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+    const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+    legs.push({ lHeadId: customerHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
+    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability @ ${gstRate}%` });
+  } else {
+    legs.push({ lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
+  }
+
   await postVoucher(pool, {
     voucherNo: row.ReceiptNo,
     voucherDate: row.ReceivedDate,
@@ -123,10 +196,7 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
     companyId: row.CompanyId ?? null,
     projectId: row.ProjectId ?? null,
     createdBy: userEmail,
-    legs: [
-      { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
-      { lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` },
-    ],
+    legs,
   });
   return { posted: true };
 }
@@ -342,12 +412,112 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * Stamp duty + registration fee actually paid to the Sub-Registrar Office on
+ * deed registration — real statutory cash outlay by the company, previously
+ * just plain numbers on CrmSalesDeed with zero financial trail.
+ *   Dr Stamp Duty & Registration Expense ... company incurs the cost
+ *   Cr CRM Collections A/c ................ cash leaves (same cash proxy
+ *                                            already used for brokerage
+ *                                            payouts and cancellation refunds)
+ */
+async function postCrmSalesDeedStatutoryToGL(pool, deedId, userEmail) {
+  if (await hasPosting(pool, "CrmSalesDeed", deedId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, deedId).query(`
+    SELECT d.Id, d.DeedNo, d.StampDuty, d.RegistrationFee, d.RegistrationDate, d.DeedDate,
+           b.CompanyId, b.ProjectId
+    FROM dbo.CrmSalesDeed d
+    JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+    WHERE d.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmSalesDeed ${deedId} not found` };
+
+  const amount = (Number(row.StampDuty) || 0) + (Number(row.RegistrationFee) || 0);
+  if (amount <= 0) return { none: true, reason: `Deed ${deedId} has no stamp duty / registration fee recorded` };
+
+  const expenseHeadId = await getGLHeadId(pool, CRM_STAMP_DUTY_ACCOUNT);
+  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  const voucherDate = row.RegistrationDate || row.DeedDate || new Date();
+
+  await postVoucher(pool, {
+    voucherNo: row.DeedNo,
+    voucherDate,
+    sourceType: "CrmSalesDeed",
+    sourceId: deedId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: expenseHeadId, debit: amount, narration: `${row.DeedNo} — stamp duty & registration fee on deed registration` },
+      { lHeadId: collectionsHeadId, credit: amount, narration: `${row.DeedNo} — stamp duty & registration fee paid` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
+ * A standalone (non-unit-linked) parking sale being paid — the same money
+ * event as postCrmReceiptToGL, but for CrmParkingAllotment rows that have no
+ * CrmBooking/CrmPaymentMilestone to hang a receipt off of (BookingId IS
+ * NULL). Previously PUT /mark-paid just flipped PaymentStatus with zero
+ * financial trail.
+ *   Dr CRM Collections A/c ... cash comes in
+ *   Cr Customer ............... reduces what they owe us
+ */
+async function postCrmParkingPaymentToGL(pool, allotmentId, userEmail) {
+  if (await hasPosting(pool, "CrmParkingAllotment", allotmentId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, allotmentId).query(`
+    SELECT pa.Id, pa.TotalAmount, pa.ReceiptNo, pa.PaymentMode, pa.PaymentReceivedDate,
+           a.CustomerId, p.ProjectId
+    FROM dbo.CrmParkingAllotment pa
+    JOIN dbo.CrmApplication a ON a.Id = pa.ApplicationId
+    JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+    WHERE pa.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmParkingAllotment ${allotmentId} not found` };
+  if (!row.CustomerId)
+    return { posted: false, reason: `Allotment ${allotmentId}: application has no linked CrmCustomer` };
+
+  const amount = Number(row.TotalAmount) || 0;
+  if (amount <= 0) return { none: true, reason: `Allotment ${allotmentId} amount is ${amount} (<= 0)` };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  const docNo = row.ReceiptNo || `PARK-${allotmentId}`;
+
+  await postVoucher(pool, {
+    voucherNo: docNo,
+    voucherDate: row.PaymentReceivedDate || new Date(),
+    sourceType: "CrmParkingAllotment",
+    sourceId: allotmentId,
+    companyId: null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — standalone parking payment received (${row.PaymentMode || "—"})` },
+      { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — standalone parking payment received` },
+    ],
+  });
+  return { posted: true };
+}
+
 module.exports = {
   CRM_COLLECTIONS_ACCOUNT,
+  CRM_GST_OUTPUT_ACCOUNT,
   ensureCrmCustomerLedgerHead,
+  syncCrmCustomerLedgerHead,
+  getGstRateForBooking,
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,
   postCrmBrokerPaymentToGL,
   postCrmCancellationRefundToGL,
+  postCrmSalesDeedStatutoryToGL,
+  postCrmParkingPaymentToGL,
 };

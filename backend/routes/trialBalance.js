@@ -143,6 +143,14 @@ router.get("/", async (req, res) => {
     const heads = headsRes.recordset;
 
     // ── 3. Build group map ───────────────────────────────────────────────────
+    // LHeadType 'C' is overloaded in this schema — projectMaster.js's
+    // ensureProjectLedgerHeads() and crmLedger.js's ensureCrmCustomerLedgerHead()
+    // both mint 'C' heads for genuine Customers/buyers, while
+    // contractorAllocation.js/workOrder.js use the same 'C' for genuine
+    // construction Contractors. The two are told apart by which side of the
+    // balance sheet their AccountGroup falls under: Customer heads are
+    // classified under SUNDRY DEBTORS/TRADE RECEIVABLES (AGId 65/64,
+    // asset side); Contractor heads are not. See isReceivablesGroup() below.
     const TYPE_LABEL = {
       S: "Supplier",
       C: "Contractor",
@@ -150,6 +158,7 @@ router.get("/", async (req, res) => {
       A: "Customer",
       GL: "General Ledger",
     };
+    const RECEIVABLES_GROUP_IDS = new Set([64, 65]); // TRADE RECEIVABLES, SUNDRY DEBTORS
 
     const groupMap = new Map();
     for (const g of groupsRes.recordset) {
@@ -170,6 +179,20 @@ router.get("/", async (req, res) => {
       });
     }
 
+    // Walk a group's ancestor chain to see if it falls under Trade
+    // Receivables / Sundry Debtors — used to correctly label 'C' heads that
+    // are actually Customers rather than Contractors (see comment above).
+    function isReceivablesGroup(groupId) {
+      let cur = groupMap.get(Number(groupId));
+      let hops = 0;
+      while (cur && hops < 10) {
+        if (RECEIVABLES_GROUP_IDS.has(cur.id)) return true;
+        cur = cur.parentId != null ? groupMap.get(cur.parentId) : null;
+        hops++;
+      }
+      return false;
+    }
+
     // Attach entities to their group
     for (const h of heads) {
       const g = groupMap.get(Number(h.groupId));
@@ -180,11 +203,16 @@ router.get("/", async (req, res) => {
       const td = Number(h.txn_debit || 0);
       const tc = Number(h.txn_credit || 0);
 
+      const typeLabel =
+        h.type === "C" && isReceivablesGroup(h.groupId)
+          ? "Customer"
+          : TYPE_LABEL[h.type] || h.type;
+
       g.entities.push({
         id: h.id,
         name: h.name,
         type: h.type,
-        typeLabel: TYPE_LABEL[h.type] || h.type,
+        typeLabel,
         isGroup: false,
         children: [],
         opening: { debit: od, credit: oc },
@@ -350,7 +378,30 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
           -- JournalVoucher
           jv.JVID,
-          jv.JVNo         AS JVDocNo
+          jv.JVNo         AS JVDocNo,
+
+          -- CrmPaymentReceipt (milestone payment received)
+          cpr.Id           AS CrmReceiptId,
+          cpr.ReceiptNo    AS CrmReceiptNo,
+          cpr.PaymentMode  AS CrmReceiptMode,
+          cpm.BookingId    AS CrmReceiptBookingId,
+
+          -- CrmOnAccountPayment (advance deposit)
+          coa.Id           AS CrmOnAccountId,
+          coa.ReceiptNo    AS CrmOnAccountNo,
+          coa.PaymentMode  AS CrmOnAccountMode,
+          coa.BookingId    AS CrmOnAccountBookingId,
+
+          -- CrmBrokerPayment (brokerage payout)
+          cbp.Id           AS CrmBrokerPaymentId,
+          cbp.PaymentMode  AS CrmBrokerPaymentMode,
+          cbm.BookingId    AS CrmBrokerPaymentBookingId,
+
+          -- CrmCancellation (refund on cancellation)
+          ccx.Id           AS CrmCancellationId,
+          ccx.CancellationNo AS CrmCancellationNo,
+          ccx.RefundMode   AS CrmCancellationMode,
+          ccx.BookingId    AS CrmCancellationBookingId
 
         FROM dbo.GeneralLedgerEntry gle
 
@@ -364,6 +415,18 @@ router.get("/:lheadId/transactions", async (req, res) => {
           ON gle.SourceType = 'GRN' AND grn.GRNID = gle.SourceId
         LEFT JOIN dbo.JournalVoucher jv
           ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
+        LEFT JOIN dbo.CrmPaymentReceipt cpr
+          ON gle.SourceType = 'CrmPaymentReceipt' AND cpr.Id = gle.SourceId
+        LEFT JOIN dbo.CrmPaymentMilestone cpm
+          ON cpm.Id = cpr.MilestoneId
+        LEFT JOIN dbo.CrmOnAccountPayment coa
+          ON gle.SourceType = 'CrmOnAccountPayment' AND coa.Id = gle.SourceId
+        LEFT JOIN dbo.CrmBrokerPayment cbp
+          ON gle.SourceType = 'CrmBrokerPayment' AND cbp.Id = gle.SourceId
+        LEFT JOIN dbo.CrmBrokerageMaster cbm
+          ON cbm.Id = cbp.BrokerageId
+        LEFT JOIN dbo.CrmCancellation ccx
+          ON gle.SourceType = 'CrmCancellation' AND ccx.Id = gle.SourceId
 
         WHERE gle.LHeadId = @LHeadId
           AND gle.IsReversed = 0
@@ -508,6 +571,21 @@ router.get("/:lheadId/transactions", async (req, res) => {
       } else if (st === "journalvoucher" && r.JVID) {
         docNo = r.JVDocNo || docNo;
         sourceRef = { id: r.JVID, docNo: r.JVDocNo, type: "JournalVoucher" };
+      } else if (st === "crmpaymentreceipt" && r.CrmReceiptId) {
+        docNo = r.CrmReceiptNo || docNo;
+        mode = r.CrmReceiptMode;
+        sourceRef = { id: r.CrmReceiptId, docNo: r.CrmReceiptNo, type: "CrmPaymentReceipt", bookingId: r.CrmReceiptBookingId };
+      } else if (st === "crmonaccountpayment" && r.CrmOnAccountId) {
+        docNo = r.CrmOnAccountNo || docNo;
+        mode = r.CrmOnAccountMode;
+        sourceRef = { id: r.CrmOnAccountId, docNo: r.CrmOnAccountNo, type: "CrmOnAccountPayment", bookingId: r.CrmOnAccountBookingId };
+      } else if (st === "crmbrokerpayment" && r.CrmBrokerPaymentId) {
+        mode = r.CrmBrokerPaymentMode;
+        sourceRef = { id: r.CrmBrokerPaymentId, docNo, type: "CrmBrokerPayment", bookingId: r.CrmBrokerPaymentBookingId };
+      } else if (st === "crmcancellation" && r.CrmCancellationId) {
+        docNo = r.CrmCancellationNo || docNo;
+        mode = r.CrmCancellationMode;
+        sourceRef = { id: r.CrmCancellationId, docNo: r.CrmCancellationNo, type: "CrmCancellation", bookingId: r.CrmCancellationBookingId };
       }
 
       return {

@@ -8,8 +8,9 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
+const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -289,6 +290,21 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           summary: "Sales deed executed and shared with the customer via portal, awaiting their approval.",
           createdBy: actorId(req),
         });
+      }
+    }
+
+    // "REGISTERED -> STATUTORY COST INCURRED" — the moment RegistrationNo is
+    // filed, stamp duty + registration fee are real money the company has
+    // paid the Sub-Registrar Office. Never blocks the update itself if GL
+    // posting fails — same try/catch + recordGLPosting pattern used for
+    // CRM payments/brokerage/cancellations.
+    if (newStatus === "Registered" && !row.RegistrationNo) {
+      try {
+        const outcome = await postCrmSalesDeedStatutoryToGL(pool, id, req.user?.name || req.user?.email || "system");
+        await recordGLPosting("crm-sales-deed", id, outcome, req.user?.name || req.user?.email || "system");
+      } catch (glErr) {
+        console.error("[crm-sales-deed] GL posting failed:", glErr.message);
+        await recordGLPosting("crm-sales-deed", id, { failed: true, reason: glErr.message }, req.user?.name || req.user?.email || "system");
       }
     }
 

@@ -7,6 +7,9 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold } = require("../services/crmHoldService");
+const { getNextDocNumber } = require("../services/docNumber");
+const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
+const { recordGLPosting } = require("../services/approvalService");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -275,15 +278,41 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
+    const b = req.body || {};
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     if (row.recordset[0].BookingId) {
       return res.status(400).json({ error: "This parking sale is linked to a booking — record payment through the booking's payment schedule instead" });
     }
-    await pool.request().input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmParkingAllotment SET PaymentStatus = 'Paid' WHERE Id = @id");
-    res.json({ success: true, status: "Paid" });
+
+    const receiptNo = await getNextDocNumber(pool, "PARK", "PARK");
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("no", sql.NVarChar(30), receiptNo)
+      .input("mode", sql.NVarChar(50), b.PaymentMode || null)
+      .input("dt", sql.Date, b.ReceivedDate || null)
+      .query(`
+        UPDATE dbo.CrmParkingAllotment SET
+          PaymentStatus = 'Paid', ReceiptNo = @no, PaymentMode = @mode,
+          PaymentReceivedDate = ISNULL(@dt, CAST(SYSDATETIME() AS DATE))
+        WHERE Id = @id
+      `);
+
+    // Real cash received — post to GL instead of leaving this as a status
+    // flag with zero financial trail. Never blocks the payment confirmation
+    // itself if GL posting fails — same try/catch + recordGLPosting pattern
+    // used across the rest of CRM.
+    const actorEmail = req.user?.name || req.user?.email || "system";
+    try {
+      const outcome = await postCrmParkingPaymentToGL(pool, id, actorEmail);
+      await recordGLPosting("crm-parking-payment", id, outcome, actorEmail);
+    } catch (glErr) {
+      console.error("[crm-parking] GL posting failed:", glErr.message);
+      await recordGLPosting("crm-parking-payment", id, { failed: true, reason: glErr.message }, actorEmail);
+    }
+
+    res.json({ success: true, status: "Paid", ReceiptNo: receiptNo });
   } catch (e) {
     console.error("[crm-parking] mark-paid error:", e.message);
     res.status(500).json({ error: e.message });

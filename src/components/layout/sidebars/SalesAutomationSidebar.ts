@@ -30,6 +30,7 @@ export const salesAutomationNavItems: NavItem[] = [
     children: [
       { label: "All Leads",    path: "/sales-automation/leads",          pageKey: "sa-leads"              },
       { label: "Inquiry",      path: "/sales-automation/inquiry",        pageKey: "sa-inquiry"            },
+      { label: "Follow-Up",    path: "/sales-automation/followups",      pageKey: "sa-followups"          },
       { label: "Site Visits",  path: "/sales-automation/site-visits",    pageKey: "sa-site-visits"        },
       { label: "Activities",   path: "/sales-automation/lead-activities", pageKey: "sa-lead-activities"   },
       { label: "Tasks",        path: "/sales-automation/lead-tasks",     pageKey: "sa-lead-tasks"         },
