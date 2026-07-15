@@ -3,6 +3,7 @@
 // instead of framer-motion since there's no DOM/CSS layer here.
 import { useRef, useState } from "react";
 import { Animated, TextInput, View, type TextInputProps } from "react-native";
+import { fonts } from "@/theme/fonts";
 
 interface FloatingLabelInputProps extends Omit<TextInputProps, "placeholder"> {
   label: string;
@@ -31,12 +32,13 @@ export function FloatingLabelInput({
     <View className="relative">
       <Animated.Text
         pointerEvents="none"
-        className="absolute left-4 font-medium z-10"
+        className="absolute left-4 z-10"
         style={{
           color: focused ? "#c4b5fd" : "rgba(255,255,255,0.35)",
           top: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 6] }),
           fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [13, 9] }),
           letterSpacing: active ? 0.8 : 0,
+          fontFamily: fonts.body.medium,
         }}
       >
         {label}
@@ -59,6 +61,7 @@ export function FloatingLabelInput({
           backgroundColor: focused ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
           borderWidth: 1.5,
           borderColor: focused ? "rgba(167,139,250,0.6)" : "rgba(255,255,255,0.10)",
+          fontFamily: fonts.body.regular,
         }}
         {...inputProps}
       />

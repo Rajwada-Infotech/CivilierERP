@@ -28,6 +28,7 @@ import { DotGrid } from "@/components/DotGrid";
 import { ScanLine } from "@/components/ScanLine";
 import { FloatingParticles } from "@/components/FloatingParticles";
 import { PasswordStrength } from "@/components/PasswordStrength";
+import { fonts } from "@/theme/fonts";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -97,10 +98,10 @@ function PortalButton({
         </View>
         <ArrowUpRight size={13} color="rgba(255,255,255,0.2)" />
       </View>
-      <Text className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.8)" }}>
+      <Text className="text-xs" style={{ color: "rgba(255,255,255,0.8)", fontFamily: fonts.body.semibold }}>
         {title}
       </Text>
-      <Text className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)" }}>
+      <Text className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)", fontFamily: fonts.body.regular }}>
         {subtitle}
       </Text>
     </Pressable>
@@ -179,13 +180,13 @@ export default function LoginScreen() {
               <View className="items-center mb-7">
                 <LogoRing size={80} />
                 <View className="mt-3">
-                  <GradientText style={{ fontSize: 30, fontWeight: "700", letterSpacing: -0.5 }}>
+                  <GradientText style={{ fontSize: 30, fontFamily: fonts.heading.bold, letterSpacing: -0.5 }}>
                     CivilierERP
                   </GradientText>
                 </View>
                 <View className="flex-row items-center gap-1.5 mt-2">
                   <View className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#a78bfa" }} />
-                  <Text className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  <Text className="text-xs" style={{ color: "rgba(255,255,255,0.4)", fontFamily: fonts.body.medium }}>
                     {tagline}
                   </Text>
                 </View>
@@ -236,7 +237,7 @@ export default function LoginScreen() {
                       style={{ backgroundColor: "rgba(239,68,68,0.12)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)" }}
                     >
                       <AlertCircle size={14} color="#fca5a5" />
-                      <Text className="text-sm flex-1" style={{ color: "#fca5a5" }}>
+                      <Text className="text-sm flex-1" style={{ color: "#fca5a5", fontFamily: fonts.body.medium }}>
                         {error}
                       </Text>
                     </View>
@@ -259,14 +260,14 @@ export default function LoginScreen() {
                       opacity: loading || !email || !password ? 0.6 : 1,
                     }}
                   >
-                    <Text className="text-white font-semibold text-sm">
+                    <Text className="text-white text-sm" style={{ fontFamily: fonts.body.semibold }}>
                       {loading ? "Signing in…" : "Sign In"}
                     </Text>
                   </LinearGradient>
                 </Pressable>
               </View>
 
-              <Text className="text-center text-[10px] mt-5" style={{ color: "rgba(255,255,255,0.2)" }}>
+              <Text className="text-center text-[10px] mt-5" style={{ color: "rgba(255,255,255,0.2)", fontFamily: fonts.body.regular }}>
                 Secure access · Role-based permissions
               </Text>
 
@@ -275,8 +276,8 @@ export default function LoginScreen() {
                   surface a notice instead of a dead route. */}
               <View className="mt-5 pt-5" style={{ borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" }}>
                 <Text
-                  className="text-center text-[10px] font-semibold uppercase mb-3"
-                  style={{ color: "rgba(255,255,255,0.25)", letterSpacing: 1 }}
+                  className="text-center text-[10px] uppercase mb-3"
+                  style={{ color: "rgba(255,255,255,0.25)", letterSpacing: 1, fontFamily: fonts.body.semibold }}
                 >
                   Looking for a different portal?
                 </Text>
@@ -295,7 +296,7 @@ export default function LoginScreen() {
                   />
                 </View>
                 {portalNotice && (
-                  <Text className="text-center text-[10px] mt-3" style={{ color: "rgba(255,255,255,0.35)" }}>
+                  <Text className="text-center text-[10px] mt-3" style={{ color: "rgba(255,255,255,0.35)", fontFamily: fonts.body.regular }}>
                     {portalNotice}
                   </Text>
                 )}
