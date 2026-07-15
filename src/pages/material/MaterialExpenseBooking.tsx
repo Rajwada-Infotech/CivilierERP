@@ -205,7 +205,6 @@ export default function MaterialExpenseBooking() {
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
-  const [loadingEmi, _setLoadingEmi] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
@@ -592,7 +591,7 @@ export default function MaterialExpenseBooking() {
         workDoneRef:
           doc.kind === "WORK_DONE"
             ? doc.docNo
-            : doc.kind === "WO_PO" && (doc as any).sourcWDDocNo
+            : doc.kind === "WO_PO" && (doc as any).sourceWDDocNo
               ? (doc as any).sourceWDDocNo
               : undefined,
       };
@@ -925,18 +924,23 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
-  const editingIdNum = editingId ? parseInt(editingId, 10) : null;
-  const bookedPOIds = new Set<number>();
-  const bookedWorkDoneIds = new Set<number>();
-  const bookedWOPOIds = new Set<number>();
-  const bookedGRNIds = new Set<number>();
-  for (const r of bookedSourceIds) {
-    if (editingIdNum && r.Eid === editingIdNum) continue;
-    if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
-    if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
-    if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
-    if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
-  }
+  const { editingIdNum, bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
+    useMemo(() => {
+      const editingIdNum = editingId ? parseInt(editingId, 10) : null;
+      const bookedPOIds = new Set<number>();
+      const bookedWorkDoneIds = new Set<number>();
+      const bookedWOPOIds = new Set<number>();
+      const bookedGRNIds = new Set<number>();
+
+      for (const r of bookedSourceIds) {
+        if (editingIdNum && r.Eid === editingIdNum) continue;
+        if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
+        if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
+        if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
+        if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
+      }
+      return { editingIdNum, bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds };
+    }, [bookedSourceIds, editingId]);
 
   const showDocSection = !!form.companyId;
 
@@ -1584,7 +1588,6 @@ export default function MaterialExpenseBooking() {
                     baseDocNo={form.bookingReference}
                     onChange={(emi) => set("emi", emi)}
                     liveSchedule={isEditing ? liveEmiSchedule : null}
-                    loadingEmi={loadingEmi}
                     onDisableEmi={isEditing ? disableEmi : undefined}
                   />
                 </div>
