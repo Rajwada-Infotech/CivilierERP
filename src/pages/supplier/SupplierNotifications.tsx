@@ -101,7 +101,7 @@ export default function SupplierNotifications() {
         type: "submitted",
         title: `${q.DocNo} submitted`,
         subtitle: `Your prices have been shared with the procurement team`,
-        time: q.InvitedAt,
+        time: q.SubmittedAt ?? q.InvitedAt,
         href: `/supplier/quotation/${q.QuotationId}`,
       });
     }
