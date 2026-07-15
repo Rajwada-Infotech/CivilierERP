@@ -88,15 +88,17 @@ export function ReadOnlyField({
 export function AutoFillBanner({
   docNo,
   onClear,
+  label = "Linked to expense",
 }: {
   docNo: string;
   onClear: () => void;
+  label?: string;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5">
       <div className="flex items-center gap-2 min-w-0">
         <Link2 size={13} className="text-primary shrink-0" />
-        <span className="text-xs text-muted-foreground">Linked to expense</span>
+        <span className="text-xs text-muted-foreground">{label}</span>
         <span className="font-mono text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
           {docNo}
         </span>

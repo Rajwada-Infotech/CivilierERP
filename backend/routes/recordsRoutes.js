@@ -222,6 +222,41 @@ async function fetchGRNAttachments(pool, actor) {
   }));
 }
 
+// Contract attachments are stored as a JSON array of
+// {name, url (base64 data URI), type, size} in dbo.Contract.Attachments —
+// no dedicated attachments table, so this unpacks that column per row.
+async function fetchContractAttachments(pool, actor) {
+  if (actor.role === "customer") return [];
+  const result = await pool.request().query(`
+    SELECT ContractId, DocNo, Attachments, CreatedBy, CreatedAt
+    FROM dbo.Contract
+    WHERE Attachments IS NOT NULL AND Attachments <> ''
+  `);
+  const rows = [];
+  for (const r of result.recordset) {
+    let atts;
+    try { atts = JSON.parse(r.Attachments); } catch { continue; }
+    if (!Array.isArray(atts)) continue;
+    atts.forEach((a, i) => {
+      rows.push({
+        source: "contract",
+        sourceId: `${r.ContractId}-${i}`,
+        module: "Contract",
+        docRef: r.DocNo || `CONTRACT-${r.ContractId}`,
+        docLabel: r.DocNo || `Contract #${r.ContractId}`,
+        filename: a.name,
+        mimeType: a.type,
+        size: a.size ?? null,
+        uploadedBy: r.CreatedBy || null,
+        uploadedAt: r.CreatedAt,
+        url: a.url,
+      });
+    });
+  }
+  rows.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+  return rows;
+}
+
 // ─── Registry of sources ─────────────────────────────────────────────────────
 // To wire in a future module's attachments, add { key, label, fetch } here —
 // nothing else in this file needs to change.
@@ -230,6 +265,7 @@ const SOURCES = [
   { key: "vehicle", label: "Vehicle In/Out", fetch: fetchVehicleAttachments },
   { key: "vault", label: "Document Vault", fetch: fetchVaultDocuments },
   { key: "grn", label: "GRN", fetch: fetchGRNAttachments },
+  { key: "contract", label: "Contract", fetch: fetchContractAttachments },
 ];
 
 // ─── GET /api/records — unified list ─────────────────────────────────────────
