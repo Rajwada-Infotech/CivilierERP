@@ -103,6 +103,7 @@ export function NavSheet() {
               borderTopRightRadius: 24,
               borderWidth: 1,
               borderColor: colors.border,
+              overflow: "hidden",
               transform: [
                 {
                   translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }),
@@ -111,7 +112,7 @@ export function NavSheet() {
             }}
           >
             <Pressable onPress={() => {}}>
-              <View style={{ height: 3, backgroundColor: colors.primary, borderTopLeftRadius: 24, borderTopRightRadius: 24 }} />
+              <View style={{ height: 3, backgroundColor: colors.primary }} />
 
               {/* Drag handle */}
               <View className="items-center pt-2 pb-1">
