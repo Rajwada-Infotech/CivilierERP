@@ -18,6 +18,7 @@ import {
 import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getOABalanceByRef } from "@/api/onAccountApi";
+import { getPaymentReasonOptions } from "@/api/paymentReasonApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
@@ -682,6 +683,12 @@ const Payment: React.FC = () => {
       enabled: !!companyFilter,
     },
   );
+
+  const { data: paymentReasons = [] } = useQuery({
+    queryKey: ["payment-reason-options"],
+    queryFn: getPaymentReasonOptions,
+    staleTime: 5 * 60_000,
+  });
 
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
@@ -2225,13 +2232,18 @@ const Payment: React.FC = () => {
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Payment Purpose" required>
-                    <input
-                      type="text"
+                    <select
                       value={form.paymentName}
                       onChange={(e) => set("paymentName", e.target.value)}
-                      placeholder="e.g. Advance payment for cement"
-                      className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60"
-                    />
+                      className="w-full appearance-none px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">— Select reason —</option>
+                      {paymentReasons.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Payment Date" required>
                     <div className="relative">

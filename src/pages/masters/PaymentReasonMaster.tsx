@@ -86,13 +86,17 @@ export default function PaymentReasonMaster() {
     {
       id: "name",
       header: "Reason",
-      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+      meta: { className: "w-[30%] sm:w-[26%]" },
+      cell: ({ row }) => (
+        <span className="font-medium truncate block">{row.original.name}</span>
+      ),
     },
     {
       id: "description",
       header: "Description",
+      meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
-        <span className="text-muted-foreground text-xs max-w-xs block truncate">
+        <span className="text-muted-foreground text-xs block truncate">
           {row.original.description || "—"}
         </span>
       ),
@@ -100,14 +104,15 @@ export default function PaymentReasonMaster() {
     {
       id: "status",
       header: "Status",
+      meta: { className: "w-24 sm:w-28" },
       cell: ({ row }) =>
         row.original.isActive ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />Active
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-border inline-block shrink-0" />Inactive
           </span>
         ),
     },
@@ -115,10 +120,11 @@ export default function PaymentReasonMaster() {
       id: "actions",
       header: "Actions",
       enableSorting: false,
+      meta: { className: "w-28" },
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-end gap-1">
             {rights.canEdit && (
               <button
                 onClick={() => openEdit(r)}
