@@ -19,7 +19,6 @@ import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/ap
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getOABalanceByRef } from "@/api/onAccountApi";
 import { getPaymentReasonOptions } from "@/api/paymentReasonApi";
-import { getContractOptions, type ContractOption } from "@/api/contractApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -134,12 +133,6 @@ const Payment: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
-  const [contracts, setContracts] = useState<ContractOption[]>([]);
-  useEffect(() => {
-    getContractOptions()
-      .then(setContracts)
-      .catch(() => {});
-  }, []);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Re-issue (bounced cheque replacement) context
@@ -718,10 +711,12 @@ const Payment: React.FC = () => {
   const handleContractSelect = (contract: any) => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
+    setLinkedGRNs([]);
     setForm((prev) => ({
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
+      contractId: contract.ContractId != null ? String(contract.ContractId) : "",
       company: contract.CompanyName || String(contract.CompanyId || ""),
       project: contract.ProjectName || String(contract.ProjectId || ""),
       projectSite: contract.ProjectName || String(contract.ProjectId || ""),
@@ -734,6 +729,7 @@ const Payment: React.FC = () => {
       ...prev,
       paymentName: "",
       expenseRef: "",
+      contractId: "",
       company: "",
       project: "",
       projectSite: "",
@@ -1914,44 +1910,78 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
-                    <Field
-                      label="Contract (optional)"
-                      hint="Record this as an on-account advance against a contract"
-                    >
-                      <div className="relative">
-                        <FileText
-                          size={13}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <select
-                          value={form.contractId}
-                          onChange={(e) => set("contractId", e.target.value)}
-                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">Not linked to a contract</option>
-                          {contracts.map((c) => (
-                            <option key={c.id} value={String(c.id)}>
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          size={11}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                      </div>
-                    </Field>
                   </div>
                 )}
 
-                {form.expenseRef && (
+                {form.expenseRef && selectedContract && (
+                  <AutoFillBanner
+                    docNo={selectedContract.DocNo || form.expenseRef}
+                    label="Linked to contract"
+                    onClear={clearContractLink}
+                  />
+                )}
+
+                {form.expenseRef && !selectedContract && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
                   />
                 )}
 
-                {form.expenseRef && (
+                {form.expenseRef && selectedContract && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="flex items-center gap-2">
+                        <Building2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.company}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contractor">
+                      <div className="flex items-center gap-2">
+                        <Users
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.ContactPerson || form.paidTo || ""}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contract Doc No">
+                      <div className="flex items-center gap-2">
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.DocNo || form.expenseRef}
+                          placeholder="Auto-fetched"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
+                {form.expenseRef && !selectedContract && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
                     <Field label="Company">
                       <div className="flex items-center gap-2">
