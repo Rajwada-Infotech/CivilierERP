@@ -18,7 +18,7 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
-import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type TaskSummary } from "@/api/homeDashboardApi";
+import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type TaskSummary, type RecentOtherExpense } from "@/api/homeDashboardApi";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { GradientText } from "@/components/GradientText";
@@ -86,6 +86,17 @@ export default function DashboardScreen() {
     if (access.material) {
       (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
         feed.push({ label: `GRN ${g.GRNNo}`, sub: g.SupplierName ?? "—", icon: Package, color: "#10b981", time: fmtDay(g.GRNDate) });
+      });
+    }
+    if (access.material) {
+      (data?.recentOtherExpenses ?? []).forEach((e: RecentOtherExpense) => {
+        feed.push({
+          label: `${e.EDocNo} (Other Expense)`,
+          sub: e.ESupplierName ?? "—",
+          icon: FileText,
+          color: "#06b6d4",
+          time: fmtDay(e.EDocDate),
+        });
       });
     }
     if (access.finance) {
