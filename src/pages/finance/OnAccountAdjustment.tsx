@@ -367,8 +367,6 @@ export default function OnAccountAdjustment() {
     setLiveBalances((prev) => new Map(prev).set(partyId, newBalance));
     // Refetch in background to get authoritative data
     setTimeout(() => {
-      refetchParties();
-      refetchCredits();
       queryClient.invalidateQueries({ queryKey: ["oa-party-summary"] });
       queryClient.invalidateQueries({ queryKey: ["oa-adjustable"] });
     }, 800);
