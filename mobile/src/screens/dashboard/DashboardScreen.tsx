@@ -25,19 +25,7 @@ import { GradientText } from "@/components/GradientText";
 import { SectionLabel } from "@/components/home/SectionLabel";
 import { ModuleCard, type StatRow } from "@/components/home/ModuleCard";
 import { FeedItem, type FeedItemData } from "@/components/home/FeedItem";
-
-const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
-
-const MODULE_PAGES: Record<string, string[]> = {
-  finance: ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions"],
-  material: ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-  followup: ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
-  engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
-  ticket: ["ticket-dashboard", "tickets"],
-  sales: ["sale-order", "sale-invoice", "sales-payment"],
-  salesAutomation: ["sa-leads", "sa-inquiry", "sa-site-visits", "sa-campaigns", "sa-ads"],
-  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-contractor-register", "civilworkdpr-worker-attendance"],
-};
+import { useModuleAccess } from "@/navigation/moduleAccess";
 
 function fmtDay(d?: string) {
   if (!d) return undefined;
@@ -49,37 +37,11 @@ const notBuiltYet = (title: string) =>
   Alert.alert(title, `The ${title} module isn't built on mobile yet — use the web app for now.`);
 
 export default function DashboardScreen() {
-  const { currentUser, canAccessPage } = useAuth();
+  const { currentUser } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const { role, privileged, isAdmin, isDba, access } = useModuleAccess();
 
-  const role = currentUser?.role ?? "";
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";
-  const privileged = PRIVILEGED_ROLES.includes(role);
-  const isDba = role === "dba";
-  const isAdmin = privileged;
-
-  const hasModuleAccess = (moduleId: string): boolean => {
-    if (privileged) return true;
-    return (MODULE_PAGES[moduleId] ?? []).some((pk) => canAccessPage(pk));
-  };
-
-  const access = useMemo(
-    () => ({
-      finance: hasModuleAccess("finance"),
-      material: hasModuleAccess("material"),
-      engineering: hasModuleAccess("engineering"),
-      followup: hasModuleAccess("followup"),
-      ticket: hasModuleAccess("ticket"),
-      sales: hasModuleAccess("sales"),
-      salesAutomation: hasModuleAccess("salesAutomation"),
-      civilworkdpr: hasModuleAccess("civilworkdpr"),
-      approvals: privileged,
-      admin: privileged && !isDba,
-      dba: isDba,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [role, privileged, isDba],
-  );
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -198,14 +160,8 @@ export default function DashboardScreen() {
       contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
-      {/* Header row */}
-      <View className="flex-row items-center gap-2 mb-5">
-        <HardHat size={13} color={`${colors.primary}b3`} />
-        <Text style={{ color: `${colors.primary}b3`, fontSize: 10, fontFamily: fonts.heading.bold, letterSpacing: 2 }}>
-          CIVILIERERP
-        </Text>
-        <View className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#10b981" }} />
-        <View className="flex-1" />
+      {/* Last-updated + refresh — branding now lives in the shared TopHeader */}
+      <View className="flex-row items-center justify-end gap-2 mb-3">
         {lastUpdated && (
           <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 10, fontFamily: fonts.body.regular }}>{lastUpdated}</Text>
         )}
