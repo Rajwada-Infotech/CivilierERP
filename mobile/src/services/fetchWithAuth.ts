@@ -20,7 +20,12 @@ export interface FetchWithAuthOptions extends RequestInit {
   skipActivityLog?: boolean;
 }
 
-let redirecting = false;
+// A Promise (not a boolean) so concurrent 401s share the same in-flight
+// clear+emit instead of racing: two requests can both observe the flag
+// unset before either sets it, but only the assignment below is
+// synchronous — the awaited work happens inside it, so the second request
+// always sees the first's in-progress promise, not a stale flag.
+let sessionExpiredFlow: Promise<void> | null = null;
 
 export async function fetchWithAuth(
   url: string,
@@ -29,9 +34,9 @@ export async function fetchWithAuth(
   const { skipActivityLog, ...fetchOptions } = options;
   const token = await getToken();
 
-  if (redirecting) {
+  if (sessionExpiredFlow) {
     if (token) {
-      redirecting = false;
+      sessionExpiredFlow = null;
     } else {
       throw new ApiError("Authentication redirect in progress.", 401);
     }
@@ -58,11 +63,17 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 401) {
-    if (!redirecting) {
-      redirecting = true;
-      await clearAuthStorage();
-      emitSessionExpired();
+    if (!sessionExpiredFlow) {
+      sessionExpiredFlow = (async () => {
+        try {
+          await clearAuthStorage();
+          emitSessionExpired();
+        } finally {
+          sessionExpiredFlow = null;
+        }
+      })();
     }
+    await sessionExpiredFlow;
     throw new ApiError("Session expired. Please login again.", response.status);
   }
 
