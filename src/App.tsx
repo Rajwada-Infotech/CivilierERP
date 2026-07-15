@@ -288,6 +288,9 @@ const ProfitCenterMaster = lazy(
 const ReturnReasonMaster = lazy(
   () => import("./pages/masters/ReturnReasonMaster"),
 );
+const PaymentReasonMaster = lazy(
+  () => import("./pages/masters/PaymentReasonMaster"),
+);
 
 // New hierarchy pages
 const SuperAdminDashboard = lazy(
@@ -1676,6 +1679,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="return-reason-master">
             <ReturnReasonMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/payment-reason"
+        element={
+          <ProtectedRoute pageKey="payment-reason-master">
+            <PaymentReasonMaster />
           </ProtectedRoute>
         }
       />
