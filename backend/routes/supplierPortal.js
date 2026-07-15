@@ -75,7 +75,13 @@ router.get("/quotations", async (req, res) => {
           q.QuotationId, q.DocNo, q.Status AS QuotationStatus, q.DocDate, q.DueDate, q.Remarks,
           ec.name AS CompanyName, ep.name AS ProjectName,
           qs.Status AS MySubmissionStatus, qs.InvitedAt,
-          (SELECT COUNT(*) FROM dbo.QuotationItems qi WHERE qi.QuotationId = q.QuotationId) AS ItemCount
+          (SELECT COUNT(*) FROM dbo.QuotationItems qi WHERE qi.QuotationId = q.QuotationId) AS ItemCount,
+          (
+            SELECT MAX(qsp.SubmittedAt)
+            FROM dbo.QuotationSupplierPrices qsp
+            JOIN dbo.QuotationItems qi2 ON qi2.QuotationItemId = qsp.QuotationItemId
+            WHERE qi2.QuotationId = q.QuotationId AND qsp.SupplierLHeadId = qs.SupplierLHeadId
+          ) AS SubmittedAt
         FROM dbo.QuotationSuppliers qs
         JOIN dbo.Quotations q ON q.QuotationId = qs.QuotationId
         LEFT JOIN dbo.enterprise ec ON ec.id = q.CompanyId

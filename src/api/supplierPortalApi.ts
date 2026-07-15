@@ -31,6 +31,7 @@ export interface SupplierQuotationSummary {
   ProjectName?: string;
   MySubmissionStatus: "Pending" | "Submitted";
   InvitedAt: string;
+  SubmittedAt?: string | null;
   ItemCount: number;
 }
 
