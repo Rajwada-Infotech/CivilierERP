@@ -137,11 +137,13 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
       .input("tref", sql.NVarChar(200), b.TransactionRef || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",   sql.Int,           actorId(req))
+      .input("bkid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
+      .input("bkname", sql.NVarChar(200), b.DepositBankName || null)
       .query(`
         INSERT INTO dbo.CrmPaymentReceipt
-          (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+          (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName)
         OUTPUT INSERTED.Id
-        VALUES (@no, @mid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME())
+        VALUES (@no, @mid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME(), @bkid, @bkname)
       `);
     const receiptId = insResult.recordset[0].Id;
 

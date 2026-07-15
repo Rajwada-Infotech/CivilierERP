@@ -55,7 +55,7 @@ const BOOKING_SELECT = `
     b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId, b.ProjectName, b.CompanyId,
     b.UnitNo, b.BlockName, um.BlockId, b.FloorName, b.UnitType, b.AreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
-    b.PaymentPlanId, b.BookingDate,
+    b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
     b.CreatedAt, b.UpdatedAt,
@@ -258,6 +258,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
       .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
       .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("hsn",   sql.VarChar(20),   b.HsnCode || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -270,6 +271,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
           AssignedTo = ISNULL(@asgn, AssignedTo),
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+          HsnCode = ISNULL(@hsn, HsnCode),
           -- GrandTotal tracks TotalValue changes without disturbing the
           -- already-rolled-up Parking/ExtraCharges totals.
           GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,

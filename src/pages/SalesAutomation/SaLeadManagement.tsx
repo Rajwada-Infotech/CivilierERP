@@ -695,7 +695,7 @@ const SaLeadManagement: React.FC = () => {
           columns={columns}
           canCreate={canDoAction("sa-leads", "create")}
           canEdit={canDoAction("sa-leads", "edit")}
-          canDelete={canDoAction("sa-leads", "delete")}
+          canDelete={false /* leads are a permanent record — can be edited, never deleted */}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{ title: "Lead Management", filename: "lead-management", columns: exportColumns }}

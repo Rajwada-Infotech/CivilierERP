@@ -135,6 +135,38 @@ router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// 3b. Daily Ad Performance Report — day-by-day reach(leads)/cost/cost-per-lead
+// per ad. "Reach" here is lead count for that day (matches how the workflow
+// spec itself defines it: "DAILY REACH(LEADS)"), not a platform impressions
+// metric — those require a live Google/Meta metrics pull (saAdPlatformService
+// .fetchAdMetrics), which needs real provider credentials this report
+// doesn't depend on. Cost is the ad's own DailySpend rate (already a
+// per-day field on SaAd), applied to whichever days actually generated a
+// lead — a real day with zero leads for an ad has no meaningful CPL and is
+// omitted, matching every other report in this file (grouped rows, not a
+// zero-filled calendar).
+router.get("/daily-ad-performance", requirePageRight("sa-ads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const where = dateRangeFilter(req, "CAST(l.DateGenerated AS DATE)") || `WHERE l.DateGenerated >= DATEADD(DAY, -30, SYSDATETIME())`;
+    const r = await pool.request().query(`
+      SELECT
+        CAST(l.DateGenerated AS DATE) AS ReportDate,
+        a.Id AS AdId, a.Name AS AdName, c.Name AS CampaignName,
+        COUNT(l.Id) AS DailyReach,
+        MAX(ISNULL(a.DailySpend, 0)) AS DailyCost,
+        CASE WHEN COUNT(l.Id) > 0 THEN MAX(ISNULL(a.DailySpend, 0)) / COUNT(l.Id) ELSE 0 END AS CostPerLead
+      FROM dbo.SaLead l
+      JOIN dbo.SaAd a ON a.Id = l.AdId
+      LEFT JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
+      ${where.replace("WHERE", "WHERE l.IsActive = 1 AND l.AdId IS NOT NULL AND")}
+      GROUP BY CAST(l.DateGenerated AS DATE), a.Id, a.Name, c.Name
+      ORDER BY ReportDate DESC, DailyReach DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // 4. Cost Per Lead Report
 router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (req, res) => {
   try {

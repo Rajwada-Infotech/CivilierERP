@@ -452,25 +452,11 @@ router.get("/:id/audit", requirePageRight("sa-leads", "view"), async (req, res) 
 });
 
 // DELETE /:id — soft delete
-router.delete("/:id", requirePageRight("sa-leads", "delete"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const leadId = parseInt(req.params.id, 10);
-    if (!isSaAdmin(req)) {
-      const scopeReq = pool.request();
-      const scope = applyLeadScope(scopeReq, req, "l");
-      const check = await scopeReq.input("lid", sql.Int, leadId)
-        .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
-      if (!check.recordset.length) return res.status(403).json({ error: "Access denied" });
-    }
-    await pool.request()
-      .input("id", sql.Int, leadId)
-      .query("UPDATE dbo.SaLead SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[sa-leads] DELETE error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+// A lead/enquiry is a permanent record — editable, never deletable, even by
+// admins. Route kept (rather than removed) so any existing caller gets a
+// clear, explicit rejection instead of a 404.
+router.delete("/:id", requirePageRight("sa-leads", "view"), async (req, res) => {
+  res.status(403).json({ error: "Leads cannot be deleted — this is a permanent record. Edit its status/classification instead." });
 });
 
 // GET /available-units — real Unit Master rows not attached to any active
@@ -503,7 +489,13 @@ router.get("/available-units", requirePageRight("sa-leads", "view"), async (req,
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await promoteLeadToFollowup(pool, parseInt(req.params.id), actorId(req));
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request().input("id", sql.Int, id);
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "This lead is not assigned to you" });
+
+    const result = await promoteLeadToFollowup(pool, id, actorId(req));
     if (result.alreadyPromoted) return res.json({ message: "Already promoted", applicantId: result.applicantId });
     res.json({ success: true, applicantId: result.applicantId });
   } catch (e) {
@@ -516,7 +508,13 @@ router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async
 router.post("/:id/promote-booking", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await promoteLeadToBooking(pool, parseInt(req.params.id), req.body, actorId(req));
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request().input("id", sql.Int, id);
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "This lead is not assigned to you" });
+
+    const result = await promoteLeadToBooking(pool, id, req.body, actorId(req));
     if (result.alreadyBooked) return res.json({ message: "Already booked", bookingId: result.bookingId });
     res.json({ success: true, bookingId: result.bookingId });
   } catch (e) {

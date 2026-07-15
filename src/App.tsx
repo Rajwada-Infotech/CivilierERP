@@ -360,6 +360,7 @@ const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
 const SaLeadManagement = lazy(() => import("./pages/SalesAutomation/SaLeadManagement"));
 const SaChannelPartners = lazy(() => import("./pages/SalesAutomation/SaChannelPartners"));
 const SaLeadActivities = lazy(() => import("./pages/SalesAutomation/SaLeadActivities"));
+const SaFollowups = lazy(() => import("./pages/SalesAutomation/SaFollowups"));
 const SaLeadTasks = lazy(() => import("./pages/SalesAutomation/SaLeadTasks"));
 const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDistribution"));
 const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
@@ -2154,6 +2155,7 @@ function AppRoutes() {
       <Route path="/sales-automation/leads" element={<ProtectedRoute pageKey="sa-leads"><SaLeadManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/channel-partners" element={<ProtectedRoute pageKey="sa-channel-partners"><SaChannelPartners /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-activities" element={<ProtectedRoute pageKey="sa-lead-activities"><SaLeadActivities /></ProtectedRoute>} />
+      <Route path="/sales-automation/followups" element={<ProtectedRoute pageKey="sa-followups"><SaFollowups /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-tasks" element={<ProtectedRoute pageKey="sa-lead-tasks"><SaLeadTasks /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaLeadDistribution /></ProtectedRoute>} />
       <Route path="/sales-automation/inquiry" element={<ProtectedRoute pageKey="sa-inquiry"><SaInquiryDashboard /></ProtectedRoute>} />

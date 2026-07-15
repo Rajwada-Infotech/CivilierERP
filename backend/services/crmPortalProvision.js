@@ -12,8 +12,21 @@ async function ensurePortalUser(pool, applicationId) {
     .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE ApplicationId = @aid");
   if (existing.recordset.length) return { created: false, id: existing.recordset[0].Id };
 
-  const app = await pool.request().input("aid", sql.Int, applicationId)
-    .query("SELECT Email, Mobile FROM dbo.CrmApplication WHERE Id = @aid");
+  // CrmCustomer is the canonical identity record (migration 181) — prefer
+  // its Email/Mobile over CrmApplication's own copies, which are only a
+  // snapshot taken at application-creation time and can drift or contain a
+  // typo that was later corrected on the Customer record without anyone
+  // realizing the Application's copy (and therefore the portal login) never
+  // got updated. Falls back to the Application's own fields only if it
+  // somehow has no linked CustomerId.
+  const app = await pool.request().input("aid", sql.Int, applicationId).query(`
+    SELECT
+      COALESCE(c.Email, a.Email) AS Email,
+      COALESCE(c.Mobile, a.Mobile) AS Mobile
+    FROM dbo.CrmApplication a
+    LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+    WHERE a.Id = @aid
+  `);
   const row = app.recordset[0];
   if (!row?.Email) return { created: false, error: "Applicant has no email on file — cannot provision portal login" };
   if (!row?.Mobile) return { created: false, error: "Applicant has no mobile on file — cannot provision portal login" };

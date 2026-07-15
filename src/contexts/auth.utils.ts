@@ -236,7 +236,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: full access within their scope, no access outside it
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
@@ -250,7 +250,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: all actions on their scoped pages
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
