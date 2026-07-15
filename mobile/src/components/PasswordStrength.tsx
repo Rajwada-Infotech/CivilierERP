@@ -1,6 +1,7 @@
 // Direct port of the web login's PasswordStrength meter (src/pages/Login.tsx)
 // — identical scoring, RN View bars instead of framer-motion divs.
 import { View, Text } from "react-native";
+import { fonts } from "@/theme/fonts";
 
 export function PasswordStrength({ password }: { password: string }) {
   if (!password) return null;
@@ -20,7 +21,7 @@ export function PasswordStrength({ password }: { password: string }) {
           />
         ))}
       </View>
-      <Text className="text-[10px] font-medium text-right" style={{ color: colors[strength] }}>
+      <Text className="text-[10px] text-right" style={{ color: colors[strength], fontFamily: fonts.body.medium }}>
         {labels[strength]}
       </Text>
     </View>
