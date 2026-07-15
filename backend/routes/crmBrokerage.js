@@ -8,8 +8,9 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 // Approve/reject is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve brokerage on this page.
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { postCrmBrokerPaymentToGL } = require("../services/crmLedger");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -245,7 +246,7 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
       return res.status(400).json({ error: `Amount exceeds the outstanding brokerage balance of ₹${remaining.toLocaleString("en-IN")}` });
     }
 
-    await pool.request()
+    const insResult = await pool.request()
       .input("bid",  sql.Int,           brokerageId)
       .input("amt",  sql.Decimal(18,2), amount)
       .input("pd",   sql.Date,          b.PaidDate || null)
@@ -255,8 +256,10 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
       .input("cb",   sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmBrokerPayment (BrokerageId, Amount, PaidDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@bid, @amt, ISNULL(@pd, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @notes, @cb, SYSDATETIME())
       `);
+    const paymentId = insResult.recordset[0].Id;
 
     // Mark as Paid once total payments reach the computed amount
     await pool.request().input("id", sql.Int, brokerageId).query(`
@@ -266,6 +269,16 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
         UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+
+    // Post to the core Finance GL — money actually paid out. Never allowed
+    // to fail the payment record itself.
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      const outcome = await postCrmBrokerPaymentToGL(pool, paymentId, actorEmail);
+      await recordGLPosting("crm-broker-payment", paymentId, outcome, actorEmail);
+    } catch (glErr) {
+      await recordGLPosting("crm-broker-payment", paymentId, { failed: true, reason: glErr.message }, actorEmail);
+    }
 
     res.status(201).json({ success: true });
   } catch (e) {

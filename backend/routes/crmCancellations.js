@@ -10,8 +10,9 @@ const { getNextDocNumber } = require("../services/docNumber");
 // Approve/reject is gated to admin/super_admin/marketing_head via this shared
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a cancellation/refund on this page.
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -223,6 +224,17 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // Post to the core Finance GL — cash actually paid back to the customer.
+    // Never allowed to fail the refund record itself.
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      const outcome = await postCrmCancellationRefundToGL(pool, id, actorEmail);
+      await recordGLPosting("crm-cancellation-refund", id, outcome, actorEmail);
+    } catch (glErr) {
+      await recordGLPosting("crm-cancellation-refund", id, { failed: true, reason: glErr.message }, actorEmail);
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-cancellations] mark-refunded error:", e.message);

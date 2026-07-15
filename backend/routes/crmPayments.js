@@ -8,6 +8,8 @@ const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
+const { recordGLPosting } = require("../services/approvalService");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -126,7 +128,7 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
     }
 
     const receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
-    await pool.request()
+    const insResult = await pool.request()
       .input("no",   sql.NVarChar(30),  receiptNo)
       .input("mid",  sql.Int,           id)
       .input("amt",  sql.Decimal(18,2), amount)
@@ -138,8 +140,10 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
       .query(`
         INSERT INTO dbo.CrmPaymentReceipt
           (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@no, @mid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME())
       `);
+    const receiptId = insResult.recordset[0].Id;
 
     // Roll up receipts into the milestone's AmountPaid / Status
     await pool.request().input("id", sql.Int, id).query(`
@@ -152,6 +156,17 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
         UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+
+    // Post to the core Finance GL — money actually received. Never allowed
+    // to fail the receipt itself; outcome logged to dbo.GLPostingLog so an
+    // unposted receipt is findable, same as every other GL-posting module.
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      const outcome = await postCrmReceiptToGL(pool, receiptId, actorEmail);
+      await recordGLPosting("crm-payment-receipt", receiptId, outcome, actorEmail);
+    } catch (glErr) {
+      await recordGLPosting("crm-payment-receipt", receiptId, { failed: true, reason: glErr.message }, actorEmail);
+    }
 
     res.status(201).json({ success: true, ReceiptNo: receiptNo });
   } catch (e) {
@@ -426,7 +441,17 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME())
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, ReceiptNo: receiptNo });
+    const onAccountId = result.recordset[0].Id;
+
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
+      await recordGLPosting("crm-on-account-payment", onAccountId, outcome, actorEmail);
+    } catch (glErr) {
+      await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
+    }
+
+    res.status(201).json({ success: true, id: onAccountId, ReceiptNo: receiptNo });
   } catch (e) {
     console.error("[crm-payments] POST /booking/:id/on-account error:", e.message);
     res.status(500).json({ error: e.message });
@@ -511,6 +536,16 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
       .input("applied", sql.Decimal(18,2), newApplied)
       .input("status", sql.NVarChar(20), newApplied >= Number(oaRow.Amount) ? "Applied" : "PartiallyApplied")
       .query("UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = @applied, Status = @status WHERE Id = @id");
+
+    // Not new cash — the deposit's cash was already posted to GL when it was
+    // received. This just moves the party's advance balance (OnAccountLedger)
+    // from "unapplied" to "applied against this milestone."
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      await postCrmOnAccountApplied(pool, onAccountId, requested, actorEmail);
+    } catch (glErr) {
+      console.error("[crm-payments] postCrmOnAccountApplied failed:", glErr.message);
+    }
 
     const finalCheck = await pool.request().input("id", sql.Int, milestoneId).query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (finalCheck.recordset[0]?.Status === "Paid") {

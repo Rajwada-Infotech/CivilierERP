@@ -110,6 +110,80 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
   }
 });
 
+// POST /standalone — buy parking only, no unit booking involved at all.
+// Payment is tracked directly on the allotment row (PaymentStatus) since
+// there's no CrmBooking/CrmPaymentMilestone schedule to hang it off of.
+//
+// Registered BEFORE POST /:bookingId deliberately — Express matches routes
+// in registration order, and "/:bookingId" is a single-segment param that
+// would otherwise greedily match the literal path "/standalone" too (as if
+// "standalone" were a bookingId), which is exactly what happened before this
+// reordering: every request here was silently swallowed by the other
+// handler, parsed "standalone" as NaN, and returned a misleading 404
+// "Booking not found" — this endpoint was unreachable dead code until now.
+router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
+    if (!b.ParkingMasterId) return res.status(400).json({ error: "ParkingMasterId is required" });
+    const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
+    if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
+
+    const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+    if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+      .query("SELECT Charge, GstRate, ParkingType FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+    if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
+    const { Charge, GstRate, ParkingType } = rate.recordset[0];
+
+    const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+    await assertSlotAvailable(pool, parkingSlotId);
+    if (parkingSlotId) await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
+    let slotNo = b.ParkingSlotNo || null;
+    if (parkingSlotId) {
+      const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
+        .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+      if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
+      slotNo = slot.recordset[0].SlotNo;
+    }
+
+    const lineAmount = Charge * qty;
+    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
+    const totalAmount = lineAmount + gstAmount;
+
+    const result = await pool.request()
+      .input("aid",  sql.Int, parseInt(b.ApplicationId))
+      .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+      .input("sid",  sql.Int, parkingSlotId)
+      .input("slot", sql.NVarChar(50), slotNo)
+      .input("qty",  sql.Int, qty)
+      .input("rate", sql.Decimal(18, 2), Charge)
+      .input("gstr", sql.Decimal(5, 2), GstRate)
+      .input("gsta", sql.Decimal(18, 2), gstAmount)
+      .input("tot",  sql.Decimal(18, 2), totalAmount)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmParkingAllotment
+          (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (NULL, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
+      `);
+
+    await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
+      { field: "StandaloneParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
+    ]);
+
+    res.status(201).json({ success: true, id: result.recordset[0].Id, TotalAmount: totalAmount });
+  } catch (e) {
+    console.error("[crm-parking] POST /standalone error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // POST /:bookingId — allot parking alongside a unit booking. Rate/GST are
 // always snapshotted from ParkingMaster at allotment time (never re-read
 // live), and a matching payment milestone is created so it's payable on its
@@ -190,72 +264,6 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
     res.status(201).json({ success: true, id: result.recordset[0].Id, TotalAmount: totalAmount });
   } catch (e) {
     console.error("[crm-parking] POST error:", e.message);
-    res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
-// POST /standalone — buy parking only, no unit booking involved at all.
-// Payment is tracked directly on the allotment row (PaymentStatus) since
-// there's no CrmBooking/CrmPaymentMilestone schedule to hang it off of.
-router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const b = req.body;
-    if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
-    if (!b.ParkingMasterId) return res.status(400).json({ error: "ParkingMasterId is required" });
-    const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
-    if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
-
-    const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-      .query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-    if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
-
-    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .query("SELECT Charge, GstRate, ParkingType FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
-    if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
-    const { Charge, GstRate, ParkingType } = rate.recordset[0];
-
-    const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
-    await assertSlotAvailable(pool, parkingSlotId);
-    if (parkingSlotId) await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
-    let slotNo = b.ParkingSlotNo || null;
-    if (parkingSlotId) {
-      const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
-        .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
-      if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
-      slotNo = slot.recordset[0].SlotNo;
-    }
-
-    const lineAmount = Charge * qty;
-    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-    const totalAmount = lineAmount + gstAmount;
-
-    const result = await pool.request()
-      .input("aid",  sql.Int, parseInt(b.ApplicationId))
-      .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .input("sid",  sql.Int, parkingSlotId)
-      .input("slot", sql.NVarChar(50), slotNo)
-      .input("qty",  sql.Int, qty)
-      .input("rate", sql.Decimal(18, 2), Charge)
-      .input("gstr", sql.Decimal(5, 2), GstRate)
-      .input("gsta", sql.Decimal(18, 2), gstAmount)
-      .input("tot",  sql.Decimal(18, 2), totalAmount)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmParkingAllotment
-          (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (NULL, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
-      `);
-
-    await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
-      { field: "StandaloneParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
-    ]);
-
-    res.status(201).json({ success: true, id: result.recordset[0].Id, TotalAmount: totalAmount });
-  } catch (e) {
-    console.error("[crm-parking] POST /standalone error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
   }
 });
