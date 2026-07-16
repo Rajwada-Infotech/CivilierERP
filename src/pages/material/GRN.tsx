@@ -838,6 +838,13 @@ export default function GRN() {
     [...finYears].sort((a, b) => b.year.localeCompare(a.year))[0]?.year ||
     undefined;
 
+  // Lock the Financial Year filter to the active year once it loads —
+  // matches PurchaseOrderMaster.tsx / VehicleInOut.tsx, which never leave
+  // it on "All Years" by default.
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYear) setSelectedFinYear(activeFinYear);
+  }, [activeFinYear, selectedFinYear]);
+
   const buildEmptyForm = () => ({
     grnNo: "",
     grnDate: new Date().toISOString().slice(0, 10),
@@ -1026,10 +1033,19 @@ export default function GRN() {
   const grnTotalWithGST = grandTotal + grandGSTAmount;
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
+  // Cache-version bumps (bumpCacheVersion("grns") on the backend) take a
+  // beat to propagate across backend workers before a refetch is
+  // guaranteed to see fresh data — PurchaseOrderMaster.tsx's approval flow
+  // already works around this with the same delay (see its
+  // handleApprovalSuccess). GRN's create/update/delete didn't have it,
+  // which is why the list looked stale until a manual browser refresh.
+  const CACHE_PROPAGATION_DELAY_MS = 400;
+
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: async (res) => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       const generated = res?.grnNo || "";
@@ -1048,6 +1064,7 @@ export default function GRN() {
       grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       setFormData(buildEmptyForm());
@@ -1063,6 +1080,7 @@ export default function GRN() {
     mutationFn: grnApi.deleteGRN,
     onSuccess: async () => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       toast.success("GRN deleted");
@@ -1144,6 +1162,11 @@ export default function GRN() {
         poNumber: po.PurchaseOrderNo ?? "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
+        // Auto-fill Company + Project straight from the PO — picking a PO
+        // first (without narrowing by company/project beforehand) now
+        // works the same as the other direction. Godown follows via the
+        // existing projectId-watching effect below.
+        companyId: po.CompanyId ? String(po.CompanyId) : prev.companyId,
         projectId: po.ProjectId ? String(po.ProjectId) : prev.projectId,
         items: lineItems.length ? lineItems : [createEmptyItem()],
         docTypeId: null,
@@ -1562,38 +1585,20 @@ export default function GRN() {
                   <div>
                     <FieldLabel>Financial Year</FieldLabel>
                     <div className="relative">
+                      {/* Locked to the active financial year — GRNs are
+                          always booked against the current FY, same as
+                          Doc Date is locked to today elsewhere. */}
                       <select
                         value={selectedFinYear}
-                        onChange={(e) => {
-                          setSelectedFinYear(e.target.value);
-                          setPage(1);
-                          setFormData((prev) => ({
-                            ...prev,
-                            companyId: "",
-                            projectId: "",
-                            poId: "",
-                            poNumber: "",
-                            supplierId: "",
-                            supplierName: "",
-                            items: [createEmptyItem()],
-                            grnNo: "",
-                            docNo: "",
-                            parentDocNo: "",
-                            rootExBDocNo: "",
-                            finYear: e.target.value,
-                          }));
-                        }}
-                        className={inpSel}
+                        disabled
+                        title="Locked to the active financial year"
+                        className={`${inpSel} opacity-70 cursor-not-allowed bg-muted/30`}
                       >
-                        <option value="">All Years</option>
-                        {finYears
-                          .filter((fy) => fy.status === "Active" && !fy.locked)
-                          .sort((a, b) => b.year.localeCompare(a.year))
-                          .map((fy) => (
-                            <option key={fy.id} value={fy.year}>
-                              {fy.year}
-                            </option>
-                          ))}
+                        {selectedFinYear ? (
+                          <option value={selectedFinYear}>{selectedFinYear}</option>
+                        ) : (
+                          <option value="">Loading…</option>
+                        )}
                       </select>
                       <ChevronDown
                         size={12}
