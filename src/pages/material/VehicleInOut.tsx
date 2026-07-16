@@ -680,17 +680,16 @@ export default function VehicleInOut() {
     retry: false,
   });
 
-  // POs filtered to the selected supplier
+  // Selectable POs — status-filtered only, not supplier-filtered, since PO
+  // is now picked first and drives the supplier (not the other way round).
   const filteredPOs = useMemo(() => {
-    if (!form.supplierId) return [];
     return (allPOs as any[]).filter(
       (po: any) =>
-        String(po.SupplierID) === String(form.supplierId) &&
-        (po.Status === "Approved" ||
-          po.Status === "Pending" ||
-          po.Status === "Received"),
+        po.Status === "Approved" ||
+        po.Status === "Pending" ||
+        po.Status === "Received",
     );
-  }, [allPOs, form.supplierId]);
+  }, [allPOs]);
 
   // Live PO line items + how much is already received across other lots
   // (excludes this record's own rows when editing, via editingId) — the
@@ -1262,52 +1261,15 @@ export default function VehicleInOut() {
                 </div>
               </SectionCard>
 
-              {/* ── Section 2: Supplier & PO ── */}
+              {/* ── Section 2: PO & Supplier ── */}
               <SectionCard>
                 <SectionTitle
                   icon={Filter}
-                  label="Supplier & Purchase Order"
-                  sub="Select supplier then filter linked POs"
+                  label="Purchase Order & Supplier"
+                  sub="Select a PO — supplier is fetched automatically"
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Supplier */}
-                  <div>
-                    <FieldLabel>Supplier</FieldLabel>
-                    <div className="relative">
-                      <select
-                        value={form.supplierId ?? ""}
-                        onChange={(e) => {
-                          const id = e.target.value
-                            ? Number(e.target.value)
-                            : null;
-                          const sup = (suppliers as any[]).find(
-                            (s: any) => Number(s.id) === id,
-                          );
-                          pf({
-                            supplierId: id,
-                            supplierName: sup?.label ?? "",
-                            contactPerson: sup?.contactPerson ?? "",
-                            poId: null,
-                            poNumber: "",
-                          });
-                        }}
-                        className={inpSel}
-                      >
-                        <option value="">Select Supplier…</option>
-                        {(suppliers as any[]).map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={12}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
-                  </div>
-
                   {/* PO */}
                   <div>
                     <FieldLabel>Purchase Order</FieldLabel>
@@ -1324,20 +1286,24 @@ export default function VehicleInOut() {
                           pf({
                             poId: id,
                             poNumber: po?.DocNo || po?.PurchaseOrderNo || "",
+                            // Auto-fetch supplier from the selected PO —
+                            // PO now drives supplier, not the other way
+                            // round.
+                            supplierId: po?.SupplierID ?? null,
+                            supplierName: po?.SupplierName ?? "",
+                            contactPerson:
+                              (suppliers as any[]).find(
+                                (s: any) => Number(s.id) === Number(po?.SupplierID),
+                              )?.contactPerson ?? "",
                           });
                           // Switching POs invalidates any received-qty
                           // entered against the previous PO's line items.
                           setReceivedQtyByItem({});
                         }}
-                        disabled={!form.supplierId}
-                        className={`${inpSel} ${!form.supplierId ? "opacity-60 cursor-not-allowed" : ""}`}
+                        className={inpSel}
                       >
                         <option value="">
-                          {!form.supplierId
-                            ? "Select a supplier first"
-                            : filteredPOs.length === 0
-                              ? "No POs for this supplier"
-                              : "Select PO…"}
+                          {filteredPOs.length === 0 ? "No POs available" : "Select PO…"}
                         </option>
                         {filteredPOs.map((po: any) => (
                           <option
@@ -1345,6 +1311,54 @@ export default function VehicleInOut() {
                             value={po.PurchaseOrderID}
                           >
                             {po.DocNo || po.PurchaseOrderNo}
+                            {po.SupplierName ? ` — ${po.SupplierName}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Supplier — auto-filled from the selected PO; still
+                      manually pickable for a standalone (no-PO) entry, in
+                      which case any already-selected PO is cleared so the
+                      two fields can't disagree. */}
+                  <div>
+                    <FieldLabel>Supplier</FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={form.supplierId ?? ""}
+                        onChange={(e) => {
+                          const id = e.target.value
+                            ? Number(e.target.value)
+                            : null;
+                          const sup = (suppliers as any[]).find(
+                            (s: any) => Number(s.id) === id,
+                          );
+                          const poMismatch =
+                            form.poId != null &&
+                            String(
+                              filteredPOs.find(
+                                (p: any) => p.PurchaseOrderID === form.poId,
+                              )?.SupplierID,
+                            ) !== String(id);
+                          pf({
+                            supplierId: id,
+                            supplierName: sup?.label ?? "",
+                            contactPerson: sup?.contactPerson ?? "",
+                            ...(poMismatch ? { poId: null, poNumber: "" } : {}),
+                          });
+                          if (poMismatch) setReceivedQtyByItem({});
+                        }}
+                        className={inpSel}
+                      >
+                        <option value="">Select Supplier…</option>
+                        {(suppliers as any[]).map((s: any) => (
+                          <option key={s.id} value={s.id}>
+                            {s.label}
                           </option>
                         ))}
                       </select>
