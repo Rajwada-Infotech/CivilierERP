@@ -95,6 +95,7 @@ import {
   Upload,
   Loader2 as Loader2Icon,
   MessageCircle,
+  Lock,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { useAuth } from "@/contexts/AuthContext";
@@ -171,6 +172,7 @@ interface POLineItem {
   gstRate: number; // effective total GST % (igst if set, else cgst+sgst)
   taxAmount: number; // qty * rate * gstRate / 100
   amount: number; // qty * rate + taxAmount (inclusive of GST)
+  uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
 }
 
 interface POForm {
@@ -186,8 +188,6 @@ interface POForm {
   docNo: string;
   status: string;
   costCenterId: string;
-  vendorInvoiceDate: string;
-  vendorInvoiceNo: string;
 }
 
 interface DropdownOption {
@@ -278,8 +278,6 @@ const EMPTY_FORM = (): POForm => ({
   docNo: "",
   status: "Draft",
   costCenterId: "",
-  vendorInvoiceDate: "",
-  vendorInvoiceNo: "",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -429,7 +427,12 @@ const PurchaseOrderMaster: React.FC = () => {
         }
       })
       .finally(() => setPoDocTypesLoading(false));
-  }, []);
+    // qtPrefill is included so arriving from the L1 chart via a
+    // location.state update (without a full remount of this page) still
+    // re-evaluates the QPO-vs-DPO auto-select instead of using whatever
+    // was captured on the very first mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtPrefill]);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter(
@@ -1050,6 +1053,7 @@ const PurchaseOrderMaster: React.FC = () => {
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        uomLocked: true,
       };
     });
 
@@ -1525,8 +1529,6 @@ const PurchaseOrderMaster: React.FC = () => {
           : "Pending", // creation always auto-submits; backend ignores this field on create anyway
       Remarks: form.remarks || null,
       CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
-      VendorInvoiceDate: form.vendorInvoiceDate || null,
-      VendorInvoiceNo: form.vendorInvoiceNo || null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
         ? null
@@ -1980,10 +1982,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
       docNo,
       status: raw.Status ?? "Draft",
       costCenterId: String(raw.CostCenterId ?? ""),
-      vendorInvoiceDate: raw.VendorInvoiceDate
-        ? raw.VendorInvoiceDate.slice(0, 10)
-        : "",
-      vendorInvoiceNo: raw.VendorInvoiceNo ?? "",
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2785,21 +2783,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             viewingPO.CostCenterName ??
                             viewingPO.costCenterName ??
                             "—",
-                        },
-                        {
-                          label: "Vendor Invoice No",
-                          value:
-                            viewingPO.VendorInvoiceNo ??
-                            viewingPO.vendorInvoiceNo ??
-                            "—",
-                        },
-                        {
-                          label: "Vendor Invoice Date",
-                          value: viewingPO.VendorInvoiceDate
-                            ? new Date(
-                                viewingPO.VendorInvoiceDate,
-                              ).toLocaleDateString("en-IN")
-                            : "—",
                         },
                         {
                           label: "Total Amount",
@@ -3881,38 +3864,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 </select>
               </div>
 
-              {/* Vendor Invoice No */}
-              <div>
-                <FieldLabel>Vendor Invoice No</FieldLabel>
-                <input
-                  type="text"
-                  placeholder="Vendor invoice number"
-                  value={form.vendorInvoiceNo}
-                  onChange={(e) => setField("vendorInvoiceNo", e.target.value)}
-                  readOnly={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-                />
-              </div>
-
-              {/* Vendor Invoice Date */}
-              <div>
-                <FieldLabel>Vendor Invoice Date</FieldLabel>
-                <div className="relative">
-                  <CalendarDays
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <input
-                    type="date"
-                    value={form.vendorInvoiceDate}
-                    onChange={(e) =>
-                      setField("vendorInvoiceDate", e.target.value)
-                    }
-                    readOnly={isReadOnly}
-                    className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                  />
-                </div>
-              </div>
             </div>
           </div>
           {/* ── Supplier, Company & Project Info Panels (auto-fetched on selection) ──── */}
@@ -4275,6 +4226,14 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       <td className="px-3 py-2">
                         {isReadOnly ? (
                           <span className="text-sm text-muted-foreground">
+                            {li.unit || "—"}
+                          </span>
+                        ) : li.uomLocked ? (
+                          <span
+                            className="flex items-center gap-1 text-sm text-muted-foreground"
+                            title="UOM is locked to what was quoted — remove and re-add the item to change it"
+                          >
+                            <Lock size={11} className="shrink-0" />
                             {li.unit || "—"}
                           </span>
                         ) : (
