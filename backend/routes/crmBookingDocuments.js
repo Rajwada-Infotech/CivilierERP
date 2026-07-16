@@ -129,6 +129,67 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
   });
 });
 
+// GET /application/:applicationId — documents captured at Application stage
+// (Phase 1 of the Application/Booking redesign) — same table, same file
+// pipeline, just keyed by ApplicationId instead of BookingId since no
+// booking exists yet at this point.
+router.get("/application/:applicationId", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const applicationId = parseInt(req.params.applicationId);
+    const result = await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT d.*, u.name AS VerifiedByName
+      FROM dbo.CrmBookingDocument d
+      LEFT JOIN dbo.Users u ON u.id = d.VerifiedBy
+      WHERE d.ApplicationId = @aid
+      ORDER BY d.CreatedAt
+    `);
+    res.json({ documents: result.recordset, standardTypes: STANDARD_DOC_TYPES });
+  } catch (e) {
+    console.error("[crm-booking-documents] GET /application error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/application/:applicationId/upload", requirePageRight("crm-applications", "edit"), (req, res) => {
+  upload.array("files", 10)(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    try {
+      const pool = getPool();
+      const applicationId = parseInt(req.params.applicationId);
+      const docType = req.body?.DocumentType?.trim();
+      if (!docType) return res.status(400).json({ error: "DocumentType is required" });
+      if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+
+      const inserted = [];
+      for (const file of req.files) {
+        const result = await pool.request()
+          .input("aid",  sql.Int, applicationId)
+          .input("type", sql.NVarChar(100), docType)
+          .input("fn",   sql.NVarChar(300), file.originalname)
+          .input("fp",   sql.NVarChar(500), file.path)
+          .input("fs",   sql.BigInt, file.size)
+          .input("mt",   sql.NVarChar(150), file.mimetype)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmBookingDocument (ApplicationId, DocumentType, FileName, FilePath, FileSize, MimeType, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.Id
+            VALUES (@aid, @type, @fn, @fp, @fs, @mt, @cb, SYSDATETIME())
+          `);
+        inserted.push(result.recordset[0].Id);
+      }
+      res.status(201).json({ success: true, ids: inserted, count: inserted.length });
+    } catch (e) {
+      for (const file of req.files || []) {
+        const resolved = path.resolve(file.path);
+        if (resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolved, () => {});
+      }
+      console.error("[crm-booking-documents] application upload error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
 // GET /file/:id — stream a document's file for inline preview/download
 router.get("/file/:id", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {

@@ -97,10 +97,11 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
         .input("pid",  sql.Int,           planId)
         .input("mno",  sql.Int,           idx + 1)
         .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
+        .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
         .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
         .query(`
-          INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, [Percent])
-          VALUES (@pid, @mno, @mname, @pct)
+          INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
+          VALUES (@pid, @mno, @mname, @mmid, @pct)
         `);
     }
 
@@ -161,10 +162,11 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
           .input("pid",  sql.Int,           id)
           .input("mno",  sql.Int,           idx + 1)
           .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
+          .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
           .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
           .query(`
-            INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, [Percent])
-            VALUES (@pid, @mno, @mname, @pct)
+            INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
+            VALUES (@pid, @mno, @mname, @mmid, @pct)
           `);
       }
     }

@@ -158,32 +158,6 @@ const exportColumns: ExportColumn[] = [
 
 const SaLeadManagement: React.FC = () => {
   const queryClient = useQueryClient();
-  const [bookingLead, setBookingLead] = useState<RecordWithId | null>(null);
-  // UnitId is a real Unit Master selection, not free text — the CRM booking
-  // endpoint this feeds (createCrmBookingRecord) hard-requires a genuine
-  // dbo.UnitMaster.Id, matching the workflow spec's "Unit Master involvement
-  // is mandatory" requirement. RatePerSqFt/TotalValue/BookingAmount are the
-  // only fields still hand-entered — unit name/type/area/project always
-  // come from the selected unit itself.
-  const { data: availableUnits = [] } = useQuery({
-    queryKey: ["sa-leads-available-units"],
-    queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/available-units`);
-      if (!res.ok) return [];
-      return res.json();
-    },
-    staleTime: 30_000,
-  });
-  const [bookingForm, setBookingForm] = useState({
-    UnitId: "",
-    RatePerSqFt: "",
-    TotalValue: "",
-    BookingAmount: "",
-    TokenType: "Percentage",
-    TokenValue: "",
-    BookingDate: new Date().toISOString().slice(0, 10),
-    PaymentMode: "",
-  });
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"list" | "pipeline" | "tracking" | "audit">("list");
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
@@ -306,8 +280,8 @@ const SaLeadManagement: React.FC = () => {
       TeamLeadName: l.TeamLeadName ?? "",
       AssignedSalespersonId: String(l.AssignedSalespersonId ?? ""),
       SalespersonName: l.SalespersonName ?? "",
-      FollowupCustomerId: l.FollowupCustomerId ?? "",
-      BookingId: l.BookingId ?? "",
+      FollowupCustomerId: l.CrmApplicationId ?? "",
+      BookingId: l.CrmBookingId ?? "",
     }));
   }, [leads]);
 
@@ -389,60 +363,6 @@ const SaLeadManagement: React.FC = () => {
       await invalidateLeadFlow();
     } catch (err: any) {
       toast.error(err.message || "Failed to promote lead");
-    } finally {
-      setHandoffLoading(null);
-    }
-  };
-
-  const resetBookingForm = () => {
-    setBookingForm({
-      UnitId: "",
-      RatePerSqFt: "",
-      TotalValue: "",
-      BookingAmount: "",
-      TokenType: "Percentage",
-      TokenValue: "",
-      BookingDate: new Date().toISOString().slice(0, 10),
-      PaymentMode: "",
-    });
-  };
-
-  const openBookingDialog = (row: RecordWithId) => {
-    setBookingLead(row);
-    setBookingForm((current) => ({
-      ...current,
-      BookingDate: new Date().toISOString().slice(0, 10),
-    }));
-  };
-
-  const promoteToBooking = async () => {
-    if (!bookingLead) return;
-    if (!bookingForm.UnitId) return toast.error("Select a unit from Unit Master");
-    setHandoffLoading(`booking-${bookingLead._id}`);
-    try {
-      const payload = {
-        UnitId: parseInt(bookingForm.UnitId),
-        RatePerSqFt: bookingForm.RatePerSqFt ? parseFloat(bookingForm.RatePerSqFt) : null,
-        TotalValue: bookingForm.TotalValue ? parseFloat(bookingForm.TotalValue) : null,
-        BookingAmount: bookingForm.BookingAmount ? parseFloat(bookingForm.BookingAmount) : 0,
-        TokenType: bookingForm.TokenType,
-        TokenValue: bookingForm.TokenValue ? parseFloat(bookingForm.TokenValue) : null,
-        BookingDate: bookingForm.BookingDate || new Date().toISOString().slice(0, 10),
-        PaymentMode: bookingForm.PaymentMode || null,
-      };
-      const res = await fetchWithAuth(`${API}/${bookingLead._id}/promote-booking`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to promote lead to booking");
-      toast.success(data.message || "Lead promoted to booking");
-      setBookingLead(null);
-      resetBookingForm();
-      await invalidateLeadFlow();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to promote lead to booking");
     } finally {
       setHandoffLoading(null);
     }
@@ -739,10 +659,9 @@ const SaLeadManagement: React.FC = () => {
                 {hasFollowup && (
                   <button
                     type="button"
-                    onClick={() => openBookingDialog(row)}
-                    disabled={handoffLoading === `booking-${row._id}`}
-                    className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-40"
-                    title="Promote to booking"
+                    onClick={() => window.open("/crm/applications", "_blank")}
+                    className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                    title="Continue in CRM Application — unit, rate, payment plan, and admin approval all happen there now"
                   >
                     <IndianRupee size={13} />
                   </button>
@@ -794,101 +713,7 @@ const SaLeadManagement: React.FC = () => {
             ],
           }}
         />
-        <Dialog open={!!bookingLead} onOpenChange={(open) => {
-          if (!open) {
-            setBookingLead(null);
-            resetBookingForm();
-          }
-        }}>
-          <DialogContent className="max-w-xl">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base">Promote Lead to Booking</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {bookingLead && (
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-sm font-medium text-foreground">{String(bookingLead.CustomerName ?? "")}</p>
-                  <p className="text-xs text-muted-foreground">{String(bookingLead.LeadUid ?? "")} · {String(bookingLead.Mobile ?? "")}</p>
-                </div>
-              )}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Unit (Unit Master)<span className="text-destructive ml-0.5">*</span>
-                </label>
-                <select
-                  value={bookingForm.UnitId}
-                  onChange={(e) => setBookingForm((current) => ({ ...current, UnitId: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                >
-                  <option value="">Select an available unit...</option>
-                  {(availableUnits as any[]).map((u) => (
-                    <option key={u.Id} value={String(u.Id)}>
-                      {u.ProjectName ? `${u.ProjectName} — ` : ""}{u.UnitName}{u.UnitType ? ` (${u.UnitType})` : ""}{u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
-                    </option>
-                  ))}
-                </select>
-                {availableUnits.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1">No available units found — all active units are already booked.</p>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  ["RatePerSqFt", "Rate Per Sq Ft", "number", false],
-                  ["TotalValue", "Total Value", "number", false],
-                  ["TokenValue", `Token Value (${bookingForm.TokenType === "Amount" ? "₹" : "%"})`, "number", false],
-                  ["BookingAmount", "Booking Amount (override)", "number", false],
-                  ["BookingDate", "Booking Date", "date", false],
-                  ["PaymentMode", "Payment Mode", "text", false],
-                ].map(([key, label, type]) => (
-                  <div key={String(key)}>
-                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                      {label}
-                    </label>
-                    <input
-                      type={String(type)}
-                      value={bookingForm[key as keyof typeof bookingForm]}
-                      onChange={(e) => setBookingForm((current) => ({ ...current, [String(key)]: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                ))}
-                <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                    Token Type
-                  </label>
-                  <select
-                    value={bookingForm.TokenType}
-                    onChange={(e) => setBookingForm((current) => ({ ...current, TokenType: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="Percentage">Percentage</option>
-                    <option value="Amount">Fixed Amount</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBookingLead(null);
-                    resetBookingForm();
-                  }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={promoteToBooking}
-                  disabled={handoffLoading === `booking-${bookingLead?._id}`}
-                  className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
-                >
-                  {handoffLoading === `booking-${bookingLead?._id}` ? "Promoting..." : "Promote"}
-                </button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog></>}
+        </>}
       </div>
 
       {/* Transfer Leads Dialog */}

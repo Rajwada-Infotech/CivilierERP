@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Car, Trash2, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -131,6 +132,49 @@ const CrmParkingBooking: React.FC = () => {
     }
   };
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "ApplicantName", header: "Customer", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName || "—"}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile || "—"}</div>
+        </div>
+      ) },
+    { id: "booking", header: "Booking", size: 110, enableSorting: false,
+      cell: (i) => i.row.original.BookingNo ? (
+        <span className="font-mono text-xs">{i.row.original.BookingNo}</span>
+      ) : (
+        <span className="text-xs px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-600">Standalone</span>
+      ) },
+    { accessorKey: "CurrentParkingType", header: "Type", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string}</span> },
+    { id: "slot", header: "Slot", size: 90, enableSorting: false,
+      cell: (i) => <span className="text-xs">{i.row.original.SlotNo || i.row.original.ParkingSlotNo || "—"}</span> },
+    { accessorKey: "Quantity", header: "Qty", size: 60, cell: (i) => <span className="text-xs">{i.getValue() as number}</span> },
+    { accessorKey: "TotalAmount", header: "Amount", size: 110, cell: (i) => <span className="font-semibold">{inr(i.row.original.TotalAmount)}</span> },
+    { accessorKey: "PaymentStatus", header: "Status", size: 100,
+      cell: (i) => (
+        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${i.row.original.PaymentStatus === "Paid" ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+          {i.row.original.PaymentStatus}
+        </span>
+      ) },
+    { id: "actions", header: "Actions", size: 150, enableSorting: false,
+      cell: (i) => {
+        const a = i.row.original;
+        return (
+          <div className="flex items-center gap-2">
+            {!a.BookingId && a.PaymentStatus !== "Paid" && (
+              <button onClick={() => handleMarkPaid(a.Id)} className="text-xs text-green-600 hover:underline flex items-center gap-1">
+                <CheckCircle2 size={12} /> Mark Paid
+              </button>
+            )}
+            <button onClick={() => handleRemove(a.Id)} className="text-xs text-red-600 hover:underline flex items-center gap-1">
+              <Trash2 size={12} /> Remove
+            </button>
+          </div>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Parking Booking"
@@ -156,59 +200,14 @@ const CrmParkingBooking: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Customer", "Booking", "Type", "Slot", "Qty", "Amount", "Status", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">No parking allotments yet</td></tr>
-            ) : (filtered as any[]).map((a: any) => (
-              <tr key={a.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{a.ApplicantName || "—"}</div>
-                  <div className="text-xs text-muted-foreground">{a.Mobile || "—"}</div>
-                </td>
-                <td className="px-4 py-3">
-                  {a.BookingNo ? (
-                    <span className="font-mono text-xs">{a.BookingNo}</span>
-                  ) : (
-                    <span className="text-xs px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-600">Standalone</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-xs">{a.CurrentParkingType}</td>
-                <td className="px-4 py-3 text-xs">{a.SlotNo || a.ParkingSlotNo || "—"}</td>
-                <td className="px-4 py-3 text-xs">{a.Quantity}</td>
-                <td className="px-4 py-3 font-semibold">{inr(a.TotalAmount)}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === "Paid" ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                    {a.PaymentStatus}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    {!a.BookingId && a.PaymentStatus !== "Paid" && (
-                      <button onClick={() => handleMarkPaid(a.Id)} className="text-xs text-green-600 hover:underline flex items-center gap-1">
-                        <CheckCircle2 size={12} /> Mark Paid
-                      </button>
-                    )}
-                    <button onClick={() => handleRemove(a.Id)} className="text-xs text-red-600 hover:underline flex items-center gap-1">
-                      <Trash2 size={12} /> Remove
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={columns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No parking allotments yet"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) resetForm(); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">

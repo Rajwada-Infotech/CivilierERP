@@ -438,6 +438,13 @@ const crmSetupItems = [
     pageKey: "crm-payment-plans",
   },
   {
+    icon: ClipboardList,
+    label: "Milestone Master",
+    path: "/crm/milestone-master",
+    color: "text-teal-500",
+    pageKey: "crm-milestone-master",
+  },
+  {
     icon: CreditCard,
     label: "Home Loan Tracking",
     path: "/crm/loan-details",

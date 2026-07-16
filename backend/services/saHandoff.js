@@ -6,39 +6,36 @@
  *   createCrmApplicationRecord() the /api/crm/applications route itself
  *   uses), stamps SaLead.CrmApplicationId, sets Status to "InFollowup".
  *
- * promoteLeadToBooking(pool, leadId, bookingData, userId)
- *   Creates a real dbo.CrmBooking (via createCrmBookingRecord() — same
- *   Unit Master validation, milestone auto-generation, and hold conversion
- *   the /api/crm/bookings route uses). bookingData.UnitId is REQUIRED — a
- *   real Unit Master selection, not a free-text unit number, matching the
- *   workflow spec's "Unit Master involvement is mandatory" requirement.
- *   Stamps SaLead.CrmBookingId, sets Status to "Booked".
+ * That is now the ONLY handoff step SA is responsible for. There used to
+ * also be a promoteLeadToBooking() here that created a dbo.CrmBooking
+ * directly — a self-service action gated only by "sa-leads" edit, meaning
+ * any salesperson could instantly create a real booking with zero admin
+ * approval. That completely bypassed the exact self-approval gate the CRM
+ * Applications/Bookings redesign was built to close (see crmApplications.js
+ * PUT /:id/approve — approve/reject is admin/super_admin/dba-only via the
+ * shared approvalTransition() engine on purpose). Removed rather than left
+ * as a parallel shortcut: once a lead is promoted to an Application here,
+ * it's a normal dbo.CrmApplication indistinguishable from one filed
+ * directly — same 4-step capture wizard, same admin approval gate, same
+ * auto-booking-on-approval. The Sales Automation UI now links straight
+ * into that Application instead of offering its own booking dialog.
  *
- * Idempotent: if CrmApplicationId/CrmBookingId is already set, returns
- * early without duplicating (backstopped by a real UNIQUE index on
+ * Idempotent: if CrmApplicationId is already set, returns early without
+ * duplicating (backstopped by a real UNIQUE index on
  * CrmApplication.LeadId — see migration 180 — so even a race between two
  * concurrent promote clicks can't create two applications for one lead).
  *
- * Deliberately NOT wrapped in an outer pool.transaction(): the shared
- * creation functions call getNextDocNumber(), which opens its own internal
- * transaction on the real ConnectionPool (pool.transaction()) — a method
- * that doesn't exist on a Transaction object, so nesting one here would
- * break it. The SaLead stamp is a separate, immediately-following query
- * instead; if a crash lands between the two, the lead simply appears
- * un-promoted and a retry is caught cleanly by the unique index/idempotency
- * check above rather than silently duplicating.
- *
- * These previously wrote into dbo.FollowupApplications/FollowupBookings —
- * a legacy module the rest of the CRM pipeline (Agreement, Payments, Sale
- * Deed, Handover, Customer Portal) never reads from, meaning every lead
- * promoted from the Sales Automation screen dead-ended and never actually
- * entered the real, wired-up workflow. Fixed to call the same creation
- * logic the CRM routes themselves use, so a lead promoted here is
- * indistinguishable from one entered directly on the Applications/Bookings
- * pages — same validation, same downstream behavior, same portal sync.
+ * This previously wrote into dbo.FollowupApplications — a legacy module the
+ * rest of the CRM pipeline (Agreement, Payments, Sale Deed, Handover,
+ * Customer Portal) never reads from, meaning every lead promoted from the
+ * Sales Automation screen dead-ended and never actually entered the real,
+ * wired-up workflow. Fixed to call the same creation logic the CRM routes
+ * themselves use, so a lead promoted here is indistinguishable from one
+ * entered directly on the Applications page — same validation, same
+ * downstream behavior, same portal sync.
  */
 const { sql } = require("../db");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError } = require("./crmEntityCreation");
+const { createCrmApplicationRecord, CrmCreationError } = require("./crmEntityCreation");
 
 async function promoteLeadToFollowup(pool, leadId, userId) {
   const leadResult = await pool.request()
@@ -119,50 +116,4 @@ async function promoteLeadToFollowup(pool, leadId, userId) {
   return { success: true, applicantId };
 }
 
-async function promoteLeadToBooking(pool, leadId, bookingData, userId) {
-  const leadResult = await pool.request()
-    .input("lid", sql.Int, leadId)
-    .query("SELECT * FROM dbo.SaLead WHERE Id = @lid");
-  const lead = leadResult.recordset[0];
-  if (!lead) throw new Error("Lead not found");
-  if (lead.CrmBookingId) {
-    return { alreadyBooked: true, bookingId: lead.CrmBookingId };
-  }
-  if (!lead.CrmApplicationId) {
-    throw new Error("Lead must be promoted to an application first (no CrmApplicationId)");
-  }
-
-  const b = bookingData || {};
-  if (!b.UnitId) {
-    const err = new Error("UnitId is required — pick a real unit from Unit Master before booking (spec: Unit Master involvement is mandatory)");
-    err.status = 400;
-    throw err;
-  }
-
-  const { id: bookingId } = await createCrmBookingRecord(pool, {
-    ApplicationId: lead.CrmApplicationId,
-    UnitId: b.UnitId,
-    TokenType: b.TokenType,
-    TokenValue: b.TokenValue,
-    TotalValue: b.TotalValue,
-    BookingAmount: b.BookingAmount,
-    BookingDate: b.BookingDate || new Date(),
-    PaymentMode: b.PaymentMode,
-    PaymentPlanId: b.PaymentPlanId,
-    AssignedTo: lead.AssignedSalespersonId || null,
-    Notes: `Promoted from SA Lead ${lead.LeadUid}`,
-  }, userId);
-
-  await pool.request()
-    .input("lid", sql.Int, leadId)
-    .input("bid", sql.Int, bookingId)
-    .query(`
-      UPDATE dbo.SaLead
-      SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
-      WHERE Id = @lid
-    `);
-
-  return { success: true, bookingId };
-}
-
-module.exports = { promoteLeadToFollowup, promoteLeadToBooking };
+module.exports = { promoteLeadToFollowup };

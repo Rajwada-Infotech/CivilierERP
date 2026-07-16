@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
+  ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -67,6 +69,13 @@ async function fetchExtraChargeTypes(): Promise<any[]> {
 
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
+  const { canDoAction } = useAuth();
+  // Bookings is now a review + restricted-edit surface (Applications and
+  // Bookings) — super admin grants "crm-bookings" edit per-user via Menu
+  // Rights instead of it being a broad role default, so every mutating
+  // control here must check this explicitly rather than assume anyone who
+  // can view the page can also edit it.
+  const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Main");
   const [paymentPlanId, setPaymentPlanId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -76,6 +85,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
   const [chargesSaving, setChargesSaving] = useState(false);
+  const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["crm-booking-detail", bookingId],
@@ -224,6 +234,47 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  const INVOICE_SORT_COLS: { key: string; label: string }[] = [
+    { key: "InvoiceNo", label: "Invoice No" },
+    { key: "InvoiceType", label: "Type" },
+    { key: "Amount", label: "Amount" },
+    { key: "InvoiceDate", label: "Date" },
+    { key: "Status", label: "Status" },
+    { key: "CreatedByName", label: "By" },
+  ];
+
+  const toggleInvoiceSort = (key: string) => {
+    setInvoiceSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const sortedInvoices = useMemo(() => {
+    const rows = (invoices as any[]).slice();
+    if (!invoiceSort) return rows;
+    const { key, dir } = invoiceSort;
+    rows.sort((a, b) => {
+      let av = a?.[key];
+      let bv = b?.[key];
+      if (key === "Amount") {
+        av = Number(av) || 0;
+        bv = Number(bv) || 0;
+      } else if (key === "InvoiceDate") {
+        av = av ? new Date(av).getTime() : 0;
+        bv = bv ? new Date(bv).getTime() : 0;
+      } else {
+        av = (av ?? "").toString().toLowerCase();
+        bv = (bv ?? "").toString().toLowerCase();
+      }
+      if (av < bv) return dir === "asc" ? -1 : 1;
+      if (av > bv) return dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return rows;
+  }, [invoices, invoiceSort]);
+
   const effectivePlanId = paymentPlanId ?? (booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "");
 
   const handleSaveMain = async () => {
@@ -355,8 +406,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <div className="col-span-2">
                     <label className="text-xs text-muted-foreground block mb-1">Payment Plan</label>
-                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)} disabled={!canEdit}
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
                       <option value="">— No plan (7-stage default) —</option>
                       {(plans as any[]).map((p: any) => (
                         <option key={p.Id} value={String(p.Id)}>{p.PlanName}{!p.CompanyId && !p.ProjectId ? " (Global)" : ""}</option>
@@ -364,12 +415,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </select>
                   </div>
                 </div>
-                <div className="flex justify-end">
-                  <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
-                    className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {saving ? "Saving..." : "Save Payment Plan"}
-                  </button>
-                </div>
+                {canEdit && (
+                  <div className="flex justify-end">
+                    <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
+                      className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                      {saving ? "Saving..." : "Save Payment Plan"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -444,44 +497,48 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-semibold">{fmt(p.TotalAmount)}</span>
-                            <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">Remove</button>
+                            {canEdit && <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">Remove</button>}
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    <select value={parkingForm.ParkingMasterId}
-                      onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
-                      className="col-span-2 text-xs border border-border rounded px-2 py-1.5 bg-background">
-                      <option value="">Select parking rate</option>
-                      {applicableParkingRates.map((r: any) => (
-                        <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} (+{r.GstRate}% GST)</option>
-                      ))}
-                    </select>
-                    {availableParkingSlots.length > 0 ? (
-                      <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background">
-                        <option value="">Slot (optional)</option>
-                        {availableParkingSlots.map((s: any) => (
-                          <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
-                        onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                    )}
-                    <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
-                      onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                      className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
-                  <button onClick={handleAddParking} disabled={chargesSaving}
-                    className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-                    + Allot Parking
-                  </button>
-                  {applicableParkingRates.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
+                  {canEdit && (
+                    <>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <select value={parkingForm.ParkingMasterId}
+                          onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
+                          className="col-span-2 text-xs border border-border rounded px-2 py-1.5 bg-background">
+                          <option value="">Select parking rate</option>
+                          {applicableParkingRates.map((r: any) => (
+                            <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} (+{r.GstRate}% GST)</option>
+                          ))}
+                        </select>
+                        {availableParkingSlots.length > 0 ? (
+                          <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
+                            <option value="">Slot (optional)</option>
+                            {availableParkingSlots.map((s: any) => (
+                              <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
+                            onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                        )}
+                        <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
+                          onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                          className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                      </div>
+                      <button onClick={handleAddParking} disabled={chargesSaving}
+                        className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
+                        + Allot Parking
+                      </button>
+                      {applicableParkingRates.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
+                      )}
+                    </>
                   )}
 
                   <div className="pt-2 border-t border-border/60 space-y-2">
@@ -493,44 +550,48 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             <span className="font-medium">{c.Description}</span>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold">{fmt(c.TotalAmount)}</span>
-                              <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">Remove</button>
+                              {canEdit && <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">Remove</button>}
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <select value={extraForm.ExtraChargeMasterId}
-                        onChange={(e) => {
-                          const master = (chargeTypes as any[]).find((c: any) => String(c.Id) === e.target.value);
-                          setExtraForm((f) => ({
-                            ...f,
-                            ExtraChargeMasterId: e.target.value,
-                            Description: master ? master.ChargeName : f.Description,
-                            Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
-                            GstRate: master ? String(master.GstRate) : f.GstRate,
-                          }));
-                        }}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background">
-                        <option value="">Custom (type below)</option>
-                        {(chargeTypes as any[]).filter((c: any) => c.IsActive).map((c: any) => (
-                          <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
-                        ))}
-                      </select>
-                      <input placeholder="Description" value={extraForm.Description}
-                        onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                      <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
-                        onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                      <input type="number" placeholder="GST %" value={extraForm.GstRate}
-                        onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-                        className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                    </div>
-                    <button onClick={handleAddExtra} disabled={chargesSaving}
-                      className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-                      + Add Charge
-                    </button>
+                    {canEdit && (
+                      <>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <select value={extraForm.ExtraChargeMasterId}
+                            onChange={(e) => {
+                              const master = (chargeTypes as any[]).find((c: any) => String(c.Id) === e.target.value);
+                              setExtraForm((f) => ({
+                                ...f,
+                                ExtraChargeMasterId: e.target.value,
+                                Description: master ? master.ChargeName : f.Description,
+                                Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
+                                GstRate: master ? String(master.GstRate) : f.GstRate,
+                              }));
+                            }}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
+                            <option value="">Custom (type below)</option>
+                            {(chargeTypes as any[]).filter((c: any) => c.IsActive).map((c: any) => (
+                              <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
+                            ))}
+                          </select>
+                          <input placeholder="Description" value={extraForm.Description}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                          <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                          <input type="number" placeholder="GST %" value={extraForm.GstRate}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                        </div>
+                        <button onClick={handleAddExtra} disabled={chargesSaving}
+                          className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
+                          + Add Charge
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -568,12 +629,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {/* ── Tab 3: Attachments ── */}
             {tab === "Attachments" && (
               <div className="space-y-3 pt-2">
-                <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
-                  <Upload size={16} className="text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload files (PDF, images, Office docs — up to 25MB each)"}</span>
-                  <input type="file" multiple className="hidden" disabled={uploading}
-                    onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
-                </label>
+                {canEdit && (
+                  <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
+                    <Upload size={16} className="text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload files (PDF, images, Office docs — up to 25MB each)"}</span>
+                    <input type="file" multiple className="hidden" disabled={uploading}
+                      onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
+                  </label>
+                )}
 
                 {attachments.length === 0 ? (
                   <div className="py-6 text-center text-muted-foreground text-sm">No attachments yet</div>
@@ -591,9 +654,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div className="flex items-center gap-2 shrink-0">
                           <a href={`${API}/${bookingId}/attachments/file/${a.Id}`} target="_blank" rel="noreferrer"
                             className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Download size={14} /></a>
-                          <button onClick={() => handleDeleteAttachment(a.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
-                            <Trash2 size={14} />
-                          </button>
+                          {canEdit && (
+                            <button onClick={() => handleDeleteAttachment(a.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -607,10 +672,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">Every invoice generated here is immediately visible to the customer in their portal.</p>
-                  <button onClick={openInvoiceDialog}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 shrink-0">
-                    <Plus size={14} /> Generate Invoice
-                  </button>
+                  {canEdit && (
+                    <button onClick={openInvoiceDialog}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 shrink-0">
+                      <Plus size={14} /> Generate Invoice
+                    </button>
+                  )}
                 </div>
 
                 {invoices.length === 0 ? (
@@ -620,13 +687,30 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-muted/40 text-left">
-                          {["Invoice No", "Type", "Amount", "Date", "Status", "By"].map((h) => (
-                            <th key={h} className="px-3 py-2 text-xs font-semibold text-muted-foreground">{h}</th>
-                          ))}
+                          {INVOICE_SORT_COLS.map(({ key, label }) => {
+                            const sorted = invoiceSort?.key === key ? invoiceSort.dir : null;
+                            return (
+                              <th key={key} onClick={() => toggleInvoiceSort(key)}
+                                className="px-3 py-2 text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors">
+                                <span className="inline-flex items-center gap-1">
+                                  {label}
+                                  <span className="text-muted-foreground/50">
+                                    {sorted === "asc" ? (
+                                      <ChevronUp size={11} className="text-emerald-500" />
+                                    ) : sorted === "desc" ? (
+                                      <ChevronDown size={11} className="text-emerald-500" />
+                                    ) : (
+                                      <ChevronsUpDown size={11} />
+                                    )}
+                                  </span>
+                                </span>
+                              </th>
+                            );
+                          })}
                         </tr>
                       </thead>
                       <tbody>
-                        {(invoices as any[]).map((inv: any) => (
+                        {sortedInvoices.map((inv: any) => (
                           <tr key={inv.Id} className="border-t border-border">
                             <td className="px-3 py-2 font-mono text-xs font-semibold text-primary">{inv.InvoiceNo}</td>
                             <td className="px-3 py-2 text-xs">{inv.InvoiceType}</td>

@@ -7,6 +7,7 @@ import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/possession-notice";
 const BKG_API = "/api/crm/bookings";
@@ -103,6 +104,43 @@ const CrmPossessionNotice: React.FC = () => {
     }
   };
 
+  const noticeColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "NoticeNo", header: "Notice No", size: 110,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+        </div>
+      ) },
+    { accessorKey: "OfferedDate", header: "Offered Date", size: 110,
+      cell: (i) => <span className="text-xs">{i.row.original.OfferedDate ? String(i.row.original.OfferedDate).slice(0, 10) : "—"}</span> },
+    { accessorKey: "ResponseDeadline", header: "Response Deadline", size: 130,
+      cell: (i) => <span className="text-xs">{i.row.original.ResponseDeadline ? String(i.row.original.ResponseDeadline).slice(0, 10) : "—"}</span> },
+    { accessorKey: "DeliveryMode", header: "Mode", size: 90,
+      cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { id: "actions", header: "Actions", size: 160, enableSorting: false,
+      cell: (i) => {
+        const n = i.row.original;
+        return (
+          <div className="flex items-center gap-2">
+            {n.Status === "Draft" && (
+              <button onClick={() => handleMarkSent(n.Id)} className="text-xs text-primary hover:underline">Mark Sent</button>
+            )}
+            {n.Status === "Sent" && (
+              <>
+                <button onClick={() => handleMarkAcknowledged(n.Id)} className="text-xs text-primary hover:underline">Acknowledge</button>
+                <button onClick={() => handleMarkDisputed(n.Id)} className="text-xs text-red-600 hover:underline">Dispute</button>
+              </>
+            )}
+          </div>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Possession Notice"
@@ -114,49 +152,13 @@ const CrmPossessionNotice: React.FC = () => {
         </button>
       }
     >
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Notice No", "Customer", "Offered Date", "Response Deadline", "Mode", "Status", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : notices.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No possession notices</td></tr>
-            ) : (notices as any[]).map((n: any) => (
-              <tr key={n.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{n.NoticeNo}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">{n.ApplicantName}</div>
-                  <div className="text-xs text-muted-foreground">{n.BookingNo} · {n.UnitNo}</div>
-                </td>
-                <td className="px-4 py-3 text-xs">{n.OfferedDate ? String(n.OfferedDate).slice(0,10) : "—"}</td>
-                <td className="px-4 py-3 text-xs">{n.ResponseDeadline ? String(n.ResponseDeadline).slice(0,10) : "—"}</td>
-                <td className="px-4 py-3 text-xs">{n.DeliveryMode || "—"}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[n.Status] || ""}`}>{n.Status}</span>
-                </td>
-                <td className="px-4 py-3 flex items-center gap-2">
-                  {n.Status === "Draft" && (
-                    <button onClick={() => handleMarkSent(n.Id)} className="text-xs text-primary hover:underline">Mark Sent</button>
-                  )}
-                  {n.Status === "Sent" && (
-                    <>
-                      <button onClick={() => handleMarkAcknowledged(n.Id)} className="text-xs text-primary hover:underline">Acknowledge</button>
-                      <button onClick={() => handleMarkDisputed(n.Id)} className="text-xs text-red-600 hover:underline">Dispute</button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={notices as any[]}
+        columns={noticeColumns}
+        loading={isLoading}
+        emptyMessage="No possession notices"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-md">

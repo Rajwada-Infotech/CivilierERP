@@ -6,6 +6,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/sales-deed";
 const BKG_API = "/api/crm/bookings";
@@ -95,6 +96,58 @@ const CrmSalesDeed: React.FC = () => {
     }
   };
 
+  const deedColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "DeedNo", header: "Deed No", size: 110,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+        </div>
+      ) },
+    { accessorKey: "DeedValue", header: "Deed Value", size: 120,
+      cell: (i) => <span>{i.row.original.DeedValue ? `₹${Number(i.row.original.DeedValue).toLocaleString("en-IN")}` : "—"}</span> },
+    { accessorKey: "RegistrationNo", header: "Registration No", size: 130,
+      cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { id: "directorApproval", header: "Director Approval", size: 150, enableSorting: false,
+      cell: (i) => {
+        const d = i.row.original;
+        return d.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" ? (
+          <div className="flex flex-col gap-1">
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${
+              d.DirectorApprovalStatus === "Approved" ? "text-green-600 bg-green-50 border-green-200"
+              : d.DirectorApprovalStatus === "Rejected" ? "text-red-600 bg-red-50 border-red-200"
+              : "text-orange-600 bg-orange-50 border-orange-200"
+            }`}>{d.DirectorApprovalStatus}</span>
+            {d.DirectorApprovalStatus === "Pending" && (
+              <ApprovalActions
+                status={d.DirectorApprovalStatus}
+                recordId={d.Id}
+                endpoint={API}
+                actionPathSuffix="director"
+                approverRoles={["super_admin"]}
+                onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-sales-deed"] })}
+              />
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      } },
+    { id: "actions", header: "Actions", size: 160, enableSorting: false,
+      cell: (i) => {
+        const d = i.row.original;
+        return d.Status !== "Registered" && d.Status !== "Cancelled" ? (
+          <button onClick={() => openProgress(d)} className="text-xs text-primary hover:underline">
+            Update Execution/Registration
+          </button>
+        ) : null;
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Sale Deed"
@@ -106,67 +159,13 @@ const CrmSalesDeed: React.FC = () => {
         </button>
       }
     >
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Deed No", "Customer", "Deed Value", "Registration No", "Status", "Director Approval", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : deeds.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No sale deeds</td></tr>
-            ) : (deeds as any[]).map((d: any) => (
-              <tr key={d.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{d.DeedNo}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">{d.ApplicantName}</div>
-                  <div className="text-xs text-muted-foreground">{d.BookingNo} · {d.UnitNo}</div>
-                </td>
-                <td className="px-4 py-3">{d.DeedValue ? `₹${Number(d.DeedValue).toLocaleString("en-IN")}` : "—"}</td>
-                <td className="px-4 py-3 text-xs">{d.RegistrationNo || "—"}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[d.Status] || ""}`}>{d.Status}</span>
-                </td>
-                <td className="px-4 py-3">
-                  {d.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" ? (
-                    <div className="flex flex-col gap-1">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${
-                        d.DirectorApprovalStatus === "Approved" ? "text-green-600 bg-green-50 border-green-200"
-                        : d.DirectorApprovalStatus === "Rejected" ? "text-red-600 bg-red-50 border-red-200"
-                        : "text-orange-600 bg-orange-50 border-orange-200"
-                      }`}>{d.DirectorApprovalStatus}</span>
-                      {d.DirectorApprovalStatus === "Pending" && (
-                        <ApprovalActions
-                          status={d.DirectorApprovalStatus}
-                          recordId={d.Id}
-                          endpoint={API}
-                          actionPathSuffix="director"
-                          approverRoles={["super_admin"]}
-                          onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-sales-deed"] })}
-                        />
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {d.Status !== "Registered" && d.Status !== "Cancelled" && (
-                    <button onClick={() => openProgress(d)} className="text-xs text-primary hover:underline">
-                      Update Execution/Registration
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={deeds as any[]}
+        columns={deedColumns}
+        loading={isLoading}
+        emptyMessage="No sale deeds"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-md">
