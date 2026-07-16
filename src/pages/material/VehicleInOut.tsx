@@ -1322,10 +1322,9 @@ export default function VehicleInOut() {
                     </div>
                   </div>
 
-                  {/* Supplier — auto-filled from the selected PO; still
-                      manually pickable for a standalone (no-PO) entry, in
-                      which case any already-selected PO is cleared so the
-                      two fields can't disagree. */}
+                  {/* Supplier — auto-filled from the selected PO and locked
+                      while a PO is selected (it's derived, not independent
+                      input). Only editable for a standalone (no-PO) entry. */}
                   <div>
                     <FieldLabel>Supplier</FieldLabel>
                     <div className="relative">
@@ -1338,22 +1337,15 @@ export default function VehicleInOut() {
                           const sup = (suppliers as any[]).find(
                             (s: any) => Number(s.id) === id,
                           );
-                          const poMismatch =
-                            form.poId != null &&
-                            String(
-                              filteredPOs.find(
-                                (p: any) => p.PurchaseOrderID === form.poId,
-                              )?.SupplierID,
-                            ) !== String(id);
                           pf({
                             supplierId: id,
                             supplierName: sup?.label ?? "",
                             contactPerson: sup?.contactPerson ?? "",
-                            ...(poMismatch ? { poId: null, poNumber: "" } : {}),
                           });
-                          if (poMismatch) setReceivedQtyByItem({});
                         }}
-                        className={inpSel}
+                        disabled={!!form.poId}
+                        title={form.poId ? "Supplier is set by the selected PO" : undefined}
+                        className={`${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`}
                       >
                         <option value="">Select Supplier…</option>
                         {(suppliers as any[]).map((s: any) => (
