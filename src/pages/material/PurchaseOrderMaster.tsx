@@ -2856,8 +2856,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Supplier Details */}
                     {viewingPOSupplier && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <Building2 size={11} className="text-emerald-500" />{" "}
                           Supplier Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
@@ -2925,8 +2925,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Billing Details */}
                     {viewingPOCompany && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <Building2 size={11} className="text-emerald-500" />{" "}
                           Billing Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
@@ -2992,8 +2992,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Project / Delivery Address */}
                     {viewingPOProject && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <MapPin size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <MapPin size={11} className="text-emerald-500" />{" "}
                           Project Details
                         </p>
                         <dl className="space-y-1.5 text-xs">

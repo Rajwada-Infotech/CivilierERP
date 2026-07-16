@@ -1295,6 +1295,10 @@ export default function VehicleInOut() {
                               (suppliers as any[]).find(
                                 (s: any) => Number(s.id) === Number(po?.SupplierID),
                               )?.contactPerson ?? "",
+                            // Auto-fill Company + Project straight from the
+                            // PO too, same as GRN.tsx does.
+                            companyId: po?.CompanyId ?? form.companyId,
+                            projectId: po?.ProjectId ?? form.projectId,
                           });
                           // Switching POs invalidates any received-qty
                           // entered against the previous PO's line items.
