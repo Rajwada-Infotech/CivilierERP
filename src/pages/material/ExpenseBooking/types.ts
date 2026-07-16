@@ -348,6 +348,10 @@ export interface SelectedDoc {
   date?: string;
   gst?: GSTConfig | null;
   grnItems?: GRNItemLine[];
+  /** Set only when multiple GRNs (same PO) were combined into this one
+   *  invoice — see ExpenseBooking/invoiceLinking.ts. */
+  linkedGrnIds?: number[];
+  linkedGrnDocNos?: string[];
 }
 
 export interface GRNItem {
@@ -419,4 +423,7 @@ export interface DocSelectorProps {
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
   onTodSelected?: (tod: TodItem | null) => void;
+  /** Combines several selected GRNs (same PO) into one invoice — the
+   *  second way to link GRNs, alongside picking one at a time. */
+  onSelectMultiGRN?: (grns: GRNItem[]) => void;
 }

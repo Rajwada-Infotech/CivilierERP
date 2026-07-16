@@ -9,7 +9,6 @@ import {
   CalendarDays,
   X,
   Search,
-  AlertCircle,
   Loader2,
   Clock,
   ChevronRight,
@@ -20,10 +19,12 @@ import { toast } from "sonner";
 import { apiFetch } from "./apiFetch";
 import { EmptyState, PickerRow, InfoPill } from "./PickerPrimitives";
 import { fmt, fmtQty, round3, derivePOGst } from "./helpers";
+import { filterServicePOs, aggregateGRNsForInvoice } from "./invoiceLinking";
 import type {
   DocSelectorProps,
   SourceKind,
   TodItem,
+  GRNItem,
   GRNItemLine,
 } from "./types";
 
@@ -54,11 +55,17 @@ export function DocSelectorPanel({
   onSelect,
   onClear,
   onTodSelected,
+  onSelectMultiGRN,
 }: DocSelectorProps) {
   const [tab, setTab] = useState<SourceKind>("WORK_DONE");
   const [search, setSearch] = useState("");
   const [todFetching, setTodFetching] = useState(false);
-  const [poGoodsBlocked, setPoGoodsBlocked] = useState<{ poId: number; docNo: string; goodsItems: string[] } | null>(null);
+  // ── Multi-GRN combine mode — the second way to link GRNs to an invoice,
+  // alongside picking one at a time. Only meaningful within the GRN tab.
+  const [multiGrnMode, setMultiGrnMode] = useState(false);
+  const [multiGrnSelectedIds, setMultiGrnSelectedIds] = useState<Set<number>>(
+    new Set(),
+  );
 
   const selectTod = async (tod: TodItem) => {
     setTodFetching(true);
@@ -164,6 +171,19 @@ export function DocSelectorPanel({
     (t) =>
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
+  );
+  // poList is already Service-only (see GET /api/purchase-orders/service-eligible)
+  // — this just applies the same company/project/finYear/search narrowing
+  // the other tabs use.
+  const filteredPO = filterServicePOs(
+    poList,
+    {
+      companyId: filterCompanyId,
+      projectId: filterProjectId,
+      finYear: filterFinYear,
+      search: q,
+    },
+    bookedPOIds,
   );
   const filteredGRN = grnList.filter((g) => {
     if (bookedGRNIds?.has(g.GRNID)) return false;
@@ -283,7 +303,17 @@ export function DocSelectorPanel({
                     {selected.status}
                   </span>
                 )}
+                {selected.linkedGrnIds && selected.linkedGrnIds.length > 1 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400">
+                    Combined from {selected.linkedGrnIds.length} GRNs
+                  </span>
+                )}
               </div>
+              {selected.linkedGrnIds && selected.linkedGrnDocNos && selected.linkedGrnDocNos.length > 1 && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {selected.linkedGrnDocNos.join(", ")}
+                </p>
+              )}
               <div className="mt-2 flex flex-wrap gap-2">
                 {selected.vendorLabel && (
                   <InfoPill
@@ -410,6 +440,12 @@ export function DocSelectorPanel({
     },
     { id: "GRN", label: "GRN", icon: Truck, count: filteredGRN.length },
     {
+      id: "PO",
+      label: "PO (Service)",
+      icon: ShoppingCart,
+      count: filteredPO.length,
+    },
+    {
       id: "TOD",
       label: "Other Expenses",
       icon: FileText,
@@ -423,7 +459,9 @@ export function DocSelectorPanel({
         ? loadingWOPO
         : tab === "GRN"
           ? loadingGRN
-          : loadingTOD;
+          : tab === "PO"
+            ? loadingPO
+            : loadingTOD;
   const placeholder =
     tab === "WORK_DONE"
       ? "Search by Work Done doc no, contractor, or WO ref…"
@@ -431,6 +469,8 @@ export function DocSelectorPanel({
         ? "Search by WO_PO number, supplier, or WO ref…"
         : tab === "GRN"
           ? "Search by GRN number, supplier, or PO…"
+          : tab === "PO"
+            ? "Search by PO number or supplier…"
           : "Search document types…";
 
   return (
@@ -475,27 +515,6 @@ export function DocSelectorPanel({
           )}
         </div>
       </div>
-
-      {/* Goods-type block warning */}
-      {poGoodsBlocked && (
-        <div className="mx-3 mb-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
-              <AlertCircle size={12} /> Direct invoice not allowed — Goods items detected
-            </p>
-            <button onClick={() => setPoGoodsBlocked(null)} className="text-[10px] text-muted-foreground hover:text-foreground">✕</button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            <span className="font-medium text-foreground">{poGoodsBlocked.docNo}</span> contains Goods-type items.
-            Direct invoices are only allowed for Service items. Use a GRN-linked invoice for goods, or split this PO into separate Service and Goods orders.
-          </p>
-          {poGoodsBlocked.goodsItems.length > 0 && (
-            <p className="text-[10px] text-destructive/80">
-              Goods items: {poGoodsBlocked.goodsItems.join(", ")}
-            </p>
-          )}
-        </div>
-      )}
 
       <div className="sidebar-scroll max-h-60 overflow-y-auto bg-background">
         {loading || todFetching ? (
@@ -595,6 +614,31 @@ export function DocSelectorPanel({
           )
         ) : tab === "GRN" ? (
           <>
+            {onSelectMultiGRN && (
+              <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border/40 bg-muted/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMultiGrnMode((m) => !m);
+                    setMultiGrnSelectedIds(new Set());
+                  }}
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                    multiGrnMode
+                      ? "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {multiGrnMode
+                    ? "Combining multiple GRNs — click to cancel"
+                    : "Combine multiple GRNs into one invoice"}
+                </button>
+                {multiGrnMode && multiGrnSelectedIds.size > 0 && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {multiGrnSelectedIds.size} selected
+                  </span>
+                )}
+              </div>
+            )}
             {loadingGRN ? (
               <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
@@ -634,10 +678,34 @@ export function DocSelectorPanel({
                     0,
                   ),
                 );
+                const selectedGrnPOIds = new Set(
+                  filteredGRN
+                    .filter((x) => multiGrnSelectedIds.has(x.GRNID))
+                    .map((x) => x.POID)
+                    .filter((v): v is number => v != null),
+                );
+                const poMismatch =
+                  multiGrnMode &&
+                  selectedGrnPOIds.size > 0 &&
+                  g.POID != null &&
+                  !selectedGrnPOIds.has(g.POID);
+                const isChecked = multiGrnSelectedIds.has(g.GRNID);
+
                 return (
                   <button
                     key={g.GRNID}
-                    onClick={() =>
+                    disabled={poMismatch}
+                    onClick={() => {
+                      if (multiGrnMode) {
+                        if (poMismatch) return;
+                        setMultiGrnSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.GRNID)) next.delete(g.GRNID);
+                          else next.add(g.GRNID);
+                          return next;
+                        });
+                        return;
+                      }
                       onSelect({
                         kind: "GRN",
                         docNo: g.DocNo || g.GRNNo || "",
@@ -669,13 +737,29 @@ export function DocSelectorPanel({
                                 }
                               })()
                             : (g.ParentGST ?? null),
-                      })
-                    }
-                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+                      });
+                    }}
+                    className={`w-full flex items-start gap-3 px-4 py-3 transition-colors border-b border-border/30 last:border-0 text-left group ${
+                      poMismatch
+                        ? "opacity-40 cursor-not-allowed"
+                        : "hover:bg-muted/30"
+                    } ${isChecked ? "bg-teal-500/[0.06]" : ""}`}
                   >
-                    <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                      <Truck size={12} className="text-teal-500" />
-                    </div>
+                    {multiGrnMode ? (
+                      <span
+                        className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 text-[10px] font-bold ${
+                          isChecked
+                            ? "bg-teal-500 border-teal-500 text-white"
+                            : "border-border text-transparent"
+                        }`}
+                      >
+                        ✓
+                      </span>
+                    ) : (
+                      <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Truck size={12} className="text-teal-500" />
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
@@ -716,15 +800,89 @@ export function DocSelectorPanel({
                         </div>
                       )}
                     </div>
-                    <ChevronRight
-                      size={12}
-                      className="text-muted-foreground/30 shrink-0 mt-1"
-                    />
+                    {!multiGrnMode && (
+                      <ChevronRight
+                        size={12}
+                        className="text-muted-foreground/30 shrink-0 mt-1"
+                      />
+                    )}
                   </button>
                 );
               })
             )}
+            {multiGrnMode && multiGrnSelectedIds.size > 0 && onSelectMultiGRN && (
+              <div className="sticky bottom-0 flex items-center justify-between gap-3 px-4 py-2.5 border-t border-teal-500/30 bg-teal-500/[0.08]">
+                <span className="text-[11px] text-muted-foreground">
+                  {multiGrnSelectedIds.size} GRN
+                  {multiGrnSelectedIds.size !== 1 ? "s" : ""} selected — same PO
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const chosen = filteredGRN.filter((g) =>
+                      multiGrnSelectedIds.has(g.GRNID),
+                    );
+                    const preview = aggregateGRNsForInvoice(chosen);
+                    if (!preview.valid) {
+                      toast.error(preview.error || "Can't combine these GRNs.");
+                      return;
+                    }
+                    onSelectMultiGRN(chosen);
+                    setMultiGrnMode(false);
+                    setMultiGrnSelectedIds(new Set());
+                  }}
+                  className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 transition-colors"
+                >
+                  Combine into One Invoice
+                </button>
+              </div>
+            )}
           </>
+        ) : tab === "PO" ? (
+          filteredPO.length === 0 ? (
+            <EmptyState label="No Service Purchase Orders found" />
+          ) : (
+            filteredPO.map((po) => {
+              const docNo = po.DocNo || po.PurchaseOrderNo;
+              return (
+                <PickerRow
+                  key={po.PurchaseOrderID}
+                  icon={<ShoppingCart size={12} className="text-emerald-600" />}
+                  iconBg="bg-emerald-500/10"
+                  primary={docNo}
+                  primaryColor="text-emerald-600 dark:text-emerald-400"
+                  secondary={[po.SupplierName, po.PODate?.slice(0, 10)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  badge={po.Status}
+                  amount={po.TotalAmount}
+                  onClick={() => {
+                    const {
+                      subtotal,
+                      cgstRate: dCgst,
+                      sgstRate: dSgst,
+                    } = derivePOGst(po.POItems ?? []);
+                    onSelect({
+                      kind: "PO",
+                      docNo,
+                      sourceId: po.PurchaseOrderID,
+                      nameLabel: po.ItemDescription,
+                      vendorLabel: po.SupplierName,
+                      companyId: po.CompanyId,
+                      projectId: po.ProjectId,
+                      amount: po.TotalAmount,
+                      subtotal: subtotal > 0 ? subtotal : undefined,
+                      derivedCgstRate: dCgst,
+                      derivedSgstRate: dSgst,
+                      status: po.Status,
+                      date: po.PODate,
+                      gst: po.GST ?? null,
+                    });
+                  }}
+                />
+              );
+            })
+          )
         ) : filteredTOD.length === 0 ? (
           <EmptyState label="No other expense types found" />
         ) : (

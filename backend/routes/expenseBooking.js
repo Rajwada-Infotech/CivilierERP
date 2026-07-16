@@ -20,6 +20,7 @@ const {
 } = require("../validation/expenseBookingSchemas");
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
+const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
@@ -490,7 +491,7 @@ router.get("/options", async (req, res) => {
           END                             AS supplierId,
           -- Use live GRN total when available so the amount in the picker is accurate
           CASE
-            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+            WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
             THEN grn.TotalAmount
             ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
           END AS amount,
@@ -502,7 +503,7 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
           ISNULL(eb.ERemainingAmount,
             CASE
-              WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+              WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
               THEN grn.TotalAmount
               ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
             END
@@ -514,7 +515,7 @@ router.get("/options", async (req, res) => {
             N' (₹',
             CAST(CAST(
               CASE
-                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+                WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
                 THEN grn.TotalAmount
                 ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
               END
@@ -738,7 +739,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           COUNT(*) AS cnt,
           SUM(
             CASE
-              WHEN eb.ESourceType = 'GRN' AND grn_cnt.TotalAmount IS NOT NULL AND grn_cnt.TotalAmount > 0
+              WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_cnt.TotalAmount IS NOT NULL AND grn_cnt.TotalAmount > 0
               THEN grn_cnt.TotalAmount
               ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
             END
@@ -793,7 +794,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
           -- Frontend uses this as the authoritative Net Amt for GRN rows.
           CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
+            WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
             THEN grn_list.TotalAmount
             ELSE NULL
           END AS EGrnTotalAmount,
@@ -1090,7 +1091,7 @@ router.get("/:id", async (req, res) => {
                ${ebSupplierDet.idExpr} AS ESupplierId,
                -- Live GRN total (incl. GST) so detail modal always shows current value
                CASE
-                 WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
+                 WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
                  THEN grn_det.TotalAmount
                  ELSE NULL
                END AS EGrnTotalAmount,
@@ -1693,6 +1694,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EFinYear,
     ESourceType,
     ESourceId,
+    // Multiple GRNs raised against the same PO, combined into one
+    // total-amount invoice — see backend/services/invoiceLinking.js.
+    // Undefined/empty/single-element means "book against ESourceId as
+    // usual", exactly like before this existed.
+    linkedGrnIds,
     EBillingTermId,
     EBillingTermName,
     EBillingTermsData,
@@ -1740,11 +1746,34 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   let bookingCgstRate;
   let bookingSgstRate;
   let bookingIgstRate;
+  let resolvedSourceId = ESourceId;
+  const grnIdsToLink = Array.isArray(linkedGrnIds)
+    ? linkedGrnIds
+        .map((id) => parseInt(id, 10))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    : [];
 
   try {
     await transaction.begin();
 
-    if (ESourceType === "GRN") {
+    if (ESourceType === "GRN" && grnIdsToLink.length > 1) {
+      // ── Multi-GRN combined invoice ──────────────────────────────────────
+      // Several GRNs raised against the same PO, booked as one invoice.
+      // Validation (same PO, all Approved, none already booked) lives in
+      // computeMultiGRNInvoice; amounts still come from the client (which
+      // computed them from the same aggregate via the frontend's sibling
+      // logic), matching how PO/WORK_DONE-sourced bookings already trust
+      // EAmountBody — bookingAmount stays unset here so it falls through
+      // to buildDirectExpenseBooking below.
+      let agg;
+      try {
+        agg = await computeMultiGRNInvoice(transaction, grnIdsToLink);
+      } catch (err) {
+        await transaction.rollback();
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+      resolvedSourceId = agg.primaryGrnId;
+    } else if (ESourceType === "GRN") {
       const grnId = parseInt(ESourceId, 10);
       if (!Number.isFinite(grnId) || grnId <= 0) {
         await transaction.rollback();
@@ -2120,7 +2149,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
-      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
+      .input("ESourceId", sql.Int, resolvedSourceId ? parseInt(resolvedSourceId, 10) : null)
       .input(
         "EBillingTermId",
         sql.Int,
@@ -2197,6 +2226,16 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           SET RecordId = @RecordId
           WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
         `);
+    }
+
+    if (grnIdsToLink.length > 1 && newExpenseId) {
+      await transaction
+        .request()
+        .input("EId", sql.Int, parseInt(newExpenseId, 10))
+        .input("ELinkedGrnIds", sql.NVarChar(sql.MAX), JSON.stringify(grnIdsToLink))
+        .query(
+          "UPDATE dbo.ExpenseBooking SET ELinkedGrnIds = @ELinkedGrnIds WHERE EId = @EId",
+        );
     }
 
     await transaction.commit();
