@@ -11,6 +11,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+const { getDocumentChainForPO } = require("../services/poVehicleGrnChain");
+const { getServicePurchaseOrders } = require("../services/invoiceLinking");
 const {
   purchaseOrderBodySchema,
   purchaseOrderUpdateSchema,
@@ -684,6 +686,21 @@ router.get(
   },
 );
 
+// ── GET /service-eligible — POs whose items are all Service items ────────────
+// Backs the Invoice page's "PO" tab: goods must go through a GRN first,
+// but a Service-only PO can be invoiced directly. Declared before /:id so
+// "service-eligible" isn't swallowed as an :id param.
+router.get("/service-eligible", async (req, res) => {
+  try {
+    const pool = getPool();
+    const pos = await getServicePurchaseOrders(pool);
+    res.json(pos);
+  } catch (err) {
+    console.error("GET service-eligible POs error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
@@ -730,6 +747,20 @@ router.get("/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("GET PurchaseOrder by id error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
+router.get("/:id/document-chain", async (req, res) => {
+  try {
+    const id = requireValidId(req, res);
+    if (!id) return;
+    const pool = getPool();
+    const chain = await getDocumentChainForPO(pool, id);
+    res.json(chain);
+  } catch (err) {
+    console.error("GET PurchaseOrder document-chain error:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1424,8 +1424,33 @@ export default function VehicleInOut() {
                                   <td className="px-4 py-2.5 font-medium text-foreground">{it.itemName || "—"}</td>
                                   <td className="px-4 py-2.5 text-right font-mono">{it.orderedQty}</td>
                                   <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{it.receivedSoFar}</td>
-                                  <td className={`px-4 py-2.5 text-right font-mono font-semibold ${it.remainingQty === 0 ? "text-muted-foreground" : "text-primary"}`}>
-                                    {it.remainingQty}
+                                  <td className="px-4 py-2.5 text-right font-mono font-semibold">
+                                    {entered > 0 ? (
+                                      <span className="inline-flex items-baseline gap-1.5">
+                                        <span className="text-muted-foreground line-through">
+                                          {it.remainingQty}
+                                        </span>
+                                        <span
+                                          className={
+                                            overLimit
+                                              ? "text-destructive"
+                                              : "text-primary"
+                                          }
+                                        >
+                                          {Math.max(it.remainingQty - entered, 0)}
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={
+                                          it.remainingQty === 0
+                                            ? "text-muted-foreground"
+                                            : "text-primary"
+                                        }
+                                      >
+                                        {it.remainingQty}
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="px-4 py-2.5 text-muted-foreground">{it.uomName || "—"}</td>
                                   <td className="px-4 py-2.5 text-right">
@@ -1436,12 +1461,23 @@ export default function VehicleInOut() {
                                       step="any"
                                       value={raw}
                                       disabled={it.remainingQty === 0}
-                                      onChange={(e) =>
+                                      onChange={(e) => {
+                                        const nextVal = e.target.value;
+                                        const nextEntered =
+                                          parseFloat(nextVal) || 0;
+                                        if (
+                                          nextEntered > it.remainingQty + 1e-6 &&
+                                          entered <= it.remainingQty + 1e-6
+                                        ) {
+                                          toast.error(
+                                            `${it.itemName || "Item"}: quantity can't be greater than ${it.remainingQty} ${it.uomName || ""}`.trim(),
+                                          );
+                                        }
                                         setReceivedQtyByItem((prev) => ({
                                           ...prev,
-                                          [it.poItemId]: e.target.value,
-                                        }))
-                                      }
+                                          [it.poItemId]: nextVal,
+                                        }));
+                                      }}
                                       placeholder="0"
                                       className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
                                         overLimit ? "border-destructive text-destructive" : "border-border"

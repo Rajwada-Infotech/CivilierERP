@@ -635,7 +635,7 @@ export default function Issues() {
     {
       accessorKey: "DocNo",
       header: "Doc No",
-      size: 400,
+      size: 160,
       cell: ({ row, getValue }) => (
         <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
           {String(getValue() || row.original.IssueNo || "—")}
@@ -645,6 +645,7 @@ export default function Issues() {
     {
       accessorKey: "CompanyName",
       header: "Company",
+      size: 140,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <div className="flex items-center gap-1.5 text-sm">
@@ -656,6 +657,7 @@ export default function Issues() {
     {
       accessorKey: "ProjectName",
       header: "Project",
+      size: 140,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -667,6 +669,7 @@ export default function Issues() {
     {
       accessorKey: "GodownName",
       header: "Godown",
+      size: 180,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ row, getValue }) => {
         const name = getValue() as string;
@@ -688,6 +691,7 @@ export default function Issues() {
     {
       accessorKey: "ItemCount",
       header: "Items",
+      size: 130,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
@@ -704,6 +708,7 @@ export default function Issues() {
     {
       accessorKey: "Date",
       header: "Date",
+      size: 120,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => {
         const v = getValue() as string;
@@ -723,9 +728,10 @@ export default function Issues() {
     {
       accessorKey: "Status",
       header: "Status",
+      size: 190,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue, row }) => (
-        <div>
+        <div className="min-w-0">
           <ApprovalStatusChain
             table="MaterialIssues"
             recordId={row.original.IssueId}
@@ -736,7 +742,7 @@ export default function Issues() {
     {
       id: "actions",
       header: "Actions",
-      size: 120,
+      size: 90,
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-2">

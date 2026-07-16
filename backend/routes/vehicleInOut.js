@@ -42,6 +42,11 @@ const {
   backPatchRecordId,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+const {
+  getPendingVehicleInOutsForPO,
+  getDocumentChainForVehicleInOut,
+  getVehicleInOutItemsEnriched,
+} = require("../services/poVehicleGrnChain");
 
 const router = express.Router();
 
@@ -380,7 +385,27 @@ router.get("/:id", async (req, res) => {
     `);
     record.Items = itemsResult.recordset;
 
+    const chain = await getDocumentChainForVehicleInOut(pool, id);
+    record.GRN = chain?.grn || null;
+    record.GRNStatus = chain?.grn ? "GRN Created" : "Pending GRN";
+
     res.json(record);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /po/:poId/pending-grn — Vehicle In/Out lots eligible for a new GRN ───
+// Excludes any lot that already has an active (non-Rejected) GRN — the
+// "PO -> Vehicle In/Out -> GRN" picker on the GRN form uses this to only
+// offer lots that haven't been consumed yet.
+router.get("/po/:poId/pending-grn", async (req, res) => {
+  try {
+    const pool = getPool();
+    const poId = parseInt(req.params.poId, 10);
+    if (!poId) return res.status(400).json({ error: "Invalid poId" });
+    const rows = await getPendingVehicleInOutsForPO(pool, poId);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -431,6 +456,21 @@ router.get("/:id/po", async (req, res) => {
       `);
 
     res.json({ ...poResult.recordset[0], LineItems: itemsResult.recordset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/items-enriched — this record's items joined with PO rate/UOM/tax ──
+// Used by the GRN form once a Vehicle In/Out lot is picked: builds GRN line
+// items straight from what this specific vehicle actually brought in.
+router.get("/:id/items-enriched", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const items = await getVehicleInOutItemsEnriched(pool, id);
+    res.json(items);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -783,19 +823,18 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
     if (!check.recordset[0])
       return res.status(404).json({ error: "Not found" });
 
-    // ── Guard: a GRN already exists against this record's PO ───────────────
-    const poId = check.recordset[0].POID;
-    if (poId) {
-      const grnCheck = await pool
-        .request()
-        .input("POID", sql.Int, poId)
-        .query("SELECT COUNT(*) AS cnt FROM dbo.GoodsReceiptNotes WHERE POID = @POID");
-      if (Number(grnCheck.recordset[0]?.cnt) > 0) {
-        return res.status(409).json({
-          error: "has_grn",
-          message: "A GRN has already been created against this Purchase Order. Delete the GRN first, then delete this Vehicle In/Out record.",
-        });
-      }
+    // ── Guard: a GRN already exists against this specific Vehicle In/Out record ──
+    const grnCheck = await pool
+      .request()
+      .input("ID", sql.Int, id)
+      .query(
+        "SELECT COUNT(*) AS cnt FROM dbo.GoodsReceiptNotes WHERE VehicleInOutID = @ID AND Status <> 'Rejected'",
+      );
+    if (Number(grnCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_grn",
+        message: "A GRN has already been created against this Vehicle In/Out record. Delete the GRN first, then delete this Vehicle In/Out record.",
+      });
     }
 
     await pool

@@ -21,12 +21,20 @@ function recolorToAmber(data: any) {
 
 function SignalLottie() {
   const animationData = useMemo(() => recolorToAmber(signalAnimationRaw), []);
-  const { View } = useLottie({
+  const { View, setDirection, animationLoaded } = useLottie({
     animationData,
     loop: true,
     autoplay: true,
     style: { width: 24, height: 24, flexShrink: 0 },
   });
+
+  // The bundled animation plays bars-full-to-empty by default, which reads
+  // backwards for a "connecting…" indicator — play it in reverse so the
+  // bars build up instead of draining.
+  useEffect(() => {
+    if (animationLoaded) setDirection(-1);
+  }, [animationLoaded, setDirection]);
+
   return <>{View}</>;
 }
 
