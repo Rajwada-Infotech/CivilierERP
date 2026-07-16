@@ -136,6 +136,125 @@ async function getAttachmentsFor(pool, vehicleInOutId) {
   return result.recordset.map(attachmentRowToDto);
 }
 
+/**
+ * PO line items with how much has already been received across Vehicle
+ * In/Out lots (excluding Rejected/Deleted header records and, when editing
+ * an existing record, that record's own rows — otherwise a record would
+ * count its own already-saved quantity against itself and shrink its own
+ * editable range every time it's opened). Independent of GRN's
+ * PurchaseOrderItems.ReceivedQty — see migration 191's header comment.
+ */
+async function getPOItemsWithRemaining(pool, poId, excludeVehicleInOutId) {
+  const request = pool.request().input("POID", sql.Int, poId);
+  if (excludeVehicleInOutId) {
+    request.input("ExcludeID", sql.Int, excludeVehicleInOutId);
+  }
+  const result = await request.query(`
+    SELECT
+      poi.Id AS POItemId,
+      poi.ItemId,
+      poi.ItemName,
+      poi.ItemCode,
+      poi.UomName,
+      poi.Quantity AS OrderedQty,
+      ISNULL((
+        SELECT SUM(vi.ReceivedQty)
+        FROM dbo.VehicleInOutItems vi
+        JOIN dbo.VehicleInOut v ON v.VehicleInOutID = vi.VehicleInOutID
+        WHERE vi.POItemId = poi.Id
+          AND v.Status NOT IN ('Rejected', 'Deleted')
+          ${excludeVehicleInOutId ? "AND v.VehicleInOutID <> @ExcludeID" : ""}
+      ), 0) AS ReceivedSoFar
+    FROM dbo.PurchaseOrderItems poi
+    WHERE poi.PurchaseOrderID = @POID
+    ORDER BY poi.SortOrder
+  `);
+  return result.recordset.map((r) => ({
+    poItemId: r.POItemId,
+    itemId: r.ItemId,
+    itemName: r.ItemName,
+    itemCode: r.ItemCode,
+    uomName: r.UomName,
+    orderedQty: Number(r.OrderedQty) || 0,
+    receivedSoFar: Number(r.ReceivedSoFar) || 0,
+    remainingQty: Math.max(0, (Number(r.OrderedQty) || 0) - (Number(r.ReceivedSoFar) || 0)),
+  }));
+}
+
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 400;
+  }
+}
+
+/**
+ * Validates each submitted {poItemId, receivedQty} against what's actually
+ * left to receive on the PO (ordered - already received across other
+ * lots, excluding this record's own rows when editing). Throws
+ * ValidationError (caught by the route as a 400) if any line would push
+ * received-so-far past what was ordered — the "don't let me save 1000
+ * when I ordered 100" rule, enforced per PO line item. Pure — no writes —
+ * so callers can validate before touching the header row.
+ */
+async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutId) {
+  const submitted = (Array.isArray(items) ? items : [])
+    .map((it) => ({
+      poItemId: parseInt(it.poItemId, 10),
+      receivedQty: Number(it.receivedQty) || 0,
+    }))
+    .filter((it) => it.poItemId && it.receivedQty > 0);
+
+  if (!poId || submitted.length === 0) return [];
+
+  const remaining = await getPOItemsWithRemaining(pool, poId, excludeVehicleInOutId);
+  const byId = new Map(remaining.map((r) => [r.poItemId, r]));
+
+  for (const line of submitted) {
+    const po = byId.get(line.poItemId);
+    if (!po) {
+      throw new ValidationError(
+        `Item (PO line ${line.poItemId}) does not belong to the selected purchase order.`,
+      );
+    }
+    if (line.receivedQty > po.remainingQty + 1e-6) {
+      throw new ValidationError(
+        `${po.itemName || "Item"}: cannot receive ${line.receivedQty} — only ${po.remainingQty} remaining on the PO (ordered ${po.orderedQty}, already received ${po.receivedSoFar}).`,
+      );
+    }
+  }
+
+  return submitted.map((line) => ({ ...line, po: byId.get(line.poItemId) }));
+}
+
+/**
+ * Replaces a Vehicle In/Out record's item rows with an already-validated
+ * set (from validateVehicleInOutItems). Delete-then-insert so an edit that
+ * drops a line (receivedQty set to 0, or removed entirely) doesn't leave a
+ * stale row counting against the PO forever.
+ */
+async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
+  await pool.request().input("ID", sql.Int, vehicleInOutId).query(`
+    DELETE FROM dbo.VehicleInOutItems WHERE VehicleInOutID = @ID
+  `);
+
+  for (const line of validatedItems) {
+    await pool
+      .request()
+      .input("VehicleInOutID", sql.Int, vehicleInOutId)
+      .input("POItemId", sql.Int, line.poItemId)
+      .input("ItemId", sql.NVarChar(100), line.po.itemId || null)
+      .input("ItemName", sql.NVarChar(255), line.po.itemName || null)
+      .input("UomName", sql.NVarChar(50), line.po.uomName || null)
+      .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty).query(`
+        INSERT INTO dbo.VehicleInOutItems
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty)
+        VALUES
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty)
+      `);
+  }
+}
+
 // ── GET /next-number ─────────────────────────────────────────────────────────
 router.get("/next-number", async (req, res) => {
   try {
@@ -254,6 +373,12 @@ router.get("/:id", async (req, res) => {
 
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
+    const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty
+      FROM dbo.VehicleInOutItems
+      WHERE VehicleInOutID = @ItemsID
+    `);
+    record.Items = itemsResult.recordset;
 
     res.json(record);
   } catch (err) {
@@ -311,6 +436,42 @@ router.get("/:id/po", async (req, res) => {
   }
 });
 
+// ── GET /po-items/:poId — PO line items with remaining-to-receive quantity ───
+// Used both when picking a PO on a new record (no excludeVehicleInOutId) and
+// when editing an existing one (excludeVehicleInOutId=<this record's id>, so
+// its own already-saved quantities don't count against its own remaining).
+router.get("/po-items/:poId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const poId = parseInt(req.params.poId, 10);
+    if (!poId) return res.status(400).json({ error: "Invalid poId" });
+    const excludeId = req.query.excludeVehicleInOutId
+      ? parseInt(req.query.excludeVehicleInOutId, 10)
+      : null;
+    const items = await getPOItemsWithRemaining(pool, poId, excludeId);
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/items — this record's own saved received quantities ─────────────
+router.get("/:id/items", async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const result = await pool.request().input("ID", sql.Int, id).query(`
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty
+      FROM dbo.VehicleInOutItems
+      WHERE VehicleInOutID = @ID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST / — create ───────────────────────────────────────────────────────────
 router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);
@@ -331,6 +492,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     challanNo,
     attachmentIds, // array of ids returned by POST /upload, still unlinked
     remarks,
+    items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
   if (!vehicleNo)
@@ -340,6 +502,11 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
   let recordId = null;
 
   try {
+    // ── 0. Validate received quantities against what's left on the PO ───────
+    // before touching the header row, so a rejected submission never
+    // creates an orphaned Vehicle In/Out record.
+    const validatedItems = await validateVehicleInOutItems(pool, poId, items, null);
+
     // ── 1. Resolve doc type ──────────────────────────────────────────────────
     const docTypeId = await resolveDocTypeId(pool, sql, "VEH");
 
@@ -403,6 +570,9 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     // ── 5. Link any attachments uploaded while filling out the form ─────────
     await linkAttachments(pool, recordId, parseIdList(attachmentIds));
 
+    // ── 6. Persist the validated received-quantity lines ────────────────────
+    await saveVehicleInOutItems(pool, recordId, validatedItems);
+
     await bumpCacheVersion(CACHE_KEY);
 
     // Auto-submit: transition Draft → Pending immediately so no manual
@@ -425,7 +595,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 
     res.status(201).json({ vehicleInOutId: recordId, docNo: finalDocNo });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -450,6 +620,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     challanNo,
     attachmentIds, // any newly-uploaded (still-unlinked) attachment ids to attach
     remarks,
+    items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
   if (!vehicleNo)
@@ -457,6 +628,12 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
 
   try {
     const pool = getPool();
+
+    // Validate before writing anything — excludeVehicleInOutId=id so this
+    // record's own previously-saved quantities don't count against its
+    // own remaining allowance while re-editing it.
+    const validatedItems = await validateVehicleInOutItems(pool, poId, items, id);
+
     await pool
       .request()
       .input("ID", sql.Int, id)
@@ -496,10 +673,14 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     // Link any newly-uploaded attachments added during this edit.
     await linkAttachments(pool, id, parseIdList(attachmentIds));
 
+    // Persist the validated received-quantity lines (replaces this
+    // record's previous item rows).
+    await saveVehicleInOutItems(pool, id, validatedItems);
+
     await bumpCacheVersion(CACHE_KEY);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
