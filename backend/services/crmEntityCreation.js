@@ -13,6 +13,8 @@ const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold } = require("./crmHoldService");
+const { rollupBookingTotals } = require("../routes/crmParking");
+const { createReceiptForMilestone } = require("../routes/crmPayments");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 
@@ -76,8 +78,8 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     const lr = await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .query(`
-        SELECT CustomerName, Mobile, AltMobile, Email, BudgetMin, BudgetMax,
-               PropertyType, BhkPreference, PreferredLocation, AssignedSalespersonId,
+        SELECT CustomerName, Mobile, AltMobile, Email,
+               PropertyType, BhkPreference, PreferredLocation,
                SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId
         FROM dbo.SaLead WHERE Id = @lid
       `);
@@ -149,14 +151,27 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("unit", sql.NVarChar(100), unitName)
       .input("pt",   sql.NVarChar(50),  b.PropertyType  || prefill.PropertyType  || null)
       .input("bhk",  sql.NVarChar(30),  b.BhkPreference || prefill.BhkPreference || null)
-      .input("bmin", sql.Decimal(18,2), b.BudgetMin != null ? parseFloat(b.BudgetMin) : (prefill.BudgetMin || null))
-      .input("bmax", sql.Decimal(18,2), b.BudgetMax != null ? parseFloat(b.BudgetMax) : (prefill.BudgetMax || null))
       .input("src",  sql.NVarChar(200), b.Source || prefill.SourceType || null)
       .input("platid", sql.Int, platformId)
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : (prefill.AssignedSalespersonId || null))
+      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
+      .input("doa",  sql.Date,          b.DateOfApply || null)
+      .input("ppid", sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("ttype",sql.NVarChar(20),  b.TokenType || null)
+      .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
+      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
+      .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
+      // AssignedTo respects an explicit caller value (saHandoff.js passes
+      // the lead's already-routed salesperson) or falls back to whoever
+      // created the record. crmApplications.js's own POST route enforces
+      // the stricter "self-assign, no client override" rule for the human-
+      // filed Application form specifically — this shared function stays
+      // permissive so the SA->CRM handoff's existing assignment logic keeps
+      // working unchanged.
+      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : actorUserId)
+      .input("asgnby", sql.Int,         b.AssignedBy ? parseInt(b.AssignedBy) : actorUserId)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
       .input("cb",   sql.Int,           actorUserId)
@@ -164,16 +179,18 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
         INSERT INTO dbo.CrmApplication
           (ApplicationNo, LeadId, CustomerId, ApplicantName, Mobile, AltMobile, Email,
            ProjectId, PreferredUnitId, CompanyId, InterestedProject, InterestedUnit,
-           PropertyType, BhkPreference, BudgetMin, BudgetMax,
+           PropertyType, BhkPreference,
            Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
-           AssignedTo, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
+           RatePerSqFt, DateOfApply, PaymentPlanId, TokenType, TokenValue, BookingAmount, PaymentMode,
+           AssignedTo, AssignedBy, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
           (@no, @lid, @custid, @name, @mob, @alt, @em,
            @pid, @uid, @cid, @proj, @unit,
-           @pt, @bhk, @bmin, @bmax,
+           @pt, @bhk,
            @src, @platid, @campid, @adid, @cpid,
-           @asgn, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME())
+           @rate, @doa, @ppid, @ttype, @tval, @bamt, @pmode,
+           @asgn, @asgnby, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME())
       `);
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -394,9 +411,61 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const bookingId = result.recordset[0].Id;
 
+  // The Application-stage capture (bank/KYC, documents, parking) was saved
+  // keyed by ApplicationId with BookingId left NULL, since no Booking existed
+  // yet at that point (see crmCustomerBankDetails.js/crmBookingDocuments.js/
+  // crmParking.js's ApplicationId-keyed routes). Backfill BookingId onto those
+  // rows now so the Booking review page — which reads by BookingId — actually
+  // shows the customer's data instead of appearing empty right after approval.
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmCustomerBankDetail SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+  // ParkingTotal/GrandTotal were computed above with ParkingTotal = 0 since no
+  // parking allotment had BookingId set yet — recompute now that the backfill
+  // above has linked any Application-stage parking selections to this Booking.
+  await rollupBookingTotals(pool, bookingId);
+
   await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
 
   await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId);
+
+  // The Application's Payment Details step already captured the token
+  // amount as "paid" (PaymentMode + a cheque/transaction reference, see
+  // CrmApplication.tsx) — that is real money Finance needs to know about,
+  // not just descriptive text sitting on the Application. Sync it into a
+  // real, GL-posted receipt against Milestone #1 the moment the booking
+  // (and its milestone schedule) exists, through the exact same accounting
+  // path a manually-entered receipt goes through (crmPayments.js). Never
+  // allowed to block booking creation — same partial-failure tolerance as
+  // every other best-effort step in this function.
+  if (bookingAmount > 0) {
+    try {
+      const m1 = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+      const instrument = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ChequeNo, ChequeDate, TransactionRef, BankName FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+      const actorRow = await pool.request().input("uid", sql.Int, actorUserId)
+        .query("SELECT email, name FROM dbo.users WHERE id = @uid");
+      if (m1.recordset.length) {
+        const inst = instrument.recordset[0] || {};
+        const actorEmail = actorRow.recordset[0]?.email || actorRow.recordset[0]?.name || null;
+        await createReceiptForMilestone(pool, m1.recordset[0].Id, {
+          Amount: bookingAmount,
+          ReceivedDate: b.BookingDate,
+          PaymentMode: b.PaymentMode || null,
+          TransactionRef: b.PaymentMode === "Cheque" ? (inst.ChequeNo || null) : (inst.TransactionRef || null),
+          ChequeDate: b.PaymentMode === "Cheque" ? (inst.ChequeDate || null) : null,
+          DepositBankName: inst.BankName || null,
+          Notes: "Auto-synced from Application token payment capture",
+        }, actorUserId, actorEmail);
+      }
+    } catch (receiptErr) {
+      console.error("[crmEntityCreation] auto-receipt sync failed:", receiptErr.message);
+    }
+  }
 
   await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
     `Auto-approved: booking ${bookingNo} created`, actorUserId, { force: true });

@@ -11,7 +11,7 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Customers",      path: "/crm/customers",      pageKey: "crm-customers"     },
       { label: "Applications",   path: "/crm/applications",   pageKey: "crm-applications"  },
-      { label: "Bookings",       path: "/crm/bookings",       pageKey: "crm-bookings"      },
+      { label: "Applications and Bookings", path: "/crm/bookings", pageKey: "crm-bookings" },
       { label: "Welcome Calls",  path: "/crm/welcome-calls",  pageKey: "crm-welcome-calls" },
       { label: "Communication Log", path: "/crm/communication", pageKey: "crm-communication" },
       { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },

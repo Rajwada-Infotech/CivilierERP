@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/lead-distribution";
 const RULES_API = "/api/sa/distribution-rules";
@@ -138,6 +139,49 @@ const SaLeadDistribution: React.FC = () => {
     }
   };
 
+  const pendingColumns: ColumnDef<any, unknown>[] = [
+    { id: "select", header: () => (
+        <input type="checkbox" checked={selectedLeads.length === pending.length && pending.length > 0}
+          onChange={(e) => setSelectedLeads(e.target.checked ? pending.map((l: any) => l.Id) : [])} />
+      ), size: 40, enableSorting: false,
+      cell: (i) => <input type="checkbox" checked={selectedLeads.includes(i.row.original.Id)} onChange={() => toggleLead(i.row.original.Id)} /> },
+    { accessorKey: "CustomerName", header: "Customer", size: 150,
+      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "Mobile", header: "Mobile", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "PlatformName", header: "Source", size: 110,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.PlatformName || "—"}</span> },
+    { accessorKey: "CampaignName", header: "Campaign", size: 130,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.CampaignName || "—"}</span> },
+    { accessorKey: "DateGenerated", header: "Date", size: 100,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</span> },
+    ...(method === "Manual" ? [{
+      id: "assignTo", header: "Assign To", size: 130, enableSorting: false,
+      cell: (i: any) => (
+        <select value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
+          className="text-xs border border-border rounded px-2 py-1 bg-background">
+          <option value="">Select</option>
+          {eligibleUsers.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
+        </select>
+      ),
+    } as ColumnDef<any, unknown>] : []),
+  ];
+
+  const historyColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "LeadUid", header: "Lead", size: 100,
+      cell: (i) => <span className="text-xs text-muted-foreground font-mono">{i.getValue() as string}</span> },
+    { accessorKey: "CustomerName", header: "Customer", size: 150,
+      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "FromUserName", header: "From", size: 120,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.FromUserName || "—"}</span> },
+    { accessorKey: "ToUserName", header: "To", size: 120,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.ToUserName || "—"}</span> },
+    { accessorKey: "Level", header: "Level", size: 80,
+      cell: (i) => <span className="text-muted-foreground">L{i.row.original.Level}</span> },
+    { accessorKey: "Method", header: "Method", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "DistributedAt", header: "Date", size: 140,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? String(i.row.original.DistributedAt).slice(0, 16).replace("T", " ") : "—"}</span> },
+  ];
+
   return (
     <SalesAutoShell title="Lead Distribution" subtitle="Allocate leads to team leaders (L1) and sales persons (L2)">
       <div className="space-y-6">
@@ -215,85 +259,26 @@ const SaLeadDistribution: React.FC = () => {
             })()}
 
             {/* Pending leads table */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40">
-                  <tr>
-                    <th className="p-3 text-left w-8">
-                      <input type="checkbox" checked={selectedLeads.length === pending.length && pending.length > 0}
-                        onChange={(e) => setSelectedLeads(e.target.checked ? pending.map((l: any) => l.Id) : [])} />
-                    </th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Customer</th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Mobile</th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Source</th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Campaign</th>
-                    <th className="p-3 text-left text-xs font-medium text-muted-foreground">Date</th>
-                    {method === "Manual" && <th className="p-3 text-left text-xs font-medium text-muted-foreground">Assign To</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingPending ? (
-                    <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Loading...</td></tr>
-                  ) : pending.length === 0 ? (
-                    <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">No pending leads for Level {level}</td></tr>
-                  ) : pending.map((l: any) => (
-                    <tr key={l.Id} className="border-t border-border hover:bg-muted/20 transition-colors">
-                      <td className="p-3"><input type="checkbox" checked={selectedLeads.includes(l.Id)} onChange={() => toggleLead(l.Id)} /></td>
-                      <td className="p-3 font-medium text-foreground">{l.CustomerName}</td>
-                      <td className="p-3 text-muted-foreground">{l.Mobile}</td>
-                      <td className="p-3 text-muted-foreground">{l.PlatformName || "—"}</td>
-                      <td className="p-3 text-muted-foreground">{l.CampaignName || "—"}</td>
-                      <td className="p-3 text-muted-foreground">{l.DateGenerated ? String(l.DateGenerated).slice(0, 10) : "—"}</td>
-                      {method === "Manual" && (
-                        <td className="p-3">
-                          <select value={assignments[l.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [l.Id]: parseInt(e.target.value) }))}
-                            className="text-xs border border-border rounded px-2 py-1 bg-background">
-                            <option value="">Select</option>
-                            {eligibleUsers.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-                          </select>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              data={pending}
+              columns={pendingColumns}
+              searchable={false}
+              loading={loadingPending}
+              emptyMessage={`No pending leads for Level ${level}`}
+              className="rounded-lg border border-border overflow-hidden bg-card"
+            />
           </div>
         )}
 
         {tab === "history" && (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Lead</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Customer</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">From</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">To</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Level</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Method</th>
-                  <th className="p-3 text-left text-xs font-medium text-muted-foreground">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loadingHistory ? (
-                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Loading...</td></tr>
-                ) : history.length === 0 ? (
-                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">No distribution history yet</td></tr>
-                ) : history.map((d: any) => (
-                  <tr key={d.Id} className="border-t border-border hover:bg-muted/20 transition-colors">
-                    <td className="p-3 text-xs text-muted-foreground font-mono">{d.LeadUid}</td>
-                    <td className="p-3 font-medium text-foreground">{d.CustomerName}</td>
-                    <td className="p-3 text-muted-foreground">{d.FromUserName || "—"}</td>
-                    <td className="p-3 text-muted-foreground">{d.ToUserName || "—"}</td>
-                    <td className="p-3 text-muted-foreground">L{d.Level}</td>
-                    <td className="p-3 text-muted-foreground">{d.Method}</td>
-                    <td className="p-3 text-muted-foreground">{d.DistributedAt ? String(d.DistributedAt).slice(0, 16).replace("T", " ") : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            data={history}
+            columns={historyColumns}
+            searchable={false}
+            loading={loadingHistory}
+            emptyMessage="No distribution history yet"
+            className="rounded-lg border border-border overflow-hidden bg-card"
+          />
         )}
         {tab === "rules" && (
           <div className="space-y-6">

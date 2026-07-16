@@ -14,6 +14,8 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { CrmBookingDetail } from "./CrmBookingDetail";
+import { useAuth } from "@/contexts/AuthContext";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -96,6 +98,12 @@ function getNextStep(b: any): NextStep {
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
+  const { canDoAction } = useAuth();
+  // Bookings are now created automatically on Application approval — manual
+  // creation here is a fallback for when that fails, restricted to the same
+  // per-user "crm-bookings" edit grant as every other mutating action on
+  // this review page (see CrmBookingDetail.tsx).
+  const canEdit = canDoAction("crm-bookings", "edit");
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
@@ -224,15 +232,119 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  const bookingColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking No", size: 110,
+      cell: (i) => (
+        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
+          {i.row.original.BookingNo}
+        </button>
+      ) },
+    { accessorKey: "ApplicantName", header: "Customer", size: 140,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { id: "projectUnit", header: "Project / Unit", size: 150, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div>
+            <div>{b.ProjectName || "—"}</div>
+            <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
+            {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
+          </div>
+        );
+      } },
+    { accessorKey: "AreaSqFt", header: "Area", size: 90,
+      cell: (i) => <span className="text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
+    { id: "value", header: "Value", size: 130, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div>
+            <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
+            {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
+              <div className="text-[10px] text-muted-foreground">
+                Unit {fmt(b.TotalValue)}
+                {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
+                {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
+              </div>
+            )}
+          </div>
+        );
+      } },
+    { accessorKey: "BookingAmount", header: "Booking Amt", size: 100, cell: (i) => <span>{fmt(i.row.original.BookingAmount)}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "BookingDate", header: "Date", size: 100,
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
+    { id: "actions", header: "Actions", size: 220, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        const step = getNextStep(b);
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* submitOnly: Approve/Reject only ever happen from the
+                Admin Approval Inbox (admin/super_admin/marketing_head) */}
+            <ApprovalActions
+              status={b.Status}
+              recordId={b.Id}
+              endpoint={API}
+              submitOnly
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
+            />
+            {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {step ? (
+              <button onClick={() => navigate(step.path)}
+                className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
+                {step.label} <ChevronRight size={12} />
+              </button>
+            ) : b.Status === "Approved" ? (
+              <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
+                <CheckCircle2 size={12} /> All Steps Complete
+              </span>
+            ) : null}
+            {/* Non-sequential utility actions — not part of the linear
+                flow, so they live in an overflow menu instead of competing
+                with the one active step. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
+                  <MoreHorizontal size={16} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
+                {b.Status !== "Cancelled" && canEdit && (
+                  <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
+                    Change Unit
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
-      title="CRM — Bookings"
-      subtitle="Unit bookings linked to customer applications"
+      title="CRM — Applications and Bookings"
+      subtitle="Review-only — bookings auto-create on Application approval; edit rights are granted per user"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
-          <Plus size={14} /> New Booking
-        </button>
+        canEdit ? (
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+            <Plus size={14} /> New Booking
+          </button>
+        ) : undefined
       }
     >
       <div className="flex gap-3 flex-wrap">
@@ -249,115 +361,14 @@ const CrmBooking: React.FC = () => {
         </select>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-left">
-                {["Booking No", "Customer", "Project / Unit", "Area", "Value", "Booking Amt", "Status", "Date", "Actions"].map((h) => (
-                  <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">No bookings found</td></tr>
-              ) : (filtered as any[]).map((b: any) => (
-                <tr key={b.Id} className="border-t border-border hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <button onClick={() => setViewingBookingId(b.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
-                      {b.BookingNo}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{b.ApplicantName}</div>
-                    <div className="text-xs text-muted-foreground">{b.Mobile}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div>{b.ProjectName || "—"}</div>
-                    <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
-                    {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-sm">{b.AreaSqFt ? `${b.AreaSqFt} sqft` : "—"}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
-                    {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
-                      <div className="text-[10px] text-muted-foreground">
-                        Unit {fmt(b.TotalValue)}
-                        {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
-                        {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{fmt(b.BookingAmount)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{b.BookingDate ? String(b.BookingDate).slice(0, 10) : "—"}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* submitOnly: Approve/Reject only ever happen from the
-                          Admin Approval Inbox (admin/super_admin/marketing_head) */}
-                      <ApprovalActions
-                        status={b.Status}
-                        recordId={b.Id}
-                        endpoint={API}
-                        submitOnly
-                        onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
-                      />
-                      {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-                      {(() => {
-                        const step = getNextStep(b);
-                        if (step) {
-                          return (
-                            <button onClick={() => navigate(step.path)}
-                              className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
-                              {step.label} <ChevronRight size={12} />
-                            </button>
-                          );
-                        }
-                        if (b.Status === "Approved") {
-                          return (
-                            <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
-                              <CheckCircle2 size={12} /> All Steps Complete
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
-                      {/* Non-sequential utility actions — not part of the
-                          linear flow, so they live in an overflow menu
-                          instead of competing with the one active step. */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
-                            <MoreHorizontal size={16} />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
-                          {b.Status !== "Cancelled" && (
-                            <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
-                              Change Unit
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={bookingColumns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No bookings found"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       {/* New Booking Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>

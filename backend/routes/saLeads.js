@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { promoteLeadToFollowup, promoteLeadToBooking } = require("../services/saHandoff");
+const { promoteLeadToFollowup } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
 const crypto = require("crypto");
@@ -66,7 +66,7 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
         l.Id, l.LeadUid, l.CustomerName, l.Mobile, l.AltMobile, l.Email,
         l.DateGenerated, l.Status, l.Classification, l.CustomerRemarks,
         l.AssignedTeamLeadId, l.AssignedSalespersonId,
-        l.FollowupCustomerId, l.BookingId, l.IsActive, l.CreatedAt,
+        l.FollowupCustomerId, l.BookingId, l.CrmApplicationId, l.CrmBookingId, l.IsActive, l.CreatedAt,
         l.PlatformId, l.CampaignId, l.AdId,
         l.ExternalLeadId, l.LeadFormName, l.SourceCampaignName, l.SourceAdName,
         l.SourcePlacement, l.LeadCaptureUrl, l.UtmSource, l.UtmMedium,
@@ -459,32 +459,6 @@ router.delete("/:id", requirePageRight("sa-leads", "view"), async (req, res) => 
   res.status(403).json({ error: "Leads cannot be deleted — this is a permanent record. Edit its status/classification instead." });
 });
 
-// GET /available-units — real Unit Master rows not attached to any active
-// CRM booking, for the "Promote to Booking" dialog's unit picker. Exists
-// here (rather than requiring sa-leads users to also hold crm-unit-matrix
-// rights) since Sales Automation and CRM are separately permissioned
-// modules — this keeps the picker usable for whoever can already promote a
-// lead, without a second permission grant.
-router.get("/available-units", requirePageRight("sa-leads", "view"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.UnitType, u.AreaSqFt, proj.name AS ProjectName
-      FROM dbo.UnitMaster u
-      LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
-      WHERE u.IsActive = 1
-        AND u.Id NOT IN (
-          SELECT UnitId FROM dbo.CrmBooking WHERE UnitId IS NOT NULL AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')
-        )
-      ORDER BY proj.name, u.UnitName
-    `);
-    res.json(result.recordset);
-  } catch (e) {
-    console.error("[sa-leads] GET /available-units error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // POST /:id/promote-followup
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
@@ -500,25 +474,6 @@ router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async
     res.json({ success: true, applicantId: result.applicantId });
   } catch (e) {
     console.error("[sa-leads] promote-followup error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// POST /:id/promote-booking
-router.post("/:id/promote-booking", requirePageRight("sa-leads", "edit"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const id = parseInt(req.params.id);
-    const scopeReq = pool.request().input("id", sql.Int, id);
-    const scope = applyLeadScope(scopeReq, req, "l");
-    const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
-    if (!owned.recordset.length) return res.status(403).json({ error: "This lead is not assigned to you" });
-
-    const result = await promoteLeadToBooking(pool, id, req.body, actorId(req));
-    if (result.alreadyBooked) return res.json({ message: "Already booked", bookingId: result.bookingId });
-    res.json({ success: true, bookingId: result.bookingId });
-  } catch (e) {
-    console.error("[sa-leads] promote-booking error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -365,3 +365,7 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
 });
 
 module.exports = router;
+// Reused by crmEntityCreation.js's createCrmBookingRecord to recompute
+// ParkingTotal/GrandTotal right after backfilling Application-stage parking
+// allotments onto the newly created Booking.
+module.exports.rollupBookingTotals = rollupBookingTotals;

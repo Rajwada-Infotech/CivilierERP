@@ -10,6 +10,7 @@ const API = "/api/crm/payment-plans";
 const COMPANY_API = "/api/business/dropdown";
 const UNIT_API = "/api/unit-master";
 const BLOCK_API = "/api/block-master";
+const MILESTONE_MASTER_API = "/api/crm/milestone-master";
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -28,6 +29,9 @@ async function fetchProjects(): Promise<any[]> {
 async function fetchBlocks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BLOCK_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchMilestoneMaster(): Promise<any[]> {
+  try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchPlanDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   return r.ok ? r.json() : null;
@@ -42,13 +46,14 @@ const CrmPaymentPlans: React.FC = () => {
   const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
-  const [items, setItems] = useState([{ MilestoneName: "Booking", Percent: "" }]);
+  const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
   const [saving, setSaving] = useState(false);
 
   const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
   const { data: blocks = [] } = useQuery({ queryKey: ["block-master"], queryFn: fetchBlocks, staleTime: 5 * 60_000 });
+  const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
 
   const projectsForCompany = useMemo(() => {
     if (!companyId) return projects as any[];
@@ -64,7 +69,7 @@ const CrmPaymentPlans: React.FC = () => {
   const resetForm = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId("");
-    setItems([{ MilestoneName: "Booking", Percent: "" }]);
+    setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
   };
 
   const openEdit = async (id: number) => {
@@ -79,8 +84,11 @@ const CrmPaymentPlans: React.FC = () => {
     setBlockId(plan.BlockId ? String(plan.BlockId) : "");
     setItems(
       (planItems as any[]).length
-        ? planItems.map((i: any) => ({ MilestoneName: i.MilestoneName, Percent: String(i.Percent) }))
-        : [{ MilestoneName: "Booking", Percent: "" }],
+        ? planItems.map((i: any) => ({
+            MilestoneMasterId: i.MilestoneMasterId ? String(i.MilestoneMasterId) : "",
+            MilestoneName: i.MilestoneName, Percent: String(i.Percent),
+          }))
+        : [{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }],
     );
     setDialogOpen(true);
   };
@@ -207,8 +215,24 @@ const CrmPaymentPlans: React.FC = () => {
               <div className="space-y-2">
                 {items.map((it, idx) => (
                   <div key={idx} className="flex gap-2">
+                    <select value={it.MilestoneMasterId}
+                      onChange={(e) => {
+                        const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
+                        setItems((arr) => arr.map((x, i) => i === idx ? {
+                          ...x,
+                          MilestoneMasterId: e.target.value,
+                          MilestoneName: master ? master.Name : x.MilestoneName,
+                          Percent: master?.DefaultPercent != null && !x.Percent ? String(master.DefaultPercent) : x.Percent,
+                        } : x));
+                      }}
+                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
+                      <option value="">Custom (type below)</option>
+                      {(milestoneMaster as any[]).filter((m: any) => m.IsActive).map((m: any) => (
+                        <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
+                      ))}
+                    </select>
                     <input type="text" placeholder="Milestone name" value={it.MilestoneName}
-                      onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value } : x))}
+                      onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value, MilestoneMasterId: "" } : x))}
                       className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
                     <input type="number" placeholder="%" value={it.Percent}
                       onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
@@ -218,7 +242,7 @@ const CrmPaymentPlans: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setItems((arr) => [...arr, { MilestoneName: "", Percent: "" }])}
+              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
                 className="text-xs text-primary hover:underline mt-2">+ Add milestone</button>
             </div>
           </div>

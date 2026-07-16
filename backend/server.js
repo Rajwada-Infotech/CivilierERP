@@ -345,6 +345,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
   { path: "/api/crm/payment-plans",        file: "./routes/crmPaymentPlans"        },
+  { path: "/api/crm/milestone-master",     file: "./routes/crmMilestoneMaster"     },
   { path: "/api/crm/parking",              file: "./routes/crmParking"             },
   { path: "/api/crm/holds",                file: "./routes/crmHolds"               },
   { path: "/api/crm/extra-charges",        file: "./routes/crmExtraCharges"        },

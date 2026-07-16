@@ -5,6 +5,7 @@ import { MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/lead-activities";
 const ACTIVITY_TYPES = ["Call", "WhatsApp", "Email", "Meeting", "Note", "SMS", "SiteVisit"];
@@ -73,6 +74,21 @@ const SaLeadActivities: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading activities...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load activities.</div>;
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "LeadUid", header: "Lead", size: 100, cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.row.original.LeadUid}</span> },
+    { accessorKey: "CustomerName", header: "Customer", size: 140,
+      cell: (i) => (<><div className="font-medium">{i.row.original.CustomerName}</div><div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div></>) },
+    { accessorKey: "ActivityType", header: "Activity", size: 110,
+      cell: (i) => <span className="inline-flex items-center gap-1.5">{i.row.original.ActivityType === "Call" ? <Phone size={13} /> : <MessageCircle size={13} />}{i.row.original.ActivityType}</span> },
+    { accessorKey: "Outcome", header: "Outcome", size: 100, cell: (i) => <span className="text-xs">{i.row.original.Outcome || "-"}</span> },
+    { accessorKey: "Summary", header: "Summary", size: 220, cell: (i) => <span>{i.row.original.Summary}</span> },
+    { accessorKey: "NextFollowupDate", header: "Next Follow-up", size: 130,
+      cell: (i) => <span className="whitespace-nowrap">{i.row.original.NextFollowupDate ? String(i.row.original.NextFollowupDate).slice(0, 10) : "-"}</span> },
+    { accessorKey: "CreatedByName", header: "Logged By", size: 110, cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CreatedByName || "System"}</span> },
+    { accessorKey: "CreatedAt", header: "Created", size: 140,
+      cell: (i) => <span className="text-xs text-muted-foreground whitespace-nowrap">{i.row.original.CreatedAt ? new Date(i.row.original.CreatedAt).toLocaleString() : "-"}</span> },
+  ];
+
   return (
     <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads">
       <div className="space-y-5">
@@ -103,29 +119,13 @@ const SaLeadActivities: React.FC = () => {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity timeline" className="w-full border border-border rounded-md bg-background px-3 py-2 text-sm" />
         </div>
 
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>{["Lead", "Customer", "Activity", "Outcome", "Summary", "Next Follow-up", "Logged By", "Created"].map((h) => <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">No activities yet</td></tr>
-              ) : filtered.map((a) => (
-                <tr key={a.Id} className="border-t border-border hover:bg-muted/20">
-                  <td className="p-3 font-mono text-xs text-muted-foreground">{a.LeadUid}</td>
-                  <td className="p-3"><div className="font-medium">{a.CustomerName}</div><div className="text-xs text-muted-foreground">{a.Mobile}</div></td>
-                  <td className="p-3"><span className="inline-flex items-center gap-1.5">{a.ActivityType === "Call" ? <Phone size={13} /> : <MessageCircle size={13} />}{a.ActivityType}</span></td>
-                  <td className="p-3 text-xs">{a.Outcome || "-"}</td>
-                  <td className="p-3 min-w-72">{a.Summary}</td>
-                  <td className="p-3 whitespace-nowrap">{a.NextFollowupDate ? String(a.NextFollowupDate).slice(0, 10) : "-"}</td>
-                  <td className="p-3 text-xs text-muted-foreground">{a.CreatedByName || "System"}</td>
-                  <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{a.CreatedAt ? new Date(a.CreatedAt).toLocaleString() : "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={filtered}
+          columns={columns}
+          searchable={false}
+          emptyMessage="No activities yet"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
       </div>
     </SalesAutoShell>
   );
