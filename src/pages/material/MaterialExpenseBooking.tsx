@@ -1834,7 +1834,10 @@ export default function MaterialExpenseBooking() {
 
                     {/* Records table */}
                     <div className="hidden sm:block">
-                      <div className="rounded-md">
+                      {/* Table still scrolls horizontally on narrow
+                          viewports — just without the visible scrollbar
+                          track taking up a row of its own. */}
+                      <div className="rounded-md [&>div]:[scrollbar-width:none] [&>div]:[-ms-overflow-style:none] [&>div::-webkit-scrollbar]:hidden">
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/30">
