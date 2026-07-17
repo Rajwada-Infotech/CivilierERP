@@ -107,6 +107,7 @@ import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import type {
   CompanyOption,
   ProjectOption,
@@ -1039,6 +1040,8 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
+  /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
+  const isDirect = !isGRN && !isPOorWO;
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
       const editingIdNum = editingId ? parseInt(editingId, 10) : null;
@@ -1554,6 +1557,23 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
+              {/* ── Direct (Other Expenses) Items ──────────────────────── */}
+              {isDirect && selectedDoc?.kind === "TOD" && (
+                <DirectItemsTable
+                  items={form.directItems ?? []}
+                  readOnly={
+                    form.status === "Approved" ||
+                    form.status === "Pending" ||
+                    form.status === "Booked"
+                  }
+                  onChange={(items) => {
+                    setForm((prev) => ({ ...prev, directItems: items }));
+                  }}
+                  onTotalChange={(total) => {
+                    setForm((prev) => ({ ...prev, basicAmount: total }));
+                  }}
+                />
+              )}
 
               {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <AmountGstSection
