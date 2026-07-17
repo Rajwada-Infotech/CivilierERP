@@ -52,9 +52,25 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
 router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().input("bid", sql.Int, parseInt(req.params.bookingId))
+    const bid = parseInt(req.params.bookingId);
+    const result = await pool.request().input("bid", sql.Int, bid)
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
-    res.json(result.recordset[0] || null);
+    if (result.recordset.length) return res.json(result.recordset[0]);
+
+    // No bank-detail row saved yet — PAN and the account holder's name are
+    // already on file at Customer intake (dbo.CrmCustomer), so pre-fill them
+    // here instead of making staff retype a PAN the system already has.
+    // Everything else (bank/nominee/Aadhaar/occupation) is genuinely new
+    // information this form is the first place to capture, so it stays blank.
+    const prefill = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      WHERE b.Id = @bid
+    `);
+    if (!prefill.recordset.length) return res.json(null);
+    res.json({ PanNo: prefill.recordset[0].PanNo || null, AccountHolderName: prefill.recordset[0].AccountHolderName || null });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -79,6 +95,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
       ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
       pan: b.PanNo || null, aadh: b.AadhaarNo || null,
       occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
+      cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
       notes: b.Notes || null,
     };
 
@@ -92,6 +109,8 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
         .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
         .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
         .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+        .input("tref", sql.NVarChar(200), fields.tref)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
         .query(`
           UPDATE dbo.CrmCustomerBankDetail SET
@@ -103,6 +122,8 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
             NomineeAddress = ISNULL(@naddr, NomineeAddress),
             PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
             Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
+            ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
+            TransactionRef = ISNULL(@tref, TransactionRef),
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE BookingId = @bid
         `);
@@ -116,13 +137,15 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
         .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
         .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
         .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+        .input("tref", sql.NVarChar(200), fields.tref)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
         .query(`
           INSERT INTO dbo.CrmCustomerBankDetail
             (BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
              NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
-             PanNo, AadhaarNo, Occupation, AnnualIncome, Notes, CreatedBy, CreatedAt)
-          VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @notes, @cb, SYSDATETIME())
+             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
+          VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
         `);
     }
 
@@ -133,6 +156,101 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-customer-bank-details] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /application/:applicationId — same record, keyed by Application
+// instead of Booking, for the new Application-stage payment/KYC capture
+// (Phase 1 of the Application/Booking redesign — a booking doesn't exist
+// yet at this point, so BookingId stays NULL on this row until one does).
+router.get("/application/:applicationId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("aid", sql.Int, parseInt(req.params.applicationId))
+      .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-customer-bank-details] GET /application error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put("/application/:applicationId", requirePageRight("crm-customer-bank-details", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const aid = parseInt(req.params.applicationId);
+    const b = req.body;
+    const actor = actorId(req);
+
+    const app = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    const existing = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
+
+    const fields = {
+      bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
+      holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
+      ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
+      pan: b.PanNo || null, aadh: b.AadhaarNo || null,
+      occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
+      cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
+      notes: b.Notes || null,
+    };
+
+    if (existing.recordset.length) {
+      await pool.request()
+        .input("aid", sql.Int, aid)
+        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+        .input("tref", sql.NVarChar(200), fields.tref)
+        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmCustomerBankDetail SET
+            BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
+            AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
+            AccountHolderName = ISNULL(@holder, AccountHolderName),
+            NomineeName = ISNULL(@nname, NomineeName), NomineeRelation = ISNULL(@nrel, NomineeRelation),
+            NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
+            NomineeAddress = ISNULL(@naddr, NomineeAddress),
+            PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
+            Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
+            ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
+            TransactionRef = ISNULL(@tref, TransactionRef),
+            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE ApplicationId = @aid
+        `);
+    } else {
+      await pool.request()
+        .input("aid", sql.Int, aid)
+        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+        .input("tref", sql.NVarChar(200), fields.tref)
+        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
+        .query(`
+          INSERT INTO dbo.CrmCustomerBankDetail
+            (ApplicationId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
+             NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
+             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
+          VALUES (@aid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
+        `);
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-customer-bank-details] PUT /application error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

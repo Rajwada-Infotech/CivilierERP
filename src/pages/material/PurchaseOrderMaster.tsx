@@ -520,6 +520,20 @@ const PurchaseOrderMaster: React.FC = () => {
   const [companyDetails, setCompanyDetails] = useState<CompanyDetails | null>(
     null,
   );
+
+  // Whether the selected supplier and company are in the same GST state —
+  // drives CGST+SGST vs IGST on every line item below. Mirrors the same
+  // normalizeState + fallback-to-intrastate pattern used server-side in
+  // expenseBooking.js / buildGrnGstData.js, so a PO and its downstream
+  // GRN/invoice never disagree on tax mode. Defaults to intrastate when
+  // either state is unknown, rather than silently charging IGST.
+  const normalizeState = (v: string | null | undefined) =>
+    String(v || "").trim().toLowerCase();
+  const isIntraState = useMemo(() => {
+    const supState = normalizeState(supplierDetails?.LGSTState);
+    const compState = normalizeState(companyDetails?.state);
+    return !supState || !compState || supState === compState;
+  }, [supplierDetails?.LGSTState, companyDetails?.state]);
   // Reuses CompanyDetails shape — the enterprise table holds Project rows
   // too, so the same getCompanyDetails() lookup gives us the project's
   // address to show as the PO's delivery address.
@@ -1462,26 +1476,54 @@ const PurchaseOrderMaster: React.FC = () => {
         u.code.toLowerCase() === itemUomNorm ||
         u.name.toLowerCase() === itemUomNorm,
     );
-    // Use CGST+SGST when either is set; otherwise IGST
+    // Items are tagged with CGST, SGST, and IGST rates all at once — which
+    // one actually applies depends on whether the supplier and the ordering
+    // company are in the same GST state (isIntraState, computed above from
+    // supplierDetails.LGSTState vs companyDetails.state). Same state →
+    // CGST+SGST; different state → IGST. This is why the identical item can
+    // price out differently on two POs raised against two different-state
+    // suppliers.
     const mc = Number(item.cgst ?? 0);
     const ms = Number(item.sgst ?? 0);
     const mi = Number(item.igst ?? 0);
-    const useCgstSgst = mc > 0 || ms > 0;
-    const rawGstRate = useCgstSgst ? mc + ms : mi;
-    // Item-master's own CGST/SGST/IGST columns are often stale/unset — when
-    // that's the case but the HSN Master has a resolved rate, use it. We
-    // don't know the HSN rate's CGST/SGST split, so it's applied as IGST.
-    const useResolvedRate = rawGstRate <= 0 && (item.resolvedGstRate ?? 0) > 0;
-    const gstRate = useResolvedRate ? item.resolvedGstRate! : rawGstRate;
+    const resolvedTotal = item.resolvedGstRate ?? 0;
+
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    if (isIntraState) {
+      if (mc > 0 || ms > 0) {
+        cgstRate = mc;
+        sgstRate = ms;
+      } else if (mi > 0) {
+        // Only an IGST rate is on file — split it evenly for an intrastate order.
+        cgstRate = mi / 2;
+        sgstRate = mi / 2;
+      } else if (resolvedTotal > 0) {
+        cgstRate = resolvedTotal / 2;
+        sgstRate = resolvedTotal / 2;
+      }
+    } else {
+      if (mi > 0) {
+        igstRate = mi;
+      } else if (mc > 0 || ms > 0) {
+        // Only a CGST/SGST split is on file — combine it for an interstate order.
+        igstRate = mc + ms;
+      } else if (resolvedTotal > 0) {
+        igstRate = resolvedTotal;
+      }
+    }
+    const gstRate = cgstRate + sgstRate + igstRate;
+
     updateLine(idx, {
       itemId,
       itemName: item.name,
       itemDescription: item.description,
       uomId: uomMatch?.id ?? null,
       unit: uomMatch?.name ?? item.uom,
-      cgstRate: useCgstSgst ? mc : 0,
-      sgstRate: useCgstSgst ? ms : 0,
-      igstRate: useResolvedRate ? item.resolvedGstRate! : useCgstSgst ? 0 : mi,
+      cgstRate,
+      sgstRate,
+      igstRate,
       gstRate,
     });
   };

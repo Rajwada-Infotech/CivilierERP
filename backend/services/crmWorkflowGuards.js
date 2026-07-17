@@ -178,7 +178,20 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
       VALUES (@agid, 'IdentityProof', 'Identity Proof (PAN / Aadhaar copy)', 1, 'Requested', 'Customer', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
     `);
 
-  const portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
+  // The agreement (and its identity-proof document request) are already
+  // committed above by this point — portal provisioning is a "nice to have
+  // in parallel" step per the workflow spec, not a prerequisite for the
+  // agreement itself. Guarded separately so a portal-provisioning hiccup
+  // (e.g. a transient DB error) can't turn into a 500 on whatever unrelated
+  // action actually triggered this — logging a welcome call or saving bank
+  // details — when that action itself already succeeded and committed.
+  let portalInfo = null;
+  try {
+    portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
+  } catch (e) {
+    console.error("[maybeAutoCreateAgreement] portal provisioning failed:", e.message);
+    portalInfo = { created: false, error: e.message };
+  }
 
   if (prereq.booking.AssignedTo) {
     await emitNotification(pool, prereq.booking.AssignedTo, "crm_agreement_ready",
@@ -476,12 +489,130 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
     `);
 }
 
+// Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
+// leaves to a human to type in — this is the auto path's own default, used
+// only when the Application/Booking didn't carry an explicit override.
+const BROKERAGE_TIER_THRESHOLD = 10000000; // 1 Crore
+function tierBrokeragePercent(totalValue) {
+  return Number(totalValue) >= BROKERAGE_TIER_THRESHOLD ? 1 : 2;
+}
+
+/**
+ * Auto-advance step: the moment a booking's first payment milestone is fully
+ * Paid, a broker selected at Application/Booking stage automatically gets a
+ * real CrmBrokerageMaster record — instead of requiring staff to remember to
+ * create one manually (the old flow, still available as POST / for bookings
+ * that never had a broker picked up front, gated on Agreement Executed).
+ * Idempotent: no-op if the booking has no BrokerId, or a brokerage record
+ * already exists for it. Rate: booking.BrokerageRatePercent if set, else the
+ * tier default off booking.TotalValue. If BrokerageSplitEnabled, creates TWO
+ * half-rate rows ('Before Agreement', unlocked immediately since Milestone 1
+ * is the trigger; 'After Agreement', locked until maybeUnlockBrokerageTranche
+ * fires) instead of one full-rate row.
+ * Call site: createReceiptForMilestone in crmPayments.js, gated additionally
+ * on this being Milestone #1 specifically — the other auto-advance guards in
+ * this file react to "all milestones settled", not milestone 1 alone, so
+ * this can't reuse their trigger condition.
+ */
+async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
+  const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT BrokerId, BrokerageRatePercent, BrokerageSplitEnabled, TotalValue, AssignedTo, BookingNo
+    FROM dbo.CrmBooking WHERE Id = @bid
+  `);
+  const bk = booking.recordset[0];
+  if (!bk || !bk.BrokerId) return null;
+
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
+  if (existing.recordset.length) return null;
+
+  const broker = await pool.request().input("brid", sql.Int, bk.BrokerId)
+    .query("SELECT LHeadId, LHeadName, LHeadPhone FROM dbo.AccountHeadMaster WHERE LHeadId = @brid AND LHeadType = 'BR'");
+  if (!broker.recordset.length) return null;
+  const brk = broker.recordset[0];
+
+  const totalValue = Number(bk.TotalValue) || 0;
+  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
+
+  // Mirrors crmBrokerage.js POST /'s own ComputedAmount formula exactly, so
+  // an auto-created row and a manually-created one compute the same way.
+  const amountFor = (pct) => Math.round(totalValue * pct) / 100;
+
+  const insertRow = async (ratePercent, trancheLabel, isLocked) => {
+    const computedAmount = amountFor(ratePercent);
+    const result = await pool.request()
+      .input("bid",   sql.Int,           bookingId)
+      .input("brid",  sql.Int,           brk.LHeadId)
+      .input("name",  sql.NVarChar(200), brk.LHeadName)
+      .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
+      .input("rt",    sql.NVarChar(20),  "Percentage")
+      .input("rv",    sql.Decimal(18,2), ratePercent)
+      .input("camt",  sql.Decimal(18,2), computedAmount)
+      .input("label", sql.NVarChar(30),  trancheLabel)
+      .input("lock",  sql.Bit,           isLocked ? 1 : 0)
+      .input("notes", sql.NVarChar(sql.MAX), "Auto-created — broker selected at Application stage, Milestone #1 paid")
+      .input("cb",    sql.Int,           actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmBrokerageMaster
+          (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @label, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+      `);
+    return result.recordset[0].Id;
+  };
+
+  let ids;
+  try {
+    if (bk.BrokerageSplitEnabled) {
+      const half = totalPercent / 2;
+      ids = [
+        await insertRow(half, "Before Agreement", false),
+        await insertRow(half, "After Agreement", true),
+      ];
+    } else {
+      ids = [await insertRow(totalPercent, null, false)];
+    }
+  } catch (e) {
+    // Race with another milestone-paid trigger reaching here concurrently —
+    // same UNIQUE(BookingId)-loses-the-race pattern as maybeAutoCreateAgreement.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
+
+  if (bk.AssignedTo) {
+    await emitNotification(pool, bk.AssignedTo, "crm_brokerage_ready",
+      "Brokerage Record Created",
+      `Brokerage auto-created for booking ${bk.BookingNo} — Milestone #1 paid for broker ${brk.LHeadName}.`,
+      ids[0], "crm_brokerage");
+  }
+
+  return { ids };
+}
+
+/**
+ * Unlocks the "After Agreement" tranche the moment the Agreement this
+ * booking is attached to actually reaches Executed — before that, the row
+ * exists (IsLocked=1) but can't be approved or paid (see the IsLocked gate
+ * in crmBrokerage.js). No-op if there's no such row (single-payout bookings,
+ * or bookings with no broker at all).
+ * Call site: crmAgreements.js's PUT /:id/mark-executed, alongside the other
+ * auto-advance calls already there.
+ */
+async function maybeUnlockBrokerageTranche(pool, bookingId) {
+  await pool.request().input("bid", sql.Int, bookingId).query(`
+    UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
+    WHERE BookingId = @bid AND TrancheLabel = 'After Agreement' AND IsLocked = 1
+  `);
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateSalesDeed,
   maybeAutoGenerateInvoice,
   maybeAutoGenerateAgreementInvoice,
+  maybeAutoCreateBrokerage,
+  maybeUnlockBrokerageTranche,
   maybeResolveAgreementDate,
   finalizeAgreementDate,
   syncLegalMilestoneStep,

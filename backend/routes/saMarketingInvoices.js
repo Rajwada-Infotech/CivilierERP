@@ -10,6 +10,8 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 router.use(authMiddleware);
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
+const { postSaMarketingInvoiceToGL } = require("../services/saLedger");
+const { recordGLPosting } = require("../services/approvalService");
 
 bumpCacheVersion("sa-marketing-invoices").catch(() => {});
 
@@ -54,7 +56,6 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
   const createdBy = req.user?.userId || null;
   if (!InvoiceNumber || !String(InvoiceNumber).trim())
     return res.status(400).json({ error: "Invoice Number is required" });
-  const computedTotal = (parseFloat(Amount) || 0) + (parseFloat(GstAmount) || 0);
   try {
     const pool = getPool();
     await pool.request()
@@ -65,7 +66,6 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
       .input("InvoiceDate", sql.Date, InvoiceDate || null)
       .input("Amount", sql.Decimal(18, 2), Amount || 0)
       .input("GstAmount", sql.Decimal(18, 2), GstAmount || 0)
-      .input("TotalAmount", sql.Decimal(18, 2), computedTotal)
       .input("DueDate", sql.Date, DueDate || null)
       .input("PaymentStatus", sql.NVarChar(20), PaymentStatus || "Pending")
       .input("Notes", sql.NVarChar(sql.MAX), Notes || null)
@@ -73,10 +73,10 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.SaMarketingInvoice
-          (InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount, TotalAmount,
+          (InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount,
            DueDate, PaymentStatus, Notes, IsActive, CreatedBy, CreatedAt)
         VALUES
-          (@InvoiceNumber, @VendorName, @CampaignId, @AdId, @InvoiceDate, @Amount, @GstAmount, @TotalAmount,
+          (@InvoiceNumber, @VendorName, @CampaignId, @AdId, @InvoiceDate, @Amount, @GstAmount,
            @DueDate, @PaymentStatus, @Notes, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await invalidateMarketingInvoiceDependents();
@@ -95,9 +95,12 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount, DueDate, PaymentStatus, Notes, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
-  const computedTotal = (parseFloat(Amount) || 0) + (parseFloat(GstAmount) || 0);
   try {
     const pool = getPool();
+    const cur = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT PaymentStatus FROM dbo.SaMarketingInvoice WHERE Id = @Id");
+    const previousStatus = cur.recordset[0]?.PaymentStatus;
+
     await pool.request()
       .input("Id", sql.Int, id)
       .input("InvoiceNumber", sql.NVarChar(50), InvoiceNumber)
@@ -107,7 +110,6 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
       .input("InvoiceDate", sql.Date, InvoiceDate || null)
       .input("Amount", sql.Decimal(18, 2), Amount || 0)
       .input("GstAmount", sql.Decimal(18, 2), GstAmount || 0)
-      .input("TotalAmount", sql.Decimal(18, 2), computedTotal)
       .input("DueDate", sql.Date, DueDate || null)
       .input("PaymentStatus", sql.NVarChar(20), PaymentStatus || "Pending")
       .input("Notes", sql.NVarChar(sql.MAX), Notes || null)
@@ -117,12 +119,28 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
         UPDATE dbo.SaMarketingInvoice SET
           InvoiceNumber = @InvoiceNumber, VendorName = @VendorName,
           CampaignId = @CampaignId, AdId = @AdId, InvoiceDate = @InvoiceDate,
-          Amount = @Amount, GstAmount = @GstAmount, TotalAmount = @TotalAmount,
+          Amount = @Amount, GstAmount = @GstAmount,
           DueDate = @DueDate,
           PaymentStatus = @PaymentStatus, Notes = @Notes, IsActive = @IsActive,
           UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+
+    // "PAID -> REAL DISBURSEMENT" — same pattern as CRM/commissions: a
+    // marketing invoice being marked Paid is real cash leaving the company,
+    // not just a status flag. Only fires on the actual Pending->Paid edge,
+    // and never blocks the update itself if GL posting fails.
+    if (PaymentStatus === "Paid" && previousStatus !== "Paid") {
+      const actorEmail = req.user?.name || req.user?.email || "system";
+      try {
+        const outcome = await postSaMarketingInvoiceToGL(pool, id, actorEmail);
+        await recordGLPosting("sa-marketing-invoice", id, outcome, actorEmail);
+      } catch (glErr) {
+        console.error("[sa-marketing-invoices] GL posting failed:", glErr.message);
+        await recordGLPosting("sa-marketing-invoice", id, { failed: true, reason: glErr.message }, actorEmail);
+      }
+    }
+
     await invalidateMarketingInvoiceDependents();
     res.json({ message: "Invoice updated successfully" });
   } catch (err) {

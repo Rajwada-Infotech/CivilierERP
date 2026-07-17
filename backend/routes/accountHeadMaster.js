@@ -1,4 +1,7 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -10,6 +13,56 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const bcrypt = require("bcrypt");
 
 const adminOnly = allowRoles("admin", "super_admin");
+
+// ── Broker RERA certificate upload — mirrors crmBookingDocuments.js's
+// disk-storage + streamed-GET pattern exactly (private upload dir, random
+// filename, path-traversal guard on read). Only ever attached to
+// LHeadType='BR' rows.
+const BROKER_CERT_DIR = path.join(__dirname, "../uploads/broker-certificates");
+if (!fs.existsSync(BROKER_CERT_DIR)) fs.mkdirSync(BROKER_CERT_DIR, { recursive: true });
+const brokerCertUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, BROKER_CERT_DIR),
+    filename: (_req, file, cb) => {
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
+    },
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("File type not allowed — upload a PDF or image"));
+  },
+});
+
+// SUNDRY CREDITORS (migration 260628/154, Code='SCS') — every broker's ledger
+// head lands here automatically instead of staff manually picking an Account
+// Group. Mirrors crmLedger.js's getSundryDebtorsGroupId() cache-once pattern
+// exactly, just the payable-side equivalent for brokers (who are owed
+// commission) instead of the receivable-side one CRM customers use.
+let _sundryCreditorsGroupId;
+async function getSundryCreditorsGroupId(pool) {
+  if (_sundryCreditorsGroupId !== undefined) return _sundryCreditorsGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SCS'");
+  _sundryCreditorsGroupId = r.recordset[0]?.AGId ?? null;
+  return _sundryCreditorsGroupId;
+}
+
+// SUNDRY DEBTORS (ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY
+// DEBTORS, Code='SDS') — the receivable-side equivalent of
+// getSundryCreditorsGroupId above. Every Customer/Applicant (LHeadType='A')
+// created via CustomerMaster.tsx lands here automatically. Mirrors
+// crmLedger.js's getSundryDebtorsGroupId() (kept as a separate cache here
+// rather than importing that module, matching how this file already
+// duplicates the Creditors pattern instead of sharing it).
+let _sundryDebtorsGroupId;
+async function getSundryDebtorsGroupId(pool) {
+  if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'");
+  _sundryDebtorsGroupId = r.recordset[0]?.AGId ?? null;
+  return _sundryDebtorsGroupId;
+}
 
 // Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
 // bcrypt library and cost factor per the "no new encryption mechanism" spec,
@@ -123,6 +176,11 @@ router.get("/:id", async (req, res, next) => {
     ];
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
+    if (hasColumn(columnMeta, "LHeadRera")) selectColumns.push("lh.LHeadRera");
+    if (hasColumn(columnMeta, "LHeadCertificateUrl"))
+      selectColumns.push("lh.LHeadCertificateUrl");
+    if (hasColumn(columnMeta, "LHeadCertificateFileName"))
+      selectColumns.push("lh.LHeadCertificateFileName");
     if (hasColumn(columnMeta, "LHeadCategory"))
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
@@ -178,6 +236,11 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
 
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
+    if (hasColumn(columnMeta, "LHeadRera")) selectColumns.push("lh.LHeadRera");
+    if (hasColumn(columnMeta, "LHeadCertificateUrl"))
+      selectColumns.push("lh.LHeadCertificateUrl");
+    if (hasColumn(columnMeta, "LHeadCertificateFileName"))
+      selectColumns.push("lh.LHeadCertificateFileName");
     if (hasColumn(columnMeta, "LHeadCategory"))
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
@@ -247,6 +310,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     LDescription,
     LGSTType,
     LHeadPan,
+    LHeadRera,
     LHeadCategory,
     LHeadType,
   IsTdsApplicable,
@@ -317,6 +381,33 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
 
+    // Brokers, Suppliers, and Contractors all always land in SUNDRY
+    // CREDITORS — never trust a client-supplied LBelongsTo for these types
+    // (payable-side ledger heads), so one is never left invisible in Trial
+    // Balance the way a NULL-group head would be (see trialBalance.js's
+    // `WHERE ahm.LBelongsTo IS NOT NULL` filter).
+    //
+    // LHeadType='C' still collides with one remaining code path that reuses
+    // 'C' to mean "Customer" rather than "Contractor" —
+    // projectMaster.js's ensureProjectLedgerHeads (LHeadCode 'PRJ-<id>-CUST').
+    // crmLedger.js's ensureCrmCustomerLedgerHead used to collide here too but
+    // now correctly mints LHeadType='A' (see migration 224). Those rows
+    // belong in SUNDRY DEBTORS, not Creditors, so any code containing
+    // 'CUST' is excluded from this block.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
+    let effectiveLBelongsTo = LBelongsTo;
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
+      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      // Customers/Applicants (CustomerMaster.tsx) always land in SUNDRY
+      // DEBTORS — same never-trust-the-client treatment as the Creditors
+      // block above, just the receivable side.
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
+    }
+
     // Both need to be resolved before the insert (email generation queries
     // the DB for collisions; hashing is async), and both only apply to
     // suppliers.
@@ -353,7 +444,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       .input("LGST", sql.VarChar(20), LGST || null)
       .input("LGSTState", sql.VarChar(50), LGSTState || null)
       .input("LCountry", sql.VarChar(50), LCountry || "India")
-      .input("LBelongsTo", sql.Int, LBelongsTo || null)
+      .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null)
       .input("LHeadType", sql.VarChar(50), LHeadType || "GL")
       .input("Status", sql.NVarChar(20), "Draft"); // ← always Draft on create
@@ -387,6 +478,11 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       request.input("LHeadPan", sql.NVarChar(50), LHeadPan || null);
       insertColumns.push("LHeadPan");
       insertValues.push("@LHeadPan");
+    }
+    if (hasColumn(columnMeta, "LHeadRera")) {
+      request.input("LHeadRera", sql.NVarChar(50), LHeadRera || null);
+      insertColumns.push("LHeadRera");
+      insertValues.push("@LHeadRera");
     }
     if (hasColumn(columnMeta, "LHeadCategory")) {
       request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
@@ -649,6 +745,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     LDescription,
     LGSTType,
     LHeadPan,
+    LHeadRera,
     LHeadCategory,
     LHeadType,
     IsTdsApplicable,
@@ -723,6 +820,21 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
 
     const columnMeta = await getAccountHeadColumnMeta();
 
+    // Same auto-assignment as POST / — a broker/supplier/contractor's group
+    // is never client-editable, even on update. Excludes any 'CUST'-coded
+    // head, which also uses LHeadType='C' but means "Customer" (Sundry
+    // Debtors), not Contractor — see POST / for detail.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
+    let effectiveLBelongsTo = LBelongsTo;
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
+      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
+    }
+
     let newSupplierPasswordHash = null;
     if (LHeadType === "S" && supplierPasswordPlain) {
       newSupplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
@@ -746,7 +858,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LGST", sql.VarChar(20), LGST || null)
       .input("LGSTState", sql.VarChar(50), LGSTState || null)
       .input("LCountry", sql.VarChar(50), LCountry || null)
-      .input("LBelongsTo", sql.Int, LBelongsTo || null)
+      .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null);
 
     const updates = [
@@ -775,6 +887,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "LHeadPan")) {
       request.input("LHeadPan", sql.NVarChar(50), LHeadPan || null);
       updates.push("LHeadPan=@LHeadPan");
+    }
+    if (hasColumn(columnMeta, "LHeadRera")) {
+      request.input("LHeadRera", sql.NVarChar(50), LHeadRera || null);
+      updates.push("LHeadRera=@LHeadRera");
     }
     if (hasColumn(columnMeta, "LHeadCategory")) {
       request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
@@ -858,6 +974,65 @@ router.delete("/:id", requirePageRight("account-head", "delete"), async (req, re
   } catch (err) {
     console.error("DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/certificate — RERA/broker certificate upload, single file.
+// Scoped to LHeadType='BR' rows only — this is a broker-only concept even
+// though it lives on the shared AccountHeadMaster table.
+router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, res) => {
+  brokerCertUpload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const id = parseInt(req.params.id);
+      const pool = getPool();
+      const row = await pool.request().input("id", sql.Int, id)
+        .query("SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      if (!row.recordset.length || row.recordset[0].LHeadType !== "BR") {
+        fs.unlink(req.file.path, () => {});
+        return res.status(404).json({ error: "Broker not found" });
+      }
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("url", sql.NVarChar(500), req.file.path)
+        .input("fn", sql.NVarChar(300), req.file.originalname)
+        .query(`
+          UPDATE dbo.AccountHeadMaster SET
+            LHeadCertificateUrl = @url, LHeadCertificateFileName = @fn, UpdatedAt = SYSDATETIME()
+          WHERE LHeadId = @id
+        `);
+      await bumpCacheVersion("account-head-master");
+      res.status(201).json({ success: true, fileName: req.file.originalname });
+    } catch (e) {
+      if (req.file) {
+        const resolved = path.resolve(req.file.path);
+        if (resolved.startsWith(path.resolve(BROKER_CERT_DIR) + path.sep)) fs.unlink(resolved, () => {});
+      }
+      console.error("[account-head] certificate upload error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// GET /:id/certificate/file — stream the certificate for inline preview/download
+router.get("/:id/certificate/file", requirePageRight("account-head", "view"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const result = await getPool().request().input("id", sql.Int, id)
+      .query("SELECT LHeadCertificateUrl, LHeadCertificateFileName FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+    if (!result.recordset.length || !result.recordset[0].LHeadCertificateUrl) return res.status(404).json({ error: "Certificate not found" });
+    const doc = result.recordset[0];
+
+    const resolvedPath = path.resolve(doc.LHeadCertificateUrl);
+    if (!resolvedPath.startsWith(path.resolve(BROKER_CERT_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
+
+    res.setHeader("Content-Disposition", `inline; filename="${doc.LHeadCertificateFileName || "certificate"}"`);
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (e) {
+    console.error("[account-head] certificate GET error:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -19,6 +19,7 @@
  */
 const { getPool, sql } = require("../db");
 const { emitNotification } = require("./notify");
+const logger = require("../logger");
 
 const INTERVAL_MS = 60 * 60 * 1000; // hourly, same cadence as escalationEngine.js
 const COOLDOWN_HOURS = 24; // don't re-notify the same overdue record within this window
@@ -219,8 +220,15 @@ let timer = null;
 function startCrmSlaEngine() {
   const run = () => {
     runCrmSlaCheck()
-      .then((summary) => console.log("[CrmSlaEngine] Done:", JSON.stringify(summary)))
-      .catch((e) => console.error("[CrmSlaEngine] run failed:", e.message));
+      .then((summary) => {
+        const totalOverdue = Object.values(summary).reduce((s, v) => s + v.overdue, 0);
+        const totalNotified = Object.values(summary).reduce((s, v) => s + v.notified, 0);
+        // Nothing overdue is the common case (runs hourly) — skip the log
+        // line entirely rather than printing an all-zero summary every run.
+        if (totalOverdue === 0) return;
+        logger.info({ event: "CRM_SLA_RUN_DONE", totalOverdue, totalNotified, summary }, "CRM SLA check complete");
+      })
+      .catch((e) => logger.error({ event: "CRM_SLA_RUN_FAILED", err: e.message }, "CRM SLA check failed"));
   };
   run(); // once at boot, matching escalationEngine.js's pattern
   timer = setInterval(run, INTERVAL_MS);

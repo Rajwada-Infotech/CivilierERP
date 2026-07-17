@@ -200,7 +200,7 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
       return res.status(400).json({ error: `Invalid Category. Must be: ${SNAG_CATEGORIES.join(", ")}` });
     if (!b.Description?.trim()) return res.status(400).json({ error: "Description is required" });
 
-    await pool.request()
+    const result = await pool.request()
       .input("hid",  sql.Int,            handoverId)
       .input("cat",  sql.NVarChar(50),   b.Category)
       .input("desc", sql.NVarChar(sql.MAX), b.Description.trim())
@@ -208,6 +208,7 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
       .input("rb",   sql.Int,            actorId(req))
       .query(`
         INSERT INTO dbo.CrmSnagItem (HandoverId, Category, Description, PhotoUrl, Status, RaisedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@hid, @cat, @desc, @photo, 'Open', @rb, SYSDATETIME())
       `);
 
@@ -215,7 +216,7 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
     await pool.request().input("hid", sql.Int, handoverId)
       .query(`UPDATE dbo.CrmHandover SET Status = 'SnagPending' WHERE Id = @hid AND Status IN ('Scheduled','SnagInspection')`);
 
-    res.status(201).json({ success: true });
+    res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     console.error("[crm-handover] POST snags error:", e.message);
     res.status(500).json({ error: e.message });
@@ -228,7 +229,8 @@ router.put("/:id/snags/:snagId", requirePageRight("crm-handover", "edit"), async
     const pool = getPool();
     const b = req.body;
     const snagId = parseInt(req.params.snagId);
-    await pool.request()
+    if (!Number.isFinite(snagId)) return res.status(400).json({ error: "Invalid snag id" });
+    const result = await pool.request()
       .input("id", sql.Int, snagId)
       .input("st", sql.NVarChar(30), b.Status || null)
       .input("rb", sql.Int, actorId(req))
@@ -239,6 +241,7 @@ router.put("/:id/snags/:snagId", requirePageRight("crm-handover", "edit"), async
           ResolvedAt = CASE WHEN @st = 'Resolved' THEN SYSDATETIME() ELSE ResolvedAt END
         WHERE Id = @id
       `);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Snag not found" });
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-handover] PUT snags error:", e.message);

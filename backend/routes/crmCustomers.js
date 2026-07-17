@@ -6,6 +6,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
+const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -145,7 +146,21 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
         VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @addr, @city, @state, @pin,
                 @dob, @coname, @comob, @copan, @corel, @notes, @cb, SYSDATETIME())
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, CustomerNo: customerNo });
+    const newId = result.recordset[0].Id;
+
+    // Eagerly create the "Customer Master" ledger head (dbo.AccountHeadMaster,
+    // LHeadType='C') instead of waiting for the first GL-posting event —
+    // otherwise a customer with an application/booking but no payment yet
+    // is invisible to the Sales module's Customer Sale Order picker and
+    // Finance's customer lists until money actually moves. Never blocks
+    // customer creation if this fails.
+    try {
+      await ensureCrmCustomerLedgerHead(pool, newId, req.user?.name || req.user?.email || "system");
+    } catch (ledgerErr) {
+      console.error("[crm-customers] ledger head creation failed:", ledgerErr.message);
+    }
+
+    res.status(201).json({ success: true, id: newId, CustomerNo: customerNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
       return res.status(409).json({ error: "A customer with this mobile number already exists" });
@@ -190,6 +205,42 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
           Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // CrmApplication.Email/Mobile/AltMobile were originally seeded FROM the
+    // customer at application-creation time but are separate copies — left
+    // unsynced, an edit here (e.g. correcting a typo) would silently leave
+    // every linked application, and therefore that application's already-
+    // provisioned portal login lookup, pointing at the stale value. Keep
+    // them in lockstep since CrmCustomer is the canonical identity record.
+    await pool.request()
+      .input("id",     sql.Int,          id)
+      .input("name",   sql.NVarChar(200), b.CustomerName || null)
+      .input("mob",    sql.NVarChar(20), b.Mobile || null)
+      .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
+      .input("email",  sql.NVarChar(200), b.Email ?? null)
+      .query(`
+        UPDATE dbo.CrmApplication SET
+          ApplicantName = ISNULL(@name, ApplicantName),
+          Mobile = ISNULL(@mob, Mobile),
+          AltMobile = @altmob,
+          Email = @email
+        WHERE CustomerId = @id
+      `);
+
+    // Same lockstep guarantee, extended to the "Customer Master" ledger head
+    // (dbo.AccountHeadMaster, LHeadType='C') that the Sales module's Customer
+    // Sale Orders and Finance's ledger/Trial Balance reports actually read —
+    // ensureCrmCustomerLedgerHead only ever wrote this once, at first
+    // payment, so an edit here previously left that master record stale
+    // forever. No-op if the customer has no ledger head yet.
+    try {
+      await syncCrmCustomerLedgerHead(pool, id, {
+        CustomerName: b.CustomerName, Mobile: b.Mobile, Email: b.Email, Address: b.Address, PanNo: b.PanNo,
+      });
+    } catch (ledgerErr) {
+      console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);
+    }
+
     res.json({ success: true });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {

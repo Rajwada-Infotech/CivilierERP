@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Landmark, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const BKG_API = "/api/crm/bookings";
 
@@ -93,6 +94,40 @@ const CrmLoanTracking: React.FC = () => {
     }
   };
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking", size: 110, cell: (i) => <span className="font-mono text-xs">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { accessorKey: "TotalValue", header: "Total Value", size: 110, cell: (i) => <span>{fmt(i.row.original.TotalValue)}</span> },
+    { id: "bankName", header: "Bank", size: 110, enableSorting: false,
+      cell: (i) => <span>{loanMap[i.row.original.Id]?.BankName || "—"}</span> },
+    { id: "loanAmount", header: "Loan Amount", size: 110, enableSorting: false,
+      cell: (i) => <span>{fmt(loanMap[i.row.original.Id]?.LoanAmount)}</span> },
+    { id: "disbursed", header: "Disbursed", size: 110, enableSorting: false,
+      cell: (i) => <span className="text-green-600">{fmt(loanMap[i.row.original.Id]?.DisbursedAmount)}</span> },
+    { id: "status", header: "Status", size: 100, enableSorting: false,
+      cell: (i) => {
+        const status = loanMap[i.row.original.Id]?.SanctionStatus || "NotApplied";
+        return <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[status]}`}>{status}</span>;
+      } },
+    { id: "rmContact", header: "RM Contact", size: 130, enableSorting: false,
+      cell: (i) => {
+        const loan = loanMap[i.row.original.Id];
+        return <span className="text-xs">{loan?.RmName ? `${loan.RmName} · ${loan.RmContact || ""}` : "—"}</span>;
+      } },
+    { id: "actions", header: "", size: 80, enableSorting: false,
+      cell: (i) => (
+        <button onClick={() => openEdit(i.row.original.Id)} className="flex items-center gap-1 text-xs text-primary hover:underline">
+          <Landmark size={12} /> {loanMap[i.row.original.Id] ? "Edit" : "Add"}
+        </button>
+      ) },
+  ];
+
   return (
     <SalesAutoShell title="CRM — Home Loan Tracking" subtitle="Bank coordination and loan disbursement status per booking">
       <div className="relative max-w-md">
@@ -102,50 +137,14 @@ const CrmLoanTracking: React.FC = () => {
           className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Booking", "Customer", "Total Value", "Bank", "Loan Amount", "Disbursed", "Status", "RM Contact", ""].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">No bookings found</td></tr>
-            ) : filtered.map((b: any) => {
-              const loan = loanMap[b.Id];
-              return (
-                <tr key={b.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs">{b.BookingNo}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{b.ApplicantName}</div>
-                    <div className="text-xs text-muted-foreground">{b.Mobile}</div>
-                  </td>
-                  <td className="px-4 py-3">{fmt(b.TotalValue)}</td>
-                  <td className="px-4 py-3">{loan?.BankName || "—"}</td>
-                  <td className="px-4 py-3">{fmt(loan?.LoanAmount)}</td>
-                  <td className="px-4 py-3 text-green-600">{fmt(loan?.DisbursedAmount)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[loan?.SanctionStatus || "NotApplied"]}`}>
-                      {loan?.SanctionStatus || "NotApplied"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs">{loan?.RmName ? `${loan.RmName} · ${loan.RmContact || ""}` : "—"}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => openEdit(b.Id)} className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      <Landmark size={12} /> {loan ? "Edit" : "Add"}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={columns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No bookings found"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={!!editingBookingId} onOpenChange={(o) => { if (!o) setEditingBookingId(null); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">

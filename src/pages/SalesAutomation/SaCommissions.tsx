@@ -5,6 +5,7 @@ import { CheckCircle2, IndianRupee, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/commissions";
 
@@ -103,6 +104,41 @@ const SaCommissions: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading commissions...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load commissions.</div>;
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "LeadUid", header: "Lead", size: 130,
+      cell: (i) => (<><div className="font-mono text-xs text-muted-foreground">{i.row.original.LeadUid || "-"}</div><div>{i.row.original.CustomerName || "-"}</div></>) },
+    { accessorKey: "BookingValue", header: "Booking Value", size: 110,
+      cell: (i) => <span className="whitespace-nowrap">Rs {money(i.row.original.BookingValue)}</span> },
+    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span>{i.row.original.SalespersonName || "-"}</span> },
+    { accessorKey: "TeamLeadName", header: "Team Lead", size: 120, cell: (i) => <span>{i.row.original.TeamLeadName || "-"}</span> },
+    { accessorKey: "ChannelPartnerName", header: "Channel Partner", size: 130, cell: (i) => <span>{i.row.original.ChannelPartnerName || "-"}</span> },
+    { id: "amounts", header: "Amounts", size: 200, enableSorting: false,
+      cell: (i) => {
+        const c = i.row.original;
+        return <span className="text-xs text-muted-foreground">SP Rs {money(c.SpAmount)} | TL Rs {money(c.TlAmount)} | CP Rs {money(c.CpAmount)}</span>;
+      } },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className="inline-flex items-center gap-1.5"><IndianRupee size={13} />{i.row.original.Status}</span> },
+    { id: "actions", header: "Actions", size: 130, enableSorting: false,
+      cell: (i) => {
+        const c = i.row.original;
+        return (
+          <>
+            {canDoAction("sa-commissions", "edit") && c.Status === "Pending" && (
+              <button onClick={() => updateStatus(c, "Approved")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+                <CheckCircle2 size={13} /> Approve
+              </button>
+            )}
+            {canDoAction("sa-commissions", "edit") && c.Status === "Approved" && (
+              <button onClick={() => updateStatus(c, "Paid")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+                <IndianRupee size={13} /> Paid
+              </button>
+            )}
+          </>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell title="Commission Tracking" subtitle="Track sales, team lead and channel partner payouts from bookings">
       <div className="space-y-5">
@@ -141,40 +177,13 @@ const SaCommissions: React.FC = () => {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search commissions" className="w-full border border-border rounded-md bg-background px-3 py-2 text-sm" />
         </div>
 
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>{["Lead", "Booking Value", "Salesperson", "Team Lead", "Channel Partner", "Amounts", "Status", "Actions"].map((h) => <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">No commissions yet</td></tr>
-              ) : filtered.map((c) => (
-                <tr key={c.Id} className="border-t border-border hover:bg-muted/20">
-                  <td className="p-3"><div className="font-mono text-xs text-muted-foreground">{c.LeadUid || "-"}</div><div>{c.CustomerName || "-"}</div></td>
-                  <td className="p-3 whitespace-nowrap">Rs {money(c.BookingValue)}</td>
-                  <td className="p-3">{c.SalespersonName || "-"}</td>
-                  <td className="p-3">{c.TeamLeadName || "-"}</td>
-                  <td className="p-3">{c.ChannelPartnerName || "-"}</td>
-                  <td className="p-3 min-w-48 text-xs text-muted-foreground">SP Rs {money(c.SpAmount)} | TL Rs {money(c.TlAmount)} | CP Rs {money(c.CpAmount)}</td>
-                  <td className="p-3"><span className="inline-flex items-center gap-1.5"><IndianRupee size={13} />{c.Status}</span></td>
-                  <td className="p-3">
-                    {canDoAction("sa-commissions", "edit") && c.Status === "Pending" && (
-                      <button onClick={() => updateStatus(c, "Approved")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
-                        <CheckCircle2 size={13} /> Approve
-                      </button>
-                    )}
-                    {canDoAction("sa-commissions", "edit") && c.Status === "Approved" && (
-                      <button onClick={() => updateStatus(c, "Paid")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
-                        <IndianRupee size={13} /> Paid
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={filtered}
+          columns={columns}
+          searchable={false}
+          emptyMessage="No commissions yet"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
       </div>
     </SalesAutoShell>
   );

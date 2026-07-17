@@ -97,10 +97,11 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
         .input("pid",  sql.Int,           planId)
         .input("mno",  sql.Int,           idx + 1)
         .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
+        .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
         .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
         .query(`
-          INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, [Percent])
-          VALUES (@pid, @mno, @mname, @pct)
+          INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
+          VALUES (@pid, @mno, @mname, @mmid, @pct)
         `);
     }
 
@@ -116,12 +117,30 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
   }
 });
 
+// PUT /:id — updates Description/IsActive/scope as before. If an `Items`
+// array is also supplied, replaces the milestone breakdown entirely (same
+// sum-to-100 validation as create). This only corrects the TEMPLATE — any
+// booking that already generated its CrmPaymentMilestone schedule from this
+// plan keeps its existing (already-materialized) schedule untouched; only
+// bookings created after this edit pick up the new split. That mirrors the
+// existing booking-level guard that blocks changing a booking's own
+// PaymentPlanId once a milestone has a real payment against it — a plan
+// template is a stamp, not a live binding.
 router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, res) => {
+  const pool = getPool();
+  const id = parseInt(req.params.id);
+  const b = req.body;
+  const items = Array.isArray(b.Items) ? b.Items : null;
+  if (items) {
+    if (!items.length) return res.status(400).json({ error: "At least one milestone item is required" });
+    const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
+    if (Math.round(totalPct * 100) !== 10000) return res.status(400).json({ error: `Milestone percentages must sum to 100 (currently ${totalPct})` });
+  }
+
+  const tx = pool.transaction();
   try {
-    const pool = getPool();
-    const id = parseInt(req.params.id);
-    const b = req.body;
-    await pool.request()
+    await tx.begin();
+    await tx.request()
       .input("id",   sql.Int,  id)
       .input("desc", sql.NVarChar(500), b.Description || null)
       .input("active", sql.Bit, b.IsActive !== false ? 1 : 0)
@@ -134,8 +153,31 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
           CompanyId = @cid, ProjectId = @pid, BlockId = @bid
         WHERE Id = @id
       `);
-    res.json({ success: true });
+
+    if (items) {
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id");
+      for (let idx = 0; idx < items.length; idx++) {
+        await tx.request()
+          .input("pid",  sql.Int,           id)
+          .input("mno",  sql.Int,           idx + 1)
+          .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
+          .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
+          .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
+          .query(`
+            INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
+            VALUES (@pid, @mno, @mname, @mmid, @pct)
+          `);
+      }
+    }
+
+    await tx.commit();
+
+    const usage = await pool.request().input("id", sql.Int, id)
+      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id AND IsActive = 1");
+    res.json({ success: true, bookingsUsingPlan: usage.recordset[0].Cnt });
   } catch (e) {
+    await tx.rollback();
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
       return res.status(409).json({ error: "A plan with this name already exists for this company/project/block" });
     }

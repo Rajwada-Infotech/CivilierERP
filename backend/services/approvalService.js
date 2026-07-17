@@ -135,7 +135,12 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "inter-company-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
   "crm-bookings": CRM_APPROVER_ROLES,
-  "crm-agreements": CRM_APPROVER_ROLES,
+  // legal_head added specifically here (not to CRM_APPROVER_ROLES generally) —
+  // this is the "SENIOR LOGIN IN LEGAL TEAM" approval gate from the workflow
+  // spec. legal_head can approve an Agreement's legal paperwork but has no
+  // approve rights on bookings/brokerage/cancellations/NOC — those stay
+  // admin/super_admin/marketing_head only.
+  "crm-agreements": [...CRM_APPROVER_ROLES, "legal_head"],
   // Explicitly narrower than the other CRM modules — super_admin only, per
   // instruction, "for now"; reassignable later purely via LevelsData same
   // as every other module here, no code change needed when that happens.

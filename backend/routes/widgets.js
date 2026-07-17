@@ -7,7 +7,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { redisGet, redisSet } = require("../redis");
 
-const CACHE_TTL_SECONDS = 45;
+const CACHE_TTL_SECONDS = 15;
 const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
 
 const toNumber = (value) => Number(value || 0);
@@ -102,6 +102,7 @@ function getPermissions(role) {
     canViewProcurement: isPrivileged,
     canViewTasks: true,
     canViewAdminTools: isPrivileged,
+    canViewCrm: isPrivileged || role === "marketing_head",
   };
 }
 
@@ -410,6 +411,28 @@ function buildAlerts({ role, isPrivileged, summary }) {
         count: summary.openPOs,
       });
     }
+
+    if (summary.crmSlaBreachedTickets > 0) {
+      alerts.push({
+        type: "critical",
+        score: 90,
+        title: "CRM SLA Breached",
+        description: `${summary.crmSlaBreachedTickets} service tickets are past their SLA due date`,
+        action: "/reports",
+        count: summary.crmSlaBreachedTickets,
+      });
+    }
+
+    if (summary.crmOverduePayments > 0) {
+      alerts.push({
+        type: "warning",
+        score: 70,
+        title: "CRM Overdue Payments",
+        description: `${summary.crmOverduePayments} payment milestones are overdue`,
+        action: "/reports",
+        count: summary.crmOverduePayments,
+      });
+    }
   } else {
     if (summary.overdueTasks > 0) {
       alerts.push({
@@ -578,6 +601,7 @@ router.get("/", async (req, res) => {
   const role = req.user?.role || "user";
   const userId = Number(req.user?.userId || 0);
   const isPrivileged = PRIVILEGED_ROLES.has(role);
+  const isCrmVisible = isPrivileged || role === "marketing_head";
   const cacheKey = `widgets:${role}:${userId || "session"}`;
 
   try {
@@ -607,6 +631,7 @@ router.get("/", async (req, res) => {
       recentGrnsResult,
       activityTrendResult,
       taskTrendResult,
+      crmStatsResult,
     ] = await Promise.all([
       isPrivileged
         ? pool.request().query(`
@@ -659,7 +684,11 @@ router.get("/", async (req, res) => {
                 WHERE Status IN ('Draft','Pending') OR Status IS NULL
               ) AS PendingCheques,
               (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'S') AS SupplierCount,
-              (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'C') AS CustomerCount,
+              -- 'C' means Contractor, not Customer, in this schema — 'A' is
+              -- the real Customer type (see accountHeadMaster.js). This was
+              -- previously miscounting Contractors under a "CustomerCount"
+              -- label.
+              (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'A') AS CustomerCount,
               (
                 SELECT COUNT(*)
                 FROM dbo.AccountHeadMaster
@@ -930,6 +959,42 @@ router.get("/", async (req, res) => {
             GROUP BY CAST(CreatedAt AS DATE)
             ORDER BY BucketDate ASC
           `),
+
+      isCrmVisible
+        ? pool.request().query(`
+            SELECT
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1) AS TotalLeads,
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND CAST(DateGenerated AS DATE) = CAST(GETDATE() AS DATE)) AS LeadsToday,
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'Hot') AS HotLeads,
+              (SELECT COUNT(*) FROM dbo.SaCampaign WHERE IsActive = 1 AND Status = 'Active') AS ActiveCampaigns,
+              (SELECT COUNT(*) FROM dbo.CrmBooking WHERE IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')) AS ActiveCrmBookings,
+              (SELECT COUNT(*) FROM dbo.SaLead l WHERE l.IsActive = 1 AND EXISTS (
+                SELECT 1 FROM dbo.SaLeadActivity a WHERE a.LeadId = l.Id AND a.NextFollowupDate IS NOT NULL AND a.NextFollowupDate <= CAST(GETDATE() AS DATE)
+              )) AS PendingFollowups,
+              (SELECT ISNULL(SUM(r.Amount), 0) FROM dbo.CrmPaymentReceipt r WHERE CAST(r.ReceivedDate AS DATE) = CAST(GETDATE() AS DATE)) AS CrmCollectionsToday,
+              (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.Status = 'Pending' AND m.DueDate < CAST(GETDATE() AS DATE)) AS CrmOverduePayments,
+              (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE Status = 'Pending') AS CrmPendingCancellations,
+              (SELECT COUNT(*) FROM dbo.CrmServiceTicket WHERE Status NOT IN ('Resolved', 'Closed')) AS CrmOpenServiceTickets,
+              (SELECT COUNT(*) FROM dbo.CrmServiceTicket WHERE Status NOT IN ('Resolved', 'Closed') AND SlaDueDate IS NOT NULL AND SlaDueDate < GETDATE()) AS CrmSlaBreachedTickets,
+              (SELECT COUNT(*) FROM dbo.CrmHandover WHERE Status NOT IN ('Completed')) AS CrmPendingHandovers
+          `)
+        : pool.request().input("UserId", sql.Int, userId).query(`
+            SELECT
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND AssignedSalespersonId = @UserId) AS TotalLeads,
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND AssignedSalespersonId = @UserId AND CAST(DateGenerated AS DATE) = CAST(GETDATE() AS DATE)) AS LeadsToday,
+              (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND AssignedSalespersonId = @UserId AND Status = 'Hot') AS HotLeads,
+              0 AS ActiveCampaigns,
+              0 AS ActiveCrmBookings,
+              (SELECT COUNT(*) FROM dbo.SaLead l WHERE l.IsActive = 1 AND l.AssignedSalespersonId = @UserId AND EXISTS (
+                SELECT 1 FROM dbo.SaLeadActivity a WHERE a.LeadId = l.Id AND a.NextFollowupDate IS NOT NULL AND a.NextFollowupDate <= CAST(GETDATE() AS DATE)
+              )) AS PendingFollowups,
+              0 AS CrmCollectionsToday,
+              0 AS CrmOverduePayments,
+              0 AS CrmPendingCancellations,
+              0 AS CrmOpenServiceTickets,
+              0 AS CrmSlaBreachedTickets,
+              0 AS CrmPendingHandovers
+          `),
     ]);
 
     const users = userStatsResult.recordset[0] || {};
@@ -937,6 +1002,7 @@ router.get("/", async (req, res) => {
     const finance = financeStatsResult.recordset[0] || {};
     const procurement = procurementStatsResult.recordset[0] || {};
     const tasks = taskStatsResult.recordset[0] || {};
+    const crm = crmStatsResult.recordset[0] || {};
 
     const summary = {
       totalUsers: toNumber(users.TotalUsers),
@@ -966,6 +1032,18 @@ router.get("/", async (req, res) => {
       reviewedTasks: toNumber(tasks.ReviewedTasks),
       overdueTasks: toNumber(tasks.OverdueTasks),
       dueSoonTasks: toNumber(tasks.DueSoonTasks),
+      totalLeads: toNumber(crm.TotalLeads),
+      leadsToday: toNumber(crm.LeadsToday),
+      hotLeads: toNumber(crm.HotLeads),
+      activeCampaigns: toNumber(crm.ActiveCampaigns),
+      activeCrmBookings: toNumber(crm.ActiveCrmBookings),
+      pendingFollowups: toNumber(crm.PendingFollowups),
+      crmCollectionsToday: toNumber(crm.CrmCollectionsToday),
+      crmOverduePayments: toNumber(crm.CrmOverduePayments),
+      crmPendingCancellations: toNumber(crm.CrmPendingCancellations),
+      crmOpenServiceTickets: toNumber(crm.CrmOpenServiceTickets),
+      crmSlaBreachedTickets: toNumber(crm.CrmSlaBreachedTickets),
+      crmPendingHandovers: toNumber(crm.CrmPendingHandovers),
     };
 
     const trends = {
