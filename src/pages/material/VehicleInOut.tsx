@@ -1,4 +1,5 @@
 import React, { useRef, useState, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import Webcam from "react-webcam";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -711,6 +712,56 @@ export default function VehicleInOut() {
     );
   }, [projects, form.companyId]);
 
+  // ── Deep links from the "Pending Vehicle In/Out" widget ────────────────────
+  // ?view=<id>      — open a previously logged lot in the view modal.
+  // ?newForPO=<id>  — open the create form pre-filled for a PO that still
+  //                   has goods outstanding (mirrors the PO <select>'s own
+  //                   onChange below, so company/project/supplier match).
+  const [searchParams, setSearchParams] = useSearchParams();
+  React.useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    _onView({ VehicleInOutID: Number(viewId) });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("view");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    const poIdParam = searchParams.get("newForPO");
+    if (!poIdParam || allPOs.length === 0) return;
+    const id = Number(poIdParam);
+    const po = (allPOs as any[]).find((p: any) => p.PurchaseOrderID === id);
+    setShowForm(true);
+    setEditingId(null);
+    setForm({
+      ...buildEmpty(activeFinYear),
+      poId: id,
+      poNumber: po?.DocNo || po?.PurchaseOrderNo || "",
+      supplierId: po?.SupplierID ?? null,
+      supplierName: po?.SupplierName ?? "",
+      companyId: po?.CompanyId ?? null,
+      projectId: po?.ProjectId ?? null,
+    });
+    setReceivedQtyByItem({});
+    setErrors({});
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("newForPO");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, allPOs]);
+
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const createMut = useMutation({
     mutationFn: (p: VehicleInOutPayload) => vehApi.createVehicleInOut(p),
@@ -771,6 +822,8 @@ export default function VehicleInOut() {
   // ── Validate ──────────────────────────────────────────────────────────────────
   const validate = () => {
     const errs: Record<string, string> = {};
+    if (!form.companyId) errs.companyId = "Company is required";
+    if (!form.projectId) errs.projectId = "Project is required";
     if (!form.vehicleNo.trim()) errs.vehicleNo = "Vehicle number is required";
     if (!form.entryTime) errs.entryTime = "Entry time is required";
 
@@ -787,7 +840,9 @@ export default function VehicleInOut() {
 
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
-      toast.error(errs.items || "Please fix the errors");
+      toast.error(
+        errs.items || errs.companyId || errs.projectId || "Please fix the errors",
+      );
       return false;
     }
     return true;
@@ -1106,7 +1161,7 @@ export default function VehicleInOut() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Company */}
                   <div>
-                    <FieldLabel>
+                    <FieldLabel required>
                       <span className="inline-flex items-center gap-1">
                         <Building2 size={9} />
                         Company
@@ -1123,7 +1178,7 @@ export default function VehicleInOut() {
                             projectId: null,
                           })
                         }
-                        className={inpSel}
+                        className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">Select Company…</option>
                         {(companies as any[]).map((c: any) => (
@@ -1137,11 +1192,16 @@ export default function VehicleInOut() {
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
                     </div>
+                    {errors.companyId && (
+                      <p className="text-[10px] text-destructive mt-1">
+                        {errors.companyId}
+                      </p>
+                    )}
                   </div>
 
                   {/* Project */}
                   <div>
-                    <FieldLabel>
+                    <FieldLabel required>
                       <span className="inline-flex items-center gap-1">
                         <FolderOpen size={9} />
                         Project
@@ -1157,7 +1217,7 @@ export default function VehicleInOut() {
                               : null,
                           })
                         }
-                        className={inpSel}
+                        className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">Select Project…</option>
                         {filteredProjects.map((p: any) => (
@@ -1171,6 +1231,11 @@ export default function VehicleInOut() {
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
                     </div>
+                    {errors.projectId && (
+                      <p className="text-[10px] text-destructive mt-1">
+                        {errors.projectId}
+                      </p>
+                    )}
                   </div>
 
                   {/* Doc Date — locked to today; entries are dated when

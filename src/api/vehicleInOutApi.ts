@@ -146,6 +146,31 @@ export async function getPOItemsRemaining(
   return res.json().catch(() => []);
 }
 
+/** One PO with goods still outstanding after partial Vehicle In/Out lots
+ *  (GET /pending-summary) — backs the "Pending Vehicle In/Out" widget. */
+export interface PendingVehicleInOutSummary {
+  poId: number;
+  poNumber: string | null;
+  supplierName: string | null;
+  companyId: number | null;
+  projectId: number | null;
+  totalOrdered: number;
+  totalReceived: number;
+  pendingQty: number;
+  /** Most recent Vehicle In/Out lot already logged against this PO, if any. */
+  lastVehicleInOutId: number | null;
+  lastVehicleInOutDocNo: string | null;
+  lastVehicleNo: string | null;
+}
+
+export async function getPendingVehicleSummary(): Promise<
+  PendingVehicleInOutSummary[]
+> {
+  const res = await fetchWithAuth(`${BASE}/pending-summary`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json().catch(() => []);
+}
+
 export async function previewNextVEHNumber(): Promise<{ nextDocNo: string }> {
   const res = await fetchWithAuth(`${BASE}/next-number`);
   if (!res.ok) throw new Error(await res.text());

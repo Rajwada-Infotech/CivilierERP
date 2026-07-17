@@ -1,7 +1,8 @@
 import type React from "react";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
@@ -12,6 +13,11 @@ import {
 } from "@/api/widgetsApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
+  getPendingVehicleSummary,
+  type PendingVehicleInOutSummary,
+} from "@/api/vehicleInOutApi";
+import { getEnterprisesByType } from "@/api/enterpriseApi";
+import {
   Puzzle,
   BarChart2,
   TrendingUp,
@@ -21,10 +27,11 @@ import {
   Calendar,
   Bell,
   MessageSquare,
-  Map,
+  Map as MapIcon,
   Paperclip,
   RefreshCw,
   Calculator,
+  Truck,
   X,
 } from "lucide-react";
 
@@ -39,10 +46,11 @@ const widgetIcons: Record<string, React.ElementType> = {
   calendar: Calendar,
   bell: Bell,
   "message-square": MessageSquare,
-  map: Map,
+  map: MapIcon,
   paperclip: Paperclip,
   "refresh-cw": RefreshCw,
   calculator: Calculator,
+  truck: Truck,
 };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -521,20 +529,232 @@ function ActivityFeedWidget() {
       ))}
     </div>
   );
+}// ─── MAP VIEW WIDGET ─────────────────────────────────────────────────────────
+// Plots each project (enterprise rows with business_type="P") as a marker on
+// an OpenStreetMap tile layer via Leaflet — free, no API key. Projects that
+// already have Latitude/Longitude use those directly; projects with only a
+// free-text Address are geocoded client-side through Nominatim (OSM's free
+// geocoder, results cached in-memory + rate-limited to its ~1 req/sec fair
+// use policy). Projects with neither are skipped.
+const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
+let geocodeQueue: Promise<unknown> = Promise.resolve();
+
+interface ProjectMarker {
+  id: number;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  status: string | null;
+  companyName: string | null;
+  lat: number;
+  lng: number;
+}
+
+function geocodeAddress(addr: string): Promise<{ lat: number; lng: number } | null> {
+  if (geocodeCache.has(addr)) return Promise.resolve(geocodeCache.get(addr)!);
+  // Nominatim's fair-use policy caps this at ~1 req/sec — chain requests
+  // through a single queue (with a trailing delay) so a widget with many
+  // un-geocoded projects doesn't fire them all at once.
+  const run = geocodeQueue.then(async () => {
+    let coords: { lat: number; lng: number } | null = null;
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`,
+      );
+      const results = await res.json();
+      const hit = results?.[0];
+      coords = hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
+    } catch {
+      coords = null;
+    }
+    geocodeCache.set(addr, coords);
+    await new Promise((r) => setTimeout(r, 1100));
+    return coords;
+  });
+  geocodeQueue = run.catch(() => null);
+  return run;
+}
+
+function useProjectMarkers() {
+  const [markers, setMarkers] = useState<ProjectMarker[]>([]);
+  const [geocoding, setGeocoding] = useState(false);
+
+  const { data: projects = [], isLoading } = useQuery({
+    queryKey: ["map-widget-projects"],
+    queryFn: () => getEnterprisesByType("P"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: companies = [] } = useQuery({
+    queryKey: ["map-widget-companies"],
+    queryFn: () => getEnterprisesByType("C"),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  useEffect(() => {
+    if (projects.length === 0) {
+      setMarkers([]);
+      return;
+    }
+    let alive = true;
+    const companyName = (id: number | null) =>
+      id ? (companies.find((c) => c.id === id)?.name ?? null) : null;
+
+    const withCoords: ProjectMarker[] = [];
+    const needsGeocode: typeof projects = [];
+    for (const p of projects) {
+      if (p.latitude != null && p.longitude != null) {
+        withCoords.push({
+          id: p.id,
+          name: p.name || `Project #${p.id}`,
+          address: p.address,
+          city: p.city,
+          state: p.state,
+          status: p.status,
+          companyName: companyName(p.belongs_to),
+          lat: Number(p.latitude),
+          lng: Number(p.longitude),
+        });
+      } else if (p.address || p.city) {
+        needsGeocode.push(p);
+      }
+    }
+
+    setMarkers(withCoords);
+    if (needsGeocode.length === 0) return;
+
+    setGeocoding(true);
+    Promise.all(
+      needsGeocode.map(async (p) => {
+        const addr = [p.address, p.city, p.state, p.country]
+          .filter(Boolean)
+          .join(", ");
+        if (!addr) return null;
+        const coords = await geocodeAddress(addr);
+        if (!coords) return null;
+        return {
+          id: p.id,
+          name: p.name || `Project #${p.id}`,
+          address: p.address,
+          city: p.city,
+          state: p.state,
+          status: p.status,
+          companyName: companyName(p.belongs_to),
+          lat: coords.lat,
+          lng: coords.lng,
+        } as ProjectMarker;
+      }),
+    ).then((geocoded) => {
+      if (!alive) return;
+      setMarkers([
+        ...withCoords,
+        ...geocoded.filter((m): m is ProjectMarker => m !== null),
+      ]);
+      setGeocoding(false);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [projects, companies]);
+
+  return { markers, loading: isLoading, geocoding };
+}
+
+// Leaflet's default marker icon references image files by URL, which
+// bundlers like Vite don't resolve automatically — point them at a CDN
+// (same approach the Leaflet docs recommend for bundled apps) once, at
+// module load.
+let leafletIconPatched = false;
+function patchLeafletIcon(L: typeof import("leaflet")) {
+  if (leafletIconPatched) return;
+  leafletIconPatched = true;
+  delete (L.Icon.Default.prototype as any)._getIconUrl;
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl:
+      "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  });
 }
 
 function MapViewWidget() {
-  return (
-    <div className="space-y-3">
+  const { markers, geocoding } = useProjectMarkers();
+  const [LeafletMod, setLeafletMod] = useState<{
+    L: typeof import("leaflet");
+    RL: typeof import("react-leaflet");
+  } | null>(null);
+
+  useEffect(() => {
+    Promise.all([import("leaflet"), import("react-leaflet")]).then(
+      ([L, RL]) => {
+        patchLeafletIcon(L);
+        setLeafletMod({ L, RL });
+      },
+    );
+  }, []);
+
+  if (!markers.length && !geocoding) {
+    return (
       <div className="h-44 rounded-xl bg-muted/20 border border-border flex items-center justify-center">
-        <div className="text-center space-y-2">
-          <Map size={32} className="text-muted-foreground/40 mx-auto" />
-          <p className="text-sm text-muted-foreground">Map integration</p>
+        <div className="text-center space-y-2 px-4">
+          <MapIcon size={32} className="text-muted-foreground/40 mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            No project locations to show
+          </p>
           <p className="text-xs text-muted-foreground/60">
-            Connect a map API to display site locations
+            Add an address or coordinates to a project to see it here.
           </p>
         </div>
       </div>
+    );
+  }
+
+  if (!LeafletMod) return <Spinner />;
+
+  const { MapContainer, TileLayer, Marker, Popup } = LeafletMod.RL;
+  const center: [number, number] = markers.length
+    ? [markers[0].lat, markers[0].lng]
+    : [22.5726, 88.3639]; // fallback: Kolkata
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-xl overflow-hidden border border-border" style={{ height: 320 }}>
+        <MapContainer
+          center={center}
+          zoom={markers.length > 1 ? 6 : 12}
+          style={{ height: "100%", width: "100%" }}
+          scrollWheelZoom={false}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {markers.map((m) => (
+            <Marker key={m.id} position={[m.lat, m.lng]}>
+              <Popup>
+                <div className="text-xs space-y-1 max-w-[200px]">
+                  <p className="font-bold text-sm">{m.name}</p>
+                  {m.companyName && <p>{m.companyName}</p>}
+                  {(m.address || m.city) && (
+                    <p>{[m.address, m.city, m.state].filter(Boolean).join(", ")}</p>
+                  )}
+                  {m.status && (
+                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                      {m.status}
+                    </span>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      </div>
+      {geocoding && (
+        <p className="text-[10px] text-muted-foreground text-center">
+          Resolving project addresses…
+        </p>
+      )}
     </div>
   );
 }
@@ -802,6 +1022,73 @@ function CalculatorWidget() {
   );
 }
 
+function PendingVehicleInOutWidget() {
+  const navigate = useNavigate();
+  const { data: pending = [], isLoading } = useQuery<
+    PendingVehicleInOutSummary[]
+  >({
+    queryKey: ["pending-vehicle-in-out"],
+    queryFn: getPendingVehicleSummary,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+  if (isLoading) return <Spinner />;
+  if (!pending.length)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No pending vehicles — every PO is fully delivered.
+      </p>
+    );
+
+  const goTo = (row: PendingVehicleInOutSummary) => {
+    if (row.lastVehicleInOutId) {
+      navigate(`/material/vehicle-in-out?view=${row.lastVehicleInOutId}`);
+    } else {
+      navigate(`/material/vehicle-in-out?newForPO=${row.poId}`);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center justify-between">
+        <span>Pending Vehicle In/Out</span>
+        <span className="text-foreground font-bold text-sm">
+          {pending.length}
+        </span>
+      </p>
+      <div className="divide-y divide-border max-h-80 overflow-y-auto">
+        {pending.map((row) => (
+          <button
+            key={row.poId}
+            onClick={() => goTo(row)}
+            className="w-full py-2.5 flex items-center justify-between gap-3 text-left hover:bg-muted/20 rounded-lg px-2 -mx-2 transition-colors"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {row.poNumber || `PO #${row.poId}`}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {row.supplierName || "—"}
+                {row.lastVehicleInOutDocNo
+                  ? ` · Last: ${row.lastVehicleInOutDocNo}`
+                  : " · No vehicle logged yet"}
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-sm font-bold text-amber-500">
+                {fmtNum(row.pendingQty)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                of {fmtNum(row.totalOrdered)} pending
+              </p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── WIDGET MAP ───────────────────────────────────────────────────────────────
 const widgetComponents: Record<string, React.ComponentType> = {
   "Bar Chart": BarChartWidget,
@@ -816,6 +1103,7 @@ const widgetComponents: Record<string, React.ComponentType> = {
   "File Uploader": FileUploaderWidget,
   "Progress Ring": ProgressRingWidget,
   Calculator: CalculatorWidget,
+  "Pending Vehicle In/Out": PendingVehicleInOutWidget,
 };
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
