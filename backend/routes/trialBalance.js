@@ -143,11 +143,12 @@ router.get("/", async (req, res) => {
     const heads = headsRes.recordset;
 
     // ── 3. Build group map ───────────────────────────────────────────────────
-    // LHeadType 'C' is overloaded in this schema — projectMaster.js's
-    // ensureProjectLedgerHeads() and crmLedger.js's ensureCrmCustomerLedgerHead()
-    // both mint 'C' heads for genuine Customers/buyers, while
-    // contractorAllocation.js/workOrder.js use the same 'C' for genuine
-    // construction Contractors. The two are told apart by which side of the
+    // LHeadType 'C' is still overloaded for one remaining source:
+    // projectMaster.js's ensureProjectLedgerHeads() mints a 'C' head for a
+    // project's own "customer" side of its auto-created trading pair
+    // (crmLedger.js's ensureCrmCustomerLedgerHead() used to do the same for
+    // CRM customers, but now correctly mints LHeadType='A' — see migration
+    // 224). The two 'C' meanings are told apart by which side of the
     // balance sheet their AccountGroup falls under: Customer heads are
     // classified under SUNDRY DEBTORS/TRADE RECEIVABLES (AGId 65/64,
     // asset side); Contractor heads are not. See isReceivablesGroup() below.
