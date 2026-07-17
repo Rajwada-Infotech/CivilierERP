@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 
@@ -194,6 +194,13 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   if (rollup.recordset[0]?.Status === "Paid") {
     await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
     await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorUserId);
+
+    // Brokerage's own trigger is Milestone #1 specifically becoming Paid —
+    // unlike the two guards above, which react to "all milestones settled" —
+    // so it needs its own inline condition, not the same "Paid" check reused.
+    if (targetRow.MilestoneNo === 1) {
+      await maybeAutoCreateBrokerage(pool, targetRow.BookingId, actorUserId);
+    }
   }
 
   return { receiptId, ReceiptNo: receiptNo, bookingId: targetRow.BookingId };

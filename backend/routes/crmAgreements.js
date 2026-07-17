@@ -12,7 +12,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeUnlockBrokerageTranche, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -753,6 +753,11 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     await maybeAutoGenerateInvoice(pool, row.BookingId, actor);
     await maybeAutoGenerateAgreementInvoice(pool, row.BookingId, actor);
     await syncLegalMilestoneStep(pool, row.BookingId, "FinalExecution", actor);
+
+    // The "After Agreement" brokerage tranche (if a split was opted into)
+    // has been sitting IsLocked=1 since Milestone #1 was paid — execution is
+    // exactly the real-world event that unlocks it.
+    await maybeUnlockBrokerageTranche(pool, row.BookingId);
 
     res.json({ success: true, status: "Executed" });
   } catch (e) {
