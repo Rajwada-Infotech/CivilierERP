@@ -711,6 +711,18 @@ async function ebHasPaymentTermId(pool) {
   return _ebHasPaymentTermId;
 }
 
+// Cached flag for EDirectItemsData column (added in migration for direct-expense line items)
+let _ebHasDirectItemsData = null;
+async function ebHasDirectItemsData(pool) {
+  if (_ebHasDirectItemsData !== null) return _ebHasDirectItemsData;
+  const r = await pool.request()
+    .input("T", sql.NVarChar(128), "ExpenseBooking")
+    .input("C", sql.NVarChar(128), "EDirectItemsData")
+    .query("SELECT 1 AS f FROM sys.columns WHERE object_id=OBJECT_ID(@T) AND name=@C");
+  _ebHasDirectItemsData = !!r.recordset[0];
+  return _ebHasDirectItemsData;
+}
+
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -720,6 +732,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const offset = (page - 1) * limit;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
+    const hasDirectItemsCol = await ebHasDirectItemsData(pool);
     const ebSupplierList = expenseBookingSupplierSql("eb", "lsup");
 
     // Run status counts and paginated list in parallel
@@ -753,6 +766,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
+          ${hasDirectItemsCol ? "eb.EDirectItemsData," : "CAST(NULL AS NVARCHAR(MAX)) AS EDirectItemsData,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
@@ -1329,6 +1343,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   }
 
   const hasPayTermCol = await ebHasPaymentTermId(pool);
+  const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -1622,6 +1637,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+    if (hasDirectItemsCol) insertReq.input("EDirectItemsData", sql.NVarChar(sql.MAX), null);
 
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
@@ -1637,6 +1653,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
           ECostCenter, EGLAccount, EWorkDoneRef
           ${hasPayTermCol ? ", PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -1650,6 +1667,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
           @ECostCenter, @EGLAccount, @EWorkDoneRef
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1726,6 +1744,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EGLAccount,
     EWorkDoneRef,
     PaymentTermId,
+    EDirectItemsData,
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
     LHeadId,
@@ -1752,6 +1771,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
   const pool = getPool();
   const hasPayTermCol = await ebHasPaymentTermId(pool);
+  const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -2197,6 +2217,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+    if (hasDirectItemsCol) insertReq.input("EDirectItemsData", sql.NVarChar(sql.MAX), EDirectItemsData || null);
 
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
@@ -2212,6 +2233,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
           ECostCenter, EGLAccount, EWorkDoneRef, ContractId, LHeadId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EIgstRate, @EPaymentType, @EPartialAmount, @EDiscountData, @EDocNo,
@@ -2225,6 +2247,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
           @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId, @LHeadId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -2789,6 +2812,7 @@ router.put(
       EGLAccount,
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
+      EDirectItemsData: EDirectItemsDataPut,
       LHeadId,
     } = req.body;
 
@@ -2812,6 +2836,8 @@ router.put(
     try {
       const pool = getPool();
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
+      const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
+
       // Default to a direct/manual booking's own amounts + supplier link;
       // the GRN branch below overrides amounts/GST (never IGST — GRN
       // bookings are always CGST/SGST) with the live GRN totals instead.
@@ -2952,6 +2978,8 @@ router.put(
         .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
+      if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
+
 
       const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET
@@ -2972,6 +3000,7 @@ router.put(
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef,
           LHeadId=@LHeadId
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
+          ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
         WHERE Eid = @Eid
       `);
 

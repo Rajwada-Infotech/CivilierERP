@@ -1,4 +1,7 @@
 // ─── Expense Booking — Shared Types ──────────────────────────────────────────
+import type { DirectLineItem } from "./DirectItemsTable";
+export type { DirectLineItem };
+
 export type BookingStatus =
   | "Draft"
   | "Pending"
@@ -169,6 +172,11 @@ export interface ExpenseRecord {
     amount?: number;
     [key: string]: any;
   }[];
+
+  /** Line items for direct (Other Expenses / TOD) bookings.
+   *  Serialised as JSON into EDirectItemsData on the backend.
+   *  When present and non-empty, basicAmount is derived from their sum. */
+  directItems?: DirectLineItem[];
 }
 
 export interface PriceBreakdown {
