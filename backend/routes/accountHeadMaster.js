@@ -49,6 +49,21 @@ async function getSundryCreditorsGroupId(pool) {
   return _sundryCreditorsGroupId;
 }
 
+// SUNDRY DEBTORS (ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY
+// DEBTORS, Code='SDS') — the receivable-side equivalent of
+// getSundryCreditorsGroupId above. Every Customer/Applicant (LHeadType='A')
+// created via CustomerMaster.tsx lands here automatically. Mirrors
+// crmLedger.js's getSundryDebtorsGroupId() (kept as a separate cache here
+// rather than importing that module, matching how this file already
+// duplicates the Creditors pattern instead of sharing it).
+let _sundryDebtorsGroupId;
+async function getSundryDebtorsGroupId(pool) {
+  if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'");
+  _sundryDebtorsGroupId = r.recordset[0]?.AGId ?? null;
+  return _sundryDebtorsGroupId;
+}
+
 // Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
 // bcrypt library and cost factor per the "no new encryption mechanism" spec,
 // not introducing a second constant that could silently drift out of sync.
@@ -386,6 +401,11 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      // Customers/Applicants (CustomerMaster.tsx) always land in SUNDRY
+      // DEBTORS — same never-trust-the-client treatment as the Creditors
+      // block above, just the receivable side.
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
     // Both need to be resolved before the insert (email generation queries
@@ -811,6 +831,8 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
     let newSupplierPasswordHash = null;
