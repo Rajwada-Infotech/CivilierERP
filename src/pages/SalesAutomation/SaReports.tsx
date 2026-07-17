@@ -9,6 +9,7 @@ const REPORTS = [
   { key: "lead-source", label: "Lead Source Report", cols: ["Platform", "TotalLeads", "Bookings", "Lost"] },
   { key: "campaign-performance", label: "Campaign Performance Report", cols: ["CampaignCode", "Name", "Budget", "Status", "TotalAds", "TotalLeads", "CostSpent", "Bookings", "ConversionPct"] },
   { key: "ad-performance", label: "Advertisement Performance Report", cols: ["Name", "CampaignName", "Status", "Budget", "Spent", "LeadsGenerated", "Bookings", "CostPerLead", "ConversionRate", "RoiPercent"] },
+  { key: "daily-ad-performance", label: "Daily Reach & Cost Report", cols: ["ReportDate", "AdName", "CampaignName", "DailyReach", "DailyCost", "CostPerLead"] },
   { key: "cost-per-lead", label: "Cost Per Lead Report", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalLeads", "CostPerLead"] },
   { key: "sales-performance", label: "Sales Performance Report", cols: ["SalespersonName", "LeadsHandled", "CallsMade", "SiteVisits", "Bookings"] },
   { key: "team-leader-performance", label: "Team Leader Performance Report", cols: ["TeamLeadName", "LeadsReceived", "LeadsDistributed", "PendingDistribution", "TeamBookings"] },

@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/service-tickets";
 const BKG_API = "/api/crm/bookings";
@@ -120,6 +121,76 @@ const CrmServiceTickets: React.FC = () => {
     runAction(id, "reopen", { Reason: reason });
   };
 
+  const isOverdue = (t: any) => t.SlaDueDate && new Date(t.SlaDueDate) < new Date() && !["Resolved", "Closed"].includes(t.Status);
+
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "TicketNo", header: "Ticket No", size: 110,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+        </div>
+      ) },
+    { accessorKey: "Category", header: "Category", size: 100,
+      cell: (i) => <span className="text-xs">{(i.getValue() as string).replace(/([A-Z])/g, " $1").trim()}</span> },
+    { accessorKey: "Subject", header: "Subject", size: 180,
+      cell: (i) => (
+        <div className="max-w-xs truncate">
+          {i.row.original.Subject}
+          {i.row.original.RaisedByCustomer && (
+            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
+          )}
+        </div>
+      ) },
+    { accessorKey: "Priority", header: "Priority", size: 90,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[i.row.original.Priority] || ""}`}>{i.row.original.Priority}</span> },
+    { accessorKey: "AssigneeName", header: "Assigned To", size: 110, cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
+    { id: "slaDue", header: "SLA Due", size: 140, enableSorting: false,
+      cell: (i) => {
+        const t = i.row.original;
+        const overdue = isOverdue(t);
+        return (
+          <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+            {t.SlaDueDate ? String(t.SlaDueDate).slice(0, 16).replace("T", " ") : "—"}
+            {overdue && " (OVERDUE)"}
+          </span>
+        );
+      } },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { id: "rating", header: "Rating", size: 80, enableSorting: false,
+      cell: (i) => i.row.original.CustomerRating ? (
+        <span className="flex items-center gap-0.5 text-yellow-500 text-xs">
+          <Star size={12} fill="currentColor" /> {i.row.original.CustomerRating}/5
+        </span>
+      ) : <span>—</span> },
+    { id: "actions", header: "Actions", size: 150, enableSorting: false,
+      cell: (i) => {
+        const t = i.row.original;
+        return (
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {t.Status === "Assigned" && (
+              <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
+            )}
+            {(t.Status === "Assigned" || t.Status === "InProgress") && (
+              <button onClick={() => handleResolve(t.Id)} className="text-xs text-primary hover:underline">Resolve</button>
+            )}
+            {t.Status === "Resolved" && (
+              <>
+                <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
+                <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
+              </>
+            )}
+            {t.Status === "Closed" && (
+              <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
+            )}
+          </div>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Service Tickets"
@@ -145,77 +216,15 @@ const CrmServiceTickets: React.FC = () => {
         </select>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Ticket No", "Customer", "Category", "Subject", "Priority", "Assigned To", "SLA Due", "Status", "Rating", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-sm">No service tickets found</td></tr>
-            ) : (filtered as any[]).map((t: any) => {
-              const isOverdue = t.SlaDueDate && new Date(t.SlaDueDate) < new Date() && !["Resolved", "Closed"].includes(t.Status);
-              return (
-                <tr key={t.Id} className={`border-t border-border hover:bg-muted/10 transition-colors ${isOverdue ? "bg-red-50/30" : ""}`}>
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{t.TicketNo}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{t.ApplicantName}</div>
-                    <div className="text-xs text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs">{t.Category.replace(/([A-Z])/g, " $1").trim()}</td>
-                  <td className="px-4 py-3 max-w-xs truncate">
-                    {t.Subject}
-                    {t.RaisedByCustomer && (
-                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[t.Priority] || ""}`}>{t.Priority}</span>
-                  </td>
-                  <td className="px-4 py-3 text-sm">{t.AssigneeName || "—"}</td>
-                  <td className={`px-4 py-3 text-xs ${isOverdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
-                    {t.SlaDueDate ? String(t.SlaDueDate).slice(0, 16).replace("T", " ") : "—"}
-                    {isOverdue && " (OVERDUE)"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[t.Status] || ""}`}>{t.Status}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {t.CustomerRating ? (
-                      <span className="flex items-center gap-0.5 text-yellow-500 text-xs">
-                        <Star size={12} fill="currentColor" /> {t.CustomerRating}/5
-                      </span>
-                    ) : "—"}
-                  </td>
-                  <td className="px-4 py-3 flex items-center gap-2 whitespace-nowrap">
-                    {t.Status === "Assigned" && (
-                      <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
-                    )}
-                    {(t.Status === "Assigned" || t.Status === "InProgress") && (
-                      <button onClick={() => handleResolve(t.Id)} className="text-xs text-primary hover:underline">Resolve</button>
-                    )}
-                    {t.Status === "Resolved" && (
-                      <>
-                        <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
-                        <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
-                      </>
-                    )}
-                    {t.Status === "Closed" && (
-                      <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={columns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No service tickets found"
+        rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-lg">

@@ -10,6 +10,8 @@ import {
   Eye,
   Printer,
   ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
   CalendarDays,
   RotateCcw,
 } from "lucide-react";
@@ -62,6 +64,8 @@ export interface ColumnDef {
   key: string;
   label: string;
   hideOnMobile?: boolean;
+  /** Set false to disable the click-to-sort header for a purely computed/rendered column */
+  sortable?: boolean;
 }
 
 export type RecordWithId = Record<string, unknown> & { _id: string };
@@ -209,6 +213,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const toggleSort = (key: string) => {
+    if (sortKey !== key) { setSortKey(key); setSortDir("asc"); }
+    else if (sortDir === "asc") setSortDir("desc");
+    else { setSortKey(null); setSortDir("asc"); }
+  };
 
   // Cache for asyncOptions — keyed by field name
   const [asyncOptionsCache, setAsyncOptionsCache] = useState<
@@ -425,6 +437,22 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     return Object.values(row).some((v) =>
       String(v).toLowerCase().includes(search.toLowerCase()),
     );
+  });
+
+  // Numeric-aware-then-string comparator — most master data is either plain
+  // numbers/dates (sort numerically) or free text (sort alphabetically);
+  // trying Number() first and falling back to localeCompare covers both
+  // without per-column configuration.
+  const sorted = !sortKey ? filtered : [...filtered].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const an = Number(av), bn = Number(bv);
+    const cmp = (Number.isFinite(an) && Number.isFinite(bn) && av !== "" && bv !== "")
+      ? an - bn
+      : String(av).localeCompare(String(bv), undefined, { numeric: true });
+    return sortDir === "asc" ? cmp : -cmp;
   });
 
   const inputBase =
@@ -661,7 +689,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <div className="flex items-center gap-2 w-full sm:w-auto">
               {exportConfig && canExport && (
                 <ExportMenu
-                  data={filtered as Record<string, unknown>[]}
+                  data={sorted as Record<string, unknown>[]}
                   columns={exportConfig.columns}
                   title={exportConfig.title}
                   filename={exportConfig.filename}
@@ -689,21 +717,39 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {columns.map((col) => (
-                    <th
-                      key={col.key}
-                      className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
+                  {columns.map((col) => {
+                    const canSort = col.sortable !== false;
+                    const active = sortKey === col.key;
+                    return (
+                      <th
+                        key={col.key}
+                        onClick={canSort ? () => toggleSort(col.key) : undefined}
+                        className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none${col.hideOnMobile ? " hidden sm:table-cell" : ""}${canSort ? " cursor-pointer hover:text-foreground transition-colors" : ""}`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {col.label}
+                          {canSort && (
+                            <span className="text-muted-foreground/50">
+                              {active && sortDir === "asc" ? (
+                                <ChevronUp size={11} className="text-primary" />
+                              ) : active && sortDir === "desc" ? (
+                                <ChevronDown size={11} className="text-primary" />
+                              ) : (
+                                <ChevronsUpDown size={11} />
+                              )}
+                            </span>
+                          )}
+                        </span>
+                      </th>
+                    );
+                  })}
                   <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filtered.length === 0 ? (
+                {sorted.length === 0 ? (
                   <tr>
                     <td
                       colSpan={columns.length + 1}
@@ -715,7 +761,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((row) => (
+                  sorted.map((row) => (
                     <tr
                       key={row._id}
                       className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}

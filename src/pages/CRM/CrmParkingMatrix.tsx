@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Car, Clock } from "lucide-react";
+import { Car, Clock, User, FileText } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -35,12 +35,21 @@ interface MatrixSlot {
   AllotmentId: number | null;
   BookingId: number | null;
   BookingNo: string | null;
+  AllotmentDate: string | null;
+  ApplicationId: number | null;
+  ApplicationNo: string | null;
   ApplicantName: string | null;
   Mobile: string | null;
+  AssignedToName: string | null;
+  AssignedToEmail: string | null;
   HoldId: number | null;
   HoldUntil: string | null;
+  HoldApplicationId: number | null;
+  HoldApplicationNo: string | null;
   HoldApplicantName: string | null;
   HoldMobile: string | null;
+  HoldAssignedToName: string | null;
+  HoldAssignedToEmail: string | null;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -65,7 +74,19 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixSl
 }
 
 const NONE = "__none__";
-const daysLeft = (until: string) => Math.max(0, Math.ceil((new Date(until).getTime() - Date.now()) / 86400000));
+
+// Hour/minute-precision countdown — mirrors CrmUnitMatrix.tsx's timeLeft().
+function timeLeft(until: string): string {
+  const ms = new Date(until).getTime() - Date.now();
+  if (ms <= 0) return "Expired";
+  const totalMin = Math.floor(ms / 60000);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h left`;
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
+}
 
 // Available slot -> choose whether to sell it now or just hold it for a
 // customer who's still deciding.
@@ -267,9 +288,14 @@ function PlaceHoldDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => v
   );
 }
 
-function HoldInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
+// Shared detail dialog for tapping any non-Available tile — mirrors
+// CrmUnitMatrix.tsx's TileInfoDialog. Parking allotments can be standalone
+// (sold independent of a unit booking, BookingId NULL) so the Booked path
+// only offers an "Open Booking" link when one actually exists.
+function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
   const qc = useQueryClient();
   const [releasing, setReleasing] = useState(false);
+  const isHold = slot.Status === "OnHold";
 
   const handleRelease = async () => {
     setReleasing(true);
@@ -286,21 +312,56 @@ function HoldInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
     }
   };
 
+  const appNo = isHold ? slot.HoldApplicationNo : slot.ApplicationNo;
+  const applicantName = isHold ? slot.HoldApplicantName : slot.ApplicantName;
+  const mobile = isHold ? slot.HoldMobile : slot.Mobile;
+  const assignedName = isHold ? slot.HoldAssignedToName : slot.AssignedToName;
+  const assignedEmail = isHold ? slot.HoldAssignedToEmail : slot.AssignedToEmail;
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading">Slot {slot.SlotNo} — On Hold</DialogTitle></DialogHeader>
-        <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-muted-foreground">Held for</span><span className="font-medium">{slot.HoldApplicantName}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Mobile</span><span className="font-medium">{slot.HoldMobile}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Expires in</span><span className="font-medium">{slot.HoldUntil ? daysLeft(slot.HoldUntil) : "—"} day(s)</span></div>
+        <DialogHeader>
+          <DialogTitle className="font-heading">Slot {slot.SlotNo} — {isHold ? "On Hold" : "Booked"}</DialogTitle>
+        </DialogHeader>
+        <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground flex items-center gap-1"><FileText size={12} /> Application</span>
+            <span className="font-medium">{appNo || "—"}</span>
+          </div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Applicant</span><span className="font-medium">{applicantName || "—"}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground flex items-center gap-1"><User size={12} /> Salesperson</span>
+            <span className="font-medium text-right">{assignedName || "—"}{assignedEmail ? <span className="block text-[11px] text-muted-foreground font-normal">{assignedEmail}</span> : null}</span>
+          </div>
+          {isHold ? (
+            <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Expires in</span><span className="font-medium text-amber-600">{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span></div>
+          ) : (
+            <>
+              <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{slot.BookingNo || "Standalone parking sale"}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Sold on</span><span className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</span></div>
+            </>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          <button onClick={handleRelease} disabled={releasing}
-            className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-            {releasing ? "Releasing..." : "Release Hold"}
-          </button>
+          {isHold ? (
+            <button onClick={handleRelease} disabled={releasing}
+              className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
+              {releasing ? "Releasing..." : "Release Hold"}
+            </button>
+          ) : slot.BookingId ? (
+            <button onClick={() => window.open(`/crm/bookings?applicationId=${slot.ApplicationId}`, "_blank")}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              Open Booking
+            </button>
+          ) : (
+            <button onClick={() => window.open(`/crm/applications`, "_blank")}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              Open Application
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -314,6 +375,14 @@ export function ParkingMatrixPage() {
   const [sellSlot, setSellSlot] = useState<MatrixSlot | null>(null);
   const [holdSlot, setHoldSlot] = useState<MatrixSlot | null>(null);
   const [infoSlot, setInfoSlot] = useState<MatrixSlot | null>(null);
+
+  // Forces a re-render every minute so hold countdown badges (and any open
+  // TileInfoDialog) tick down live instead of only updating on refetch.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const { data: projects = [] } = useQuery({
     queryKey: ["parking-matrix-projects"],
@@ -409,11 +478,11 @@ export function ParkingMatrixPage() {
                     key={s.Id}
                     onClick={() => {
                       if (s.Status === "Available") setChoiceSlot(s);
-                      else if (s.Status === "OnHold") setInfoSlot(s);
+                      else if (s.Status === "OnHold" || s.Status === "Booked") setInfoSlot(s);
                     }}
-                    disabled={s.Status === "Booked" || s.Status === "Blocked"}
+                    disabled={s.Status === "Blocked"}
                     className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
-                      s.Status === "Available" || s.Status === "OnHold" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
+                      s.Status !== "Blocked" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
                     }`}
                     title={s.BlockName ? `${s.BlockName} — ${s.SlotNo}` : s.SlotNo}
                   >
@@ -428,7 +497,7 @@ export function ParkingMatrixPage() {
                         : s.Status === "OnHold" ? (
                           <>
                             <Clock size={11} className="shrink-0" />
-                            {s.HoldApplicantName} · {s.HoldUntil ? `${daysLeft(s.HoldUntil)}d left` : ""}
+                            {s.HoldApplicantName} · {s.HoldUntil ? timeLeft(s.HoldUntil) : ""}
                           </>
                         ) : "—"}
                     </div>
@@ -450,7 +519,7 @@ export function ParkingMatrixPage() {
       )}
       {sellSlot && <BookParkingDialog slot={sellSlot} projectId={projectId} onClose={() => setSellSlot(null)} />}
       {holdSlot && <PlaceHoldDialog slot={holdSlot} onClose={() => setHoldSlot(null)} />}
-      {infoSlot && <HoldInfoDialog slot={infoSlot} onClose={() => setInfoSlot(null)} />}
+      {infoSlot && <TileInfoDialog slot={infoSlot} onClose={() => setInfoSlot(null)} />}
     </>
   );
 }

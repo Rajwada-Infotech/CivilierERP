@@ -5,31 +5,31 @@ export const followupNavItems: NavItem[] = [
   { label: "Dashboard", icon: Category2, path: "/followup", pageKey: "followup-dashboard", isDashboard: true },
 
   {
+    // "Applications", "Bookings", "Unit Selection", "Welcome Calls" retired from here —
+    // 0 live rows each, duplicate CRM entry points that let a unit be double-booked
+    // (FollowupBookings never checked UnitMaster availability the way CrmBooking does).
+    // "Applicants Pipeline" / "Unit Selection Pipeline" are kept — they're read-only
+    // pipeline views, not the CRUD front doors the audit flagged. See backend/server.js
+    // and src/App.tsx for the matching route removals.
     label: "Sales",
     icon: Profile2User,
     children: [
-      { label: "Applications",           path: "/followup/sales/applications",           pageKey: "followup-applications" },
       { label: "Applicants Pipeline",    path: "/followup/sales/pipeline/applicants",    pageKey: "followup-applicants" },
-      { label: "Bookings",               path: "/followup/sales/bookings",               pageKey: "followup-bookings" },
-      { label: "Unit Selection",         path: "/followup/sales/unit-selection",         pageKey: "followup-unit-selections" },
       { label: "Unit Selection Pipeline",path: "/followup/sales/pipeline/unit-selections",pageKey: "followup-unit-selections" },
-      { label: "Welcome Calls",          path: "/followup/sales/welcome-calls",          pageKey: "followup-welcome-calls" },
     ],
   },
 
   {
-    // "Agreements" and "Agreement Workflow" retired from here — both were a
-    // parallel, never-actually-used Agreement system (0 live rows in either
-    // FollowupAgreements or FollowupAgreementWorkflows) sitting alongside
-    // the real, actively-developed one at CRM > Documents > Agreements.
-    // Keeping two live "Agreement" entry points invited exactly the
-    // confusion this was retired to fix. The route files/pages themselves
-    // are left on disk, just unreachable — see backend/server.js and
-    // src/App.tsx for the matching removals.
+    // "Agreements", "Agreement Workflow" and "Legal Milestones" retired from here —
+    // all were parallel, never-actually-used systems (0 live rows in FollowupAgreements,
+    // FollowupAgreementWorkflows, and FollowupLegalMilestones) sitting alongside the
+    // real, actively-developed CRM equivalents (crmAgreements.js, crmLegalMilestones.js).
+    // Keeping duplicate live entry points invited exactly the confusion this was retired
+    // to fix. The route files/pages themselves are left on disk, just unreachable —
+    // see backend/server.js and src/App.tsx for the matching removals.
     label: "Agreement",
     icon: DocumentText,
     children: [
-      { label: "Legal Milestones",   path: "/followup/legal/milestones",         pageKey: "followup-legal-milestones" },
       { label: "Document Vault",     path: "/followup/agreement/document-vault", pageKey: "followup-document-vault" },
       { label: "Communicator",       path: "/followup/agreement/communicator",   pageKey: "followup-communicator" },
     ],

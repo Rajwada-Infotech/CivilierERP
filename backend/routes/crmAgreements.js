@@ -12,7 +12,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeUnlockBrokerageTranche, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -65,6 +65,7 @@ const AGR_SELECT = `
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.SentToCustomerAt, ag.DateApprovalStatus,
+    ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue,
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
@@ -73,6 +74,7 @@ const AGR_SELECT = `
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
+  LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
 `;
 
@@ -171,25 +173,42 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
       .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @cb, SYSDATETIME())
       `);
     const agreementId = result.recordset[0].Id;
 
     // Parallel: auto-create the customer portal login the moment agreement
     // preparation begins, so the customer can start tracking progress.
+    // The agreement above is already committed by this point (no transaction
+    // wraps the two together) — portal provisioning failing here must not
+    // read back as "agreement creation failed" and must not leave the
+    // already-created Draft agreement unreported to the caller.
     const appRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
     let portalInfo = null;
     if (appRow.recordset.length) {
-      portalInfo = await ensurePortalUser(pool, appRow.recordset[0].ApplicationId);
-      if (portalInfo?.error) {
-        return res.status(400).json({ error: portalInfo.error });
+      try {
+        portalInfo = await ensurePortalUser(pool, appRow.recordset[0].ApplicationId);
+      } catch (e) {
+        console.error("[crm-agreements] portal provisioning failed:", e.message);
+        portalInfo = { created: false, error: e.message };
       }
+    }
+
+    // "A legal person will arrange/prepare the papers works" — if assigned
+    // at creation time, they're notified immediately rather than having to
+    // discover the assignment by browsing the list.
+    if (b.LegalExecutiveId) {
+      await emitNotification(pool, parseInt(b.LegalExecutiveId), "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${agNo} assigned to you for legal preparation.`,
+        agreementId, "crm_agreement");
     }
 
     res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo, portal: portalInfo });
@@ -617,7 +636,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id");
+      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, LegalExecutiveId, AgreementNo FROM dbo.CrmAgreement WHERE Id = @id");
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const oldRow = old.recordset[0];
 
@@ -645,6 +664,10 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
         `);
     }
 
+    const newLegalExecutiveId = b.LegalExecutiveId !== undefined
+      ? (b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+      : oldRow.LegalExecutiveId;
+
     await pool.request()
       .input("id",    sql.Int,           id)
       .input("lname", sql.NVarChar(300), b.LegalName     || null)
@@ -653,14 +676,27 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
       .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
+      .input("leg",   sql.Int,           newLegalExecutiveId)
       .input("ub",    sql.Int,           actor)
       .query(`
         UPDATE dbo.CrmAgreement SET
           LegalName = ISNULL(@lname, LegalName),
           LegalAddress = @laddr, PanNo = @pan, AadhaarNo = @aadh,
-          Notes = @note, VersionNo = VersionNo + @bump, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          Notes = @note, VersionNo = VersionNo + @bump,
+          LegalExecutiveId = @leg,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // Notify the legal executive the moment they're assigned/reassigned —
+    // same as at creation time — so the handoff to "the legal person" is
+    // never just a silent database field nobody checks.
+    if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
+      await emitNotification(pool, newLegalExecutiveId, "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${oldRow.AgreementNo} assigned to you for legal preparation.`,
+        id, "crm_agreement");
+    }
 
     res.json({ success: true, versionBumped: touchesLegalContent });
   } catch (e) {
@@ -717,6 +753,11 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     await maybeAutoGenerateInvoice(pool, row.BookingId, actor);
     await maybeAutoGenerateAgreementInvoice(pool, row.BookingId, actor);
     await syncLegalMilestoneStep(pool, row.BookingId, "FinalExecution", actor);
+
+    // The "After Agreement" brokerage tranche (if a split was opted into)
+    // has been sitting IsLocked=1 since Milestone #1 was paid — execution is
+    // exactly the real-world event that unlocks it.
+    await maybeUnlockBrokerageTranche(pool, row.BookingId);
 
     res.json({ success: true, status: "Executed" });
   } catch (e) {

@@ -66,6 +66,26 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   return { id: result.recordset[0].Id, holdUntil: result.recordset[0].HoldUntil, applicantName: app.recordset[0].ApplicantName };
 }
 
+// Wraps placeHold() for automatic (non-staff-initiated) callers — e.g. the
+// Application submit flow, which may run again if a Draft/Rejected
+// application gets resubmitted. A genuine "already held by someone else"
+// conflict still throws (409) so the caller can log it; only "already
+// actively held by this SAME application" is treated as a no-op success,
+// since re-placing an identical hold isn't an error, it's a re-submit.
+async function placeHoldIfNeeded(pool, params) {
+  try {
+    return await placeHold(pool, params);
+  } catch (e) {
+    if (e.status === 409 && e.message === "This item already has an active hold") {
+      const existing = await findActiveHold(pool, params.entityType, params.entityId);
+      if (existing && existing.ApplicationId === params.applicationId) {
+        return { id: existing.Id, holdUntil: existing.HoldUntil, alreadyHeld: true };
+      }
+    }
+    throw e;
+  }
+}
+
 async function releaseHold(pool, holdId, userId) {
   const row = await pool.request().input("id", sql.Int, holdId)
     .query("SELECT Id, Status FROM dbo.CrmInventoryHold WHERE Id = @id");
@@ -93,4 +113,4 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
     .query("UPDATE dbo.CrmInventoryHold SET Status = 'Converted', ReleasedAt = SYSDATETIME() WHERE Id = @id");
 }
 
-module.exports = { ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, releaseHold, guardAndConvertHold };
+module.exports = { ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold, guardAndConvertHold };

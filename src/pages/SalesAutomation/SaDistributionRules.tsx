@@ -6,6 +6,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/distribution-rules";
 
@@ -135,6 +136,15 @@ const SaDistributionRules: React.FC = () => {
   const level1Rules = (rules as any[]).filter((r: any) => r.Level === 1);
   const level2Rules = (rules as any[]).filter((r: any) => r.Level === 2);
 
+  const memberColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "UserName", header: "Member", size: 150,
+      cell: (i) => <span className="text-foreground font-medium">{i.getValue() as string}</span> },
+    { accessorKey: "Weight", header: "Weight", size: 100,
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.Weight}</span> },
+    { id: "order", header: "Order", size: 100, enableSorting: false,
+      cell: (i) => <span className="text-muted-foreground">{i.row.index + 1}</span> },
+  ];
+
   const RuleGroup = ({ title, groupRules, level }: { title: string; groupRules: any[]; level: number }) => (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -188,24 +198,13 @@ const SaDistributionRules: React.FC = () => {
               {rule.members.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No members</p>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th className="text-left text-xs text-muted-foreground pb-1.5">Member</th>
-                      <th className="text-left text-xs text-muted-foreground pb-1.5">Weight</th>
-                      <th className="text-left text-xs text-muted-foreground pb-1.5">Order</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rule.members.map((m: any, i: number) => (
-                      <tr key={m.Id} className="border-t border-border/50">
-                        <td className="py-1.5 text-foreground font-medium">{m.UserName}</td>
-                        <td className="py-1.5 text-muted-foreground">{m.Weight}</td>
-                        <td className="py-1.5 text-muted-foreground">{i + 1}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  data={rule.members}
+                  columns={memberColumns}
+                  searchable={false}
+                  paginated={false}
+                  emptyMessage="No members"
+                />
               )}
             </div>
           )}

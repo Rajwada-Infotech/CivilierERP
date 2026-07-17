@@ -132,6 +132,35 @@ export const SALES_PERSON_ACCESS: PagePermission[] = [
   { page: "sa-site-visits", actions: ["view", "create", "edit"] },
 ];
 
+// Legal Head: oversees the full legal pipeline on an Agreement — drafting,
+// senior approval (see approvalService.js CRM_APPROVER_ROLES override for
+// crm-agreements), NOC, and Sale Deed. Scoped strictly to CRM's legal-facing
+// pages, not the whole CRM module (unlike marketing_head's full CRM prefix).
+export const LEGAL_HEAD_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  { page: "crm-dashboard", actions: ["view"] },
+  { page: "crm-bookings", actions: ["view"] },
+  { page: "crm-agreements", actions: ["view", "create", "edit"] },
+  { page: "crm-documents", actions: ["view", "create", "edit", "delete"] },
+  { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
+  { page: "crm-noc", actions: ["view", "create", "edit"] },
+  { page: "crm-sales-deed", actions: ["view", "create", "edit"] },
+];
+
+// Legal Person: the drafter/preparer — "arranges/prepares the papers work"
+// per the workflow spec. Can create and edit agreements/documents but has no
+// approve rights (approvalService.js's role check on crm-agreements only
+// allows legal_head, not legal_person) and no NOC/Sale Deed access (that's
+// the head's closure-stage oversight).
+export const LEGAL_PERSON_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  { page: "crm-dashboard", actions: ["view"] },
+  { page: "crm-bookings", actions: ["view"] },
+  { page: "crm-agreements", actions: ["view", "create", "edit"] },
+  { page: "crm-documents", actions: ["view", "create", "edit"] },
+  { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
+];
+
 // marketing_head: full CRUD on all SA + Sales pages, plus dashboard access.
 // This populates currentUser.pagePermissions for any code that reads that
 // array directly instead of going through canAccessPage/canDoAction (which
@@ -152,7 +181,7 @@ const MARKETING_HEAD_KNOWN_PAGES = [
   "crm-unit-matrix", "crm-parking-matrix",
   "crm-legal-milestones", "crm-noc", "crm-sales-deed",
   "crm-pre-possession", "crm-possession-notice", "crm-construction-updates",
-  "crm-payments", "crm-payment-plans", "crm-brokerage",
+  "crm-payments", "crm-payment-plans", "crm-brokerage", "crm-parking-booking",
   "crm-handover", "crm-service-tickets", "crm-cancellations", "crm-customer-360", "crm-loan-details",
   // Sales module
   "sale-order", "sale-invoice", "sales-payment",
@@ -175,6 +204,8 @@ export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
   if (role === "marketing_head") return MARKETING_HEAD_ACCESS;
   if (role === "sales_team_lead") return SALES_TEAM_LEAD_ACCESS;
   if (role === "sales_person") return SALES_PERSON_ACCESS;
+  if (role === "legal_head") return LEGAL_HEAD_ACCESS;
+  if (role === "legal_person") return LEGAL_PERSON_ACCESS;
   return DEFAULT_USER_ACCESS;
 };
 
@@ -205,7 +236,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: full access within their scope, no access outside it
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
@@ -219,7 +250,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     // marketing_head: all actions on their scoped pages
     if (currentUser.role === "marketing_head") {
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard";
+      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(

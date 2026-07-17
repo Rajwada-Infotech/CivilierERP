@@ -93,7 +93,7 @@ const CrmCustomer360: React.FC = () => {
                   <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
                     <div><span className="text-muted-foreground">Value: </span>{fmt(b.TotalValue)}</div>
                     <div><span className="text-muted-foreground">Paid: </span><span className="text-green-600 font-medium">{fmt(b.TotalPaid)}</span></div>
-                    <div><span className="text-muted-foreground">Balance: </span><span className="text-orange-600 font-medium">{fmt((b.TotalDue || 0) - (b.TotalPaid || 0))}</span></div>
+                    <div><span className="text-muted-foreground">Balance: </span><span className="text-orange-600 font-medium">{fmt(b.TotalOutstanding)}</span></div>
                     <div><span className="text-muted-foreground">Agreement: </span>{b.AgreementStatus || "—"}</div>
                     <div><span className="text-muted-foreground">Handover: </span>{b.HandoverStatus || "—"}</div>
                     <div><span className="text-muted-foreground">Legal: </span>{b.LegalMilestoneStatus || "—"}</div>
