@@ -301,12 +301,31 @@ function buildSupplierColumns(
     },
     {
       accessorKey: "LGST",
-      header: "GST No.",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      header: "GST No. / Type",
+      cell: ({ getValue, row }) => {
+        const gst = getValue() as string | null;
+        const gstType = (row.original as any).LGSTType as string | null;
+        const badgeCls = gstType === "Registered"
+          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+          : gstType === "Unregistered"
+            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            : "bg-muted text-muted-foreground border-border";
+        const badgeLabel = gstType === "Registered"
+          ? "GST"
+          : gstType === "Unregistered"
+            ? "Non-GST"
+            : "Unknown";
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="font-mono text-xs font-semibold text-primary">
+              {gst || "—"}
+            </span>
+            <span className={`inline-flex w-fit items-center text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
+              {badgeLabel}
+            </span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "LHeadStatus",
@@ -773,11 +792,18 @@ const SupplierMaster: React.FC = () => {
     (form.SupplierPassword.trim() === "" || form.SupplierPassword.trim().length >= 6);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  const normalizeGSTType = (t: string | null): string => {
-    if (!t) return "";
+  /** Normalises a raw LGSTType value from the DB into one of the two canonical
+   *  strings the form accepts.  When the DB value is NULL (supplier was created
+   *  before the field was added) we infer the type from the GST number:
+   *    - GST number present  → 'Registered'
+   *    - No GST number       → 'Unregistered'
+   *  This way the correct value is written back on the very next save, even
+   *  before the backfill migration (196) has run on a given environment. */
+  const normalizeGSTType = (t: string | null | undefined, lgst?: string | null): string => {
     if (t === "Unregistered") return "Unregistered";
-    // Legacy values (Regular, Composition, SEZ, Deemed Export) all imply a registered GSTIN
-    return "Registered";
+    if (t) return "Registered"; // Registered / Regular / Composition / SEZ / etc.
+    // t is null/undefined — infer from GST number
+    return lgst?.trim() ? "Registered" : "Unregistered";
   };
 
   const startEdit = (s: Supplier) => {
@@ -790,7 +816,7 @@ const SupplierMaster: React.FC = () => {
       LGST: s.LGST ?? "",
       LHeadPan: s.LHeadPan ?? "",
       supplierCategory: s.supplierCategory ?? "",
-      LGSTType: normalizeGSTType(s.LGSTType),
+      LGSTType: normalizeGSTType(s.LGSTType, s.LGST),
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
@@ -815,6 +841,7 @@ const SupplierMaster: React.FC = () => {
     if (!form.LHeadName.trim()) e.LHeadName = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LBelongsTo) e.LBelongsTo = true;
+    if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     // Optional on both create (defaults to "123456" server-side) and edit
     // (blank keeps the current password) — only flagged when typed but short.
@@ -1255,7 +1282,7 @@ const SupplierMaster: React.FC = () => {
                 {/* GST Type */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Type
+                    GST Type <span className="text-destructive">*</span>
                   </label>
                   <select
                     value={form.LGSTType}
@@ -1268,13 +1295,17 @@ const SupplierMaster: React.FC = () => {
                       }));
                       setErrors((p) => ({ ...p, LGST: false }));
                     }}
-                    className={`${inputCls} appearance-none`}
+                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
                   >
-                    <option value="">Select type…</option>
                     {GST_TYPES.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
+                  {errors.LGSTType && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required — determines GST Bill vs Non-GST Bill on invoices
+                    </p>
+                  )}
                 </div>
 
                 {/* GST Number — only when Registered */}
