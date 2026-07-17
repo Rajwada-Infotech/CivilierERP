@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Grid3x3, Layers, Clock } from "lucide-react";
+import { Grid3x3, Layers, Clock, User, FileText } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -33,12 +33,21 @@ interface MatrixUnit {
   Status: "Available" | "Booked" | "OnHold" | "Blocked";
   BookingId: number | null;
   BookingNo: string | null;
+  BookingDate: string | null;
+  ApplicationId: number | null;
+  ApplicationNo: string | null;
   ApplicantName: string | null;
   Mobile: string | null;
+  AssignedToName: string | null;
+  AssignedToEmail: string | null;
   HoldId: number | null;
   HoldUntil: string | null;
+  HoldApplicationId: number | null;
+  HoldApplicationNo: string | null;
   HoldApplicantName: string | null;
   HoldMobile: string | null;
+  HoldAssignedToName: string | null;
+  HoldAssignedToEmail: string | null;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -63,7 +72,21 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixUn
 }
 
 const NONE = "__none__";
-const daysLeft = (until: string) => Math.max(0, Math.ceil((new Date(until).getTime() - Date.now()) / 86400000));
+
+// Hour/minute-precision countdown — HoldUntil is a real DATETIME2(3), so a
+// 72-hour auto-hold can show "68h 42m left" instead of a coarse day count
+// that would sit at "3 days" for most of its life and jump straight to "0".
+function timeLeft(until: string): string {
+  const ms = new Date(until).getTime() - Date.now();
+  if (ms <= 0) return "Expired";
+  const totalMin = Math.floor(ms / 60000);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h left`;
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
+}
 
 // Available unit -> ask who it's being held for and for how long. Booking
 // itself still happens through the normal Application -> Booking flow; this
@@ -143,9 +166,15 @@ function PlaceHoldDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => v
   );
 }
 
-function HoldInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => void }) {
+// Shared detail dialog for tapping any non-Available tile — OnHold shows the
+// live countdown + a Release action, Booked shows the booking record + a
+// link into it. Both show who's holding/booked it and which salesperson
+// (AssignedTo) owns that Application, so a tap always answers "who, what,
+// and via which record" instead of just the bare status label.
+function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => void }) {
   const qc = useQueryClient();
   const [releasing, setReleasing] = useState(false);
+  const isHold = unit.Status === "OnHold";
 
   const handleRelease = async () => {
     setReleasing(true);
@@ -162,21 +191,51 @@ function HoldInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
     }
   };
 
+  const appNo = isHold ? unit.HoldApplicationNo : unit.ApplicationNo;
+  const applicantName = isHold ? unit.HoldApplicantName : unit.ApplicantName;
+  const mobile = isHold ? unit.HoldMobile : unit.Mobile;
+  const assignedName = isHold ? unit.HoldAssignedToName : unit.AssignedToName;
+  const assignedEmail = isHold ? unit.HoldAssignedToEmail : unit.AssignedToEmail;
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading">Unit {unit.UnitName} — On Hold</DialogTitle></DialogHeader>
-        <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-muted-foreground">Held for</span><span className="font-medium">{unit.HoldApplicantName}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Mobile</span><span className="font-medium">{unit.HoldMobile}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Expires in</span><span className="font-medium">{unit.HoldUntil ? daysLeft(unit.HoldUntil) : "—"} day(s)</span></div>
+        <DialogHeader>
+          <DialogTitle className="font-heading">Unit {unit.UnitName} — {isHold ? "On Hold" : "Booked"}</DialogTitle>
+        </DialogHeader>
+        <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground flex items-center gap-1"><FileText size={12} /> Application</span>
+            <span className="font-medium">{appNo || "—"}</span>
+          </div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Applicant</span><span className="font-medium">{applicantName || "—"}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground flex items-center gap-1"><User size={12} /> Salesperson</span>
+            <span className="font-medium text-right">{assignedName || "—"}{assignedEmail ? <span className="block text-[11px] text-muted-foreground font-normal">{assignedEmail}</span> : null}</span>
+          </div>
+          {isHold ? (
+            <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Expires in</span><span className="font-medium text-amber-600">{unit.HoldUntil ? timeLeft(unit.HoldUntil) : "—"}</span></div>
+          ) : (
+            <>
+              <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{unit.BookingNo || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Booked on</span><span className="font-medium">{unit.BookingDate ? String(unit.BookingDate).slice(0, 10) : "—"}</span></div>
+            </>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          <button onClick={handleRelease} disabled={releasing}
-            className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-            {releasing ? "Releasing..." : "Release Hold"}
-          </button>
+          {isHold ? (
+            <button onClick={handleRelease} disabled={releasing}
+              className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
+              {releasing ? "Releasing..." : "Release Hold"}
+            </button>
+          ) : (
+            <button onClick={() => window.open(`/crm/bookings?applicationId=${unit.ApplicationId}`, "_blank")}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              Open Booking
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -188,6 +247,14 @@ export function UnitMatrixPage() {
   const [blockId, setBlockId] = useState("");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);
   const [infoTarget, setInfoTarget] = useState<MatrixUnit | null>(null);
+
+  // Forces a re-render every minute so the hold countdown badges (and any
+  // open TileInfoDialog) tick down live instead of only updating on refetch.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const { data: projects = [] } = useQuery({
     queryKey: ["unit-matrix-projects"],
@@ -320,11 +387,11 @@ export function UnitMatrixPage() {
                           key={u.Id}
                           onClick={() => {
                             if (u.Status === "Available") setHoldTarget(u);
-                            else if (u.Status === "OnHold") setInfoTarget(u);
+                            else if (u.Status === "OnHold" || u.Status === "Booked") setInfoTarget(u);
                           }}
-                          disabled={u.Status === "Booked" || u.Status === "Blocked"}
+                          disabled={u.Status === "Blocked"}
                           className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
-                            u.Status === "Available" || u.Status === "OnHold" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
+                            u.Status !== "Blocked" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
                           }`}
                           title={u.BlockName ? `${u.BlockName} — ${u.UnitName}` : u.UnitName}
                         >
@@ -341,7 +408,7 @@ export function UnitMatrixPage() {
                               : u.Status === "OnHold" ? (
                                 <>
                                   <Clock size={11} className="shrink-0" />
-                                  {u.HoldApplicantName} · {u.HoldUntil ? `${daysLeft(u.HoldUntil)}d left` : ""}
+                                  {u.HoldApplicantName} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
                                 </>
                               ) : "—"}
                           </div>
@@ -357,7 +424,7 @@ export function UnitMatrixPage() {
       </FollowupShell>
 
       {holdTarget && <PlaceHoldDialog unit={holdTarget} onClose={() => setHoldTarget(null)} />}
-      {infoTarget && <HoldInfoDialog unit={infoTarget} onClose={() => setInfoTarget(null)} />}
+      {infoTarget && <TileInfoDialog unit={infoTarget} onClose={() => setInfoTarget(null)} />}
     </>
   );
 }

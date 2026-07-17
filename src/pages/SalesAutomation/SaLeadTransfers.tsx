@@ -6,6 +6,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, ArrowRightLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/lead-transfers";
 
@@ -93,6 +94,35 @@ const SaLeadTransfers: React.FC = () => {
 
   const pendingCount = (requests as any[]).filter((r: any) => r.Status === "Pending").length;
 
+  const itemColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "LeadUid", header: "Lead ID", size: 100,
+      cell: (i) => <span className="text-xs font-mono text-muted-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "CustomerName", header: "Customer", size: 150,
+      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "Mobile", header: "Mobile", size: 110,
+      cell: (i) => <span className="text-muted-foreground text-xs">{i.getValue() as string}</span> },
+    { accessorKey: "LeadStatus", header: "Status", size: 100,
+      cell: (i) => <span className="text-xs">{i.getValue() as string}</span> },
+    { accessorKey: "Classification", header: "Classification", size: 110,
+      cell: (i) => (
+        i.row.original.Classification ? (
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+            i.row.original.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
+            i.row.original.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
+            "bg-blue-500/10 text-blue-500"
+          }`}>{i.row.original.Classification}</span>
+        ) : null
+      ) },
+    { accessorKey: "CurrentSalesperson", header: "Current Assignee", size: 130,
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CurrentSalesperson || "—"}</span> },
+    { accessorKey: "Transferred", header: "Transferred", size: 100, enableSorting: false,
+      cell: (i) => (
+        i.row.original.Transferred
+          ? <span className="text-emerald-600 font-semibold text-xs">✓ Yes</span>
+          : <span className="text-muted-foreground text-xs">—</span>
+      ) },
+  ];
+
   return (
     <SalesAutoShell title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads">
       <div className="space-y-6">
@@ -178,41 +208,13 @@ const SaLeadTransfers: React.FC = () => {
                       ) : items.length === 0 ? (
                         <div className="px-4 py-3 text-xs text-muted-foreground">No leads found</div>
                       ) : (
-                        <table className="w-full text-sm">
-                          <thead className="bg-muted/10 border-t border-border">
-                            <tr>
-                              {["Lead ID", "Customer", "Mobile", "Status", "Classification", "Current Assignee", "Transferred"].map((h) => (
-                                <th key={h} className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {items.map((item: any) => (
-                              <tr key={item.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                                <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground">{item.LeadUid}</td>
-                                <td className="px-4 py-2.5 font-medium text-foreground">{item.CustomerName}</td>
-                                <td className="px-4 py-2.5 text-muted-foreground text-xs">{item.Mobile}</td>
-                                <td className="px-4 py-2.5 text-xs">{item.LeadStatus}</td>
-                                <td className="px-4 py-2.5 text-xs">
-                                  {item.Classification && (
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      item.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-                                      item.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-                                      "bg-blue-500/10 text-blue-500"
-                                    }`}>{item.Classification}</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-2.5 text-xs text-muted-foreground">{item.CurrentSalesperson || "—"}</td>
-                                <td className="px-4 py-2.5 text-xs">
-                                  {item.Transferred
-                                    ? <span className="text-emerald-600 font-semibold">✓ Yes</span>
-                                    : <span className="text-muted-foreground">—</span>
-                                  }
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <DataTable
+                          data={items}
+                          columns={itemColumns}
+                          searchable={false}
+                          emptyMessage="No leads found"
+                          className="border-t border-border"
+                        />
                       )}
                     </div>
                   )}

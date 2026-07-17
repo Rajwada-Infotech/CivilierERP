@@ -1,12 +1,13 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ShieldAlert, IndianRupee } from "lucide-react";
+import { Plus, ShieldAlert, IndianRupee, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -40,6 +41,10 @@ const CrmBrokerage: React.FC = () => {
   const { data: records = [], isLoading } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
+  // Broker Master is the source of truth for the broker's own identity —
+  // once picked, his details are only ever displayed read-only here, never
+  // re-typed. Only the Firm/Rate below are genuinely per-deal fields.
+  const selectedBroker = useMemo(() => (brokers as any[]).find((b: any) => String(b.LHeadId) === form.BrokerId) || null, [brokers, form.BrokerId]);
 
   const handleCreate = async () => {
     if (!form.BookingId || !form.BrokerId || !form.RateValue) { toast.error("Booking, broker and rate are required"); return; }
@@ -62,6 +67,58 @@ const CrmBrokerage: React.FC = () => {
     }
   };
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking", size: 110, cell: (i) => <span className="font-mono text-xs">{i.getValue() as string}</span> },
+    { accessorKey: "BrokerName", header: "Broker", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.BrokerName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BrokerFirm || "—"}</div>
+        </div>
+      ) },
+    { id: "rate", header: "Rate", size: 90, enableSorting: false,
+      cell: (i) => <span className="text-xs">{i.row.original.RateType === "Percentage" ? `${i.row.original.RateValue}%` : `₹${i.row.original.RateValue}`}</span> },
+    { accessorKey: "TrancheLabel", header: "Tranche", size: 150, enableSorting: false,
+      cell: (i) => {
+        const r = i.row.original;
+        if (!r.TrancheLabel) return <span className="text-xs text-muted-foreground">Full payout</span>;
+        return (
+          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
+            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} {r.TrancheLabel}
+          </span>
+        );
+      } },
+    { accessorKey: "ComputedAmount", header: "Computed Amount", size: 130,
+      cell: (i) => <span className="font-semibold">₹{Number(i.row.original.ComputedAmount).toLocaleString("en-IN")}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { id: "actions", header: "Actions", size: 160, enableSorting: false,
+      cell: (i) => {
+        const r = i.row.original;
+        if (r.IsLocked) {
+          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once Agreement is Executed</span>;
+        }
+        return (
+          <>
+            {/* submitOnly: Approve/Reject only ever happen from the Admin
+                Approval Inbox (admin/super_admin/dba), never self-service here */}
+            <ApprovalActions
+              status={r.Status}
+              recordId={r.Id}
+              endpoint={API}
+              submitOnly
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
+            />
+            {r.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {r.Status === "Approved" && (
+              <button onClick={() => navigate("/crm/broker-payments")} className="text-xs text-primary hover:underline">Record Payment</button>
+            )}
+            {r.Status === "Paid" && <span className="text-xs text-muted-foreground">Fully paid</span>}
+          </>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Brokerage"
@@ -83,53 +140,13 @@ const CrmBrokerage: React.FC = () => {
         </button>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Booking", "Broker", "Rate", "Computed Amount", "Status", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : records.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">No brokerage records</td></tr>
-            ) : (records as any[]).map((r: any) => (
-              <tr key={r.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs">{r.BookingNo}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">{r.BrokerName}</div>
-                  <div className="text-xs text-muted-foreground">{r.BrokerFirm || "—"}</div>
-                </td>
-                <td className="px-4 py-3 text-xs">{r.RateType === "Percentage" ? `${r.RateValue}%` : `₹${r.RateValue}`}</td>
-                <td className="px-4 py-3 font-semibold">₹{Number(r.ComputedAmount).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[r.Status] || ""}`}>{r.Status}</span>
-                </td>
-                <td className="px-4 py-3">
-                  {/* submitOnly: Approve/Reject only ever happen from the Admin
-                      Approval Inbox (admin/super_admin/dba), never self-service here */}
-                  <ApprovalActions
-                    status={r.Status}
-                    recordId={r.Id}
-                    endpoint={API}
-                    submitOnly
-                    onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
-                  />
-                  {r.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-                  {r.Status === "Approved" && (
-                    <button onClick={() => navigate("/crm/broker-payments")} className="text-xs text-primary hover:underline">Record Payment</button>
-                  )}
-                  {r.Status === "Paid" && <span className="text-xs text-muted-foreground">Fully paid</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={records}
+        columns={columns}
+        loading={isLoading}
+        emptyMessage="No brokerage records"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-md">
@@ -158,6 +175,16 @@ const CrmBrokerage: React.FC = () => {
                 <p className="text-xs text-muted-foreground mt-1">No brokers found — add one in Broker Master first.</p>
               )}
             </div>
+
+            {selectedBroker && (
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
+                {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone: </span><span className="font-medium">{selectedBroker.LHeadPhone}</span></div>}
+                {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
+                {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
+                {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Firm (optional, for this deal)</label>

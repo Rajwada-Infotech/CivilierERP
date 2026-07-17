@@ -58,7 +58,7 @@ async function getServicePurchaseOrders(pool) {
         po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate,
         po.Status, po.TotalAmount, po.SupplierID, ahm.LHeadName AS SupplierName,
         po.CompanyId, po.ProjectId, po.POType,
-        po.SourceWODocNo, po.SourceWDDocNo
+        po.SourceWODocNo, po.SourceWDDocNo, po.POItems
       FROM dbo.PurchaseOrders po
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
       WHERE po.Status IN ('Approved', 'Received')
@@ -74,7 +74,16 @@ async function getServicePurchaseOrders(pool) {
         )
       ORDER BY po.PurchaseOrderID DESC
     `);
-  return result.recordset;
+  return result.recordset.map((r) => {
+    let poItems = [];
+    try {
+      poItems = JSON.parse(r.POItems || "[]");
+      if (!Array.isArray(poItems)) poItems = [];
+    } catch {
+      poItems = [];
+    }
+    return { ...r, POItems: poItems };
+  });
 }
 
 // ── 2. Multi-GRN invoices ───────────────────────────────────────────────────

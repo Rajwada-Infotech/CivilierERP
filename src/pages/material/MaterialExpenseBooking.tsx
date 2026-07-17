@@ -1899,11 +1899,8 @@ export default function MaterialExpenseBooking() {
                               <TableHead className="text-xs font-heading w-[10%] text-right">
                                 Basic Amt
                               </TableHead>
-                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                                CGST
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                                SGST
+                              <TableHead className="text-xs font-heading w-[9%] text-right hidden md:table-cell">
+                                GST
                               </TableHead>
                               <TableHead className="text-xs font-heading w-[12%] text-right">
                                 Net Amt
@@ -2032,8 +2029,10 @@ export default function MaterialExpenseBooking() {
                                           rec.grnTotalAmount != null
                                         ) {
                                           const gstRate =
-                                            (rec.cgstRate ?? 0) +
-                                            (rec.sgstRate ?? 0);
+                                            (rec.igstRate ?? 0) > 0
+                                              ? rec.igstRate ?? 0
+                                              : (rec.cgstRate ?? 0) +
+                                                (rec.sgstRate ?? 0);
                                           const base =
                                             gstRate > 0
                                               ? rec.grnTotalAmount /
@@ -2046,14 +2045,15 @@ export default function MaterialExpenseBooking() {
                                     )}
                                   </TableCell>
                                   <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft"
-                                      ? "—"
-                                      : `${rec.cgstRate}%`}
-                                  </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft"
-                                      ? "—"
-                                      : `${rec.sgstRate}%`}
+                                    {rec.status === "Draft" ? (
+                                      "—"
+                                    ) : (rec.igstRate ?? 0) > 0 ? (
+                                      <span title="IGST (interstate)">
+                                        {rec.igstRate}%
+                                      </span>
+                                    ) : (
+                                      `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`
+                                    )}
                                   </TableCell>
                                   <TableCell className="font-mono text-xs font-semibold text-right py-3">
                                     {rec.status === "Draft" ? (

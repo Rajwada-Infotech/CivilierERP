@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -240,6 +241,69 @@ const CrmCustomers: React.FC = () => {
 
   const filtered = useMemo(() => customers as any[], [customers]);
 
+  // Every column's cell is wrapped with the same row-click handler so the
+  // whole row stays clickable to open the edit dialog, matching the old
+  // hand-rolled <tr onClick={...}> behavior.
+  const customerColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "CustomerNo", header: "Customer No", size: 110,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
+          {i.getValue() as string}
+        </div>
+      ) },
+    { accessorKey: "CustomerName", header: "Name", size: 160,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+          <div className="font-medium text-foreground">{i.row.original.CustomerName}</div>
+          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
+        </div>
+      ) },
+    { accessorKey: "Mobile", header: "Mobile", size: 110,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
+          {i.getValue() as string}
+        </div>
+      ) },
+    { accessorKey: "PanNo", header: "PAN", size: 100,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
+          {(i.getValue() as string) || "—"}
+        </div>
+      ) },
+    { id: "location", header: "Address", size: 130, enableSorting: false,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+          {[i.row.original.CustomerCity ?? i.row.original.City, i.row.original.CustomerState ?? i.row.original.State].filter(Boolean).join(", ") || "—"}
+        </div>
+      ) },
+    { accessorKey: "CoApplicantName", header: "Co-Applicant", size: 120,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+          {(i.getValue() as string) || "—"}
+        </div>
+      ) },
+    { accessorKey: "ApplicationCount", header: "Applications", size: 120,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+          <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200">
+            {i.row.original.ApplicationCount} application{i.row.original.ApplicationCount === 1 ? "" : "s"}
+          </span>
+        </div>
+      ) },
+    { accessorKey: "CreatedAt", header: "Registered", size: 100,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+          {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
+        </div>
+      ) },
+    { id: "chevron", header: "", size: 40, enableSorting: false,
+      cell: (i) => (
+        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+          <ChevronRight size={14} className="text-muted-foreground" />
+        </div>
+      ) },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Customers"
@@ -258,45 +322,14 @@ const CrmCustomers: React.FC = () => {
           className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-left">
-                {["Customer No", "Name", "Mobile", "PAN", "Address", "Co-Applicant", "Applications", "Registered", ""].map((h) => (
-                  <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">No customers found</td></tr>
-              ) : filtered.map((c: any) => (
-                <tr key={c.Id} className="border-t border-border hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => setEditingId(c.Id)}>
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{c.CustomerNo}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-foreground">{c.CustomerName}</div>
-                    {c.LeadUid && <div className="text-xs text-muted-foreground">Lead: {c.LeadUid}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.Mobile}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{c.PanNo || "—"}</td>
-                  <td className="px-4 py-3 text-xs">{[c.CustomerCity ?? c.City, c.CustomerState ?? c.State].filter(Boolean).join(", ") || "—"}</td>
-                  <td className="px-4 py-3 text-xs">{c.CoApplicantName || "—"}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200">
-                      {c.ApplicationCount} application{c.ApplicationCount === 1 ? "" : "s"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{c.CreatedAt ? String(c.CreatedAt).slice(0, 10) : "—"}</td>
-                  <td className="px-4 py-3"><ChevronRight size={14} className="text-muted-foreground" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={customerColumns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No customers found"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       {/* New Customer Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

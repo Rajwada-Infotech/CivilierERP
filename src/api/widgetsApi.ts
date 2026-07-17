@@ -28,6 +28,18 @@ export interface WidgetsSummary {
   reviewedTasks: number;
   overdueTasks: number;
   dueSoonTasks: number;
+  totalLeads: number;
+  leadsToday: number;
+  hotLeads: number;
+  activeCampaigns: number;
+  activeCrmBookings: number;
+  pendingFollowups: number;
+  crmCollectionsToday: number;
+  crmOverduePayments: number;
+  crmPendingCancellations: number;
+  crmOpenServiceTickets: number;
+  crmSlaBreachedTickets: number;
+  crmPendingHandovers: number;
 }
 
 export interface WidgetsTrendPoint {
@@ -122,6 +134,7 @@ export interface WidgetsPermissions {
   canViewProcurement: boolean;
   canViewTasks: boolean;
   canViewAdminTools: boolean;
+  canViewCrm: boolean;
 }
 
 export interface WidgetQuickAction {

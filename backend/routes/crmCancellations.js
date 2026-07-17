@@ -10,8 +10,9 @@ const { getNextDocNumber } = require("../services/docNumber");
 // Approve/reject is gated to admin/super_admin/marketing_head via this shared
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a cancellation/refund on this page.
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -76,7 +77,20 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
       .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
-    const deductionPct = b.DeductionPercent != null ? parseFloat(b.DeductionPercent) : 10; // default 10% cancellation charge
+    // Default 10% cancellation charge if the requester doesn't override it.
+    // No per-project/per-plan cancellation policy exists yet to validate
+    // against, but the proposed number must still be a sane percentage —
+    // previously this was taken straight from req.body with only a numeric
+    // parse, so anyone with create rights could pass a negative or >100%
+    // value at request time (the real approve/reject gate is later, but the
+    // *proposed* record itself was unconstrained).
+    let deductionPct = 10;
+    if (b.DeductionPercent != null) {
+      deductionPct = parseFloat(b.DeductionPercent);
+      if (!Number.isFinite(deductionPct) || deductionPct < 0 || deductionPct > 100) {
+        return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
+      }
+    }
     const deductionAmt = Math.round(totalPaid * deductionPct) / 100;
     const refundAmt = Math.max(0, totalPaid - deductionAmt);
     const cancellationNo = await getNextDocNumber(pool, "CXL", "CXL");
@@ -210,6 +224,17 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // Post to the core Finance GL — cash actually paid back to the customer.
+    // Never allowed to fail the refund record itself.
+    const actorEmail = req.user?.email || req.user?.name || null;
+    try {
+      const outcome = await postCrmCancellationRefundToGL(pool, id, actorEmail);
+      await recordGLPosting("crm-cancellation-refund", id, outcome, actorEmail);
+    } catch (glErr) {
+      await recordGLPosting("crm-cancellation-refund", id, { failed: true, reason: glErr.message }, actorEmail);
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-cancellations] mark-refunded error:", e.message);

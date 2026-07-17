@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { MapPin } from "lucide-react";
+import { MapPin, Phone } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/sa/inquiry";
@@ -198,6 +198,12 @@ const SaInquiryDashboard: React.FC = () => {
                   <div className="flex items-center gap-2">
                     {detail.lead?.Classification && (
                       <span className={`text-xs font-semibold px-2 py-1 rounded-full ${classColor(detail.lead.Classification)}`}>{detail.lead.Classification}</span>
+                    )}
+                    {detail.lead?.Mobile && (
+                      <a href={`tel:${detail.lead.Mobile}`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 transition-colors">
+                        <Phone size={12} /> Call
+                      </a>
                     )}
                     {/* Schedule Visit button */}
                     {!alreadyScheduled ? (

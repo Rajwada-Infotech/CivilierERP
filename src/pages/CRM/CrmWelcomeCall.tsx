@@ -7,6 +7,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -917,6 +918,37 @@ const CrmWelcomeCall: React.FC = () => {
     [queue]
   );
 
+  const queueColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking No", size: 110,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 140,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { id: "projectUnit", header: "Project / Unit", size: 130, enableSorting: false,
+      cell: (i) => <span className="text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
+    { accessorKey: "LastOutcome", header: "Last Outcome", size: 120,
+      cell: (i) => i.row.original.LastOutcome ? (
+        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[i.row.original.LastOutcome] || ""}`}>{i.row.original.LastOutcome}</span>
+      ) : <span className="text-xs text-muted-foreground">Never called</span> },
+    { accessorKey: "NextCallDate", header: "Follow-up Due", size: 110,
+      cell: (i) => i.row.original.NextCallDate ? (
+        <span className={new Date(i.row.original.NextCallDate) <= new Date() ? "text-orange-600 font-medium text-xs" : "text-muted-foreground text-xs"}>
+          {String(i.row.original.NextCallDate).slice(0, 10)}
+        </span>
+      ) : <span className="text-xs">—</span> },
+    { id: "actions", header: "Action", size: 100, enableSorting: false,
+      cell: (i) => (
+        <button onClick={() => setActiveBooking(i.row.original)}
+          className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+          <Phone size={12} /> Call Now
+        </button>
+      ) },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Welcome Calls"
@@ -949,51 +981,14 @@ const CrmWelcomeCall: React.FC = () => {
       </div>
 
       {view === "queue" ? (
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-left">
-                {["Booking No", "Customer", "Project / Unit", "Last Outcome", "Follow-up Due", "Action"].map((h) => (
-                  <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {queueLoading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-              ) : filteredQueue.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-sm">Queue is clear — no calls pending</td></tr>
-              ) : filteredQueue.map((c: any) => (
-                <tr key={c.BookingId} className="border-t border-border hover:bg-muted/10 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{c.BookingNo}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{c.ApplicantName}</div>
-                    <div className="text-xs text-muted-foreground">{c.Mobile}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs">{c.ProjectName || "—"} · {c.UnitNo}</td>
-                  <td className="px-4 py-3">
-                    {c.LastOutcome ? (
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.LastOutcome] || ""}`}>{c.LastOutcome}</span>
-                    ) : <span className="text-xs text-muted-foreground">Never called</span>}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {c.NextCallDate ? (
-                      <span className={new Date(c.NextCallDate) <= new Date() ? "text-orange-600 font-medium" : "text-muted-foreground"}>
-                        {String(c.NextCallDate).slice(0, 10)}
-                      </span>
-                    ) : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => setActiveBooking(c)}
-                      className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                      <Phone size={12} /> Call Now
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={filteredQueue}
+          columns={queueColumns}
+          searchable={false}
+          loading={queueLoading}
+          emptyMessage="Queue is clear — no calls pending"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
       ) : (
         <div className="space-y-2">
           {historyLoading ? (

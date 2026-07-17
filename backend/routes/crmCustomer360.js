@@ -44,6 +44,16 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
                (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
+               -- Same formula crmCustomers.js's Customer Master detail view uses (the
+               -- one place this was originally computed correctly) — Waived milestones
+               -- don't count as still-owed, and a Cancelled/Rejected booking's balance
+               -- isn't real collectible debt. TotalPaid/TotalDue above are kept as raw
+               -- sums for reference; the frontend should use this for "what do they
+               -- still owe", not (TotalDue - TotalPaid).
+               CASE WHEN b.Status IN ('Cancelled', 'Rejected') THEN 0 ELSE
+                 (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('Paid', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
+                  FROM dbo.CrmPaymentMilestone m2 WHERE m2.BookingId = b.Id)
+               END AS TotalOutstanding,
                (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = b.Id AND Status IN ('Requested','Approved')) AS HasCancellation
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

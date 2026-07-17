@@ -75,4 +75,52 @@ function requirePageRight(pageKey, action) {
   };
 }
 
-module.exports = { requirePageRight };
+/**
+ * Same check as requirePageRight, but passes if the user has the given
+ * action on ANY of several page keys — for endpoints genuinely shared by
+ * more than one page (e.g. removing a parking allotment is reachable both
+ * from a booking's own detail view and from the standalone Parking Booking
+ * page, and a user might only hold rights on one of the two pages).
+ */
+function requireAnyPageRight(pageKeys, action) {
+  return async (req, res, next) => {
+    try {
+      const role = (req.user?.role || "").toLowerCase();
+      const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
+      if (SUPERUSER_ROLES.has(role)) return next();
+
+      if (role === "marketing_head" && pageKeys.some((k) => isMarketingHeadAllowed(String(k).toLowerCase()))) {
+        return next();
+      }
+
+      const userId = req.user?.userId ?? req.user?.id;
+      const roleId = req.user?.roleId;
+      if (!userId) {
+        return res.status(401).json({ error: "Invalid token - missing user id" });
+      }
+
+      const targetAction = String(action).toLowerCase();
+      const targetPages = new Set(pageKeys.map((k) => String(k).toLowerCase()));
+
+      const effective = await getEffectivePagePermissions(userId, roleId);
+      const allowed = effective.some((right) => {
+        const page = String(right?.page || "").toLowerCase();
+        if (!targetPages.has(page)) return false;
+        const actions = Array.isArray(right?.actions)
+          ? right.actions.map((item) => String(item).toLowerCase())
+          : [];
+        return actions.includes(targetAction);
+      });
+
+      if (!allowed) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      return next();
+    } catch (err) {
+      console.error("requireAnyPageRight check failed:", err);
+      return res.status(500).json({ error: "Permission check error" });
+    }
+  };
+}
+
+module.exports = { requirePageRight, requireAnyPageRight };

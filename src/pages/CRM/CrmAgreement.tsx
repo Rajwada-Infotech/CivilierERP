@@ -11,6 +11,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/agreements";
 const BKG_API = "/api/crm/bookings";
+const SA_LEADS_API = "/api/sa/leads";
 
 const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 const DOC_STATUSES = ["Pending", "Requested", "Uploaded", "Submitted", "Verified", "Rejected"];
@@ -32,8 +33,17 @@ const docStatusColor: Record<string, string> = {
 
 const EMPTY_AGR_FORM = {
   BookingId: "", LegalName: "", LegalAddress: "",
-  PanNo: "", AadhaarNo: "", Notes: "",
+  PanNo: "", AadhaarNo: "", Notes: "", LegalExecutiveId: "",
 };
+
+async function fetchUsers(): Promise<{ value: string; label: string }[]> {
+  try {
+    const r = await fetchWithAuth(`${SA_LEADS_API}/users`);
+    if (!r.ok) return [];
+    const d: any[] = await r.json();
+    return d.map((u) => ({ value: String(u.Id), label: u.Name }));
+  } catch { return []; }
+}
 const EMPTY_DOC_FORM = {
   DocumentType: "SaleAgreement", DocumentUrl: "", IssuedBy: "", Remarks: "",
 };
@@ -139,7 +149,7 @@ const CrmAgreement: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
   const docFileInputRef = useRef<HTMLInputElement>(null);
   const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "" });
+  const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "", LegalExecutiveId: "" });
   const [saving, setSaving] = useState(false);
 
   const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
@@ -150,6 +160,7 @@ const CrmAgreement: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: dateHistory = [] } = useQuery({
     queryKey: ["crm-agreement-date-history", selectedId],
     queryFn: () => fetchDateHistory(selectedId!),
@@ -184,6 +195,9 @@ const CrmAgreement: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create agreement");
       toast.success(`Agreement ${data.AgreementNo} created`);
+      if (data.portal?.error) {
+        toast.warning(`Agreement created, but customer portal login could not be provisioned: ${data.portal.error}`, { duration: 8000 });
+      }
       setAgrDialog(false);
       setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
@@ -355,6 +369,7 @@ const CrmAgreement: React.FC = () => {
       PanNo: detail.agreement.PanNo || "",
       AadhaarNo: detail.agreement.AadhaarNo || "",
       RevisionReason: "",
+      LegalExecutiveId: detail.agreement.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : "",
     });
     setEditDialog(true);
   };
@@ -417,6 +432,9 @@ const CrmAgreement: React.FC = () => {
                 <div className="text-xs text-muted-foreground mt-0.5 font-mono">{a.AgreementNo}</div>
                 <div className="text-xs text-muted-foreground">{a.BookingNo} · {a.UnitNo}</div>
                 <div className="text-xs text-muted-foreground">{a.DocumentCount || 0} document(s)</div>
+                <div className="text-xs text-muted-foreground">
+                  Legal: {a.LegalExecutiveName ? <span className="text-foreground font-medium">{a.LegalExecutiveName}</span> : <span className="text-amber-600">Unassigned</span>}
+                </div>
               </button>
             ))}
           </div>
@@ -729,6 +747,14 @@ const CrmAgreement: React.FC = () => {
                 ))}
               </select>
             </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+              <select value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">— Unassigned —</option>
+                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { key: "LegalName",    label: "Legal Name",      type: "text" },
@@ -925,6 +951,14 @@ const CrmAgreement: React.FC = () => {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">Edit Agreement Details</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+              <select value={editForm.LegalExecutiveId} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">— Unassigned —</option>
+                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>

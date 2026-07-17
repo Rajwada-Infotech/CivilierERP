@@ -7,6 +7,7 @@ import { AlertCircle, CheckCircle2, Clock, Plus, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -133,8 +134,12 @@ const CrmPaymentMilestones: React.FC = () => {
           Remarks:       payForm.Remarks       || undefined,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       toast.success("Payment recorded");
+      if (data.brokerWarning) {
+        toast.warning(data.brokerWarning, { duration: 8000 });
+      }
 
       const current = milestones.find((m) => m.Id === editingId);
       const paidAmt = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : current?.AmountPaid;
@@ -233,6 +238,86 @@ const CrmPaymentMilestones: React.FC = () => {
       setApplyingId(null);
     }
   };
+
+  const milestoneColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "MilestoneNo", header: "#", size: 40,
+      cell: (i) => <span className="text-muted-foreground">{i.getValue() as number}</span> },
+    { accessorKey: "MilestoneName", header: "Milestone", size: 200,
+      cell: (i) => (
+        <span className="font-medium">
+          {i.row.original.MilestoneName}
+          {i.row.original.RequiredDocuments && (
+            <div className="text-[10px] text-muted-foreground font-normal mt-0.5" title={i.row.original.RequiredDocuments}>
+              Docs: {i.row.original.RequiredDocuments}
+            </div>
+          )}
+        </span>
+      ) },
+    { accessorKey: "ResponsibleDepartment", header: "Dept", size: 100,
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ResponsibleDepartment || "—"}</span> },
+    { accessorKey: "DueDate", header: "Due Date", size: 110,
+      cell: (i) => {
+        const m = i.row.original;
+        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+        return (
+          <span className="text-xs">
+            {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
+            {isOverdue && <span className="ml-1 text-red-500 text-[10px]">OVERDUE</span>}
+          </span>
+        );
+      } },
+    { accessorKey: "AmountDue", header: "Amount Due", size: 100,
+      cell: (i) => <span className="font-semibold">{fmt(i.row.original.AmountDue)}</span> },
+    { accessorKey: "AmountPaid", header: "Amount Paid", size: 100,
+      cell: (i) => <span className="text-green-600 font-semibold">{fmt(i.row.original.AmountPaid)}</span> },
+    { id: "balance", header: "Balance", size: 100, enableSorting: false,
+      cell: (i) => {
+        const m = i.row.original;
+        const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
+        return <span className="text-orange-600 font-semibold">{balance > 0 ? fmt(balance) : "—"}</span>;
+      } },
+    { id: "status", header: "Status", size: 120, enableSorting: false,
+      cell: (i) => {
+        const m = i.row.original;
+        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+        const displayStatus = isOverdue && m.Status === "Pending" ? "Overdue" : m.Status;
+        return (
+          <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[displayStatus] || ""}`}>
+            {statusIcon[displayStatus]}{displayStatus}
+          </span>
+        );
+      } },
+    { accessorKey: "PaymentMode", header: "Payment Mode", size: 90,
+      cell: (i) => <span className="text-xs">{i.row.original.PaymentMode || "—"}</span> },
+    { accessorKey: "TransactionRef", header: "Ref", size: 90,
+      cell: (i) => <span className="text-xs font-mono">{i.row.original.TransactionRef || "—"}</span> },
+    { id: "actions", header: "", size: 160, enableSorting: false,
+      cell: (i) => {
+        const m = i.row.original;
+        return (
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {m.Status !== "Paid" && m.Status !== "Waived" && (
+              <>
+                <button onClick={() => handleOpenPayment(m)}
+                  className="text-xs text-primary hover:underline">
+                  Record Payment
+                </button>
+                {onAccountBalance > 0 && (
+                  <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
+                    className="text-xs text-blue-600 hover:underline disabled:opacity-40">
+                    {applyingId === m.Id ? "Applying..." : "Apply On-Account"}
+                  </button>
+                )}
+                <button onClick={() => handleWaive(m)}
+                  className="text-xs text-muted-foreground hover:underline">
+                  Waive
+                </button>
+              </>
+            )}
+          </div>
+        );
+      } },
+  ];
 
   return (
     <SalesAutoShell
@@ -336,74 +421,17 @@ const CrmPaymentMilestones: React.FC = () => {
           )}
 
           {/* Milestone table */}
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 text-left">
-                  {["#", "Milestone", "Dept", "Due Date", "Amount Due", "Amount Paid", "Balance", "Status", "Payment Mode", "Ref", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {milestones.length === 0 ? (
-                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground text-sm">No milestones found</td></tr>
-                ) : milestones.map((m: any) => {
-                  const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
-                  const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
-                  const displayStatus = isOverdue && m.Status === "Pending" ? "Overdue" : m.Status;
-                  return (
-                    <tr key={m.Id} className={`border-t border-border hover:bg-muted/10 transition-colors ${isOverdue ? "bg-red-50/30" : ""}`}>
-                      <td className="px-4 py-3 text-muted-foreground">{m.MilestoneNo}</td>
-                      <td className="px-4 py-3 font-medium">
-                        {m.MilestoneName}
-                        {m.RequiredDocuments && (
-                          <div className="text-[10px] text-muted-foreground font-normal mt-0.5" title={m.RequiredDocuments}>
-                            Docs: {m.RequiredDocuments}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{m.ResponsibleDepartment || "—"}</td>
-                      <td className="px-4 py-3 text-xs">
-                        {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
-                        {isOverdue && <span className="ml-1 text-red-500 text-[10px]">OVERDUE</span>}
-                      </td>
-                      <td className="px-4 py-3 font-semibold">{fmt(m.AmountDue)}</td>
-                      <td className="px-4 py-3 text-green-600 font-semibold">{fmt(m.AmountPaid)}</td>
-                      <td className="px-4 py-3 text-orange-600 font-semibold">{balance > 0 ? fmt(balance) : "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[displayStatus] || ""}`}>
-                          {statusIcon[displayStatus]}{displayStatus}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs">{m.PaymentMode || "—"}</td>
-                      <td className="px-4 py-3 text-xs font-mono">{m.TransactionRef || "—"}</td>
-                      <td className="px-4 py-3 flex items-center gap-2 whitespace-nowrap">
-                        {m.Status !== "Paid" && m.Status !== "Waived" && (
-                          <>
-                            <button onClick={() => handleOpenPayment(m)}
-                              className="text-xs text-primary hover:underline">
-                              Record Payment
-                            </button>
-                            {onAccountBalance > 0 && (
-                              <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
-                                className="text-xs text-blue-600 hover:underline disabled:opacity-40">
-                                {applyingId === m.Id ? "Applying..." : "Apply On-Account"}
-                              </button>
-                            )}
-                            <button onClick={() => handleWaive(m)}
-                              className="text-xs text-muted-foreground hover:underline">
-                              Waive
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            data={milestones}
+            columns={milestoneColumns}
+            emptyMessage="No milestones found"
+            className="rounded-xl border border-border overflow-hidden bg-card"
+            rowClassName={(row) => {
+              const m = row.original as any;
+              const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+              return isOverdue ? "bg-red-50/30" : "";
+            }}
+          />
         </>
       )}
 

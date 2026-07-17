@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
-  Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet,
+  Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
+  ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -41,15 +43,49 @@ async function fetchOnAccount(id: number): Promise<any | null> {
   const r = await fetchWithAuth(`${PAY_API}/booking/${id}/on-account`);
   return r.ok ? r.json() : null;
 }
+async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
+  const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`);
+  return r.ok ? r.json() : [];
+}
+async function fetchExtraCharges(bookingId: number): Promise<any[]> {
+  const r = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`);
+  return r.ok ? r.json() : [];
+}
+async function fetchParkingRates(): Promise<any[]> {
+  const r = await fetchWithAuth("/api/parking-master");
+  return r.ok ? r.json() : [];
+}
+async function fetchAvailableParkingSlots(projectId?: number, blockId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  const params = new URLSearchParams({ projectId: String(projectId) });
+  if (blockId) params.set("blockId", String(blockId));
+  const r = await fetchWithAuth(`/api/parking-matrix?${params}`);
+  return r.ok ? r.json() : [];
+}
+async function fetchExtraChargeTypes(): Promise<any[]> {
+  const r = await fetchWithAuth("/api/extra-charge-master");
+  return r.ok ? r.json() : [];
+}
 
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
+  const { canDoAction } = useAuth();
+  // Bookings is now a review + restricted-edit surface (Applications and
+  // Bookings) — super admin grants "crm-bookings" edit per-user via Menu
+  // Rights instead of it being a broad role default, so every mutating
+  // control here must check this explicitly rather than assume anyone who
+  // can view the page can also edit it.
+  const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Main");
   const [paymentPlanId, setPaymentPlanId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "" });
+  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+  const [chargesSaving, setChargesSaving] = useState(false);
+  const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["crm-booking-detail", bookingId],
@@ -79,6 +115,165 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchAttachments(bookingId),
     enabled: tab === "Attachments",
   });
+  const { data: parking = [] } = useQuery({
+    queryKey: ["crm-parking", bookingId],
+    queryFn: () => fetchParkingAllotments(bookingId),
+    enabled: tab === "Details",
+  });
+  const { data: extras = [] } = useQuery({
+    queryKey: ["crm-extra-charges", bookingId],
+    queryFn: () => fetchExtraCharges(bookingId),
+    enabled: tab === "Details",
+  });
+  const { data: parkingRates = [] } = useQuery({
+    queryKey: ["parking-master-all"],
+    queryFn: fetchParkingRates,
+    enabled: tab === "Details",
+    staleTime: 5 * 60_000,
+  });
+  const { data: parkingSlots = [] } = useQuery({
+    queryKey: ["parking-matrix-for-booking", booking?.ProjectId, booking?.BlockId],
+    queryFn: () => fetchAvailableParkingSlots(booking?.ProjectId, booking?.BlockId),
+    enabled: tab === "Details" && !!booking?.ProjectId,
+    staleTime: 30_000,
+  });
+  const { data: chargeTypes = [] } = useQuery({
+    queryKey: ["extra-charge-master-all"],
+    queryFn: fetchExtraChargeTypes,
+    enabled: tab === "Details",
+    staleTime: 5 * 60_000,
+  });
+
+  const applicableParkingRates = (parkingRates as any[]).filter(
+    (r: any) => r.IsActive && r.ProjectId === booking?.ProjectId && (!r.BlockId || r.BlockId === booking?.BlockId)
+  );
+  const selectedParkingRate = applicableParkingRates.find((r: any) => String(r.Id) === parkingForm.ParkingMasterId);
+  const availableParkingSlots = (parkingSlots as any[]).filter(
+    (s: any) => s.Status === "Available" && (!selectedParkingRate || s.ParkingType === selectedParkingRate.ParkingType)
+  );
+
+  const invalidateCharges = () => {
+    qc.invalidateQueries({ queryKey: ["crm-parking", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-extra-charges", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+  };
+
+  const handleAddParking = async () => {
+    if (!parkingForm.ParkingMasterId) { toast.error("Select a parking rate"); return; }
+    setChargesSaving(true);
+    try {
+      const res = await fetchWithAuth(`/api/crm/parking/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ParkingMasterId: parkingForm.ParkingMasterId,
+          ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
+          ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
+          Quantity: parseInt(parkingForm.Quantity) || 1,
+        }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Parking allotted — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+      setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+      qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking?.ProjectId, booking?.BlockId] });
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChargesSaving(false);
+    }
+  };
+
+  const handleRemoveParking = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Parking allotment removed");
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleAddExtra = async () => {
+    if (!extraForm.Description.trim() || !extraForm.Amount) { toast.error("Description and Amount are required"); return; }
+    setChargesSaving(true);
+    try {
+      const res = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
+          Description: extraForm.Description.trim(),
+          Amount: parseFloat(extraForm.Amount),
+          GstRate: parseFloat(extraForm.GstRate) || 0,
+        }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Charge added — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChargesSaving(false);
+    }
+  };
+
+  const handleRemoveExtra = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`/api/crm/extra-charges/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Charge removed");
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const INVOICE_SORT_COLS: { key: string; label: string }[] = [
+    { key: "InvoiceNo", label: "Invoice No" },
+    { key: "InvoiceType", label: "Type" },
+    { key: "Amount", label: "Amount" },
+    { key: "InvoiceDate", label: "Date" },
+    { key: "Status", label: "Status" },
+    { key: "CreatedByName", label: "By" },
+  ];
+
+  const toggleInvoiceSort = (key: string) => {
+    setInvoiceSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const sortedInvoices = useMemo(() => {
+    const rows = (invoices as any[]).slice();
+    if (!invoiceSort) return rows;
+    const { key, dir } = invoiceSort;
+    rows.sort((a, b) => {
+      let av = a?.[key];
+      let bv = b?.[key];
+      if (key === "Amount") {
+        av = Number(av) || 0;
+        bv = Number(bv) || 0;
+      } else if (key === "InvoiceDate") {
+        av = av ? new Date(av).getTime() : 0;
+        bv = bv ? new Date(bv).getTime() : 0;
+      } else {
+        av = (av ?? "").toString().toLowerCase();
+        bv = (bv ?? "").toString().toLowerCase();
+      }
+      if (av < bv) return dir === "asc" ? -1 : 1;
+      if (av > bv) return dir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return rows;
+  }, [invoices, invoiceSort]);
 
   const effectivePlanId = paymentPlanId ?? (booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "");
 
@@ -211,8 +406,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <div className="col-span-2">
                     <label className="text-xs text-muted-foreground block mb-1">Payment Plan</label>
-                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)} disabled={!canEdit}
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
                       <option value="">— No plan (7-stage default) —</option>
                       {(plans as any[]).map((p: any) => (
                         <option key={p.Id} value={String(p.Id)}>{p.PlanName}{!p.CompanyId && !p.ProjectId ? " (Global)" : ""}</option>
@@ -220,12 +415,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </select>
                   </div>
                 </div>
-                <div className="flex justify-end">
-                  <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
-                    className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {saving ? "Saving..." : "Save Payment Plan"}
-                  </button>
-                </div>
+                {canEdit && (
+                  <div className="flex justify-end">
+                    <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
+                      className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                      {saving ? "Saving..." : "Save Payment Plan"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -241,16 +438,30 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div><span className="text-muted-foreground block">Email</span><span className="font-medium">{customer.Email || "—"}</span></div>
                       <div><span className="text-muted-foreground block">PAN</span><span className="font-medium font-mono">{customer.PanNo || "—"}</span></div>
                       <div className="col-span-2"><span className="text-muted-foreground block">Address</span><span className="font-medium">{customer.Address || "—"}{[customer.City, customer.State, customer.Pincode].filter(Boolean).length ? ` · ${[customer.City, customer.State, customer.Pincode].filter(Boolean).join(", ")}` : ""}</span></div>
-                      {customer.CoApplicantName && (
-                        <div className="col-span-2 pt-1 border-t border-border/60 flex items-center gap-1.5">
-                          <Users2 size={11} className="text-muted-foreground" />
-                          <span className="text-muted-foreground">Co-Applicant:</span>
-                          <span className="font-medium">{customer.CoApplicantName}{customer.CoApplicantRelation ? ` (${customer.CoApplicantRelation})` : ""} — {customer.CoApplicantMobile || "—"}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
+
+                {/* Co-applicants: sourced from dbo.CrmCoApplicant (the per-booking
+                    table), not CrmCustomer's intake-time fields — this is the
+                    authoritative list once a booking exists, same source Welcome
+                    Call's checklist uses, so the two never disagree. */}
+                <div className="rounded-xl border border-border p-3.5">
+                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Users2 size={13} /> Co-Applicants</h3>
+                  {(data?.coApplicants || []).length > 0 ? (
+                    <div className="space-y-1.5">
+                      {(data.coApplicants as any[]).map((ca) => (
+                        <div key={ca.Id} className="text-xs flex items-center gap-1.5">
+                          <span className="font-medium">{ca.Name}</span>
+                          {ca.Relation && <span className="text-muted-foreground">({ca.Relation})</span>}
+                          <span className="text-muted-foreground">— {ca.Mobile || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No co-applicant on record.</p>
+                  )}
+                </div>
 
                 <div className="rounded-xl border border-border p-3.5">
                   <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Building2 size={13} /> Booking</h3>
@@ -267,6 +478,120 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div><span className="text-muted-foreground block">Parking</span><span className="font-medium">{fmt(booking.ParkingTotal)}</span></div>
                     <div><span className="text-muted-foreground block">Extra Charges</span><span className="font-medium">{fmt(booking.ExtraChargesTotal)}</span></div>
                     <div><span className="text-muted-foreground block">Grand Total</span><span className="font-bold text-primary">{fmt(booking.GrandTotal)}</span></div>
+                  </div>
+                </div>
+
+                {/* Parking & Extra Charges — allot/remove directly here, not a
+                    separate hidden dialog, so the numbers above and the
+                    line items behind them live in the same place. */}
+                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><Car size={13} /> Parking Allotment</h3>
+                  {(parking as any[]).length > 0 && (
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      {(parking as any[]).map((p: any) => (
+                        <div key={p.Id} className="flex items-center justify-between px-2.5 py-1.5 border-b border-border last:border-0 text-xs">
+                          <div>
+                            <span className="font-medium">{p.CurrentParkingType}</span>
+                            {p.ParkingSlotNo && <span className="text-muted-foreground"> · {p.ParkingSlotNo}</span>}
+                            <span className="text-muted-foreground"> · Qty {p.Quantity}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">{fmt(p.TotalAmount)}</span>
+                            {canEdit && <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">Remove</button>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {canEdit && (
+                    <>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <select value={parkingForm.ParkingMasterId}
+                          onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
+                          className="col-span-2 text-xs border border-border rounded px-2 py-1.5 bg-background">
+                          <option value="">Select parking rate</option>
+                          {applicableParkingRates.map((r: any) => (
+                            <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} (+{r.GstRate}% GST)</option>
+                          ))}
+                        </select>
+                        {availableParkingSlots.length > 0 ? (
+                          <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
+                            <option value="">Slot (optional)</option>
+                            {availableParkingSlots.map((s: any) => (
+                              <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
+                            onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                        )}
+                        <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
+                          onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                          className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                      </div>
+                      <button onClick={handleAddParking} disabled={chargesSaving}
+                        className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
+                        + Allot Parking
+                      </button>
+                      {applicableParkingRates.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
+                      )}
+                    </>
+                  )}
+
+                  <div className="pt-2 border-t border-border/60 space-y-2">
+                    <h3 className="text-xs font-semibold text-muted-foreground">Extra Charges (Custom Requirements)</h3>
+                    {(extras as any[]).length > 0 && (
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        {(extras as any[]).map((c: any) => (
+                          <div key={c.Id} className="flex items-center justify-between px-2.5 py-1.5 border-b border-border last:border-0 text-xs">
+                            <span className="font-medium">{c.Description}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{fmt(c.TotalAmount)}</span>
+                              {canEdit && <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">Remove</button>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {canEdit && (
+                      <>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <select value={extraForm.ExtraChargeMasterId}
+                            onChange={(e) => {
+                              const master = (chargeTypes as any[]).find((c: any) => String(c.Id) === e.target.value);
+                              setExtraForm((f) => ({
+                                ...f,
+                                ExtraChargeMasterId: e.target.value,
+                                Description: master ? master.ChargeName : f.Description,
+                                Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
+                                GstRate: master ? String(master.GstRate) : f.GstRate,
+                              }));
+                            }}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
+                            <option value="">Custom (type below)</option>
+                            {(chargeTypes as any[]).filter((c: any) => c.IsActive).map((c: any) => (
+                              <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
+                            ))}
+                          </select>
+                          <input placeholder="Description" value={extraForm.Description}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                          <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                          <input type="number" placeholder="GST %" value={extraForm.GstRate}
+                            onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
+                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                        </div>
+                        <button onClick={handleAddExtra} disabled={chargesSaving}
+                          className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
+                          + Add Charge
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -304,12 +629,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {/* ── Tab 3: Attachments ── */}
             {tab === "Attachments" && (
               <div className="space-y-3 pt-2">
-                <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
-                  <Upload size={16} className="text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload files (PDF, images, Office docs — up to 25MB each)"}</span>
-                  <input type="file" multiple className="hidden" disabled={uploading}
-                    onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
-                </label>
+                {canEdit && (
+                  <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
+                    <Upload size={16} className="text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload files (PDF, images, Office docs — up to 25MB each)"}</span>
+                    <input type="file" multiple className="hidden" disabled={uploading}
+                      onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
+                  </label>
+                )}
 
                 {attachments.length === 0 ? (
                   <div className="py-6 text-center text-muted-foreground text-sm">No attachments yet</div>
@@ -327,9 +654,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div className="flex items-center gap-2 shrink-0">
                           <a href={`${API}/${bookingId}/attachments/file/${a.Id}`} target="_blank" rel="noreferrer"
                             className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Download size={14} /></a>
-                          <button onClick={() => handleDeleteAttachment(a.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
-                            <Trash2 size={14} />
-                          </button>
+                          {canEdit && (
+                            <button onClick={() => handleDeleteAttachment(a.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -343,10 +672,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">Every invoice generated here is immediately visible to the customer in their portal.</p>
-                  <button onClick={openInvoiceDialog}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 shrink-0">
-                    <Plus size={14} /> Generate Invoice
-                  </button>
+                  {canEdit && (
+                    <button onClick={openInvoiceDialog}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 shrink-0">
+                      <Plus size={14} /> Generate Invoice
+                    </button>
+                  )}
                 </div>
 
                 {invoices.length === 0 ? (
@@ -356,13 +687,30 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-muted/40 text-left">
-                          {["Invoice No", "Type", "Amount", "Date", "Status", "By"].map((h) => (
-                            <th key={h} className="px-3 py-2 text-xs font-semibold text-muted-foreground">{h}</th>
-                          ))}
+                          {INVOICE_SORT_COLS.map(({ key, label }) => {
+                            const sorted = invoiceSort?.key === key ? invoiceSort.dir : null;
+                            return (
+                              <th key={key} onClick={() => toggleInvoiceSort(key)}
+                                className="px-3 py-2 text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors">
+                                <span className="inline-flex items-center gap-1">
+                                  {label}
+                                  <span className="text-muted-foreground/50">
+                                    {sorted === "asc" ? (
+                                      <ChevronUp size={11} className="text-emerald-500" />
+                                    ) : sorted === "desc" ? (
+                                      <ChevronDown size={11} className="text-emerald-500" />
+                                    ) : (
+                                      <ChevronsUpDown size={11} />
+                                    )}
+                                  </span>
+                                </span>
+                              </th>
+                            );
+                          })}
                         </tr>
                       </thead>
                       <tbody>
-                        {(invoices as any[]).map((inv: any) => (
+                        {sortedInvoices.map((inv: any) => (
                           <tr key={inv.Id} className="border-t border-border">
                             <td className="px-3 py-2 font-mono text-xs font-semibold text-primary">{inv.InvoiceNo}</td>
                             <td className="px-3 py-2 text-xs">{inv.InvoiceType}</td>
