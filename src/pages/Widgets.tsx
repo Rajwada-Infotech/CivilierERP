@@ -549,7 +549,9 @@ function ActivityFeedWidget() {
       ))}
     </div>
   );
-}// ─── MAP VIEW WIDGET ─────────────────────────────────────────────────────────
+}
+
+// ─── MAP VIEW WIDGET ─────────────────────────────────────────────────────────
 // Plots each project (enterprise rows with business_type="P") as a marker on
 // an OpenStreetMap tile layer via Leaflet — free, no API key. Projects that
 // already have Latitude/Longitude use those directly; projects with only a
@@ -571,22 +573,43 @@ interface ProjectMarker {
   lng: number;
 }
 
+async function nominatimSearch(
+  query: string,
+): Promise<{ lat: number; lng: number } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
+      { signal: controller.signal },
+    );
+    const results = await res.json();
+    const hit = results?.[0];
+    return hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function geocodeAddress(addr: string): Promise<{ lat: number; lng: number } | null> {
   if (geocodeCache.has(addr)) return Promise.resolve(geocodeCache.get(addr)!);
   // Nominatim's fair-use policy caps this at ~1 req/sec — chain requests
   // through a single queue (with a trailing delay) so a widget with many
-  // un-geocoded projects doesn't fire them all at once.
+  // un-geocoded projects doesn't fire them all at once. Each lookup is
+  // capped at 6s so one slow/unresolvable address can't stall the rest.
   const run = geocodeQueue.then(async () => {
     let coords: { lat: number; lng: number } | null = null;
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`,
-      );
-      const results = await res.json();
-      const hit = results?.[0];
-      coords = hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
-    } catch {
-      coords = null;
+    // Informal local addresses (e.g. "RATHTOLA EM BYPASS") often only
+    // resolve once the leading, non-geographic word is dropped — try the
+    // full string first, then progressively fewer leading words.
+    const words = addr.split(/\s+/).filter(Boolean);
+    const attempts = Math.min(words.length, 4);
+    for (let drop = 0; drop < attempts; drop++) {
+      coords = await nominatimSearch(words.slice(drop).join(" "));
+      if (coords || drop === words.length - 1) break;
+      await new Promise((r) => setTimeout(r, 1100));
     }
     geocodeCache.set(addr, coords);
     await new Promise((r) => setTimeout(r, 1100));
@@ -599,6 +622,7 @@ function geocodeAddress(addr: string): Promise<{ lat: number; lng: number } | nu
 function useProjectMarkers() {
   const [markers, setMarkers] = useState<ProjectMarker[]>([]);
   const [geocoding, setGeocoding] = useState(false);
+  const [geocodeFailedCount, setGeocodeFailedCount] = useState(0);
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["map-widget-projects"],
@@ -670,6 +694,7 @@ function useProjectMarkers() {
         ...withCoords,
         ...geocoded.filter((m): m is ProjectMarker => m !== null),
       ]);
+      setGeocodeFailedCount(geocoded.filter((m) => m === null).length);
       setGeocoding(false);
     });
 
@@ -678,7 +703,7 @@ function useProjectMarkers() {
     };
   }, [projects, companies]);
 
-  return { markers, loading: isLoading, geocoding };
+  return { markers, loading: isLoading, geocoding, geocodeFailedCount };
 }
 
 // Leaflet's default marker icon references image files by URL, which
@@ -699,7 +724,7 @@ function patchLeafletIcon(L: typeof import("leaflet")) {
 }
 
 function MapViewWidget() {
-  const { markers, geocoding } = useProjectMarkers();
+  const { markers, geocoding, geocodeFailedCount } = useProjectMarkers();
   const [LeafletMod, setLeafletMod] = useState<{
     L: typeof import("leaflet");
     RL: typeof import("react-leaflet");
@@ -714,16 +739,22 @@ function MapViewWidget() {
     );
   }, []);
 
-  if (!markers.length && !geocoding) {
+  if (geocoding) return <Spinner />;
+
+  if (!markers.length) {
     return (
       <div className="h-44 rounded-xl bg-muted/20 border border-border flex items-center justify-center">
         <div className="text-center space-y-2 px-4">
           <MapIcon size={32} className="text-muted-foreground/40 mx-auto" />
           <p className="text-sm text-muted-foreground">
-            No project locations to show
+            {geocodeFailedCount > 0
+              ? `Couldn't locate ${geocodeFailedCount} project address${geocodeFailedCount > 1 ? "es" : ""}`
+              : "No project locations to show"}
           </p>
           <p className="text-xs text-muted-foreground/60">
-            Add an address or coordinates to a project to see it here.
+            {geocodeFailedCount > 0
+              ? "Try adding City/State to the project's address, or set GPS coordinates directly."
+              : "Add an address or coordinates to a project to see it here."}
           </p>
         </div>
       </div>
