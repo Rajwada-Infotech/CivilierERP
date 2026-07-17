@@ -371,8 +371,20 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // (payable-side ledger heads), so one is never left invisible in Trial
     // Balance the way a NULL-group head would be (see trialBalance.js's
     // `WHERE ahm.LBelongsTo IS NOT NULL` filter).
+    //
+    // LHeadType='C' collides with two other code paths that reuse 'C' to
+    // mean "Customer" rather than "Contractor" — crmLedger.js's
+    // ensureCrmCustomerLedgerHead (LHeadCode 'CRMCUST-<id>') and
+    // projectMaster.js's ensureProjectLedgerHeads (LHeadCode
+    // 'PRJ-<id>-CUST') — a pre-existing ambiguity in this codebase, not
+    // introduced here. Those rows belong in SUNDRY DEBTORS, not Creditors,
+    // so any code containing 'CUST' is excluded from this block.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C") {
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
@@ -789,9 +801,15 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     const columnMeta = await getAccountHeadColumnMeta();
 
     // Same auto-assignment as POST / — a broker/supplier/contractor's group
-    // is never client-editable, even on update.
+    // is never client-editable, even on update. Excludes any 'CUST'-coded
+    // head, which also uses LHeadType='C' but means "Customer" (Sundry
+    // Debtors), not Contractor — see POST / for detail.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C") {
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
