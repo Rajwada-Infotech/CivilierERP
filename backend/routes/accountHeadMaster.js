@@ -366,12 +366,13 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
 
-    // Brokers always land in SUNDRY CREDITORS — never trust a client-supplied
-    // LBelongsTo for LHeadType='BR' (the frontend no longer even shows a
-    // picker for it), so a broker's ledger head is never invisible in Trial
-    // Balance the way a NULL-group head would be.
+    // Brokers, Suppliers, and Contractors all always land in SUNDRY
+    // CREDITORS — never trust a client-supplied LBelongsTo for these types
+    // (payable-side ledger heads), so one is never left invisible in Trial
+    // Balance the way a NULL-group head would be (see trialBalance.js's
+    // `WHERE ahm.LBelongsTo IS NOT NULL` filter).
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR") {
+    if (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C") {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
@@ -787,10 +788,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
 
     const columnMeta = await getAccountHeadColumnMeta();
 
-    // Same auto-assignment as POST / — a broker's group is never
-    // client-editable, even on update.
+    // Same auto-assignment as POST / — a broker/supplier/contractor's group
+    // is never client-editable, even on update.
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR") {
+    if (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C") {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 

@@ -42,7 +42,6 @@ import {
   Copy,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -783,7 +782,6 @@ const SupplierMaster: React.FC = () => {
   const canSave =
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
-    !!form.LBelongsTo &&
     (form.LGSTType !== "Registered" || form.LGST.trim() !== "") &&
     // Password is optional — left blank on create, the backend defaults the
     // login to "123456" (changeable later from this form); on edit, blank
@@ -840,7 +838,6 @@ const SupplierMaster: React.FC = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
-    if (!form.LBelongsTo) e.LBelongsTo = true;
     if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     // Optional on both create (defaults to "123456" server-side) and edit
@@ -1124,21 +1121,17 @@ const SupplierMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Account Group */}
+                {/* Account Group — always Sundry Creditors for suppliers, never
+                    picked manually (see accountHeadMaster.js's
+                    getSundryCreditorsGroupId, applied server-side on every
+                    create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Account Group <span className="text-red-500">*</span>
+                    Account Group
                   </label>
-                  <GroupTreePicker
-                    value={form.LBelongsTo}
-                    onChange={(v) => { setForm((p) => ({ ...p, LBelongsTo: v })); setErrors((p) => ({ ...p, LBelongsTo: false })); }}
-                    tree={accountGroupTree}
-                    allGroups={accountGroups}
-                    error={errors.LBelongsTo}
-                  />
-                  {errors.LBelongsTo && (
-                    <p className="text-xs text-red-500 mt-0.5">Account Group is required</p>
-                  )}
+                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                    Sundry Creditors
+                  </div>
                 </div>
               </div>
             </div>
