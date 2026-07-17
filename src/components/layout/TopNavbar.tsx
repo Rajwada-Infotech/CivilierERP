@@ -446,6 +446,13 @@ const crmSetupItems = [
     pageKey: "crm-payment-plans",
   },
   {
+    icon: ClipboardList,
+    label: "Milestone Master",
+    path: "/crm/milestone-master",
+    color: "text-teal-500",
+    pageKey: "crm-milestone-master",
+  },
+  {
     icon: CreditCard,
     label: "Home Loan Tracking",
     path: "/crm/loan-details",
@@ -720,6 +727,8 @@ const ROLE_ACCENT: Record<string, { label: string; color: string }> = {
   marketing_head: { label: "Marketing Head", color: "#f97316" },
   sales_team_lead: { label: "Sales Team Lead", color: "#a855f7" },
   sales_person: { label: "Sales Person", color: "#6366f1" },
+  legal_head: { label: "Legal Head", color: "#0ea5e9" },
+  legal_person: { label: "Legal Person", color: "#64748b" },
 };
 
 const UserMenuContent: React.FC<{

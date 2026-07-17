@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/sa/lead-tasks";
 
@@ -87,6 +88,28 @@ const SaLeadTasks: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading lead tasks...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load lead tasks.</div>;
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "Title", header: "Task", size: 200,
+      cell: (i) => (<><div className="font-medium">{i.row.original.Title}</div><div className="text-xs text-muted-foreground">{i.row.original.Description || ""}</div></>) },
+    { accessorKey: "LeadUid", header: "Lead", size: 130,
+      cell: (i) => (<><div className="font-mono text-xs text-muted-foreground">{i.row.original.LeadUid}</div><div>{i.row.original.CustomerName}</div></>) },
+    { accessorKey: "AssigneeName", header: "Assignee", size: 110, cell: (i) => <span>{i.row.original.AssigneeName || "-"}</span> },
+    { accessorKey: "DueDate", header: "Due", size: 130,
+      cell: (i) => <span className="whitespace-nowrap">{i.row.original.DueDate ? new Date(i.row.original.DueDate).toLocaleString() : "-"}</span> },
+    { accessorKey: "Priority", header: "Priority", size: 90, cell: (i) => <span>{i.row.original.Priority}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className="inline-flex items-center gap-1.5"><Clock size={13} />{i.row.original.Status}</span> },
+    { id: "actions", header: "Actions", size: 100, enableSorting: false,
+      cell: (i) => {
+        const task = i.row.original;
+        return canDoAction("sa-lead-tasks", "edit") && task.Status !== "Done" ? (
+          <button onClick={() => updateStatus(task, "Done")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+            <CheckCircle2 size={13} /> Done
+          </button>
+        ) : null;
+      } },
+  ];
+
   return (
     <SalesAutoShell title="Lead Tasks" subtitle="Schedule follow-ups, reminders and sales actions for active leads">
       <div className="space-y-5">
@@ -117,34 +140,13 @@ const SaLeadTasks: React.FC = () => {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks" className="w-full border border-border rounded-md bg-background px-3 py-2 text-sm" />
         </div>
 
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>{["Task", "Lead", "Assignee", "Due", "Priority", "Status", "Actions"].map((h) => <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">No tasks yet</td></tr>
-              ) : filtered.map((task) => (
-                <tr key={task.Id} className="border-t border-border hover:bg-muted/20">
-                  <td className="p-3 min-w-64"><div className="font-medium">{task.Title}</div><div className="text-xs text-muted-foreground">{task.Description || ""}</div></td>
-                  <td className="p-3"><div className="font-mono text-xs text-muted-foreground">{task.LeadUid}</div><div>{task.CustomerName}</div></td>
-                  <td className="p-3">{task.AssigneeName || "-"}</td>
-                  <td className="p-3 whitespace-nowrap">{task.DueDate ? new Date(task.DueDate).toLocaleString() : "-"}</td>
-                  <td className="p-3">{task.Priority}</td>
-                  <td className="p-3"><span className="inline-flex items-center gap-1.5"><Clock size={13} />{task.Status}</span></td>
-                  <td className="p-3">
-                    {canDoAction("sa-lead-tasks", "edit") && task.Status !== "Done" && (
-                      <button onClick={() => updateStatus(task, "Done")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
-                        <CheckCircle2 size={13} /> Done
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={filtered}
+          columns={columns}
+          searchable={false}
+          emptyMessage="No tasks yet"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
       </div>
     </SalesAutoShell>
   );

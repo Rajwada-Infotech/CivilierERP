@@ -11,7 +11,7 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Customers",      path: "/crm/customers",      pageKey: "crm-customers"     },
       { label: "Applications",   path: "/crm/applications",   pageKey: "crm-applications"  },
-      { label: "Bookings",       path: "/crm/bookings",       pageKey: "crm-bookings"      },
+      { label: "Applications and Bookings", path: "/crm/bookings", pageKey: "crm-bookings" },
       { label: "Welcome Calls",  path: "/crm/welcome-calls",  pageKey: "crm-welcome-calls" },
       { label: "Communication Log", path: "/crm/communication", pageKey: "crm-communication" },
       { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
@@ -66,6 +66,7 @@ export const crmNavItems: NavItem[] = [
     icon: IndianRupee,
     children: [
       { label: "Payment Milestones", path: "/crm/payments",       pageKey: "crm-payments"      },
+      { label: "Parking Booking",    path: "/crm/parking-booking",pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",      pageKey: "crm-brokerage"     },
       { label: "Broker Payment",     path: "/crm/broker-payments",pageKey: "crm-brokerage"     },
     ],

@@ -69,17 +69,21 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
     const result = await request.query(`
       SELECT
         s.Id, s.SlotNo, s.ParkingType, s.BlockId, blk.BlockName, s.IsActive AS SlotIsActive,
-        pa.Id AS AllotmentId, pa.BookingId, b.BookingNo,
-        a.ApplicantName, a.Mobile,
+        pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo,
+        a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
+        assn.name AS AssignedToName, assn.email AS AssignedToEmail,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
-        ha.ApplicantName AS HoldApplicantName, ha.Mobile AS HoldMobile
+        ha.ApplicationNo AS HoldApplicationNo, ha.ApplicantName AS HoldApplicantName, ha.Mobile AS HoldMobile,
+        hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.ParkingSlot s
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = s.BlockId
       LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
       LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
+      LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       LEFT JOIN dbo.CrmApplication ha ON ha.Id = h.ApplicationId
+      LEFT JOIN dbo.users hassn ON hassn.id = ha.AssignedTo
       WHERE ${where}
       ORDER BY s.SlotNo
     `);
@@ -94,13 +98,21 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       AllotmentId: r.AllotmentId || null,
       BookingId: r.BookingId || null,
       BookingNo: r.BookingNo || null,
+      AllotmentDate: r.AllotmentDate || null,
+      ApplicationId: r.ApplicationId || null,
+      ApplicationNo: r.ApplicationNo || null,
       ApplicantName: r.ApplicantName || null,
       Mobile: r.Mobile || null,
+      AssignedToName: r.AssignedToName || null,
+      AssignedToEmail: r.AssignedToEmail || null,
       HoldId: r.HoldId || null,
       HoldUntil: r.HoldUntil || null,
       HoldApplicationId: r.HoldApplicationId || null,
+      HoldApplicationNo: r.HoldApplicationNo || null,
       HoldApplicantName: r.HoldApplicantName || null,
       HoldMobile: r.HoldMobile || null,
+      HoldAssignedToName: r.HoldAssignedToName || null,
+      HoldAssignedToEmail: r.HoldAssignedToEmail || null,
     }));
 
     res.json(slots);

@@ -14,6 +14,8 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { CrmBookingDetail } from "./CrmBookingDetail";
+import { useAuth } from "@/contexts/AuthContext";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -78,287 +80,6 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—";
 
-const inr = (n: number | null | undefined) =>
-  n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
-
-async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchExtraCharges(bookingId: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchParkingRates(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/parking-master"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAvailableParkingSlots(projectId: number, blockId: number | null): Promise<any[]> {
-  try {
-    const params = new URLSearchParams({ projectId: String(projectId) });
-    if (blockId) params.set("blockId", String(blockId));
-    const r = await fetchWithAuth(`/api/parking-matrix?${params}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
-}
-async function fetchExtraChargeTypes(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/extra-charge-master"); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-// Booking-scoped Parking + Extra Charges panel — Parking rates and Extra
-// Charge types are read-only here (they're maintained in their Setup
-// masters); this dialog only allots/removes them against this booking.
-const ChargesDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
-  const qc = useQueryClient();
-  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
-  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
-  const [saving, setSaving] = useState(false);
-
-  const { data: parking = [] } = useQuery({
-    queryKey: ["crm-parking", booking.Id],
-    queryFn: () => fetchParkingAllotments(booking.Id),
-  });
-  const { data: extras = [] } = useQuery({
-    queryKey: ["crm-extra-charges", booking.Id],
-    queryFn: () => fetchExtraCharges(booking.Id),
-  });
-  const { data: parkingRates = [] } = useQuery({
-    queryKey: ["parking-master-all"],
-    queryFn: fetchParkingRates,
-    staleTime: 5 * 60_000,
-  });
-  const { data: parkingSlots = [] } = useQuery({
-    queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId],
-    queryFn: () => fetchAvailableParkingSlots(booking.ProjectId, booking.BlockId),
-    enabled: !!booking.ProjectId,
-    staleTime: 30_000,
-  });
-  const { data: chargeTypes = [] } = useQuery({
-    queryKey: ["extra-charge-master-all"],
-    queryFn: fetchExtraChargeTypes,
-    staleTime: 5 * 60_000,
-  });
-
-  const applicableRates = (parkingRates as any[]).filter(
-    (r: any) => r.IsActive && r.ProjectId === booking.ProjectId && (!r.BlockId || r.BlockId === booking.BlockId)
-  );
-  const selectedRate = applicableRates.find((r: any) => String(r.Id) === parkingForm.ParkingMasterId);
-  const availableSlots = (parkingSlots as any[]).filter(
-    (s: any) => s.Status === "Available" && (!selectedRate || s.ParkingType === selectedRate.ParkingType)
-  );
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["crm-parking", booking.Id] });
-    qc.invalidateQueries({ queryKey: ["crm-extra-charges", booking.Id] });
-    qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-  };
-
-  const handleAddParking = async () => {
-    if (!parkingForm.ParkingMasterId) { toast.error("Select a parking rate"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`/api/crm/parking/${booking.Id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ParkingMasterId: parkingForm.ParkingMasterId,
-          ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
-          ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
-          Quantity: parseInt(parkingForm.Quantity) || 1,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Parking allotted — ${inr(data.TotalAmount)}`);
-      setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
-      qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking.ProjectId, booking.BlockId] });
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveParking = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Parking allotment removed");
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
-
-  const handleAddExtra = async () => {
-    if (!extraForm.Description.trim() || !extraForm.Amount) { toast.error("Description and Amount are required"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${booking.Id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
-          Description: extraForm.Description.trim(),
-          Amount: parseFloat(extraForm.Amount),
-          GstRate: parseFloat(extraForm.GstRate) || 0,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Charge added — ${inr(data.TotalAmount)}`);
-      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveExtra = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Charge removed");
-      invalidate();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
-
-  const parkingTotal = (parking as any[]).reduce((s, p) => s + p.TotalAmount, 0);
-  const extraTotal = (extras as any[]).reduce((s, e) => s + e.TotalAmount, 0);
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="font-heading">Charges — {booking.BookingNo}</DialogTitle>
-        </DialogHeader>
-
-        {/* Grand total breakdown */}
-        <div className="rounded-lg bg-muted/40 border border-border p-3 grid grid-cols-4 gap-2 text-center text-xs">
-          <div><div className="text-muted-foreground">Unit Value</div><div className="font-semibold">{inr(booking.TotalValue)}</div></div>
-          <div><div className="text-muted-foreground">Parking</div><div className="font-semibold">{inr(parkingTotal)}</div></div>
-          <div><div className="text-muted-foreground">Extra Charges</div><div className="font-semibold">{inr(extraTotal)}</div></div>
-          <div><div className="text-muted-foreground">Grand Total</div><div className="font-bold text-primary">{inr((booking.TotalValue || 0) + parkingTotal + extraTotal)}</div></div>
-        </div>
-
-        {/* Parking */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Parking Allotment</h3>
-          {(parking as any[]).length > 0 && (
-            <div className="rounded-lg border border-border overflow-hidden">
-              {(parking as any[]).map((p) => (
-                <div key={p.Id} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0 text-sm">
-                  <div>
-                    <span className="font-medium">{p.CurrentParkingType}</span>
-                    {p.ParkingSlotNo && <span className="text-xs text-muted-foreground"> · {p.ParkingSlotNo}</span>}
-                    <span className="text-xs text-muted-foreground"> · Qty {p.Quantity}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold">{inr(p.TotalAmount)}</span>
-                    <button onClick={() => handleRemoveParking(p.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-4 gap-2">
-            <select value={parkingForm.ParkingMasterId}
-              onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
-              className="col-span-2 text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Select parking rate</option>
-              {applicableRates.map((r: any) => (
-                <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — {inr(r.Charge)} (+{r.GstRate}% GST)</option>
-              ))}
-            </select>
-            {availableSlots.length > 0 ? (
-              <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                className="text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select slot (optional)</option>
-                {availableSlots.map((s: any) => (
-                  <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
-                ))}
-              </select>
-            ) : (
-              <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
-                onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-                className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            )}
-            <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
-              onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <button onClick={handleAddParking} disabled={saving}
-            className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-            + Allot Parking
-          </button>
-          {applicableRates.length === 0 && (
-            <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
-          )}
-          {applicableRates.length > 0 && availableSlots.length === 0 && (
-            <p className="text-xs text-muted-foreground">No numbered slot inventory set up for this project/block yet — enter a slot number manually, or add slots in Setup → Parking Slot Master.</p>
-          )}
-        </div>
-
-        {/* Extra Charges */}
-        <div className="space-y-2 pt-2 border-t border-border">
-          <h3 className="text-sm font-semibold">Extra Charges (Custom Requirements)</h3>
-          {(extras as any[]).length > 0 && (
-            <div className="rounded-lg border border-border overflow-hidden">
-              {(extras as any[]).map((c) => (
-                <div key={c.Id} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0 text-sm">
-                  <div className="font-medium">{c.Description}</div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold">{inr(c.TotalAmount)}</span>
-                    <button onClick={() => handleRemoveExtra(c.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <select value={extraForm.ExtraChargeMasterId}
-              onChange={(e) => {
-                const master = (chargeTypes as any[]).find((c) => String(c.Id) === e.target.value);
-                setExtraForm((f) => ({
-                  ...f,
-                  ExtraChargeMasterId: e.target.value,
-                  Description: master ? master.ChargeName : f.Description,
-                  Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
-                  GstRate: master ? String(master.GstRate) : f.GstRate,
-                }));
-              }}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Custom (type below)</option>
-              {(chargeTypes as any[]).filter((c) => c.IsActive).map((c) => (
-                <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
-              ))}
-            </select>
-            <input placeholder="Description" value={extraForm.Description}
-              onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
-              onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <input type="number" placeholder="GST %" value={extraForm.GstRate}
-              onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-              className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <button onClick={handleAddExtra} disabled={saving}
-            className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-            + Add Charge
-          </button>
-        </div>
-
-        <div className="flex justify-end pt-2 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 // The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
 // approvals) -> Payments. Only ever surface the ONE step the booking is
 // actually sitting at right now — never let staff jump ahead to a later
@@ -377,6 +98,12 @@ function getNextStep(b: any): NextStep {
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
+  const { canDoAction } = useAuth();
+  // Bookings are now created automatically on Application approval — manual
+  // creation here is a fallback for when that fails, restricted to the same
+  // per-user "crm-bookings" edit grant as every other mutating action on
+  // this review page (see CrmBookingDetail.tsx).
+  const canEdit = canDoAction("crm-bookings", "edit");
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
@@ -386,7 +113,6 @@ const CrmBooking: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
-  const [chargesBooking, setChargesBooking] = useState<any | null>(null);
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
 
   const { data: bookings = [], isLoading } = useQuery({
@@ -465,6 +191,9 @@ const CrmBooking: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create booking");
       toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
+      if (data.tokenWarning) {
+        toast.warning(data.tokenWarning, { duration: 8000 });
+      }
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM, ApplicationId: appFilter });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
@@ -503,15 +232,119 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  const bookingColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking No", size: 110,
+      cell: (i) => (
+        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
+          {i.row.original.BookingNo}
+        </button>
+      ) },
+    { accessorKey: "ApplicantName", header: "Customer", size: 140,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { id: "projectUnit", header: "Project / Unit", size: 150, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div>
+            <div>{b.ProjectName || "—"}</div>
+            <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
+            {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
+          </div>
+        );
+      } },
+    { accessorKey: "AreaSqFt", header: "Area", size: 90,
+      cell: (i) => <span className="text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
+    { id: "value", header: "Value", size: 130, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div>
+            <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
+            {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
+              <div className="text-[10px] text-muted-foreground">
+                Unit {fmt(b.TotalValue)}
+                {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
+                {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
+              </div>
+            )}
+          </div>
+        );
+      } },
+    { accessorKey: "BookingAmount", header: "Booking Amt", size: 100, cell: (i) => <span>{fmt(i.row.original.BookingAmount)}</span> },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "BookingDate", header: "Date", size: 100,
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
+    { id: "actions", header: "Actions", size: 220, enableSorting: false,
+      cell: (i) => {
+        const b = i.row.original;
+        const step = getNextStep(b);
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* submitOnly: Approve/Reject only ever happen from the
+                Admin Approval Inbox (admin/super_admin/marketing_head) */}
+            <ApprovalActions
+              status={b.Status}
+              recordId={b.Id}
+              endpoint={API}
+              submitOnly
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
+            />
+            {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {step ? (
+              <button onClick={() => navigate(step.path)}
+                className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
+                {step.label} <ChevronRight size={12} />
+              </button>
+            ) : b.Status === "Approved" ? (
+              <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
+                <CheckCircle2 size={12} /> All Steps Complete
+              </span>
+            ) : null}
+            {/* Non-sequential utility actions — not part of the linear
+                flow, so they live in an overflow menu instead of competing
+                with the one active step. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
+                  <MoreHorizontal size={16} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
+                {b.Status !== "Cancelled" && canEdit && (
+                  <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
+                    Change Unit
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
-      title="CRM — Bookings"
-      subtitle="Unit bookings linked to customer applications"
+      title="CRM — Applications and Bookings"
+      subtitle="Review-only — bookings auto-create on Application approval; edit rights are granted per user"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
-          <Plus size={14} /> New Booking
-        </button>
+        canEdit ? (
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+            <Plus size={14} /> New Booking
+          </button>
+        ) : undefined
       }
     >
       <div className="flex gap-3 flex-wrap">
@@ -528,116 +361,14 @@ const CrmBooking: React.FC = () => {
         </select>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-left">
-                {["Booking No", "Customer", "Project / Unit", "Area", "Value", "Booking Amt", "Status", "Date", "Actions"].map((h) => (
-                  <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground text-sm">No bookings found</td></tr>
-              ) : (filtered as any[]).map((b: any) => (
-                <tr key={b.Id} className="border-t border-border hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <button onClick={() => setViewingBookingId(b.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
-                      {b.BookingNo}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{b.ApplicantName}</div>
-                    <div className="text-xs text-muted-foreground">{b.Mobile}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div>{b.ProjectName || "—"}</div>
-                    <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
-                    {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-sm">{b.AreaSqFt ? `${b.AreaSqFt} sqft` : "—"}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
-                    {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
-                      <div className="text-[10px] text-muted-foreground">
-                        Unit {fmt(b.TotalValue)}
-                        {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
-                        {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{fmt(b.BookingAmount)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{b.BookingDate ? String(b.BookingDate).slice(0, 10) : "—"}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* submitOnly: Approve/Reject only ever happen from the
-                          Admin Approval Inbox (admin/super_admin/marketing_head) */}
-                      <ApprovalActions
-                        status={b.Status}
-                        recordId={b.Id}
-                        endpoint={API}
-                        submitOnly
-                        onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
-                      />
-                      {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-                      {(() => {
-                        const step = getNextStep(b);
-                        if (step) {
-                          return (
-                            <button onClick={() => navigate(step.path)}
-                              className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
-                              {step.label} <ChevronRight size={12} />
-                            </button>
-                          );
-                        }
-                        if (b.Status === "Approved") {
-                          return (
-                            <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
-                              <CheckCircle2 size={12} /> All Steps Complete
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
-                      {/* Non-sequential utility actions — not part of the
-                          linear flow, so they live in an overflow menu
-                          instead of competing with the one active step. */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
-                            <MoreHorizontal size={16} />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setChargesBooking(b)}>Charges</DropdownMenuItem>
-                          {b.Status !== "Cancelled" && (
-                            <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
-                              Change Unit
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={bookingColumns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No bookings found"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       {/* New Booking Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
@@ -773,10 +504,6 @@ const CrmBooking: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {chargesBooking && (
-        <ChargesDialog booking={chargesBooking} onClose={() => setChargesBooking(null)} />
-      )}
 
       {viewingBookingId && (
         <CrmBookingDetail bookingId={viewingBookingId} onClose={() => setViewingBookingId(null)} />

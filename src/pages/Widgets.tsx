@@ -82,8 +82,8 @@ function useWidgetsData() {
   const { data, isLoading } = useQuery<WidgetsDashboardData>({
     queryKey: ["widgets-dashboard"],
     queryFn: getWidgetsDashboard,
-    staleTime: 60_000,
-    refetchInterval: 5 * 60 * 1000,
+    staleTime: 15_000,
+    refetchInterval: 20_000,
   });
   return { data, loading: isLoading };
 }
@@ -340,6 +340,26 @@ function StatCardWidget() {
       label: "Total Payments",
       value: fmtCur(s?.paymentAmountTotal || 0),
       color: "text-emerald-400",
+    },
+    {
+      label: "Active Leads",
+      value: fmtNum(s?.totalLeads || 0),
+      color: "text-rose-400",
+    },
+    {
+      label: "Pending Follow-Ups",
+      value: fmtNum(s?.pendingFollowups || 0),
+      color: "text-orange-400",
+    },
+    {
+      label: "CRM Bookings",
+      value: fmtNum(s?.activeCrmBookings || 0),
+      color: "text-cyan-400",
+    },
+    {
+      label: "CRM Overdue Payments",
+      value: fmtNum(s?.crmOverduePayments || 0),
+      color: "text-red-400",
     },
   ];
   return (

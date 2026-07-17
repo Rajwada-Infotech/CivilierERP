@@ -8,7 +8,9 @@ export type UserRole =
   | "supplier"
   | "marketing_head"
   | "sales_team_lead"
-  | "sales_person";
+  | "sales_person"
+  | "legal_head"
+  | "legal_person";
 
 // PageKey used to be a closed union of ~19 hardcoded keys. The real system
 // (backend ROLE_RIGHTS_PAGE_MAP in roles.js, DB-driven /api/page-definitions,

@@ -13,6 +13,8 @@ const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold } = require("./crmHoldService");
+const { rollupBookingTotals } = require("../routes/crmParking");
+const { createReceiptForMilestone } = require("../routes/crmPayments");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 
@@ -76,8 +78,8 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     const lr = await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .query(`
-        SELECT CustomerName, Mobile, AltMobile, Email, BudgetMin, BudgetMax,
-               PropertyType, BhkPreference, PreferredLocation, AssignedSalespersonId,
+        SELECT CustomerName, Mobile, AltMobile, Email,
+               PropertyType, BhkPreference, PreferredLocation,
                SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId
         FROM dbo.SaLead WHERE Id = @lid
       `);
@@ -149,31 +151,51 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("unit", sql.NVarChar(100), unitName)
       .input("pt",   sql.NVarChar(50),  b.PropertyType  || prefill.PropertyType  || null)
       .input("bhk",  sql.NVarChar(30),  b.BhkPreference || prefill.BhkPreference || null)
-      .input("bmin", sql.Decimal(18,2), b.BudgetMin != null ? parseFloat(b.BudgetMin) : (prefill.BudgetMin || null))
-      .input("bmax", sql.Decimal(18,2), b.BudgetMax != null ? parseFloat(b.BudgetMax) : (prefill.BudgetMax || null))
       .input("src",  sql.NVarChar(200), b.Source || prefill.SourceType || null)
       .input("platid", sql.Int, platformId)
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : (prefill.AssignedSalespersonId || null))
+      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
+      .input("doa",  sql.Date,          b.DateOfApply || null)
+      .input("ppid", sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("ttype",sql.NVarChar(20),  b.TokenType || null)
+      .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
+      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
+      .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
+      // AssignedTo respects an explicit caller value (saHandoff.js passes
+      // the lead's already-routed salesperson) or falls back to whoever
+      // created the record. crmApplications.js's own POST route enforces
+      // the stricter "self-assign, no client override" rule for the human-
+      // filed Application form specifically — this shared function stays
+      // permissive so the SA->CRM handoff's existing assignment logic keeps
+      // working unchanged.
+      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : actorUserId)
+      .input("asgnby", sql.Int,         b.AssignedBy ? parseInt(b.AssignedBy) : actorUserId)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
       .input("cb",   sql.Int,           actorUserId)
+      .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
+      .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
+      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled ? 1 : 0)
       .query(`
         INSERT INTO dbo.CrmApplication
           (ApplicationNo, LeadId, CustomerId, ApplicantName, Mobile, AltMobile, Email,
            ProjectId, PreferredUnitId, CompanyId, InterestedProject, InterestedUnit,
-           PropertyType, BhkPreference, BudgetMin, BudgetMax,
+           PropertyType, BhkPreference,
            Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
-           AssignedTo, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt)
+           RatePerSqFt, DateOfApply, PaymentPlanId, TokenType, TokenValue, BookingAmount, PaymentMode,
+           AssignedTo, AssignedBy, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt,
+           BrokerId, BrokerageRatePercent, BrokerageSplitEnabled)
         OUTPUT INSERTED.Id
         VALUES
           (@no, @lid, @custid, @name, @mob, @alt, @em,
            @pid, @uid, @cid, @proj, @unit,
-           @pt, @bhk, @bmin, @bmax,
+           @pt, @bhk,
            @src, @platid, @campid, @adid, @cpid,
-           @asgn, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME())
+           @rate, @doa, @ppid, @ttype, @tval, @bamt, @pmode,
+           @asgn, @asgnby, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME(),
+           @brkid, @brkpct, @brksplit)
       `);
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -211,13 +233,38 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
   if (!milestones?.length) milestones = DEFAULT_MILESTONES;
 
+  // Milestone #1 gets a real DueDate (the booking date). Every milestone
+  // after that used to be inserted with DueDate = NULL and nothing else in
+  // the codebase ever back-filled it (except a one-off for a milestone
+  // literally named 'Agreement', in finalizeAgreementDate()) — meaning the
+  // overdue/SLA detectors in crmSlaEngine.js and crmDashboard.js, which key
+  // off `DueDate < today`, could structurally never flag anything past
+  // Booking/Agreement as overdue, for any booking, ever. A construction
+  // milestone (Foundation, Slab Casting, ...) doesn't have a real calendar
+  // trigger yet in this system (that would come from crmConstructionUpdates.js
+  // events, which aren't wired to milestones), so there's no principled date
+  // to compute here — but leaving it permanently NULL is strictly worse than
+  // a placeholder default, since staff can already edit any milestone's
+  // DueDate by hand (crmPayments.js PUT /:id). Default: 30 days after the
+  // previous milestone's due date, chained forward from the booking date.
+  const MILESTONE_DEFAULT_INTERVAL_DAYS = 30;
+  let runningDue = bookingDate ? new Date(bookingDate) : new Date();
+
   for (const m of milestones) {
+    let dueDate;
+    if (m.no === 1) {
+      dueDate = runningDue;
+    } else {
+      runningDue = new Date(runningDue);
+      runningDue.setDate(runningDue.getDate() + MILESTONE_DEFAULT_INTERVAL_DAYS);
+      dueDate = runningDue;
+    }
     await pool.request()
       .input("bid",  sql.Int,           bookingId)
       .input("mno",  sql.Int,           m.no)
       .input("mname",sql.NVarChar(200), m.name)
       .input("amt",  sql.Decimal(18,2), Math.round(totalValue * m.pct) / 100)
-      .input("due",  sql.Date,          m.no === 1 ? (bookingDate || new Date()) : null)
+      .input("due",  sql.Date,          dueDate)
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
@@ -247,6 +294,43 @@ async function validatePaymentPlanScope(pool, planId, { companyId, projectId, bl
   if (p.BlockId && blockId && p.BlockId !== blockId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
   }
+}
+
+// CrmCustomer's inline CoApplicantName/Mobile/PanNo/Relation fields are an
+// intake-time convenience capture (there's no booking yet at Customer/
+// Application stage). Once a booking exists, dbo.CrmCoApplicant — a proper
+// multi-row per-booking table — is the single source of truth (Welcome
+// Call's checklist and Booking Details both read from it). This seeds one
+// CrmCoApplicant row from the customer's intake data so that data isn't
+// silently lost, without making CrmCustomer's fields independently
+// authoritative going forward. Idempotent: skipped if the booking already
+// has any co-applicant rows, or if the customer never entered one.
+async function seedPrimaryCoApplicantFromCustomer(pool, bookingId, applicationId, actorUserId) {
+  const cust = await pool.request().input("appId", sql.Int, applicationId).query(`
+    SELECT c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation
+    FROM dbo.CrmCustomer c
+    JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+    WHERE a.Id = @appId
+  `);
+  const row = cust.recordset[0];
+  if (!row?.CoApplicantName?.trim()) return;
+
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Id FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1");
+  if (existing.recordset.length) return;
+
+  await pool.request()
+    .input("bid",  sql.Int, bookingId)
+    .input("name", sql.NVarChar(200), row.CoApplicantName.trim())
+    .input("rel",  sql.NVarChar(50), row.CoApplicantRelation || null)
+    .input("mob",  sql.NVarChar(20), row.CoApplicantMobile || null)
+    .input("pan",  sql.NVarChar(20), row.CoApplicantPanNo || null)
+    .input("note", sql.NVarChar(sql.MAX), "Auto-seeded from customer intake")
+    .input("cb",   sql.Int, actorUserId)
+    .query(`
+      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, CreatedBy, CreatedAt)
+      VALUES (@bid, @name, @rel, @mob, @pan, @note, @cb, SYSDATETIME())
+    `);
 }
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
@@ -315,29 +399,107 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
     .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
     .input("cb",    sql.Int,           actorUserId)
+    .input("brkid", sql.Int,           b.BrokerId ? parseInt(b.BrokerId) : null)
+    .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
+    .input("brksplit", sql.Bit,        b.BrokerageSplitEnabled ? 1 : 0)
     .query(`
       INSERT INTO dbo.CrmBooking
         (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
          AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
          BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
-         ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt)
+         ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
+         BrokerId, BrokerageRatePercent, BrokerageSplitEnabled)
       OUTPUT INSERTED.Id
       VALUES
         (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
          @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
          ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
          @asgn, 'Pending', @note, 1,
-         0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME())
+         0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
+         @brkid, @brkpct, @brksplit)
     `);
 
   const bookingId = result.recordset[0].Id;
 
+  // The Application-stage capture (bank/KYC, documents, parking) was saved
+  // keyed by ApplicationId with BookingId left NULL, since no Booking existed
+  // yet at that point (see crmCustomerBankDetails.js/crmBookingDocuments.js/
+  // crmParking.js's ApplicationId-keyed routes). Backfill BookingId onto those
+  // rows now so the Booking review page — which reads by BookingId — actually
+  // shows the customer's data instead of appearing empty right after approval.
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmCustomerBankDetail SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+  // ParkingTotal/GrandTotal were computed above with ParkingTotal = 0 since no
+  // parking allotment had BookingId set yet — recompute now that the backfill
+  // above has linked any Application-stage parking selections to this Booking.
+  await rollupBookingTotals(pool, bookingId);
+
+  await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
+
   await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId);
+
+  // The Application's Payment Details step already captured the token
+  // amount as "paid" (PaymentMode + a cheque/transaction reference, see
+  // CrmApplication.tsx) — that is real money Finance needs to know about,
+  // not just descriptive text sitting on the Application. Sync it into a
+  // real, GL-posted receipt against Milestone #1 the moment the booking
+  // (and its milestone schedule) exists, through the exact same accounting
+  // path a manually-entered receipt goes through (crmPayments.js). Never
+  // allowed to block booking creation — same partial-failure tolerance as
+  // every other best-effort step in this function.
+  if (bookingAmount > 0) {
+    try {
+      const m1 = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+      const instrument = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ChequeNo, ChequeDate, TransactionRef, BankName FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+      const actorRow = await pool.request().input("uid", sql.Int, actorUserId)
+        .query("SELECT email, name FROM dbo.users WHERE id = @uid");
+      if (m1.recordset.length) {
+        const inst = instrument.recordset[0] || {};
+        const actorEmail = actorRow.recordset[0]?.email || actorRow.recordset[0]?.name || null;
+        await createReceiptForMilestone(pool, m1.recordset[0].Id, {
+          Amount: bookingAmount,
+          ReceivedDate: b.BookingDate,
+          PaymentMode: b.PaymentMode || null,
+          TransactionRef: b.PaymentMode === "Cheque" ? (inst.ChequeNo || null) : (inst.TransactionRef || null),
+          ChequeDate: b.PaymentMode === "Cheque" ? (inst.ChequeDate || null) : null,
+          DepositBankName: inst.BankName || null,
+          Notes: "Auto-synced from Application token payment capture",
+        }, actorUserId, actorEmail);
+      }
+    } catch (receiptErr) {
+      console.error("[crmEntityCreation] auto-receipt sync failed:", receiptErr.message);
+    }
+  }
 
   await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
     `Auto-approved: booking ${bookingNo} created`, actorUserId, { force: true });
 
-  return { id: bookingId, BookingNo: bookingNo };
+  const tokenWarning = await checkTokenVsFirstMilestone(pool, bookingId, bookingAmount);
+
+  return { id: bookingId, BookingNo: bookingNo, tokenWarning };
+}
+
+// The Booking form's own TokenType/TokenValue (-> BookingAmount) and the
+// attached payment plan's own milestone #1 are computed completely
+// independently — a salesperson can record a 5% token while the plan bills
+// 10% "at booking," and nothing previously flagged the mismatch. Same
+// resolution as the broker-payment finding: a soft, non-blocking warning
+// rather than a hard gate, since real negotiated deals can legitimately
+// differ from a plan's default first-stage amount.
+async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
+  if (!bookingAmount) return null;
+  const m1 = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+  const firstMilestoneAmount = m1.recordset[0]?.AmountDue;
+  if (firstMilestoneAmount == null) return null;
+  if (Math.abs(Number(firstMilestoneAmount) - Number(bookingAmount)) < 1) return null;
+  return `Booking token amount (₹${Number(bookingAmount).toLocaleString("en-IN")}) doesn't match the payment plan's first milestone (₹${Number(firstMilestoneAmount).toLocaleString("en-IN")}) — the milestone amount is what invoicing/payments will actually track.`;
 }
 
 module.exports = {

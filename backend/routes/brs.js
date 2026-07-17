@@ -270,6 +270,55 @@ router.get("/", cache("brs", 60), async (req, res) => {
         -- Show Pending and Approved — exclude Draft and Rejected
         WHERE (rp.RPDepositBankId IS NOT NULL OR rp.RPBankName IS NOT NULL)
           AND ISNULL(rp.RPStatus, 'Draft') NOT IN ('Draft', 'Rejected')
+
+        UNION ALL
+
+        -- Incoming CRM customer payments (CrmPaymentReceipt)
+        SELECT
+          cr.Id                    AS SourceID,
+          'CRM_RECEIVED'           AS SourceType,
+          a.ApplicantName          AS PaymentName,
+          co.name                  AS CompanyName,
+          co.id                    AS CompanyID,
+          COALESCE(cr.DepositBankId, bk3.LHeadId) AS BankID,
+          COALESCE(cr.DepositBankName, bk3.LHeadName) AS BankName,
+          cr.Amount                AS Amount,
+          cr.ReceivedDate          AS PayDate,
+          cr.PaymentMode           AS Mode,
+          cr.ReceiptNo             AS DocNo,
+          cr.TransactionRef        AS TxnId,
+          'Approved'               AS PayStatus,
+          cr.CreatedAt             AS CreatedAt,
+          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          b.ProjectName            AS ProjectName,
+          COALESCE(brc3.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc3.IsBounced, 0)  AS IsBounced,
+          brc3.BounceDate          AS BounceDate,
+          brc3.BounceReason        AS BounceReason,
+          brc3.BounceRemarks       AS BounceRemarks,
+          brc3.BRSID               AS BRSID,
+          CASE WHEN brc3.IsMatched = 1 THEN FORMAT(brc3.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
+        FROM dbo.CrmPaymentReceipt cr
+        JOIN dbo.CrmPaymentMilestone m ON m.Id = cr.MilestoneId
+        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.enterprise co ON co.business_type = 'C' AND co.id = b.CompanyId
+        LEFT JOIN dbo.AccountHeadMaster bk3
+          ON  bk3.LHeadType   = 'B'
+          AND bk3.LHeadStatus = 1
+          AND bk3.LHeadId     = cr.DepositBankId
+        LEFT JOIN BankReconciliation brc3
+          ON  brc3.SourceType = 'CRM_RECEIVED'
+          AND brc3.SourceID   = cr.Id
+        -- Same rule as the other two branches: cash never hits a bank, and a
+        -- receipt with no deposit bank on file has nothing to reconcile against.
+        WHERE ISNULL(cr.PaymentMode, '') <> 'Cash'
+          AND (cr.DepositBankId IS NOT NULL OR cr.DepositBankName IS NOT NULL)
       )
     `;
 
@@ -367,7 +416,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:sourceType/:sourceId/clear", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
+  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
   try {
@@ -419,7 +468,7 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
 
 router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
+  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
   try {
@@ -449,7 +498,7 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED"].includes(sourceType))
+  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
   const { bounceDate, bounceReason, bounceRemarks } = req.body;

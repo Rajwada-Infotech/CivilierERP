@@ -224,12 +224,16 @@ const ALL_ROUTES = [
   { path: "/api/reminders", file: "./routes/tenantReminders" },
   { path: "/api/followup-log", file: "./routes/followupLog" },
   { path: "/api/applicants", file: "./routes/applicants" },
-  { path: "/api/followup-applications", file: "./routes/followupApplications" },
-  {
-    path: "/api/followup-unit-selections",
-    file: "./routes/followupUnitSelections",
-  },
-  { path: "/api/followup-bookings", file: "./routes/followupBookings" },
+  // /api/followup-applications, /api/followup-unit-selections, /api/followup-bookings
+  // retired — route modules left on disk but no longer mounted. 0 live rows in
+  // FollowupApplications/FollowupUnitSelections/FollowupBookings (confirmed live).
+  // CRM > Applications/Bookings (crmApplications.js/crmBookings.js) is the real,
+  // actively-developed system — it also enforces UnitMaster availability checks
+  // that the Followup routes never did, which was a double-booking risk.
+  // The underlying tables stay in place; other still-active Followup routes
+  // (NOC, SalesDeed, Payments, Demands, etc.) still join against them directly.
+  // /api/payment-plan-master (PaymentTermMaster) is deliberately NOT touched here —
+  // it is shared with the unrelated Material Expense Booking module.
   // /api/followup-agreements retired — the route module (routes/followupAgreements.js)
   // is left on disk but no longer mounted. 0 live rows in dbo.FollowupAgreements;
   // CRM > Documents > Agreements (crmAgreements.js) is the real, actively-developed
@@ -244,14 +248,9 @@ const ALL_ROUTES = [
   },
   { path: "/api/followup-demands", file: "./routes/followupDemands" },
   { path: "/api/followup-payments", file: "./routes/followupPayments" },
-  {
-    path: "/api/followup-welcome-calls",
-    file: "./routes/followupWelcomeCalls",
-  },
-  {
-    path: "/api/followup-legal-milestones",
-    file: "./routes/followupLegalMilestones",
-  },
+  // /api/followup-welcome-calls, /api/followup-legal-milestones retired alongside
+  // the applications/bookings/unit-selections routes above — 0 live rows, superseded
+  // by CRM > Welcome Calls (crmWelcomeCalls.js) and crmLegalMilestones.js.
   {
     path: "/api/followup-pre-possession",
     file: "./routes/followupPrePossession",
@@ -343,9 +342,11 @@ const ALL_ROUTES = [
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },
   { path: "/api/crm/communication",        file: "./routes/crmCommunication"       },
   { path: "/api/crm/dashboard",            file: "./routes/crmDashboard"           },
+  { path: "/api/crm/reports",              file: "./routes/crmReports"             },
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
   { path: "/api/crm/payment-plans",        file: "./routes/crmPaymentPlans"        },
+  { path: "/api/crm/milestone-master",     file: "./routes/crmMilestoneMaster"     },
   { path: "/api/crm/parking",              file: "./routes/crmParking"             },
   { path: "/api/crm/holds",                file: "./routes/crmHolds"               },
   { path: "/api/crm/extra-charges",        file: "./routes/crmExtraCharges"        },

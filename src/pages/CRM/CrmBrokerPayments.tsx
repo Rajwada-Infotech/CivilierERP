@@ -5,6 +5,7 @@ import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, IndianRupee } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/brokerage";
 
@@ -64,6 +65,28 @@ const CrmBrokerPayments: React.FC = () => {
     }
   };
 
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BrokerName", header: "Broker", size: 150,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.BrokerName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BrokerFirm || "—"}</div>
+        </div>
+      ) },
+    { id: "bookingCustomer", header: "Booking / Customer", size: 150, enableSorting: false,
+      cell: (i) => (
+        <div>
+          <div className="font-mono text-xs">{i.row.original.BookingNo}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.ApplicantName}</div>
+        </div>
+      ) },
+    { accessorKey: "Amount", header: "Amount", size: 110, cell: (i) => <span className="font-semibold text-green-600">₹{Number(i.row.original.Amount).toLocaleString("en-IN")}</span> },
+    { accessorKey: "PaidDate", header: "Paid Date", size: 100, cell: (i) => <span className="text-xs">{i.row.original.PaidDate ? String(i.row.original.PaidDate).slice(0, 10) : "—"}</span> },
+    { accessorKey: "PaymentMode", header: "Mode", size: 90, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "TransactionRef", header: "Ref", size: 110, cell: (i) => <span className="text-xs font-mono">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "CreatedByName", header: "Recorded By", size: 110, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "—"}</span> },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — Broker Payment"
@@ -89,40 +112,14 @@ const CrmBrokerPayments: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["Broker", "Booking / Customer", "Amount", "Paid Date", "Mode", "Ref", "Recorded By"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No broker payments recorded</td></tr>
-            ) : (filtered as any[]).map((p: any) => (
-              <tr key={p.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{p.BrokerName}</div>
-                  <div className="text-xs text-muted-foreground">{p.BrokerFirm || "—"}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="font-mono text-xs">{p.BookingNo}</div>
-                  <div className="text-xs text-muted-foreground">{p.ApplicantName}</div>
-                </td>
-                <td className="px-4 py-3 font-semibold text-green-600">₹{Number(p.Amount).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-xs">{p.PaidDate ? String(p.PaidDate).slice(0,10) : "—"}</td>
-                <td className="px-4 py-3 text-xs">{p.PaymentMode || "—"}</td>
-                <td className="px-4 py-3 text-xs font-mono">{p.TransactionRef || "—"}</td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">{p.CreatedByName || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={filtered}
+        columns={columns}
+        searchable={false}
+        loading={isLoading}
+        emptyMessage="No broker payments recorded"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-md">

@@ -11,7 +11,8 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { LayoutList, BarChart2, RefreshCw } from "lucide-react";
+import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/sa/ads";
 
@@ -52,6 +53,7 @@ const fields: FieldDef[] = [
   { name: "imageUrl", label: "Image URL", type: "text" },
   { name: "videoUrl", label: "Video URL", type: "text" },
   { name: "mediaUrls", label: "Media URLs", type: "textarea", fullWidth: true, placeholder: "Comma-separated or JSON array" },
+  { name: "keypoints", label: "Keypoints / Ad Copy Talking Points", type: "textarea", fullWidth: true, placeholder: "One per line — key selling points this ad should hit" },
   { name: "targetAgeMin", label: "Age Min", type: "number" },
   { name: "targetAgeMax", label: "Age Max", type: "number" },
   { name: "targetGender", label: "Gender", type: "select", options: ["All", "Male", "Female", "Other"] },
@@ -136,10 +138,99 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
 }
 
+async function fetchCreatives(adId: string): Promise<any[]> {
+  const res = await fetchWithAuth(`${API}/${adId}/creatives`);
+  return res.ok ? res.json() : [];
+}
+
+// Upload/list/delete image & video creatives for one ad — a standalone
+// dialog (not part of MasterPage's generic edit form, which has no file-
+// upload extension point) triggered per-row.
+const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => void }> = ({ adId, adName, onClose }) => {
+  const qc = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const { data: creatives = [], isLoading } = useQuery({
+    queryKey: ["sa-ad-creatives", adId],
+    queryFn: () => fetchCreatives(adId),
+  });
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      Array.from(files).forEach((f) => fd.append("files", f));
+      const res = await fetchWithAuth(`${API}/${adId}/creatives`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error((await res.json()).error || "Upload failed");
+      toast.success("Creative(s) uploaded");
+      qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (creativeId: number) => {
+    try {
+      const res = await fetchWithAuth(`${API}/${adId}/creatives/${creativeId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Delete failed");
+      toast.success("Creative removed");
+      qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><ImageIcon size={16} className="text-primary" /> Creatives — {adName}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
+            <Upload size={16} className="text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload image or video creatives (up to 100MB each)"}</span>
+            <input type="file" multiple accept="image/*,video/*" className="hidden" disabled={uploading}
+              onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
+          </label>
+
+          {isLoading ? (
+            <div className="py-6 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : creatives.length === 0 ? (
+            <div className="py-6 text-center text-muted-foreground text-sm">No creatives uploaded yet</div>
+          ) : (
+            <div className="space-y-2">
+              {(creatives as any[]).map((c) => (
+                <div key={c.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">{c.MediaType}</span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{c.FileName}</div>
+                      <div className="text-[11px] text-muted-foreground">{c.FileSize ? `${(c.FileSize / 1024).toFixed(0)} KB` : ""} · {c.UploadedByName || "—"}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a href={`${API}/${adId}/creatives/file/${c.Id}`} target="_blank" rel="noreferrer"
+                      className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Download size={14} /></a>
+                    <button onClick={() => handleDelete(c.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const SaAdMaster: React.FC = () => {
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "performance">("list");
+  const [creativesFor, setCreativesFor] = useState<{ id: string; name: string } | null>(null);
 
   const { data: ads, isLoading, error } = useQuery({
     queryKey: ["sa-ads"],
@@ -163,6 +254,7 @@ const SaAdMaster: React.FC = () => {
       imageUrl: item.ImageUrl ?? "",
       videoUrl: item.VideoUrl ?? "",
       mediaUrls: item.MediaUrls ?? "",
+      keypoints: item.Keypoints ?? "",
       targetAgeMin: item.TargetAgeMin ?? "",
       targetAgeMax: item.TargetAgeMax ?? "",
       targetGender: item.TargetGender ?? "",
@@ -211,6 +303,7 @@ const SaAdMaster: React.FC = () => {
     ImageUrl: r.imageUrl || null,
     VideoUrl: r.videoUrl || null,
     MediaUrls: r.mediaUrls || null,
+    Keypoints: r.keypoints || null,
     TargetAgeMin: r.targetAgeMin ? parseInt(r.targetAgeMin) : null,
     TargetAgeMax: r.targetAgeMax ? parseInt(r.targetAgeMax) : null,
     TargetGender: r.targetGender || null,
@@ -391,14 +484,24 @@ const SaAdMaster: React.FC = () => {
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           rowActions={(row) => (
-            <button
-              type="button"
-              onClick={() => syncAd(row)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              title="Prepare external ad sync"
-            >
-              <RefreshCw size={13} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setCreativesFor({ id: String(row._id), name: String(row.name) })}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                title="Manage creatives (image/video upload)"
+              >
+                <ImageIcon size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => syncAd(row)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                title="Prepare external ad sync"
+              >
+                <RefreshCw size={13} />
+              </button>
+            </>
           )}
           exportConfig={{
             title: "Ad Master",
@@ -418,6 +521,7 @@ const SaAdMaster: React.FC = () => {
               { key: "imageUrl", label: "Image URL" },
               { key: "videoUrl", label: "Video URL" },
               { key: "mediaUrls", label: "Media URLs" },
+              { key: "keypoints", label: "Keypoints / Ad Copy Talking Points" },
               { key: "targetAgeMin", label: "Target Age Min" },
               { key: "targetAgeMax", label: "Target Age Max" },
               { key: "targetGender", label: "Target Gender" },
@@ -454,6 +558,10 @@ const SaAdMaster: React.FC = () => {
           }}
         />}
       </div>
+
+      {creativesFor && (
+        <CreativesDialog adId={creativesFor.id} adName={creativesFor.name} onClose={() => setCreativesFor(null)} />
+      )}
     </SalesAutoShell>
   );
 };

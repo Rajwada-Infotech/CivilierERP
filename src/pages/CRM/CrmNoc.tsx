@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/noc";
 const BKG_API = "/api/crm/bookings";
@@ -117,6 +118,49 @@ const CrmNoc: React.FC = () => {
     }
   };
 
+  const nocColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "NocNo", header: "NOC No", size: 110,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 160,
+      cell: (i) => (
+        <div>
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+        </div>
+      ) },
+    { accessorKey: "NocType", header: "Type", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string}</span> },
+    { id: "bankLoan", header: "Bank / Loan", size: 140, enableSorting: false,
+      cell: (i) => {
+        const n = i.row.original;
+        return <span className="text-xs">{n.NocType === "Bank" ? `${n.BankName || "—"} · ₹${n.LoanAmount?.toLocaleString("en-IN") || "—"}` : "—"}</span>;
+      } },
+    { accessorKey: "Status", header: "Status", size: 100,
+      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "IssuedDate", header: "Issued", size: 100,
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.IssuedDate ? String(i.row.original.IssuedDate).slice(0, 10) : "—"}</span> },
+    { id: "actions", header: "Actions", size: 180, enableSorting: false,
+      cell: (i) => {
+        const n = i.row.original;
+        return (
+          <>
+            {/* submitOnly: Approve/Reject only ever happen from the Admin
+                Approval Inbox (admin/super_admin/marketing_head) */}
+            <ApprovalActions
+              status={n.Status}
+              recordId={n.Id}
+              endpoint={API}
+              submitOnly
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-noc"] })}
+            />
+            {n.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {n.Status === "Approved" && (
+              <button onClick={() => handleMarkIssued(n.Id)} className="text-xs text-primary hover:underline">Mark Issued</button>
+            )}
+          </>
+        );
+      } },
+  ];
+
   return (
     <SalesAutoShell
       title="CRM — NOC (Organisation & Bank)"
@@ -128,55 +172,13 @@ const CrmNoc: React.FC = () => {
         </button>
       }
     >
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-left">
-              {["NOC No", "Customer", "Type", "Bank / Loan", "Status", "Issued", "Actions"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
-            ) : nocs.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No NOC requests</td></tr>
-            ) : (nocs as any[]).map((n: any) => (
-              <tr key={n.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{n.NocNo}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">{n.ApplicantName}</div>
-                  <div className="text-xs text-muted-foreground">{n.BookingNo} · {n.UnitNo}</div>
-                </td>
-                <td className="px-4 py-3 text-xs">{n.NocType}</td>
-                <td className="px-4 py-3 text-xs">
-                  {n.NocType === "Bank" ? `${n.BankName || "—"} · ₹${n.LoanAmount?.toLocaleString("en-IN") || "—"}` : "—"}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[n.Status] || ""}`}>{n.Status}</span>
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">{n.IssuedDate ? String(n.IssuedDate).slice(0,10) : "—"}</td>
-                <td className="px-4 py-3">
-                  {/* submitOnly: Approve/Reject only ever happen from the Admin
-                      Approval Inbox (admin/super_admin/marketing_head) */}
-                  <ApprovalActions
-                    status={n.Status}
-                    recordId={n.Id}
-                    endpoint={API}
-                    submitOnly
-                    onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-noc"] })}
-                  />
-                  {n.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-                  {n.Status === "Approved" && (
-                    <button onClick={() => handleMarkIssued(n.Id)} className="text-xs text-primary hover:underline">Mark Issued</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={nocs as any[]}
+        columns={nocColumns}
+        loading={isLoading}
+        emptyMessage="No NOC requests"
+        className="rounded-xl border border-border overflow-hidden bg-card"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-sm">
