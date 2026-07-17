@@ -16,7 +16,7 @@ import {
   getPendingVehicleSummary,
   type PendingVehicleInOutSummary,
 } from "@/api/vehicleInOutApi";
-import { getEnterprisesByType } from "@/api/enterpriseApi";
+import { getEnterprisesByType, type Enterprise } from "@/api/enterpriseApi";
 import {
   Puzzle,
   BarChart2,
@@ -560,6 +560,11 @@ function ActivityFeedWidget() {
 // use policy). Projects with neither are skipped.
 const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
 let geocodeQueue: Promise<unknown> = Promise.resolve();
+// Stable references for useQuery's default value — `data: x = []` would
+// otherwise hand back a brand-new array every render while data is still
+// undefined, which retriggers any effect depending on it every render and
+// spins into "Maximum update depth exceeded".
+const EMPTY_ENTERPRISES: Enterprise[] = [];
 
 interface ProjectMarker {
   id: number;
@@ -624,12 +629,12 @@ function useProjectMarkers() {
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeFailedCount, setGeocodeFailedCount] = useState(0);
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: projects = EMPTY_ENTERPRISES, isLoading } = useQuery({
     queryKey: ["map-widget-projects"],
     queryFn: () => getEnterprisesByType("P"),
     staleTime: 5 * 60 * 1000,
   });
-  const { data: companies = [] } = useQuery({
+  const { data: companies = EMPTY_ENTERPRISES } = useQuery({
     queryKey: ["map-widget-companies"],
     queryFn: () => getEnterprisesByType("C"),
     staleTime: 5 * 60 * 1000,
