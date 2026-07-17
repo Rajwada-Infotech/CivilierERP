@@ -774,6 +774,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           -- the supplier itself.
           ${ebSupplierList.nameExpr} AS ESupplierName,
           ${ebSupplierList.idExpr} AS ESupplierId,
+          ${ebSupplierList.gstRegisteredExpr} AS ESupplierGstRegistered,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
           -- Frontend uses this as the authoritative Net Amt for GRN rows.
           CASE
@@ -1091,6 +1092,7 @@ router.get("/:id", async (req, res) => {
                -- last-resort fallback baked into the helper's expression.
                ${ebSupplierDet.nameExpr} AS ESupplierName,
                ${ebSupplierDet.idExpr} AS ESupplierId,
+               ${ebSupplierDet.gstRegisteredExpr} AS ESupplierGstRegistered,
                -- Live GRN total (incl. GST) so detail modal always shows current value
                CASE
                  WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0

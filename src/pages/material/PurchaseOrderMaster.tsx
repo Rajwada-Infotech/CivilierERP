@@ -39,6 +39,7 @@ import {
   getUOMs,
   getSupplierDetails,
   getCompanyDetails,
+  getItemsWithGST,
   type CreatePOPayload,
   type SupplierDetails,
   type CompanyDetails,
@@ -565,6 +566,13 @@ const PurchaseOrderMaster: React.FC = () => {
     queryKey: ["item-master"],
     queryFn: getItems,
   });
+  // HSN-resolved GST rates — authoritative source for GST%, since
+  // Item_Master_Group.M_CGST/M_SGST/M_IGST are often stale/unset while the
+  // HSN Master has the current rate (see getItemsWithGST for resolution order).
+  const { data: itemsGstRaw = [] } = useQuery({
+    queryKey: ["items-with-gst"],
+    queryFn: getItemsWithGST,
+  });
   const { data: tcRaw = [] } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
@@ -638,6 +646,12 @@ const PurchaseOrderMaster: React.FC = () => {
     [uomsRaw],
   );
 
+  const itemsGstById = useMemo(() => {
+    const map = new Map<string, { gstRate: number; hsnCode: string | null }>();
+    for (const i of itemsGstRaw) map.set(String(i.id), i);
+    return map;
+  }, [itemsGstRaw]);
+
   const items = useMemo(
     () =>
       ensureArray<DbItem>(itemsRaw).map((i) => ({
@@ -649,8 +663,11 @@ const PurchaseOrderMaster: React.FC = () => {
         cgst: Number(i.M_CGST ?? 0),
         sgst: Number(i.M_SGST ?? 0),
         igst: Number(i.M_IGST ?? 0),
+        // HSN-resolved rate — takes precedence over the raw item-master
+        // columns above, which are frequently stale/unset.
+        resolvedGstRate: itemsGstById.get(String(i.M_Id))?.gstRate ?? null,
       })),
-    [itemsRaw],
+    [itemsRaw, itemsGstById],
   );
 
   const tcRecords = useMemo(
@@ -1450,7 +1467,12 @@ const PurchaseOrderMaster: React.FC = () => {
     const ms = Number(item.sgst ?? 0);
     const mi = Number(item.igst ?? 0);
     const useCgstSgst = mc > 0 || ms > 0;
-    const gstRate = useCgstSgst ? mc + ms : mi;
+    const rawGstRate = useCgstSgst ? mc + ms : mi;
+    // Item-master's own CGST/SGST/IGST columns are often stale/unset — when
+    // that's the case but the HSN Master has a resolved rate, use it. We
+    // don't know the HSN rate's CGST/SGST split, so it's applied as IGST.
+    const useResolvedRate = rawGstRate <= 0 && (item.resolvedGstRate ?? 0) > 0;
+    const gstRate = useResolvedRate ? item.resolvedGstRate! : rawGstRate;
     updateLine(idx, {
       itemId,
       itemName: item.name,
@@ -1459,7 +1481,7 @@ const PurchaseOrderMaster: React.FC = () => {
       unit: uomMatch?.name ?? item.uom,
       cgstRate: useCgstSgst ? mc : 0,
       sgstRate: useCgstSgst ? ms : 0,
-      igstRate: useCgstSgst ? 0 : mi,
+      igstRate: useResolvedRate ? item.resolvedGstRate! : useCgstSgst ? 0 : mi,
       gstRate,
     });
   };

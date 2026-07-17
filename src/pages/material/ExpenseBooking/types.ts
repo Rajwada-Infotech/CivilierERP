@@ -93,6 +93,9 @@ export interface ExpenseRecord {
    *  (non PO/WO/GRN-linked) bookings, where the backend has no source document to
    *  derive the supplier from and relies on this instead (ExpenseBooking.LHeadId). */
   supplierLHeadId?: number | null;
+  /** Whether the resolved supplier/contractor is GST-registered — drives the
+   *  "GST Bill" / "Non GST Bill" badge on the invoice list. */
+  supplierGstRegistered?: boolean;
   projectSite: string;
   materialCategory: string;
   invoiceReference: string;

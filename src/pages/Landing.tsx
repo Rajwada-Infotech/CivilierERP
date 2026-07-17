@@ -2,6 +2,16 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAppVersion } from "@/hooks/useAppVersion";
+import {
+  CheckCircle2,
+  Clock3,
+  TrendingUp,
+  Building2,
+  Wallet,
+  Hammer,
+  Users,
+  StickyNote,
+} from "lucide-react";
 
 // ── Animated background orbs ──────────────────────────────────────────────────
 function BackgroundOrbs() {
@@ -74,6 +84,133 @@ function BackgroundOrbs() {
   );
 }
 
+// ── Floating illustrated UI cards scattered around the hero ──────────────────
+function FloatingCards() {
+  const cardBase =
+    "absolute rounded-2xl border backdrop-blur-xl shadow-[0_8px_40px_-8px_rgba(124,58,237,0.35)]";
+  const glass = {
+    background: "rgba(23,18,42,0.65)",
+    borderColor: "rgba(167,139,250,0.22)",
+  };
+
+  return (
+    <div className="hidden lg:block absolute inset-0 pointer-events-none">
+      {/* PO Approved — top-left */}
+      <motion.div
+        className={`${cardBase} px-4 py-3 flex items-center gap-2.5`}
+        style={{ ...glass, top: "16%", left: "8%" }}
+        initial={{ opacity: 0, y: 20, rotate: -6 }}
+        animate={{ opacity: 1, y: [0, -10, 0], rotate: -6 }}
+        transition={{
+          opacity: { delay: 0.5, duration: 0.6 },
+          y: { delay: 1.1, duration: 5.5, repeat: Infinity, ease: "easeInOut" },
+        }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: "rgba(52,211,153,0.15)" }}>
+          <CheckCircle2 size={17} color="#34d399" />
+        </div>
+        <div className="text-left">
+          <p className="text-[11px] font-semibold text-white/90 leading-tight">PO #4821 Approved</p>
+          <p className="text-[9px] text-white/40 leading-tight">Ambience Site — 2m ago</p>
+        </div>
+      </motion.div>
+
+      {/* Site visit reminder — top-right */}
+      <motion.div
+        className={`${cardBase} px-4 py-3 flex items-center gap-2.5`}
+        style={{ ...glass, top: "13%", right: "7%" }}
+        initial={{ opacity: 0, y: 20, rotate: 4 }}
+        animate={{ opacity: 1, y: [0, -12, 0], rotate: 4 }}
+        transition={{
+          opacity: { delay: 0.65, duration: 0.6 },
+          y: { delay: 1.3, duration: 6, repeat: Infinity, ease: "easeInOut" },
+        }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: "rgba(167,139,250,0.15)" }}>
+          <Clock3 size={17} color="#c4b5fd" />
+        </div>
+        <div className="text-left">
+          <p className="text-[11px] font-semibold text-white/90 leading-tight">Site Visit — Today</p>
+          <p className="text-[9px] text-white/40 leading-tight">Block C, 4:30 PM</p>
+        </div>
+      </motion.div>
+
+      {/* Sticky note — left, lower */}
+      <motion.div
+        className={`${cardBase} px-3.5 py-3 w-[148px]`}
+        style={{
+          background: "rgba(124,58,237,0.14)",
+          borderColor: "rgba(167,139,250,0.28)",
+          top: "58%",
+          left: "5%",
+        }}
+        initial={{ opacity: 0, y: 20, rotate: -8 }}
+        animate={{ opacity: 1, y: [0, -8, 0], rotate: -8 }}
+        transition={{
+          opacity: { delay: 0.8, duration: 0.6 },
+          y: { delay: 1.5, duration: 5, repeat: Infinity, ease: "easeInOut" },
+        }}>
+        <StickyNote size={14} color="#c4b5fd" className="mb-1.5" />
+        <p className="text-[10px] text-white/70 leading-snug">
+          Follow up with supplier on GRN #1092 before Friday
+        </p>
+      </motion.div>
+
+      {/* Project progress — bottom-right */}
+      <motion.div
+        className={`${cardBase} px-4 py-3.5 w-[176px]`}
+        style={{ ...glass, bottom: "16%", right: "9%" }}
+        initial={{ opacity: 0, y: 20, rotate: -3 }}
+        animate={{ opacity: 1, y: [0, -10, 0], rotate: -3 }}
+        transition={{
+          opacity: { delay: 0.95, duration: 0.6 },
+          y: { delay: 1.7, duration: 5.5, repeat: Infinity, ease: "easeInOut" },
+        }}>
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <TrendingUp size={13} color="#a78bfa" />
+          <p className="text-[10px] font-semibold text-white/85">Project Progress</p>
+        </div>
+        {[
+          { label: "Finance", pct: 82, color: "#34d399" },
+          { label: "Material", pct: 61, color: "#c4b5fd" },
+          { label: "Engineering", pct: 45, color: "#7c3aed" },
+        ].map((r) => (
+          <div key={r.label} className="mb-1.5 last:mb-0">
+            <div className="flex justify-between mb-0.5">
+              <span className="text-[8.5px] text-white/45">{r.label}</span>
+              <span className="text-[8.5px] text-white/45">{r.pct}%</span>
+            </div>
+            <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+              <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: r.color }} />
+            </div>
+          </div>
+        ))}
+      </motion.div>
+
+      {/* Modules strip — bottom-left */}
+      <motion.div
+        className={`${cardBase} px-4 py-3`}
+        style={{ ...glass, bottom: "14%", left: "10%" }}
+        initial={{ opacity: 0, y: 20, rotate: 5 }}
+        animate={{ opacity: 1, y: [0, -9, 0], rotate: 5 }}
+        transition={{
+          opacity: { delay: 1.1, duration: 0.6 },
+          y: { delay: 1.9, duration: 6.2, repeat: Infinity, ease: "easeInOut" },
+        }}>
+        <p className="text-[9px] font-semibold text-white/50 mb-2 tracking-wide">5+ MODULES UNIFIED</p>
+        <div className="flex items-center gap-2">
+          {[Wallet, Building2, Hammer, Users].map((Icon, i) => (
+            <div key={i} className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.18)" }}>
+              <Icon size={13} color="#c4b5fd" />
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const [exiting, setExiting] = useState(false);
@@ -97,7 +234,7 @@ export default function Landing() {
 
       {/* ── Main content ── */}
       <div className="relative z-10 flex flex-col items-center justify-center flex-1 px-6 text-center">
-
+        <FloatingCards />
         {/* Badge */}
         <motion.div
           initial={{ opacity: 0, y: 16, filter: "blur(6px)" }}
