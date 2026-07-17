@@ -50,7 +50,6 @@ import {
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import TreeDropdown from "@/components/common/TreeDropdown";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -721,18 +720,17 @@ const CustomerMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Account Group */}
+                {/* Account Group — always Sundry Debtors for customers,
+                    never picked manually (see accountHeadMaster.js's
+                    getSundryDebtorsGroupId, applied server-side on every
+                    create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <GroupTreePicker
-                    value={form.LBelongsTo}
-                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
-                    tree={accountGroupTree}
-                    allGroups={accountGroups}
-                    placeholder="— No group assigned"
-                  />
+                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                    Sundry Debtors
+                  </div>
                 </div>
               </div>
             </div>
