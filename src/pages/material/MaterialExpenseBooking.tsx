@@ -107,7 +107,7 @@ import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
-import { resolveGstRates, parseGRNItemsFromRaw } from "./ExpenseBooking/helpers";
+import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import type {
   CompanyOption,
@@ -504,6 +504,12 @@ export default function MaterialExpenseBooking() {
         });
         return {
           ...prev,
+          // GST rates — fetched from the linked PO's line items when
+          // available (applyMultiGRNDoc), else the merged GRN items'
+          // own rates. Stored on the booking so the list's CGST/SGST
+          // columns show something other than 0%.
+          cgstRate: doc.derivedCgstRate ?? prev.cgstRate,
+          sgstRate: doc.derivedSgstRate ?? prev.sgstRate,
           bookingReference: doc.docNo,
           bookingName: doc.nameLabel ?? prev.bookingName,
           basicAmount: totalBase > 0 ? totalBase : (doc.amount ?? prev.basicAmount),
@@ -641,7 +647,7 @@ export default function MaterialExpenseBooking() {
   // ── Combine multiple GRNs (same PO) into one invoice — the second way to
   // link GRNs, alongside picking one at a time. Uses grnList's already-
   // loaded data (GRNItems/TotalAmount), no refetch needed.
-  const applyMultiGRNDoc = (grns: GRNItem[]) => {
+  const applyMultiGRNDoc = async (grns: GRNItem[]) => {
     const agg = aggregateGRNsForInvoice(grns);
     if (!agg.valid) {
       toast.error(agg.error || "Can't combine these GRNs.");
@@ -649,6 +655,28 @@ export default function MaterialExpenseBooking() {
     }
     const ordered = [...grns].sort((a, b) => a.GRNID - b.GRNID);
     const primary = ordered[0];
+
+    // GST rates for a combined invoice come from the linked PO's own line
+    // items (the authoritative HSN-driven rate) rather than back-derived
+    // from the GRNs' item totals — falls back to the GRN-derived rate
+    // (agg.cgstRate/sgstRate) if the PO can't be fetched.
+    let cgstRate = agg.cgstRate;
+    let sgstRate = agg.sgstRate;
+    if (agg.poId) {
+      try {
+        const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
+        const { cgstRate: poCgst, sgstRate: poSgst } = derivePOGst(
+          po?.POItems ?? [],
+        );
+        if (poCgst > 0 || poSgst > 0) {
+          cgstRate = poCgst;
+          sgstRate = poSgst;
+        }
+      } catch {
+        /* non-fatal: keep the GRN-derived fallback rate */
+      }
+    }
+
     applyDoc({
       kind: "GRN",
       docNo: agg.grnDocNos.join(" + "),
@@ -660,8 +688,8 @@ export default function MaterialExpenseBooking() {
       grnItems: agg.items,
       amount: agg.totalAmount,
       subtotal: agg.basicAmount,
-      derivedCgstRate: agg.cgstRate,
-      derivedSgstRate: agg.sgstRate,
+      derivedCgstRate: cgstRate,
+      derivedSgstRate: sgstRate,
       projectId: primary.ProjectId,
       companyId: primary.CompanyId,
       gst:

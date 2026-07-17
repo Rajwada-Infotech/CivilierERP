@@ -64,6 +64,27 @@ export async function getInvoicesForParty(partyId: number): Promise<OAInvoice[]>
   return r.json();
 }
 
+export interface OAInvoiceAdjustment {
+  amount: number;
+  partyId: number;
+  partyName: string;
+  date: string;
+}
+
+/** On Account adjustments already applied to a specific invoice — used by
+ *  the Payment page to show "On A/C adjusted with ₹X from <Supplier>" when
+ *  that invoice is picked again for payment. */
+export async function getOAAdjustmentsForInvoice(
+  expenseRef: string,
+): Promise<OAInvoiceAdjustment[]> {
+  if (!expenseRef) return [];
+  const r = await fetchWithAuth(
+    `${BASE}/adjustments-for-invoice/${encodeURIComponent(expenseRef)}`,
+  );
+  if (!r.ok) return [];
+  return r.json();
+}
+
 export async function applyOAAdjustment(payload: {
   expenseRef: string;
   amount: number;
