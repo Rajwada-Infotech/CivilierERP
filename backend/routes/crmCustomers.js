@@ -2,11 +2,13 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // Fields the Application page ("select company/project, auto-fetch
 // everything from the customer") reads directly, plus the co-applicant set
