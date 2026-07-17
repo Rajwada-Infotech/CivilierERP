@@ -637,7 +637,7 @@ export default function Issues() {
       header: "Doc No",
       size: 160,
       cell: ({ row, getValue }) => (
-        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">
           {String(getValue() || row.original.IssueNo || "—")}
         </span>
       ),
@@ -647,24 +647,30 @@ export default function Issues() {
       header: "Company",
       size: 140,
       meta: { className: "hidden sm:table-cell" },
-      cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm">
-          <Building2 size={12} className="text-muted-foreground shrink-0" />
-          {String(getValue() || "—")}
-        </div>
-      ),
+      cell: ({ getValue }) => {
+        const v = String(getValue() || "—");
+        return (
+          <div className="flex items-center gap-1.5 text-xs min-w-0" title={v}>
+            <Building2 size={11} className="text-muted-foreground shrink-0" />
+            <span className="truncate">{v}</span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "ProjectName",
       header: "Project",
       size: 140,
       meta: { className: "hidden sm:table-cell" },
-      cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <FolderOpen size={12} className="shrink-0" />
-          {String(getValue() || "—")}
-        </div>
-      ),
+      cell: ({ getValue }) => {
+        const v = String(getValue() || "—");
+        return (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0" title={v}>
+            <FolderOpen size={11} className="shrink-0" />
+            <span className="truncate">{v}</span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "GodownName",
@@ -673,18 +679,19 @@ export default function Issues() {
       meta: { className: "hidden sm:table-cell" },
       cell: ({ row, getValue }) => {
         const name = getValue() as string;
-        return name ? (
-          <div className="flex items-center gap-1.5 text-sm">
-            <Warehouse size={12} className="text-emerald-600/70 dark:text-emerald-400/70 shrink-0" />
-            <span>{name}</span>
-            {row.original.GodownCode && (
-              <span className="text-xs text-muted-foreground font-mono">
-                ({row.original.GodownCode})
-              </span>
-            )}
+        if (!name) return <span className="text-muted-foreground text-xs">—</span>;
+        return (
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Warehouse size={11} className="text-emerald-600/70 dark:text-emerald-400/70 shrink-0" />
+            <div className="min-w-0 leading-tight">
+              <p className="text-xs truncate" title={name}>{name}</p>
+              {row.original.GodownCode && (
+                <p className="text-[10px] text-muted-foreground font-mono truncate">
+                  {row.original.GodownCode}
+                </p>
+              )}
+            </div>
           </div>
-        ) : (
-          <span className="text-muted-foreground text-sm">—</span>
         );
       },
     },
@@ -694,12 +701,12 @@ export default function Issues() {
       size: 130,
       meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
-        <div className="flex items-center gap-1.5">
-          <ShoppingCart size={12} className="text-muted-foreground" />
-          <span className="font-semibold text-sm">
+        <div className="flex items-center gap-1.5 text-xs">
+          <ShoppingCart size={11} className="text-muted-foreground shrink-0" />
+          <span className="font-semibold">
             {row.original.ItemCount || 0}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[10px] text-muted-foreground">
             ({(row.original.TotalQty || 0).toFixed(2)} units)
           </span>
         </div>
@@ -713,7 +720,7 @@ export default function Issues() {
       cell: ({ getValue }) => {
         const v = getValue() as string;
         return (
-          <span className="text-sm text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {v
               ? new Date(v).toLocaleDateString("en-IN", {
                   day: "2-digit",

@@ -11,6 +11,7 @@ import {
   Message2,
   ShoppingCart,
   Building3,
+  Chart21,
   Archive,
   VideoPlay,
   Shield,
@@ -81,7 +82,7 @@ const MODULES = [
   },
   {
     id: "civilworkdpr" as Module,
-    icon: Building3,
+    icon: Chart21,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",

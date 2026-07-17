@@ -391,6 +391,12 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
       `);
 
     await bumpCacheVersion("brs");
+    // The payment/received-payment list's DisplayStatus (Cheque Issued ->
+    // Cheque Cleared) is derived from this same BankReconciliation row —
+    // without bumping its cache too, the list keeps serving the stale
+    // cached response for up to its 5-minute TTL even though the UI
+    // refetches immediately on navigating back to it.
+    await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
     res.json({ message: "Marked as clear" });
 
     // Fire-and-forget — update invoice balance after responding so UI isn't blocked
@@ -429,6 +435,7 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
       `);
 
     await bumpCacheVersion("brs");
+    await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
     res.json({ message: "Marked as unclear" });
   } catch (err) {
     console.error("BRS unclear error:", err);
@@ -479,6 +486,7 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
       `);
 
     await bumpCacheVersion("brs");
+    await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
     res.json({ message: "Marked as bounced" });
 
     // Fire-and-forget — bounced cheques must not count as paid, update after responding

@@ -1978,8 +1978,19 @@ export default function MaterialExpenseBooking() {
                                       ) : null}
                                     </p>
                                   </TableCell>
-                                  <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
-                                    {rec.supplier || "—"}
+                                  <TableCell className="text-xs max-w-[120px] py-3 text-foreground/80">
+                                    <p className="truncate">{rec.supplier || "—"}</p>
+                                    {rec.supplierGstRegistered !== undefined ? (
+                                      <span
+                                        className={`inline-flex items-center mt-1 text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
+                                          rec.supplierGstRegistered
+                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                        }`}
+                                      >
+                                        {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
+                                      </span>
+                                    ) : null}
                                   </TableCell>
                                   <TableCell className="hidden xl:table-cell py-3">
                                     <p className="text-xs truncate max-w-[110px]">

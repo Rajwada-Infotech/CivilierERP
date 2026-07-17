@@ -769,6 +769,19 @@ function InfoPill({
   mono?: boolean;
 }) {
   if (!value) return null;
+  // Defensive: some callers derive `value` from `.find(...)` on loosely
+  // (`any[]`) typed lookups. If a caller's data shape ever mismatches and
+  // hands us an object instead of a string, rendering it directly used to
+  // crash the entire GRN page (React refuses objects as children) —
+  // degrade to the item's own name/label/docNo, or drop the pill, instead.
+  const safeValue =
+    typeof value === "string" || typeof value === "number"
+      ? value
+      : ((value as any)?.name ??
+        (value as any)?.label ??
+        (value as any)?.docNo ??
+        null);
+  if (!safeValue) return null;
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
       <span className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
@@ -777,7 +790,7 @@ function InfoPill({
       <span
         className={`text-xs font-semibold text-foreground truncate ${mono ? "font-mono" : ""}`}
       >
-        {value}
+        {safeValue}
       </span>
     </div>
   );
@@ -1060,6 +1073,37 @@ export default function GRN() {
       grn.SourceMRDocNo?.toLowerCase().includes(q)
     );
   });
+
+  // ── Group by linked PO — every GRN raised against the same PO now shows
+  // together instead of scattered across the flat register, matching the
+  // same grouping VehicleInOut.tsx uses. GRNs with no PO link (transfer
+  // GRNs, older records) fall into one "No PO Linked" bucket. Group order
+  // follows first-appearance in the (already recency-sorted) page.
+  const groupedGrns = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; poNumber: string | null; supplierName: string | null; rows: any[] }
+    >();
+    for (const grn of filteredGrns) {
+      const key = grn.POID ? `po-${grn.POID}` : "no-po";
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          poNumber: grn.PONumber || null,
+          supplierName: grn.SupplierName || null,
+          rows: [],
+        });
+      }
+      groups.get(key)!.rows.push(grn);
+    }
+    return Array.from(groups.values());
+  }, [filteredGrns]);
+
+  const [collapsedGrnGroups, setCollapsedGrnGroups] = useState<
+    Record<string, boolean>
+  >({});
+  const toggleGrnGroup = (key: string) =>
+    setCollapsedGrnGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // base total (excl. GST) — used for stock ledger and line display
   const grandTotal = formData.items.reduce(
@@ -2651,18 +2695,67 @@ export default function GRN() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div
-                className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
-              >
-                <DataTable
-                  data={filteredGrns}
-                  columns={GRN_LIST_COLUMNS}
-                  searchable={false}
-                  paginated={true}
-                  defaultPageSize={20}
-                  emptyMessage="No GRNs found. Click 'New GRN' to create one."
-                />
-              </div>
+              {filteredGrns.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No GRNs found. Click 'New GRN' to create one.
+                </p>
+              ) : (
+                groupedGrns.map((group) => {
+                  const collapsed = !!collapsedGrnGroups[group.key];
+                  return (
+                    <div
+                      key={group.key}
+                      className="border-b border-border last:border-0"
+                    >
+                      {/* Group header — one PO's GRNs grouped together */}
+                      <button
+                        type="button"
+                        onClick={() => toggleGrnGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight
+                            size={14}
+                            className="text-muted-foreground shrink-0"
+                          />
+                        ) : (
+                          <ChevronDown
+                            size={14}
+                            className="text-muted-foreground shrink-0"
+                          />
+                        )}
+                        <FileText size={13} className="text-primary shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          {group.poNumber || "No PO Linked"}
+                        </span>
+                        {group.supplierName && (
+                          <span className="text-xs text-muted-foreground truncate">
+                            · {group.supplierName}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.rows.length} GRN
+                          {group.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+
+                      {!collapsed && (
+                        <div
+                          className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
+                        >
+                          <DataTable
+                            data={group.rows}
+                            columns={GRN_LIST_COLUMNS}
+                            searchable={false}
+                            paginated={false}
+                            emptyMessage="No GRNs found."
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
                 <span>
@@ -3239,7 +3332,7 @@ export default function GRN() {
                                   {row.label}{row.code ? ` (${row.code})` : ""}
                                 </span>
                               </div>
-                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre || "—"}</span>
+                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
                               <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
                                 {row.side === "debit" ? fmt(row.amount) : ""}
                               </span>
