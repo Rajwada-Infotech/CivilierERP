@@ -235,8 +235,16 @@ function AdjustDialog({
                 </div>
                 <div className="flex items-center justify-between px-3 py-2 border-t border-border/50">
                   <span className="text-amber-600 dark:text-amber-400">Remaining to Pay</span>
-                  <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">{formatINR(selected.remaining)}</span>
+                  <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">{formatINR(invoiceRemaining)}</span>
                 </div>
+                {adjAmount > 0 && preview && (
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-border/50 bg-muted/10">
+                    <span className="text-muted-foreground">Remaining After This Adjustment</span>
+                    <span className={`font-mono font-semibold ${preview.isFullyCovered ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                      {formatINR(preview.invoiceRemainingAfter)}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 

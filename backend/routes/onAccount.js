@@ -7,6 +7,8 @@ const requireAuth = require("../middleware/auth");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 const { buildGrnGstData }           = require("../utils/buildGrnGstData");
+const { syncBillStatus }            = require("../utils/syncBillStatus");
+const { getOAAdjustmentsForInvoice } = require("../utils/oaAdjustments");
 
 router.use(requireAuth);
 
@@ -105,6 +107,7 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
         eb.EDiscountData,
         eb.ESourceType,
         eb.ESourceId,
+        eb.ELinkedGrnIds,
         eb.ETotalPaid,
         eb.EBillStatus,
         ISNULL(eb.ECreatedAt, GETDATE()) AS ECreatedAt
@@ -138,8 +141,15 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
       ORDER BY ECreatedAt DESC
     `);
     const rows = await Promise.all(r.recordset.map(async (row) => {
+      // Multi-GRN combined invoices (see MaterialExpenseBooking's "combine
+      // multiple GRNs" flow) have several source GRNs — ESourceId is only
+      // the primary one. Recomputing from it alone would silently
+      // understate the invoice (as it did before this fix); their stored
+      // ENetAmount is already the correct combined total with billing
+      // terms applied, so use it directly without reapplying terms.
+      const isMultiGRN = !!row.ELinkedGrnIds;
       let invoiceAmount = null;
-      if (row.ESourceType === "GRN" && row.ESourceId) {
+      if (!isMultiGRN && row.ESourceType === "GRN" && row.ESourceId) {
         try {
           const grnData = await buildGrnGstData(pool, parseInt(row.ESourceId, 10));
           if (grnData && grnData.totals.netAmount > 0) {
@@ -150,6 +160,13 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
             );
           }
         } catch { /* fallback */ }
+      }
+      if (invoiceAmount == null && isMultiGRN) {
+        invoiceAmount = row.ENetAmount != null
+          ? parseFloat(row.ENetAmount)
+          : row.EAmount != null
+            ? parseFloat(row.EAmount)
+            : null;
       }
       if (invoiceAmount == null && row.ENetAmount != null) {
         invoiceAmount = applyBillingTermsToAmount(
@@ -234,7 +251,61 @@ router.post("/apply-adjustment", async (req, res) => {
           WHERE LHeadId = @PartyId;
       `);
 
+    // Route the adjustment through the same payment-tracking system every
+    // real vendor payment uses (see expenseBooking.js's contract-advance
+    // auto-allocation for the same "Dummy Bank" convention) — a synthetic
+    // Approved NewPayment row + syncBillStatus, so the invoice's own
+    // ETotalPaid/ERemainingAmount/EBillStatus reflect this adjustment
+    // everywhere (Payment page, invoice list, etc.) instead of only the
+    // party's OA balance knowing about it.
+    const dummyBank = await pool.request().query(
+      "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
+    );
+    if (dummyBank.recordset.length) {
+      const syntheticDocNo = `OA-ADJ-${expenseRef}-${Date.now()}`;
+      await pool.request()
+        .input("PPaymentName", sql.VarChar, `On Account Adjustment (${expenseRef})`)
+        .input("PMode", sql.VarChar, "Cash")
+        .input("PAmount", sql.Decimal(18, 2), applyAmt)
+        .input("PDocType", sql.VarChar, "On Account Adjustment")
+        .input("PDate", sql.Date, new Date())
+        .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
+        .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
+        .input("PProject", sql.VarChar, "")
+        .input("PCompany", sql.VarChar, "")
+        .input("PExpenseRef", sql.NVarChar(100), expenseRef)
+        .input("DocNo", sql.NVarChar(100), syntheticDocNo)
+        .input("PCreatedAt", sql.DateTime, new Date())
+        .input("PCreatedBy", sql.NVarChar(100), createdBy)
+        .input("Status", sql.NVarChar(20), "Approved").query(`
+          INSERT INTO dbo.NewPayment
+            (PPaymentName, PMode, PAmount, PDocType, PDate, PBankID, PBankName,
+             PProject, PCompany, PExpenseRef, DocNo,
+             PCreatedAt, PCreatedBy, Status)
+          VALUES
+            (@PPaymentName, @PMode, @PAmount, @PDocType, @PDate, @PBankID, @PBankName,
+             @PProject, @PCompany, @PExpenseRef, @DocNo,
+             @PCreatedAt, @PCreatedBy, @Status)
+        `);
+      await syncBillStatus(pool, sql, expenseRef);
+    }
+
     res.json({ applied: applyAmt, remainingBalance: Math.max(0, balance - applyAmt) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /adjustments-for-invoice/:expenseRef — OA adjustments applied to
+// a specific invoice, so the Payment page can show "On A/C adjusted with
+// ₹X from <Supplier>" in the amount breakdown when that invoice is picked
+// again for payment (see utils/oaAdjustments.js).
+router.get("/adjustments-for-invoice/:expenseRef", async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params.expenseRef);
+  try {
+    const pool = getPool();
+    const adjustments = await getOAAdjustmentsForInvoice(pool, sql, expenseRef);
+    res.json(adjustments);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -276,6 +347,7 @@ router.get("/adjustable", async (req, res) => {
         eb.EDiscountData       AS EDiscountData,
         eb.ESourceType         AS ESourceType,
         eb.ESourceId           AS ESourceId,
+        eb.ELinkedGrnIds       AS ELinkedGrnIds,
         grn.TotalAmount        AS GrnTotalAmount,
         eb.ETotalPaid          AS InvoiceTotalPaid,
         eb.EDocNo              AS InvoiceDocNo,
@@ -295,8 +367,13 @@ router.get("/adjustable", async (req, res) => {
     // For GRN-source invoices, recompute the correct GST-inclusive net payable from
     // current GRN line items (same as the expense booking preview modal does).
     const rows = await Promise.all(result.recordset.map(async (row) => {
+      // Same multi-GRN guard as /invoices-for-party — ESourceId is only
+      // the primary linked GRN for a combined invoice, so recomputing from
+      // it alone understates the total. Trust the stored ENetAmount
+      // (already correct + billing-terms-applied) for those instead.
+      const isMultiGRN = !!row.ELinkedGrnIds;
       let invoiceAmount = null;
-      if (row.ESourceType === "GRN" && row.ESourceId) {
+      if (!isMultiGRN && row.ESourceType === "GRN" && row.ESourceId) {
         try {
           const grnData = await buildGrnGstData(pool, parseInt(row.ESourceId, 10));
           if (grnData && grnData.totals.netAmount > 0) {
@@ -311,6 +388,13 @@ router.get("/adjustable", async (req, res) => {
           }
         } catch { /* fallback below */ }
       }
+      if (invoiceAmount == null && isMultiGRN) {
+        invoiceAmount = row.ENetAmount != null
+          ? parseFloat(row.ENetAmount)
+          : row.EAmount != null
+            ? parseFloat(row.EAmount)
+            : null;
+      }
       if (invoiceAmount == null && row.ENetAmount != null) {
         invoiceAmount = applyBillingTermsToAmount(
           row.ENetAmount,
@@ -321,7 +405,7 @@ router.get("/adjustable", async (req, res) => {
           row.EDiscountData,
         );
       }
-      const { ENetAmount, EAmount, ECgstRate, ESgstRate, EBillingTermsData, EDiscountData, ESourceType, ESourceId, GrnTotalAmount, ...rest } = row;
+      const { ENetAmount, EAmount, ECgstRate, ESgstRate, EBillingTermsData, EDiscountData, ESourceType, ESourceId, ELinkedGrnIds, GrnTotalAmount, ...rest } = row;
       return { ...rest, InvoiceAmount: invoiceAmount };
     }));
     res.json(rows);

@@ -18,7 +18,7 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
-import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type TaskSummary } from "@/api/homeDashboardApi";
+import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type TaskSummary, type RecentOtherExpense } from "@/api/homeDashboardApi";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { GradientText } from "@/components/GradientText";
@@ -26,6 +26,7 @@ import { SectionLabel } from "@/components/home/SectionLabel";
 import { ModuleCard, type StatRow } from "@/components/home/ModuleCard";
 import { FeedItem, type FeedItemData } from "@/components/home/FeedItem";
 import { useModuleAccess } from "@/navigation/moduleAccess";
+import { FadeSlideIn } from "@/components/FadeSlideIn";
 
 function fmtDay(d?: string) {
   if (!d) return undefined;
@@ -85,6 +86,17 @@ export default function DashboardScreen() {
     if (access.material) {
       (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
         feed.push({ label: `GRN ${g.GRNNo}`, sub: g.SupplierName ?? "—", icon: Package, color: "#10b981", time: fmtDay(g.GRNDate) });
+      });
+    }
+    if (access.material) {
+      (data?.recentOtherExpenses ?? []).forEach((e: RecentOtherExpense) => {
+        feed.push({
+          label: `${e.EDocNo} (Other Expense)`,
+          sub: e.ESupplierName ?? "—",
+          icon: FileText,
+          color: "#06b6d4",
+          time: fmtDay(e.EDocDate),
+        });
       });
     }
     if (access.finance) {
@@ -147,6 +159,12 @@ export default function DashboardScreen() {
 
   const hasAnyAccess = Object.values(access).some(Boolean);
 
+  // Staggered module-card entrance delay, same idea as Home.tsx's
+  // cardIdx-based nextDelay() — a fresh counter per render so cards fade
+  // in one after another instead of all at once.
+  let cardIdx = 0;
+  const nextCardDelay = () => 300 + cardIdx++ * 45;
+
   const onRefresh = async () => {
     setRefreshing(true);
     await refetch();
@@ -173,46 +191,52 @@ export default function DashboardScreen() {
       {/* Greeting — GradientText uses MaskedView, which RN can't reliably
           nest inside a <Text> (unlike CSS's bg-clip:text span on web), so
           the highlighted name renders as its own block below the line. */}
-      <View className="mb-1">
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 30, lineHeight: 36 }}>
-          {greeting},
+      <FadeSlideIn delay={0}>
+        <View className="mb-1">
+          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 30, lineHeight: 36 }}>
+            {greeting},
+          </Text>
+          <GradientText style={{ fontFamily: fonts.heading.bold, fontSize: 30, lineHeight: 36 }} colors={["#6467f2", "#a78bfa", "#22d3ee"]}>
+            {`${firstName}.`}
+          </GradientText>
+        </View>
+      </FadeSlideIn>
+      <FadeSlideIn delay={90}>
+        <Text style={{ color: colors.mutedForeground, fontSize: 14, lineHeight: 20, marginTop: 4, fontFamily: fonts.body.regular }}>
+          {privileged
+            ? "Everything live across procurement, finance, engineering and sales — in one place."
+            : role === "engineer"
+              ? "Your engineering, follow-up and ticket workspace — live and in one place."
+              : "Your workspace overview — all your accessible modules in one place."}
         </Text>
-        <GradientText style={{ fontFamily: fonts.heading.bold, fontSize: 30, lineHeight: 36 }} colors={["#6467f2", "#a78bfa", "#22d3ee"]}>
-          {`${firstName}.`}
-        </GradientText>
-      </View>
-      <Text style={{ color: colors.mutedForeground, fontSize: 14, lineHeight: 20, marginTop: 4, fontFamily: fonts.body.regular }}>
-        {privileged
-          ? "Everything live across procurement, finance, engineering and sales — in one place."
-          : role === "engineer"
-            ? "Your engineering, follow-up and ticket workspace — live and in one place."
-            : "Your workspace overview — all your accessible modules in one place."}
-      </Text>
+      </FadeSlideIn>
 
       {/* Role badge */}
-      <View className="mt-3 flex-row">
-        <View
-          className="flex-row items-center gap-1.5 px-2.5 py-1 rounded-full"
-          style={{
-            backgroundColor: privileged ? `${colors.primary}14` : `${colors.muted}80`,
-            borderWidth: 1,
-            borderColor: privileged ? `${colors.primary}40` : colors.border,
-          }}
-        >
-          {privileged ? <ShieldCheck size={10} color={colors.primary} /> : <Users size={10} color={colors.mutedForeground} />}
-          <Text
+      <FadeSlideIn delay={160}>
+        <View className="mt-3 flex-row">
+          <View
+            className="flex-row items-center gap-1.5 px-2.5 py-1 rounded-full"
             style={{
-              color: privileged ? colors.primary : colors.mutedForeground,
-              fontSize: 10,
-              fontFamily: fonts.heading.semibold,
-              textTransform: "uppercase",
-              letterSpacing: 1,
+              backgroundColor: privileged ? `${colors.primary}14` : `${colors.muted}80`,
+              borderWidth: 1,
+              borderColor: privileged ? `${colors.primary}40` : colors.border,
             }}
           >
-            {role.replace(/_/g, " ")}
-          </Text>
+            {privileged ? <ShieldCheck size={10} color={colors.primary} /> : <Users size={10} color={colors.mutedForeground} />}
+            <Text
+              style={{
+                color: privileged ? colors.primary : colors.mutedForeground,
+                fontSize: 10,
+                fontFamily: fonts.heading.semibold,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}
+            >
+              {role.replace(/_/g, " ")}
+            </Text>
+          </View>
         </View>
-      </View>
+      </FadeSlideIn>
 
       {isError && (
         <View
@@ -233,7 +257,7 @@ export default function DashboardScreen() {
         <View className="flex-row flex-wrap justify-between">
           {access.finance && (
             <ModuleCard
-              title="Finance" icon={BarChart3} accent={moduleAccents.finance} loading={isLoading}
+              title="Finance" icon={BarChart3} accent={moduleAccents.finance} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("Finance")}
               stats={[
                 { label: "Total payments", value: fin?.payments?.totalCount ?? 0, accent: moduleAccents.finance },
@@ -246,7 +270,7 @@ export default function DashboardScreen() {
 
           {access.material && (
             <ModuleCard
-              title="Material" icon={Package} accent={moduleAccents.material} loading={isLoading}
+              title="Material" icon={Package} accent={moduleAccents.material} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("Material")}
               stats={[
                 { label: "GRNs this month", value: mat?.grns?.thisMonth ?? 0, accent: moduleAccents.material },
@@ -259,7 +283,7 @@ export default function DashboardScreen() {
 
           {access.engineering && (
             <ModuleCard
-              title="Engineering" icon={Wrench} accent={moduleAccents.engineering} loading={isLoading}
+              title="Engineering" icon={Wrench} accent={moduleAccents.engineering} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("Engineering")}
               stats={[
                 { label: "Open work orders", value: eng?.workOrders?.open ?? 0, accent: moduleAccents.engineering },
@@ -272,7 +296,7 @@ export default function DashboardScreen() {
 
           {access.civilworkdpr && (
             <ModuleCard
-              title="Civil DPR" icon={Pickaxe} accent={moduleAccents.civilworkdpr} loading={isLoading}
+              title="Civil DPR" icon={Pickaxe} accent={moduleAccents.civilworkdpr} loading={isLoading} delay={nextCardDelay()}
               badge={civilDpr?.progress?.pendingReviewCount}
               onPress={() => notBuiltYet("Civil Work DPR")}
               stats={[
@@ -286,7 +310,7 @@ export default function DashboardScreen() {
 
           {access.followup && (
             <ModuleCard
-              title="Follow-Up" icon={Users} accent={moduleAccents.followup} loading={isLoading}
+              title="Follow-Up" icon={Users} accent={moduleAccents.followup} loading={isLoading} delay={nextCardDelay()}
               badge={fol?.pendingNOCs}
               onPress={() => notBuiltYet("Follow-Up")}
               stats={[
@@ -300,7 +324,7 @@ export default function DashboardScreen() {
 
           {access.approvals && (
             <ModuleCard
-              title="Approvals" icon={FileCheck} accent={moduleAccents.approvals} loading={isLoading}
+              title="Approvals" icon={FileCheck} accent={moduleAccents.approvals} loading={isLoading} delay={nextCardDelay()}
               badge={pendingApprovals.length}
               onPress={() => notBuiltYet("Approvals")}
               stats={[
@@ -314,7 +338,7 @@ export default function DashboardScreen() {
 
           {access.sales && (
             <ModuleCard
-              title="Sales" icon={ShoppingCart} accent={moduleAccents.sales} loading={isLoading}
+              title="Sales" icon={ShoppingCart} accent={moduleAccents.sales} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("Sales")}
               stats={[
                 { label: "Total orders", value: sal?.total ?? 0, accent: moduleAccents.sales },
@@ -329,12 +353,12 @@ export default function DashboardScreen() {
           )}
 
           {access.salesAutomation && (
-            <ModuleCard title="Sales Auto" icon={Megaphone} accent={moduleAccents.salesAutomation} loading={isLoading} onPress={() => notBuiltYet("Sales Automation")} stats={[]} />
+            <ModuleCard title="Sales Auto" icon={Megaphone} accent={moduleAccents.salesAutomation} loading={isLoading} delay={nextCardDelay()} onPress={() => notBuiltYet("Sales Automation")} stats={[]} />
           )}
 
           {access.ticket && (
             <ModuleCard
-              title="Tickets" icon={Ticket} accent={moduleAccents.ticket} loading={isLoading}
+              title="Tickets" icon={Ticket} accent={moduleAccents.ticket} loading={isLoading} delay={nextCardDelay()}
               badge={tick?.urgent}
               onPress={() => notBuiltYet("Tickets")}
               stats={[
@@ -348,7 +372,7 @@ export default function DashboardScreen() {
 
           {access.admin && !isDba && (
             <ModuleCard
-              title="Admin" icon={ShieldCheck} accent={moduleAccents.admin} loading={isLoading}
+              title="Admin" icon={ShieldCheck} accent={moduleAccents.admin} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("Admin")}
               stats={[
                 { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: moduleAccents.admin },
@@ -361,7 +385,7 @@ export default function DashboardScreen() {
 
           {access.dba && (
             <ModuleCard
-              title="DBA Console" icon={Database} accent={moduleAccents.dba} loading={isLoading}
+              title="DBA Console" icon={Database} accent={moduleAccents.dba} loading={isLoading} delay={nextCardDelay()}
               onPress={() => notBuiltYet("DBA Console")}
               stats={[
                 { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: moduleAccents.dba },
@@ -388,61 +412,73 @@ export default function DashboardScreen() {
 
       {/* Key numbers */}
       {hasAnyAccess && keyNumbers.length > 0 && (
-        <View className="mt-4">
-          <SectionLabel>Key numbers</SectionLabel>
-          <View className="rounded-2xl p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-            {keyNumbers.map((item, i) => (
-              <View key={i} className="flex-row items-center justify-between" style={{ marginBottom: i < keyNumbers.length - 1 ? 16 : 0 }}>
-                <View className="flex-row items-center gap-2.5 flex-1 min-w-0">
-                  <View className="p-1.5 rounded-lg" style={{ backgroundColor: `${item.color}22` }}>
-                    <item.icon size={12} color={item.color} />
+        <FadeSlideIn delay={cardIdx * 45 + 320}>
+          <View className="mt-4">
+            <SectionLabel>Key numbers</SectionLabel>
+            <View className="rounded-2xl p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
+              {keyNumbers.map((item, i) => (
+                <FadeSlideIn key={i} delay={cardIdx * 45 + 400 + i * 60} distance={10}>
+                  <View className="flex-row items-center justify-between" style={{ marginBottom: i < keyNumbers.length - 1 ? 16 : 0 }}>
+                    <View className="flex-row items-center gap-2.5 flex-1 min-w-0">
+                      <View className="p-1.5 rounded-lg" style={{ backgroundColor: `${item.color}22` }}>
+                        <item.icon size={12} color={item.color} />
+                      </View>
+                      <Text numberOfLines={1} style={{ color: `${colors.mutedForeground}a6`, fontSize: 11, fontFamily: fonts.body.medium, flexShrink: 1 }}>
+                        {item.label}
+                      </Text>
+                    </View>
+                    <Text style={{ color: item.color, fontFamily: fonts.heading.bold, fontSize: 15 }}>
+                      {item.value == null ? "—" : `${item.prefix ?? ""}${item.value}${item.suffix ?? ""}`}
+                    </Text>
                   </View>
-                  <Text numberOfLines={1} style={{ color: `${colors.mutedForeground}a6`, fontSize: 11, fontFamily: fonts.body.medium, flexShrink: 1 }}>
-                    {item.label}
-                  </Text>
-                </View>
-                <Text style={{ color: item.color, fontFamily: fonts.heading.bold, fontSize: 15 }}>
-                  {item.value == null ? "—" : `${item.prefix ?? ""}${item.value}${item.suffix ?? ""}`}
-                </Text>
-              </View>
-            ))}
+                </FadeSlideIn>
+              ))}
+            </View>
           </View>
-        </View>
+        </FadeSlideIn>
       )}
 
       {/* Recent activity */}
       {hasAnyAccess && (
-        <View className="mt-6">
-          <SectionLabel>Recent activity</SectionLabel>
-          <View className="rounded-2xl px-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-            {isLoading ? (
-              <View className="py-6 items-center">
-                <ActivityIndicator color={colors.mutedForeground} />
-              </View>
-            ) : activityFeed.length === 0 ? (
-              <Text className="py-8 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 13, fontFamily: fonts.body.regular }}>
-                No recent activity.
-              </Text>
-            ) : (
-              activityFeed.map((item, i) => <FeedItem key={i} item={item} isLast={i === activityFeed.length - 1} />)
-            )}
+        <FadeSlideIn delay={cardIdx * 45 + 420}>
+          <View className="mt-6">
+            <SectionLabel>Recent activity</SectionLabel>
+            <View className="rounded-2xl px-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
+              {isLoading ? (
+                <View className="py-6 items-center">
+                  <ActivityIndicator color={colors.mutedForeground} />
+                </View>
+              ) : activityFeed.length === 0 ? (
+                <Text className="py-8 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 13, fontFamily: fonts.body.regular }}>
+                  No recent activity.
+                </Text>
+              ) : (
+                activityFeed.map((item, i) => (
+                  <FadeSlideIn key={i} delay={cardIdx * 45 + 500 + i * 50} distance={10}>
+                    <FeedItem item={item} isLast={i === activityFeed.length - 1} />
+                  </FadeSlideIn>
+                ))
+              )}
+            </View>
           </View>
-        </View>
+        </FadeSlideIn>
       )}
 
       {/* Footer */}
-      <View className="mt-10 items-center gap-1.5">
-        <View className="flex-row items-center gap-3">
-          <View style={{ width: 40, height: 1, backgroundColor: `${colors.border}66` }} />
-          <Text style={{ color: `${colors.mutedForeground}40`, fontSize: 10, fontFamily: fonts.heading.semibold, letterSpacing: 2 }}>
-            CIVILIER ERP · {new Date().getFullYear()}
+      <FadeSlideIn delay={cardIdx * 45 + 650} distance={8}>
+        <View className="mt-10 items-center gap-1.5">
+          <View className="flex-row items-center gap-3">
+            <View style={{ width: 40, height: 1, backgroundColor: `${colors.border}66` }} />
+            <Text style={{ color: `${colors.mutedForeground}40`, fontSize: 10, fontFamily: fonts.heading.semibold, letterSpacing: 2 }}>
+              CIVILIER ERP · {new Date().getFullYear()}
+            </Text>
+            <View style={{ width: 40, height: 1, backgroundColor: `${colors.border}66` }} />
+          </View>
+          <Text style={{ color: `${colors.mutedForeground}33`, fontSize: 9, fontFamily: fonts.heading.semibold, letterSpacing: 3 }}>
+            CRAFTED BY RAJWADA INFOTECH
           </Text>
-          <View style={{ width: 40, height: 1, backgroundColor: `${colors.border}66` }} />
         </View>
-        <Text style={{ color: `${colors.mutedForeground}33`, fontSize: 9, fontFamily: fonts.heading.semibold, letterSpacing: 3 }}>
-          CRAFTED BY RAJWADA INFOTECH
-        </Text>
-      </View>
+      </FadeSlideIn>
     </ScrollView>
   );
 }

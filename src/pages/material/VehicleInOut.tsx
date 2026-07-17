@@ -598,6 +598,10 @@ export default function VehicleInOut() {
   );
   const webcamRef = useRef<Webcam>(null);
 
+  // Received qty entered in THIS lot, keyed by PO line item id. Reset when
+  // the PO changes; prefilled from the record's own saved items on edit.
+  const [receivedQtyByItem, setReceivedQtyByItem] = useState<Record<number, string>>({});
+
   const [form, setForm] = useState(buildEmpty(activeFinYear));
   const pf = (patch: Partial<typeof form>) =>
     setForm((p) => ({ ...p, ...patch }));
@@ -676,17 +680,28 @@ export default function VehicleInOut() {
     retry: false,
   });
 
-  // POs filtered to the selected supplier
+  // Selectable POs — status-filtered only, not supplier-filtered, since PO
+  // is now picked first and drives the supplier (not the other way round).
   const filteredPOs = useMemo(() => {
-    if (!form.supplierId) return [];
     return (allPOs as any[]).filter(
       (po: any) =>
-        String(po.SupplierID) === String(form.supplierId) &&
-        (po.Status === "Approved" ||
-          po.Status === "Pending" ||
-          po.Status === "Received"),
+        po.Status === "Approved" ||
+        po.Status === "Pending" ||
+        po.Status === "Received",
     );
-  }, [allPOs, form.supplierId]);
+  }, [allPOs]);
+
+  // Live PO line items + how much is already received across other lots
+  // (excludes this record's own rows when editing, via editingId) — the
+  // read side of the "10 + 20 + 70 of 100" flow. Queried straight from
+  // dbo.PurchaseOrderItems rather than the cached PO list's denormalized
+  // POItems JSON blob, since that blob has no stable id to key qty inputs.
+  const { data: poItemsRemaining = [], isFetching: loadingPOItems } = useQuery({
+    queryKey: ["veh-po-items-remaining", form.poId, editingId],
+    queryFn: () => vehApi.getPOItemsRemaining(form.poId!, editingId ?? undefined),
+    enabled: !!form.poId,
+    staleTime: 0,
+  });
 
   const filteredProjects = useMemo(() => {
     if (!form.companyId) return projects as any[];
@@ -706,6 +721,7 @@ export default function VehicleInOut() {
       setEditingId(null);
       setErrors({});
       setForm(buildEmpty(activeFinYear));
+      setReceivedQtyByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -722,6 +738,7 @@ export default function VehicleInOut() {
       setEditingId(null);
       setErrors({});
       setForm(buildEmpty(activeFinYear));
+      setReceivedQtyByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -737,13 +754,43 @@ export default function VehicleInOut() {
     onError: (err: any) => toast.error(err.message || "Failed to delete"),
   });
 
+  // Received-qty entries as a payload array — only lines with a positive
+  // quantity are sent (an empty/zero input just means "not delivered in
+  // this lot").
+  const itemsPayload = useMemo(
+    () =>
+      Object.entries(receivedQtyByItem)
+        .map(([poItemId, raw]) => ({
+          poItemId: Number(poItemId),
+          receivedQty: parseFloat(raw) || 0,
+        }))
+        .filter((it) => it.receivedQty > 0),
+    [receivedQtyByItem],
+  );
+
   // ── Validate ──────────────────────────────────────────────────────────────────
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.vehicleNo.trim()) errs.vehicleNo = "Vehicle number is required";
     if (!form.entryTime) errs.entryTime = "Entry time is required";
+
+    // Mirror the backend's cap client-side so the user gets an inline
+    // error instead of a round-trip failure — "don't let me save 1000
+    // when I ordered 100".
+    for (const it of itemsPayload) {
+      const po = poItemsRemaining.find((p) => p.poItemId === it.poItemId);
+      if (po && it.receivedQty > po.remainingQty + 1e-6) {
+        errs.items = `${po.itemName || "An item"}: cannot receive ${it.receivedQty} — only ${po.remainingQty} remaining on the PO.`;
+        break;
+      }
+    }
+
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    if (Object.keys(errs).length > 0) {
+      toast.error(errs.items || "Please fix the errors");
+      return false;
+    }
+    return true;
   };
 
   const buildPayload = (): VehicleInOutPayload => ({
@@ -764,19 +811,18 @@ export default function VehicleInOut() {
     // no-op, so it's safe to always send the full current list.
     attachmentIds: form.attachments.map((a) => a.id),
     remarks: form.remarks,
+    items: itemsPayload,
   });
 
   const onSubmit = () => {
-    if (!validate()) {
-      toast.error("Please fix the errors");
-      return;
-    }
+    if (!validate()) return;
     if (editingId) updateMut.mutate(buildPayload());
     else createMut.mutate(buildPayload());
   };
 
   const resetForm = () => {
     setForm(buildEmpty(activeFinYear));
+    setReceivedQtyByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -794,16 +840,25 @@ export default function VehicleInOut() {
   };
 
   _onEdit = async (rec: any) => {
-    // List rows only carry AttachmentCount (cheap query) — fetch the full
-    // record so we have the actual Attachments[] (id/filename/url) to edit.
+    // List rows only carry AttachmentCount (cheap query) and never carry
+    // Items at all — fetch the full record so we have both the actual
+    // Attachments[] (id/filename/url) and Items[] (received qty per PO
+    // line item) to edit.
     let full = rec;
-    if (!Array.isArray(rec.Attachments)) {
+    if (!Array.isArray(rec.Attachments) || !Array.isArray(rec.Items)) {
       try {
         full = await vehApi.getVehicleInOut(rec.VehicleInOutID);
       } catch {
-        toast.error("Failed to load attachments for this record");
+        toast.error("Failed to load record details");
       }
     }
+    setReceivedQtyByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.map((it: any) => [it.POItemId, String(it.ReceivedQty)]),
+          )
+        : {},
+    );
     setForm({
       docNo: full.DocNo ?? "",
       docDate: full.DocDate ? String(full.DocDate).slice(0, 10) : "",
@@ -907,6 +962,32 @@ export default function VehicleInOut() {
     );
   });
 
+  // ── Group by linked PO — every Vehicle In/Out lot delivered against the
+  // same PO now shows together instead of scattered across a flat list.
+  // Records with no PO link fall into a single "No PO Linked" bucket.
+  // Group order follows first-appearance in the (already recency-sorted)
+  // list, so the most recently active PO's group surfaces first.
+  const groupedRecords = useMemo(() => {
+    const groups = new Map<string, { key: string; poNumber: string | null; supplierName: string | null; rows: any[] }>();
+    for (const r of filteredRecords) {
+      const key = r.POID ? `po-${r.POID}` : "no-po";
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          poNumber: r.PONumber || null,
+          supplierName: r.SupplierName || null,
+          rows: [],
+        });
+      }
+      groups.get(key)!.rows.push(r);
+    }
+    return Array.from(groups.values());
+  }, [filteredRecords]);
+
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+
   if (isLoading) {
     return (
       <div className="flex items-center gap-2.5 mt-8 text-muted-foreground text-sm">
@@ -972,6 +1053,7 @@ export default function VehicleInOut() {
                     setShowForm(true);
                     setEditingId(null);
                     setForm(buildEmpty(activeFinYear));
+                    setReceivedQtyByItem({});
                     setErrors({});
                   }}
                   className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
@@ -1091,7 +1173,8 @@ export default function VehicleInOut() {
                     </div>
                   </div>
 
-                  {/* Doc Date */}
+                  {/* Doc Date — locked to today; entries are dated when
+                      they're actually made, not backdated/postdated. */}
                   <div>
                     <FieldLabel required>Doc Date</FieldLabel>
                     <div className="relative">
@@ -1102,8 +1185,10 @@ export default function VehicleInOut() {
                       <input
                         type="date"
                         value={form.docDate}
-                        onChange={(e) => pf({ docDate: e.target.value })}
-                        className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                        readOnly
+                        disabled
+                        title="Doc date is always today's date"
+                        className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
                       />
                     </div>
                   </div>
@@ -1176,52 +1261,15 @@ export default function VehicleInOut() {
                 </div>
               </SectionCard>
 
-              {/* ── Section 2: Supplier & PO ── */}
+              {/* ── Section 2: PO & Supplier ── */}
               <SectionCard>
                 <SectionTitle
                   icon={Filter}
-                  label="Supplier & Purchase Order"
-                  sub="Select supplier then filter linked POs"
+                  label="Purchase Order & Supplier"
+                  sub="Select a PO — supplier is fetched automatically"
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Supplier */}
-                  <div>
-                    <FieldLabel>Supplier</FieldLabel>
-                    <div className="relative">
-                      <select
-                        value={form.supplierId ?? ""}
-                        onChange={(e) => {
-                          const id = e.target.value
-                            ? Number(e.target.value)
-                            : null;
-                          const sup = (suppliers as any[]).find(
-                            (s: any) => Number(s.id) === id,
-                          );
-                          pf({
-                            supplierId: id,
-                            supplierName: sup?.label ?? "",
-                            contactPerson: sup?.contactPerson ?? "",
-                            poId: null,
-                            poNumber: "",
-                          });
-                        }}
-                        className={inpSel}
-                      >
-                        <option value="">Select Supplier…</option>
-                        {(suppliers as any[]).map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={12}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
-                  </div>
-
                   {/* PO */}
                   <div>
                     <FieldLabel>Purchase Order</FieldLabel>
@@ -1238,17 +1286,28 @@ export default function VehicleInOut() {
                           pf({
                             poId: id,
                             poNumber: po?.DocNo || po?.PurchaseOrderNo || "",
+                            // Auto-fetch supplier from the selected PO —
+                            // PO now drives supplier, not the other way
+                            // round.
+                            supplierId: po?.SupplierID ?? null,
+                            supplierName: po?.SupplierName ?? "",
+                            contactPerson:
+                              (suppliers as any[]).find(
+                                (s: any) => Number(s.id) === Number(po?.SupplierID),
+                              )?.contactPerson ?? "",
+                            // Auto-fill Company + Project straight from the
+                            // PO too, same as GRN.tsx does.
+                            companyId: po?.CompanyId ?? form.companyId,
+                            projectId: po?.ProjectId ?? form.projectId,
                           });
+                          // Switching POs invalidates any received-qty
+                          // entered against the previous PO's line items.
+                          setReceivedQtyByItem({});
                         }}
-                        disabled={!form.supplierId}
-                        className={`${inpSel} ${!form.supplierId ? "opacity-60 cursor-not-allowed" : ""}`}
+                        className={inpSel}
                       >
                         <option value="">
-                          {!form.supplierId
-                            ? "Select a supplier first"
-                            : filteredPOs.length === 0
-                              ? "No POs for this supplier"
-                              : "Select PO…"}
+                          {filteredPOs.length === 0 ? "No POs available" : "Select PO…"}
                         </option>
                         {filteredPOs.map((po: any) => (
                           <option
@@ -1256,6 +1315,46 @@ export default function VehicleInOut() {
                             value={po.PurchaseOrderID}
                           >
                             {po.DocNo || po.PurchaseOrderNo}
+                            {po.SupplierName ? ` — ${po.SupplierName}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Supplier — auto-filled from the selected PO and locked
+                      while a PO is selected (it's derived, not independent
+                      input). Only editable for a standalone (no-PO) entry. */}
+                  <div>
+                    <FieldLabel>Supplier</FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={form.supplierId ?? ""}
+                        onChange={(e) => {
+                          const id = e.target.value
+                            ? Number(e.target.value)
+                            : null;
+                          const sup = (suppliers as any[]).find(
+                            (s: any) => Number(s.id) === id,
+                          );
+                          pf({
+                            supplierId: id,
+                            supplierName: sup?.label ?? "",
+                            contactPerson: sup?.contactPerson ?? "",
+                          });
+                        }}
+                        disabled={!!form.poId}
+                        title={form.poId ? "Supplier is set by the selected PO" : undefined}
+                        className={`${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`}
+                      >
+                        <option value="">Select Supplier…</option>
+                        {(suppliers as any[]).map((s: any) => (
+                          <option key={s.id} value={s.id}>
+                            {s.label}
                           </option>
                         ))}
                       </select>
@@ -1282,51 +1381,122 @@ export default function VehicleInOut() {
                   </div>
                 )}
 
-                {/* PO Items preview */}
-                {form.poId && (() => {
-                  const po = filteredPOs.find((p: any) => p.PurchaseOrderID === form.poId);
-                  const items: any[] = Array.isArray(po?.POItems) ? po.POItems : [];
-                  if (items.length === 0) return null;
-                  return (
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
-                        <Package size={13} className="text-muted-foreground" />
-                        <span className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                          PO Items
-                        </span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">{items.length} item{items.length !== 1 ? "s" : ""}</span>
+                {/* PO Items — enter how much this specific lot/vehicle is
+                    delivering, per line item. Capped at what's actually
+                    left on the PO (ordered minus everything already
+                    received across other Vehicle In/Out entries for the
+                    same PO) — this is the "10 + 20 + 70 of 100" flow. */}
+                {form.poId && (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
+                      <Package size={13} className="text-muted-foreground" />
+                      <span className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                        PO Items — Qty Received (This Lot)
+                      </span>
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        {loadingPOItems
+                          ? "Loading…"
+                          : `${poItemsRemaining.length} item${poItemsRemaining.length !== 1 ? "s" : ""}`}
+                      </span>
+                    </div>
+                    {poItemsRemaining.length === 0 && !loadingPOItems ? (
+                      <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+                        No items on this PO.
                       </div>
+                    ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-border bg-muted/10">
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">#</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Code</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Received So Far</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Rate</th>
+                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
-                            {items.map((it: any, i: number) => (
-                              <tr key={i} className="hover:bg-muted/10 transition-colors">
-                                <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
-                                <td className="px-4 py-2.5 font-medium text-foreground">{it.ItemName || it.itemName || "—"}</td>
-                                <td className="px-4 py-2.5 font-mono text-muted-foreground">{it.ItemCode || it.itemCode || "—"}</td>
-                                <td className="px-4 py-2.5 text-right font-mono">{it.Quantity ?? it.quantity ?? "—"}</td>
-                                <td className="px-4 py-2.5 text-muted-foreground">{it.UomName || it.uomName || "—"}</td>
-                                <td className="px-4 py-2.5 text-right font-mono">
-                                  {it.Rate != null ? `₹${Number(it.Rate).toLocaleString("en-IN")}` : "—"}
-                                </td>
-                              </tr>
-                            ))}
+                            {poItemsRemaining.map((it, i) => {
+                              const raw = receivedQtyByItem[it.poItemId] ?? "";
+                              const entered = parseFloat(raw) || 0;
+                              const overLimit = entered > it.remainingQty + 1e-6;
+                              return (
+                                <tr key={it.poItemId} className="hover:bg-muted/10 transition-colors">
+                                  <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
+                                  <td className="px-4 py-2.5 font-medium text-foreground">{it.itemName || "—"}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono">{it.orderedQty}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{it.receivedSoFar}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono font-semibold">
+                                    {entered > 0 ? (
+                                      <span className="inline-flex items-baseline gap-1.5">
+                                        <span className="text-muted-foreground line-through">
+                                          {it.remainingQty}
+                                        </span>
+                                        <span
+                                          className={
+                                            overLimit
+                                              ? "text-destructive"
+                                              : "text-primary"
+                                          }
+                                        >
+                                          {Math.max(it.remainingQty - entered, 0)}
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={
+                                          it.remainingQty === 0
+                                            ? "text-muted-foreground"
+                                            : "text-primary"
+                                        }
+                                      >
+                                        {it.remainingQty}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-muted-foreground">{it.uomName || "—"}</td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={it.remainingQty}
+                                      step="any"
+                                      value={raw}
+                                      disabled={it.remainingQty === 0}
+                                      onChange={(e) => {
+                                        const nextVal = e.target.value;
+                                        const nextEntered =
+                                          parseFloat(nextVal) || 0;
+                                        if (
+                                          nextEntered > it.remainingQty + 1e-6 &&
+                                          entered <= it.remainingQty + 1e-6
+                                        ) {
+                                          toast.error(
+                                            `${it.itemName || "Item"}: quantity can't be greater than ${it.remainingQty} ${it.uomName || ""}`.trim(),
+                                          );
+                                        }
+                                        setReceivedQtyByItem((prev) => ({
+                                          ...prev,
+                                          [it.poItemId]: nextVal,
+                                        }));
+                                      }}
+                                      placeholder="0"
+                                      className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
+                                        overLimit ? "border-destructive text-destructive" : "border-border"
+                                      } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                  );
-                })()}
+                    )}
+                  </div>
+                )}
               </SectionCard>
 
               {/* ── Section 3: Vehicle Details ── */}
@@ -1481,6 +1651,7 @@ export default function VehicleInOut() {
                   <button
                     onClick={() => {
                       setForm(buildEmpty(activeFinYear));
+                      setReceivedQtyByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -1583,41 +1754,77 @@ export default function VehicleInOut() {
           </CardHeader>
 
           <CardContent className="p-0">
-            {/* Mobile: stacked cards (table is hard to use on phones) */}
-            <div
-              className={`sm:hidden p-3 space-y-3 transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
-            >
-              {filteredRecords.length === 0 ? (
-                <p className="text-center text-muted-foreground text-sm py-10">
-                  No Vehicle In/Out records. Click 'New Entry' to create one.
-                </p>
-              ) : (
-                filteredRecords.map((rec: any) => (
-                  <VehicleCard
-                    key={rec.VehicleInOutID}
-                    rec={rec}
-                    onView={_onView}
-                    onEdit={_onEdit}
-                    onDelete={_onDelete}
-                    canEdit={rights.canEdit}
-                    canDelete={rights.canDelete}
-                  />
-                ))
-              )}
-            </div>
+            {filteredRecords.length === 0 ? (
+              <p className="text-center text-muted-foreground text-sm py-10">
+                No Vehicle In/Out records. Click 'New Entry' to create one.
+              </p>
+            ) : (
+              groupedRecords.map((group) => {
+                const collapsed = !!collapsedGroups[group.key];
+                return (
+                  <div key={group.key} className="border-b border-border last:border-0">
+                    {/* Group header — one PO's lots grouped together */}
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.key)}
+                      className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                    >
+                      {collapsed ? (
+                        <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                      )}
+                      <FileText size={13} className="text-primary shrink-0" />
+                      <span className="text-sm font-heading font-semibold text-foreground">
+                        {group.poNumber || "No PO Linked"}
+                      </span>
+                      {group.supplierName && (
+                        <span className="text-xs text-muted-foreground truncate">
+                          · {group.supplierName}
+                        </span>
+                      )}
+                      <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        {group.rows.length} lot{group.rows.length !== 1 ? "s" : ""}
+                      </span>
+                    </button>
 
-            {/* Desktop / tablet: full table */}
-            <div
-              className={`hidden sm:block overflow-x-auto transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
-            >
-              <DataTable
-                data={filteredRecords}
-                columns={COLUMNS}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No Vehicle In/Out records. Click 'New Entry' to create one."
-              />
-            </div>
+                    {!collapsed && (
+                      <>
+                        {/* Mobile: stacked cards (table is hard to use on phones) */}
+                        <div
+                          className={`sm:hidden p-3 space-y-3 transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
+                        >
+                          {group.rows.map((rec: any) => (
+                            <VehicleCard
+                              key={rec.VehicleInOutID}
+                              rec={rec}
+                              onView={_onView}
+                              onEdit={_onEdit}
+                              onDelete={_onDelete}
+                              canEdit={rights.canEdit}
+                              canDelete={rights.canDelete}
+                            />
+                          ))}
+                        </div>
+
+                        {/* Desktop / tablet: full table */}
+                        <div
+                          className={`hidden sm:block overflow-x-auto transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
+                        >
+                          <DataTable
+                            data={group.rows}
+                            columns={COLUMNS}
+                            searchable={false}
+                            paginated={false}
+                            emptyMessage="No Vehicle In/Out records."
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
               <span>

@@ -136,6 +136,19 @@ export interface FollowupSummaryData {
   scheduledHandovers: number;
 }
 
+// "Other Expenses" bookings — direct/manual expense invoices stored with
+// ESourceType = 'TOD' (confirmed against live data), as opposed to
+// GRN/PO/WO_PO/WORK_DONE-sourced bookings. See MaterialExpenseBooking.tsx's
+// own comments on "Other Expenses (TOD) bookings have no descriptive
+// source document".
+export interface RecentOtherExpense {
+  Eid: number;
+  EDocNo: string;
+  ESupplierName: string | null;
+  EDocDate: string;
+  ENetAmount: number | null;
+}
+
 export interface SalesSummaryData {
   total: number;
   approved: number;
@@ -150,6 +163,7 @@ export interface HomeDashboardData {
   admin: AdminDashboardData | null;
   pendingApprovals: ApprovalInboxItem[];
   recentTasks: TaskSummary[];
+  recentOtherExpenses: RecentOtherExpense[];
   tickets: TicketSummaryData | null;
   engineering: EngineeringSummaryData | null;
   followup: FollowupSummaryData | null;
@@ -222,6 +236,10 @@ export async function fetchHomeDashboard(
     // Fetch active project count independently — engineering/dashboard is
     // permission-gated so non-engineering users would always see 0 otherwise.
     safeFetch<unknown>("/api/project-master"),
+    // Newest 30 expense bookings (any source) — filtered client-side below
+    // for the ones with no ESourceType (the "Other Expenses"/TOD direct
+    // invoices), since the endpoint has no source-type filter param.
+    hasMaterialAccess ? safeFetch<{ data: any[] }>("/api/expense-booking?limit=30&page=1") : skip,
   ] as const;
 
   const adminRequest = isAdmin
@@ -242,6 +260,7 @@ export async function fetchHomeDashboard(
     handoverRes,
     saleOrdersRes,
     projectMasterRes,
+    expenseBookingRes,
     adminRes,
   ] = await Promise.all([...baseRequests, adminRequest]);
 
@@ -342,12 +361,25 @@ export async function fetchHomeDashboard(
     totalAmount: soList.reduce((sum, o) => sum + (Number(o.TotalAmount) || 0), 0),
   };
 
+  const expenseBookingList: any[] = Array.isArray(expenseBookingRes.data?.data) ? expenseBookingRes.data.data : [];
+  const recentOtherExpenses: RecentOtherExpense[] = expenseBookingList
+    .filter((r) => r.ESourceType === "TOD")
+    .slice(0, 2)
+    .map((r) => ({
+      Eid: r.Eid,
+      EDocNo: r.EDocNo,
+      ESupplierName: r.ESupplierName ?? r.EName ?? null,
+      EDocDate: r.EDocDate,
+      ENetAmount: r.ENetAmount ?? r.EAmount ?? null,
+    }));
+
   return {
     finance: normalizeFinanceDashboard(financeRes.data),
     material: materialRes.data,
     admin: adminRes.data,
     pendingApprovals: Array.isArray(approvalRes.data) ? approvalRes.data : [],
     recentTasks: tasksRes.data?.data ?? (Array.isArray(tasksRes.data) ? (tasksRes.data as unknown as TaskSummary[]) : []),
+    recentOtherExpenses,
     tickets,
     engineering,
     followup,

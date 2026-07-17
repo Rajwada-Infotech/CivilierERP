@@ -41,6 +41,13 @@ import {
   Loader2,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import {
+  computeRemainingPOItems,
+  hasRemainingItems,
+  countRemainingItems,
+  buildGRNLineItemsFromRemaining,
+  type RemainingPOItem,
+} from "./grnRemainingItems";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const GRN_TEMPLATE_COLUMNS = [
@@ -762,6 +769,19 @@ function InfoPill({
   mono?: boolean;
 }) {
   if (!value) return null;
+  // Defensive: some callers derive `value` from `.find(...)` on loosely
+  // (`any[]`) typed lookups. If a caller's data shape ever mismatches and
+  // hands us an object instead of a string, rendering it directly used to
+  // crash the entire GRN page (React refuses objects as children) —
+  // degrade to the item's own name/label/docNo, or drop the pill, instead.
+  const safeValue =
+    typeof value === "string" || typeof value === "number"
+      ? value
+      : ((value as any)?.name ??
+        (value as any)?.label ??
+        (value as any)?.docNo ??
+        null);
+  if (!safeValue) return null;
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
       <span className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
@@ -770,7 +790,7 @@ function InfoPill({
       <span
         className={`text-xs font-semibold text-foreground truncate ${mono ? "font-mono" : ""}`}
       >
-        {value}
+        {safeValue}
       </span>
     </div>
   );
@@ -812,6 +832,11 @@ export default function GRN() {
   const [page, setPage] = useState(1);
   const [grnStatusFilter, setGrnStatusFilter] = useState("All");
   const [loadingPO, setLoadingPO] = useState(false);
+  const [pendingVehicleInOuts, setPendingVehicleInOuts] = useState<any[]>([]);
+  const [loadingVehicleInOuts, setLoadingVehicleInOuts] = useState(false);
+  const [poRemainingItems, setPoRemainingItems] = useState<RemainingPOItem[]>(
+    [],
+  );
   const [selectedFinYear, setSelectedFinYear] = useState<string>("");
   const [deleteBlockInfo, setDeleteBlockInfo] = useState<{
     reason: string;
@@ -833,18 +858,58 @@ export default function GRN() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const limit = 10;
 
-  const activeFinYear =
-    finYears.find((fy) => fy.status === "Active")?.year ||
-    [...finYears].sort((a, b) => b.year.localeCompare(a.year))[0]?.year ||
-    undefined;
+  const activeFinYearEntry =
+    finYears.find((fy) => fy.status === "Active") ||
+    [...finYears].sort((a, b) => b.year.localeCompare(a.year))[0];
+  const activeFinYear = activeFinYearEntry?.year || undefined;
+  // The GRN list endpoint filters by a derived "YYYY-YYYY" FinYear string
+  // (built from GRNDate, see GET /api/grns), not the FinYear label ("FY
+  // 2026-27") the context stores — passing the label made the filter never
+  // match anything and silently returned zero rows. Derive the same
+  // "YYYY-YYYY" shape from the active year's start date instead.
+  const activeFinYearRange = activeFinYearEntry?.startDate
+    ? `${new Date(activeFinYearEntry.startDate).getFullYear()}-${new Date(activeFinYearEntry.startDate).getFullYear() + 1}`
+    : undefined;
+
+  // Selectable years for the (now unlocked) Financial Year filter — same
+  // "YYYY-YYYY" shape as activeFinYearRange so it matches what the backend
+  // computes per-GRN.
+  const finYearOptions = useMemo(
+    () =>
+      finYears
+        .map((fy) =>
+          fy.startDate
+            ? `${new Date(fy.startDate).getFullYear()}-${new Date(fy.startDate).getFullYear() + 1}`
+            : null,
+        )
+        .filter((v, i, arr): v is string => !!v && arr.indexOf(v) === i)
+        .sort((a, b) => b.localeCompare(a)),
+    [finYears],
+  );
+
+  // Default the Financial Year filter to the active year once it loads, but
+  // leave it editable — matches PurchaseOrderMaster.tsx / VehicleInOut.tsx.
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYearRange)
+      setSelectedFinYear(activeFinYearRange);
+  }, [activeFinYearRange, selectedFinYear]);
 
   const buildEmptyForm = () => ({
     grnNo: "",
     grnDate: new Date().toISOString().slice(0, 10),
+    // Doc Date — always today's date, distinct from GRN Date which now
+    // tracks the linked Vehicle In/Out document's own date.
+    docDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
     supplierName: "",
     poId: "",
     poNumber: "",
+    vehicleInOutId: "" as string,
+    vehicleInOutDocNo: "" as string,
+    // Which of the two ways this GRN's items were sourced from — a
+    // specific Vehicle In/Out lot, or a direct "remaining items on this
+    // PO" quick-fill. Empty until the user picks one.
+    grnSourceMode: "" as "" | "vehicleInOut" | "remaining",
     poTotalAmount: 0 as number,
     poSubtotalAmount: 0 as number,
     poReceivedAmount: 0 as number,
@@ -952,14 +1017,11 @@ export default function GRN() {
           const status = (po as any).Status;
           if (status !== "Approved" && status !== "Received") return false;
           if (selectedFinYear) {
-            // Compare against FinYearName from the DB (same FName value the
-            // fin-year selector uses).  For older POs created before fy_id
-            // was wired up, FinYearName will be null — fall back to
-            // deriving the FY from PODate so they still appear under the
-            // correct financial year filter.
-            const poFY =
-              ((po as any).FinYearName as string | null | undefined) ||
-              deriveFYFromDate((po as any).PODate);
+            // selectedFinYear is a derived "YYYY-YYYY" string (see
+            // activeFinYearRange above) — always derive the PO's FY the
+            // same way from its date rather than comparing against the
+            // "FY YYYY-YY" label, which uses a different format.
+            const poFY = deriveFYFromDate((po as any).PODate);
             if (!poFY || poFY !== selectedFinYear) return false;
           }
           if (formData.companyId) {
@@ -1012,6 +1074,37 @@ export default function GRN() {
     );
   });
 
+  // ── Group by linked PO — every GRN raised against the same PO now shows
+  // together instead of scattered across the flat register, matching the
+  // same grouping VehicleInOut.tsx uses. GRNs with no PO link (transfer
+  // GRNs, older records) fall into one "No PO Linked" bucket. Group order
+  // follows first-appearance in the (already recency-sorted) page.
+  const groupedGrns = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; poNumber: string | null; supplierName: string | null; rows: any[] }
+    >();
+    for (const grn of filteredGrns) {
+      const key = grn.POID ? `po-${grn.POID}` : "no-po";
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          poNumber: grn.PONumber || null,
+          supplierName: grn.SupplierName || null,
+          rows: [],
+        });
+      }
+      groups.get(key)!.rows.push(grn);
+    }
+    return Array.from(groups.values());
+  }, [filteredGrns]);
+
+  const [collapsedGrnGroups, setCollapsedGrnGroups] = useState<
+    Record<string, boolean>
+  >({});
+  const toggleGrnGroup = (key: string) =>
+    setCollapsedGrnGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+
   // base total (excl. GST) — used for stock ledger and line display
   const grandTotal = formData.items.reduce(
     (sum, i) => sum + (i.totalAmount || 0),
@@ -1026,10 +1119,19 @@ export default function GRN() {
   const grnTotalWithGST = grandTotal + grandGSTAmount;
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
+  // Cache-version bumps (bumpCacheVersion("grns") on the backend) take a
+  // beat to propagate across backend workers before a refetch is
+  // guaranteed to see fresh data — PurchaseOrderMaster.tsx's approval flow
+  // already works around this with the same delay (see its
+  // handleApprovalSuccess). GRN's create/update/delete didn't have it,
+  // which is why the list looked stale until a manual browser refresh.
+  const CACHE_PROPAGATION_DELAY_MS = 400;
+
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: async (res) => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       const generated = res?.grnNo || "";
@@ -1048,6 +1150,7 @@ export default function GRN() {
       grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       setFormData(buildEmptyForm());
@@ -1063,6 +1166,7 @@ export default function GRN() {
     mutationFn: grnApi.deleteGRN,
     onSuccess: async () => {
       setPage(1);
+      await new Promise((r) => setTimeout(r, CACHE_PROPAGATION_DELAY_MS));
       await queryClient.invalidateQueries({ queryKey: ["grns"] });
       await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       toast.success("GRN deleted");
@@ -1099,6 +1203,9 @@ export default function GRN() {
         ...prev,
         poId: "",
         poNumber: "",
+        vehicleInOutId: "",
+        vehicleInOutDocNo: "",
+        grnSourceMode: "",
         supplierId: "",
         supplierName: "",
         items: [createEmptyItem()],
@@ -1110,6 +1217,8 @@ export default function GRN() {
         poTotalAmount: 0,
         poSubtotalAmount: 0,
       }));
+      setPendingVehicleInOuts([]);
+      setPoRemainingItems([]);
       return;
     }
     setLoadingPO(true);
@@ -1118,34 +1227,24 @@ export default function GRN() {
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
-      const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => {
-        const rate = Number(li.Rate ?? 0);
-        const quantity = Number(li.Quantity ?? 0);
-        // TaxPct is stored per line in PurchaseOrderItems, sourced from ItemMaster (HSN master)
-        const gstPct = Number(li.TaxPct ?? 0);
-        return {
-          itemId: String(li.ItemId ?? ""),
-          itemName: li.ItemName ?? li.Description ?? "",
-          orderedQty: quantity,
-          receivedQty: 0,
-          remainingQty: quantity,
-          uom: li.UomName ?? li.UomId ?? "",
-          rate,
-          quantity: 0,
-          totalAmount: 0,
-          gstPct,
-          gstAmount: 0,
-        };
-      });
+      setPoRemainingItems(computeRemainingPOItems(po));
 
       setFormData((prev) => ({
         ...prev,
         poId,
         poNumber: po.PurchaseOrderNo ?? "",
+        vehicleInOutId: "",
+        vehicleInOutDocNo: "",
+        grnSourceMode: "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
+        // Auto-fill Company + Project straight from the PO — picking a PO
+        // first (without narrowing by company/project beforehand) now
+        // works the same as the other direction. Godown follows via the
+        // existing projectId-watching effect below.
+        companyId: po.CompanyId ? String(po.CompanyId) : prev.companyId,
         projectId: po.ProjectId ? String(po.ProjectId) : prev.projectId,
-        items: lineItems.length ? lineItems : [createEmptyItem()],
+        items: [createEmptyItem()],
         docTypeId: null,
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
         rootExBDocNo: po.RootExBDocNo || "",
@@ -1156,11 +1255,114 @@ export default function GRN() {
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
       }));
+
+      // GRNs are now raised only against a Vehicle In/Out document linked to
+      // this PO — fetch the ones that don't already have a GRN.
+      setLoadingVehicleInOuts(true);
+      try {
+        const vioRes = await fetchWithAuth(
+          `/api/vehicle-in-out/po/${poId}/pending-grn`,
+        );
+        const vios = vioRes.ok ? await vioRes.json() : [];
+        setPendingVehicleInOuts(Array.isArray(vios) ? vios : []);
+        if (!vios || vios.length === 0) {
+          toast.info(
+            "No Vehicle In/Out documents pending a GRN were found for this Purchase Order.",
+          );
+        }
+      } catch {
+        setPendingVehicleInOuts([]);
+      } finally {
+        setLoadingVehicleInOuts(false);
+      }
     } catch (e: any) {
       toast.error(e.message || "Failed to load PO details");
     } finally {
       setLoadingPO(false);
     }
+  };
+
+  // ── Vehicle In/Out select — loads GRN line items from the chosen lot ─────────
+  const handleVehicleInOutSelect = async (vehicleInOutId: string) => {
+    if (!vehicleInOutId) {
+      setFormData((prev) => ({
+        ...prev,
+        vehicleInOutId: "",
+        vehicleInOutDocNo: "",
+        grnSourceMode: "",
+        grnDate: new Date().toISOString().slice(0, 10),
+        items: [createEmptyItem()],
+      }));
+      return;
+    }
+    setLoadingPO(true);
+    try {
+      const res = await fetchWithAuth(
+        `/api/vehicle-in-out/${vehicleInOutId}/items-enriched`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch Vehicle In/Out items");
+      const items = await res.json();
+
+      const lineItems: GRNItemLine[] = (items ?? []).map((it: any) => {
+        const rate = Number(it.Rate ?? 0);
+        const vehicleQty = Number(it.VehicleQty ?? 0);
+        const gstPct = Number(it.TaxPct ?? 0);
+        const totalAmount = rate * vehicleQty;
+        return {
+          itemId: String(it.ItemId ?? ""),
+          itemName: it.ItemName ?? "",
+          orderedQty: vehicleQty,
+          receivedQty: vehicleQty,
+          remainingQty: 0,
+          uom: it.UomName ?? "",
+          rate,
+          quantity: vehicleQty,
+          totalAmount,
+          gstPct,
+          gstAmount: totalAmount * (gstPct / 100),
+        };
+      });
+
+      const vio = pendingVehicleInOuts.find(
+        (v) => String(v.VehicleInOutID) === vehicleInOutId,
+      );
+
+      setFormData((prev) => ({
+        ...prev,
+        vehicleInOutId,
+        vehicleInOutDocNo: vio?.DocNo ?? "",
+        grnSourceMode: "vehicleInOut",
+        // GRN Date now tracks the linked Vehicle In/Out document's own
+        // date — the goods were received on that date, not today.
+        grnDate: vio?.DocDate
+          ? String(vio.DocDate).slice(0, 10)
+          : prev.grnDate,
+        items: lineItems.length ? lineItems : [createEmptyItem()],
+      }));
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load Vehicle In/Out items");
+    } finally {
+      setLoadingPO(false);
+    }
+  };
+
+  // ── Use remaining PO items directly — second way to raise a GRN for
+  // what's left on a PO, alongside picking a Vehicle In/Out lot. Lets the
+  // same PO be received across as many GRNs as needed without requiring
+  // a Vehicle In/Out document for every split.
+  const handleUseRemainingItems = () => {
+    if (!hasRemainingItems(poRemainingItems)) return;
+    setFormData((prev) => ({
+      ...prev,
+      vehicleInOutId: "",
+      vehicleInOutDocNo: "",
+      grnSourceMode: "remaining",
+      grnDate: new Date().toISOString().slice(0, 10),
+      items: buildGRNLineItemsFromRemaining(poRemainingItems),
+    }));
+    toast.success(
+      `Form filled with ${countRemainingItems(poRemainingItems)} remaining item${countRemainingItems(poRemainingItems) !== 1 ? "s" : ""} from this PO`,
+    );
   };
 
   // ── Create new GRN from remaining items ───────────────────────────────────────
@@ -1192,39 +1394,21 @@ export default function GRN() {
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
-      // Build items using remainingQty from pending as the new receivedQty
-      const pendingMap = new Map(
-        pending.pendingItems.map((p) => [String(p.itemId), p]),
-      );
-
-      const lineItems: GRNItemLine[] = (po.LineItems ?? [])
-        .map((li: any) => {
-          const p = pendingMap.get(String(li.ItemId ?? ""));
-          if (!p || p.remainingQty <= 0) return null;
-          const rate = Number(li.Rate ?? p.rate ?? 0);
-          const gstPct = Number(li.TaxPct ?? 0);
-          const receivedQty = p.remainingQty;
-          const totalAmount = rate * receivedQty;
-          return {
-            itemId: String(li.ItemId ?? ""),
-            itemName: li.ItemName ?? li.Description ?? p.itemName ?? "",
-            orderedQty: p.orderedQty,
-            receivedQty,
-            remainingQty: 0, // will be recalculated on qty change
-            uom: li.UomName ?? li.UomId ?? p.uom ?? "",
-            rate,
-            quantity: receivedQty, // default billing qty = received qty
-            totalAmount,
-            gstPct,
-            gstAmount: totalAmount * (gstPct / 100),
-          } as GRNItemLine;
-        })
-        .filter(Boolean) as GRNItemLine[];
+      // Same "what's left on this PO" logic used by the main form's
+      // "Create GRN for Remaining Items" quick action — computed fresh
+      // from the PO's own Ordered/ReceivedQty rather than the specific
+      // pending-items snapshot passed in, so it reflects anything else
+      // received against this PO since that snapshot was taken.
+      const remaining = computeRemainingPOItems(po);
+      const lineItems = buildGRNLineItemsFromRemaining(remaining);
 
       setFormData({
         ...buildEmptyForm(),
         poId: String(po.PurchaseOrderID ?? pending.poId),
         poNumber: po.PurchaseOrderNo ?? "",
+        vehicleInOutId: "",
+        vehicleInOutDocNo: "",
+        grnSourceMode: "remaining",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
         companyId: po.CompanyId ? String(po.CompanyId) : "",
@@ -1238,6 +1422,7 @@ export default function GRN() {
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
       });
+      setPoRemainingItems(remaining);
       setEditingId(null);
       setShowForm(true);
       setErrors({});
@@ -1256,6 +1441,11 @@ export default function GRN() {
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!formData.poId) errs.poId = "Purchase Order is required";
+    // Two valid ways to source this GRN's items: a specific Vehicle
+    // In/Out lot, or a direct "remaining items on this PO" quick-fill.
+    if (!formData.vehicleInOutId && formData.grnSourceMode !== "remaining")
+      errs.vehicleInOutId =
+        "Select a Vehicle In/Out document, or use \"Create GRN for Remaining Items\"";
     if (!formData.supplierId)
       errs.supplierId = "Supplier could not be determined";
     if (formData.items.every((i) => i.receivedQty <= 0))
@@ -1284,6 +1474,9 @@ export default function GRN() {
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
+      vehicleInOutId: formData.vehicleInOutId
+        ? Number(formData.vehicleInOutId)
+        : null,
       grnItems: formData.items,
       status: "Draft",
       remarks: formData.remarks,
@@ -1373,10 +1566,18 @@ export default function GRN() {
     setFormData({
       grnNo: fullGrn.GRNNo || "",
       grnDate: fullGrn.GRNDate ? String(fullGrn.GRNDate).slice(0, 10) : "",
+      docDate: fullGrn.DocDate
+        ? String(fullGrn.DocDate).slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
       supplierId: String(fullGrn.SupplierID || ""),
       supplierName: fullGrn.SupplierName || "",
       poId: String(fullGrn.POID || ""),
       poNumber: fullGrn.PONumber || "",
+      vehicleInOutId: fullGrn.VehicleInOutID
+        ? String(fullGrn.VehicleInOutID)
+        : "",
+      vehicleInOutDocNo: fullGrn.documentChain?.vehicleInOut?.docNo || "",
+      grnSourceMode: fullGrn.VehicleInOutID ? "vehicleInOut" : "remaining",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
       poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
@@ -1562,38 +1763,22 @@ export default function GRN() {
                   <div>
                     <FieldLabel>Financial Year</FieldLabel>
                     <div className="relative">
+                      {/* Defaults to the active financial year but stays
+                          editable — some GRNs are booked against a prior
+                          year (e.g. late entries). */}
                       <select
                         value={selectedFinYear}
-                        onChange={(e) => {
-                          setSelectedFinYear(e.target.value);
-                          setPage(1);
-                          setFormData((prev) => ({
-                            ...prev,
-                            companyId: "",
-                            projectId: "",
-                            poId: "",
-                            poNumber: "",
-                            supplierId: "",
-                            supplierName: "",
-                            items: [createEmptyItem()],
-                            grnNo: "",
-                            docNo: "",
-                            parentDocNo: "",
-                            rootExBDocNo: "",
-                            finYear: e.target.value,
-                          }));
-                        }}
+                        onChange={(e) => setSelectedFinYear(e.target.value)}
                         className={inpSel}
                       >
-                        <option value="">All Years</option>
-                        {finYears
-                          .filter((fy) => fy.status === "Active" && !fy.locked)
-                          .sort((a, b) => b.year.localeCompare(a.year))
-                          .map((fy) => (
-                            <option key={fy.id} value={fy.year}>
-                              {fy.year}
-                            </option>
-                          ))}
+                        {finYearOptions.length === 0 && (
+                          <option value="">Loading…</option>
+                        )}
+                        {finYearOptions.map((fy) => (
+                          <option key={fy} value={fy}>
+                            {fy}
+                          </option>
+                        ))}
                       </select>
                       <ChevronDown
                         size={12}
@@ -1753,7 +1938,168 @@ export default function GRN() {
                       </p>
                     )}
                   </div>
+
+                  {/* Vehicle In/Out — only shown once a PO is selected. One
+                      of two ways to source this GRN's items: pick a Vehicle
+                      In/Out lot linked to this PO that doesn't already have
+                      a GRN, or use "Remaining Items" below instead. */}
+                  {formData.poId && (
+                    <div className="sm:col-span-2">
+                      <FieldLabel required={formData.grnSourceMode !== "remaining"}>
+                        Vehicle In/Out Document
+                      </FieldLabel>
+                      <div className="relative">
+                        <select
+                          value={formData.vehicleInOutId}
+                          onChange={(e) =>
+                            handleVehicleInOutSelect(e.target.value)
+                          }
+                          disabled={
+                            !!editingId ||
+                            loadingPO ||
+                            loadingVehicleInOuts ||
+                            formData.grnSourceMode === "remaining"
+                          }
+                          className={`${inpSel} ${!!editingId || loadingPO || loadingVehicleInOuts || formData.grnSourceMode === "remaining" ? "opacity-60 cursor-not-allowed" : ""}`}
+                        >
+                          <option value="">
+                            {loadingVehicleInOuts
+                              ? "Loading…"
+                              : pendingVehicleInOuts.length === 0
+                                ? "No pending Vehicle In/Out documents for this PO"
+                                : "Select Vehicle In/Out…"}
+                          </option>
+                          {pendingVehicleInOuts.map((v) => (
+                            <option
+                              key={v.VehicleInOutID}
+                              value={String(v.VehicleInOutID)}
+                            >
+                              {v.DocNo} — {v.VehicleNo || "No Vehicle No"}
+                              {v.DocDate
+                                ? ` (${new Date(v.DocDate).toLocaleDateString("en-IN")})`
+                                : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          size={12}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                      {errors.vehicleInOutId && (
+                        <p className="text-destructive text-[11px] mt-1">
+                          {errors.vehicleInOutId}
+                        </p>
+                      )}
+                      {formData.grnSourceMode === "remaining" && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Sourced from remaining PO items instead — clear it below to pick a Vehicle In/Out lot.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Remaining PO Items — the second way to raise a GRN
+                    against this PO, grouped alongside the linked PO
+                    itself rather than routed through a Vehicle In/Out
+                    lot. Lets the same PO be split across as many GRNs as
+                    needed as quantities trickle in. */}
+                {formData.poId &&
+                  !editingId &&
+                  poRemainingItems.length > 0 && (
+                    <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-muted/20">
+                        <RotateCcw
+                          size={12}
+                          className="text-emerald-600/80 dark:text-emerald-400/80 shrink-0"
+                        />
+                        <span className="text-xs font-semibold text-foreground">
+                          Remaining Items on this PO
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {countRemainingItems(poRemainingItems)} of{" "}
+                          {poRemainingItems.length} item
+                          {poRemainingItems.length !== 1 ? "s" : ""} left
+                        </span>
+                      </div>
+                      {hasRemainingItems(poRemainingItems) ? (
+                        <>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-muted/10 border-b border-border">
+                                  <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                    Item
+                                  </th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                    Ordered
+                                  </th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                    Received
+                                  </th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                                    Remaining
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border">
+                                {poRemainingItems
+                                  .filter((it) => it.remainingQty > 1e-6)
+                                  .map((it, idx) => (
+                                    <tr key={idx}>
+                                      <td className="px-3 py-1.5 font-medium text-foreground max-w-[200px] truncate">
+                                        {it.itemName || `Item ${idx + 1}`}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                                        {it.orderedQty}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                                        {it.receivedQty}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                        {it.remainingQty}
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="px-4 py-2.5 border-t border-border">
+                            <button
+                              type="button"
+                              onClick={handleUseRemainingItems}
+                              disabled={
+                                loadingPO ||
+                                formData.grnSourceMode === "vehicleInOut"
+                              }
+                              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                                formData.grnSourceMode === "remaining"
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default"
+                                  : formData.grnSourceMode === "vehicleInOut"
+                                    ? "border-border text-muted-foreground opacity-50 cursor-not-allowed"
+                                    : "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                              }`}
+                            >
+                              {formData.grnSourceMode === "remaining" ? (
+                                <>
+                                  <CheckCircle2 size={13} /> Using Remaining Items
+                                </>
+                              ) : (
+                                <>
+                                  <CopyPlus size={13} /> Create GRN for Remaining Items
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="px-4 py-4 text-center text-xs text-muted-foreground">
+                          Fully received — no quantity left to receive on this PO.
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 {/* Autofilled chips */}
                 {formData.poId && !loadingPO && (
@@ -1761,6 +2107,13 @@ export default function GRN() {
                     <InfoPill label="Supplier" value={formData.supplierName} />
                     <InfoPill label="PO No" value={formData.poNumber} mono />
                     <InfoPill label="Fin Year" value={formData.finYear} />
+                    {formData.vehicleInOutDocNo && (
+                      <InfoPill
+                        label="Vehicle In/Out"
+                        value={formData.vehicleInOutDocNo}
+                        mono
+                      />
+                    )}
                     {formData.projectId && (
                       <InfoPill
                         label="Project"
@@ -1775,8 +2128,8 @@ export default function GRN() {
                 )}
               </SectionCard>
 
-              {/* ── Section 2: Date + GRN Number ── */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* ── Section 2: Dates + GRN Number ── */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <FieldLabel>GRN Date</FieldLabel>
                   <div className="relative">
@@ -1784,13 +2137,36 @@ export default function GRN() {
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
+                    {/* Tracks the linked Vehicle In/Out document's date —
+                        goods are received on that date, not necessarily
+                        today, so this is no longer freely editable. */}
                     <input
                       type="date"
                       value={formData.grnDate}
-                      onChange={(e) =>
-                        setFormData((p) => ({ ...p, grnDate: e.target.value }))
-                      }
-                      className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                      readOnly
+                      disabled
+                      title="GRN Date follows the linked Vehicle In/Out document's date"
+                      className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>Doc Date</FieldLabel>
+                  <div className="relative">
+                    <Calendar
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    {/* Locked to today — entries are dated when they're
+                        actually made, not backdated/postdated. */}
+                    <input
+                      type="date"
+                      value={formData.docDate}
+                      readOnly
+                      disabled
+                      title="Doc date is always today's date"
+                      className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
                     />
                   </div>
                 </div>
@@ -2319,18 +2695,67 @@ export default function GRN() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div
-                className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
-              >
-                <DataTable
-                  data={filteredGrns}
-                  columns={GRN_LIST_COLUMNS}
-                  searchable={false}
-                  paginated={true}
-                  defaultPageSize={20}
-                  emptyMessage="No GRNs found. Click 'New GRN' to create one."
-                />
-              </div>
+              {filteredGrns.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No GRNs found. Click 'New GRN' to create one.
+                </p>
+              ) : (
+                groupedGrns.map((group) => {
+                  const collapsed = !!collapsedGrnGroups[group.key];
+                  return (
+                    <div
+                      key={group.key}
+                      className="border-b border-border last:border-0"
+                    >
+                      {/* Group header — one PO's GRNs grouped together */}
+                      <button
+                        type="button"
+                        onClick={() => toggleGrnGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight
+                            size={14}
+                            className="text-muted-foreground shrink-0"
+                          />
+                        ) : (
+                          <ChevronDown
+                            size={14}
+                            className="text-muted-foreground shrink-0"
+                          />
+                        )}
+                        <FileText size={13} className="text-primary shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          {group.poNumber || "No PO Linked"}
+                        </span>
+                        {group.supplierName && (
+                          <span className="text-xs text-muted-foreground truncate">
+                            · {group.supplierName}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.rows.length} GRN
+                          {group.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+
+                      {!collapsed && (
+                        <div
+                          className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
+                        >
+                          <DataTable
+                            data={group.rows}
+                            columns={GRN_LIST_COLUMNS}
+                            searchable={false}
+                            paginated={false}
+                            emptyMessage="No GRNs found."
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
                 <span>
@@ -2907,7 +3332,7 @@ export default function GRN() {
                                   {row.label}{row.code ? ` (${row.code})` : ""}
                                 </span>
                               </div>
-                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre || "—"}</span>
+                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
                               <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
                                 {row.side === "debit" ? fmt(row.amount) : ""}
                               </span>

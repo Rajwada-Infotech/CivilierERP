@@ -31,6 +31,7 @@ export function NavSheet() {
   const [open, setOpen] = useState(false);
   const [activeRoute, setActiveRoute] = useState<string | undefined>("Dashboard");
   const slide = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const unsub = navigationRef.addListener?.("state", () => {
@@ -38,6 +39,19 @@ export function NavSheet() {
     });
     return unsub;
   }, []);
+
+  // Pulsing glow behind the FAB — RN port of the web trigger's
+  // `animate-pulse` blurred halo (MobileNav.tsx).
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
 
   const openSheet = () => {
     setOpen(true);
@@ -69,25 +83,35 @@ export function NavSheet() {
   return (
     <>
       {/* FAB trigger */}
-      <Pressable
-        onPress={openSheet}
-        style={{ position: "absolute", right: 20, bottom: insets.bottom + 20 }}
-      >
-        <View
-          className="flex-row items-center gap-2 px-4 py-3 rounded-2xl"
+      <View style={{ position: "absolute", right: 20, bottom: insets.bottom + 20 }}>
+        <Animated.View
+          pointerEvents="none"
           style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 20,
             backgroundColor: colors.primary,
-            shadowColor: colors.primary,
-            shadowOpacity: 0.5,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 },
-            elevation: 8,
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }),
+            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) }],
           }}
-        >
-          <Grip size={16} color="#fff" />
-          <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>Menu</Text>
-        </View>
-      </Pressable>
+        />
+        <Pressable onPress={openSheet}>
+          <View
+            className="flex-row items-center gap-2 px-4 py-3 rounded-2xl"
+            style={{
+              backgroundColor: colors.primary,
+              shadowColor: colors.primary,
+              shadowOpacity: 0.5,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              elevation: 8,
+            }}
+          >
+            <Grip size={16} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>Menu</Text>
+          </View>
+        </Pressable>
+      </View>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={closeSheet}>
         <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={closeSheet}>
@@ -103,6 +127,7 @@ export function NavSheet() {
               borderTopRightRadius: 24,
               borderWidth: 1,
               borderColor: colors.border,
+              overflow: "hidden",
               transform: [
                 {
                   translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }),
@@ -111,7 +136,7 @@ export function NavSheet() {
             }}
           >
             <Pressable onPress={() => {}}>
-              <View style={{ height: 3, backgroundColor: colors.primary, borderTopLeftRadius: 24, borderTopRightRadius: 24 }} />
+              <View style={{ height: 3, backgroundColor: colors.primary }} />
 
               {/* Drag handle */}
               <View className="items-center pt-2 pb-1">

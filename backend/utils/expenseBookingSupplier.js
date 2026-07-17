@@ -67,7 +67,27 @@ function expenseBookingSupplierSql(ebAlias, suffix) {
             ELSE ${directSuppT}.LHeadId
           END`;
 
-  return { joins, nameExpr, idExpr };
+  // Whether the resolved supplier/contractor is GST-registered — reuses the
+  // exact same joins as nameExpr/idExpr above, no extra JOINs needed. A
+  // supplier counts as registered when LGSTType is explicitly 'Registered'
+  // OR (for older rows saved before that field existed) it simply has a
+  // GST number on file; everything else — including no matching supplier
+  // row at all — is treated as unregistered, so a booking never silently
+  // defaults to "GST Bill" just because the type wasn't set.
+  const gstRegisteredExpr = `
+          CASE
+            WHEN ${ebAlias}.ESourceType = 'GRN' AND ${ebAlias}.ESourceId IS NOT NULL
+              THEN CASE WHEN ${grnSuppT}.LGSTType = 'Registered' OR (${grnSuppT}.LGSTType IS NULL AND ISNULL(${grnSuppT}.LGST, '') <> '') THEN 1 ELSE 0 END
+            WHEN ${ebAlias}.ESourceType IN ('PO','WO_PO')
+              THEN CASE WHEN ${poSuppT}.LGSTType = 'Registered' OR (${poSuppT}.LGSTType IS NULL AND ISNULL(${poSuppT}.LGST, '') <> '') THEN 1 ELSE 0 END
+            WHEN ${ebAlias}.ESourceType = 'WORK_DONE'
+              THEN CASE WHEN ${wdSuppT}.LGSTType = 'Registered' OR (${wdSuppT}.LGSTType IS NULL AND ISNULL(${wdSuppT}.LGST, '') <> '') THEN 1 ELSE 0 END
+            WHEN ${ebAlias}.ESourceType = 'WO'
+              THEN CASE WHEN ${woSuppT}.LGSTType = 'Registered' OR (${woSuppT}.LGSTType IS NULL AND ISNULL(${woSuppT}.LGST, '') <> '') THEN 1 ELSE 0 END
+            ELSE CASE WHEN ${directSuppT}.LGSTType = 'Registered' OR (${directSuppT}.LGSTType IS NULL AND ISNULL(${directSuppT}.LGST, '') <> '') THEN 1 ELSE 0 END
+          END`;
+
+  return { joins, nameExpr, idExpr, gstRegisteredExpr };
 }
 
 module.exports = { expenseBookingSupplierSql };

@@ -259,6 +259,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     poId: null,
     supplier: "",
     supplierLHeadId: null,
+    supplierGstRegistered: undefined,
     projectSite: "",
     materialCategory: "",
     invoiceReference: "",
@@ -375,6 +376,10 @@ export function dbToRecord(row: any): ExpenseRecord {
     poId: null,
     supplier: row.ESupplierName ?? row.EName ?? "",
     supplierLHeadId: row.ESupplierId ?? row.LHeadId ?? null,
+    supplierGstRegistered:
+      row.ESupplierGstRegistered != null
+        ? Boolean(Number(row.ESupplierGstRegistered))
+        : undefined,
     projectSite: projectEnterpriseIdValid ? String(projectEnterpriseId) : "",
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",

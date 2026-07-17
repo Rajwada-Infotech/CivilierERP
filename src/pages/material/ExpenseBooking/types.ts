@@ -93,6 +93,9 @@ export interface ExpenseRecord {
    *  (non PO/WO/GRN-linked) bookings, where the backend has no source document to
    *  derive the supplier from and relies on this instead (ExpenseBooking.LHeadId). */
   supplierLHeadId?: number | null;
+  /** Whether the resolved supplier/contractor is GST-registered — drives the
+   *  "GST Bill" / "Non GST Bill" badge on the invoice list. */
+  supplierGstRegistered?: boolean;
   projectSite: string;
   materialCategory: string;
   invoiceReference: string;
@@ -348,6 +351,10 @@ export interface SelectedDoc {
   date?: string;
   gst?: GSTConfig | null;
   grnItems?: GRNItemLine[];
+  /** Set only when multiple GRNs (same PO) were combined into this one
+   *  invoice — see ExpenseBooking/invoiceLinking.ts. */
+  linkedGrnIds?: number[];
+  linkedGrnDocNos?: string[];
 }
 
 export interface GRNItem {
@@ -419,4 +426,7 @@ export interface DocSelectorProps {
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
   onTodSelected?: (tod: TodItem | null) => void;
+  /** Combines several selected GRNs (same PO) into one invoice — the
+   *  second way to link GRNs, alongside picking one at a time. */
+  onSelectMultiGRN?: (grns: GRNItem[]) => void;
 }
