@@ -188,8 +188,10 @@ const grnBodySchema = z
   .object({
     grnNo: optStr(50),
     grnDate: reqDate("GRN date is required"),
+    docDate: optDate,
     supplierId: reqInt("Supplier is required"),
     poId: optInt,
+    vehicleInOutId: optInt,
     grnItems: z.union([z.array(grnItemSchema), z.string()]).optional(),
     status: optStr(50),
     remarks: optStr(4000),

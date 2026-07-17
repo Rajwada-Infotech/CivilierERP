@@ -17,7 +17,7 @@ import {
 } from "@/api/newPaymentApi";
 import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { getOABalanceByRef } from "@/api/onAccountApi";
+import { getOABalanceByRef, getOAAdjustmentsForInvoice, type OAInvoiceAdjustment } from "@/api/onAccountApi";
 import { getPaymentReasonOptions } from "@/api/paymentReasonApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
@@ -581,6 +581,9 @@ const Payment: React.FC = () => {
       totalInclGST: number;
     };
   } | null>(null);
+  const [oaAdjustmentsForInvoice, setOaAdjustmentsForInvoice] = useState<
+    OAInvoiceAdjustment[]
+  >([]);
   const [, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
@@ -1069,10 +1072,101 @@ const Payment: React.FC = () => {
           }
         };
 
+        // Same as applyGrnBreakdown, but sums the breakdown across every
+        // linked GRN instead of fetching just one — the total for a
+        // combined invoice is the sum of all its source GRNs, not any
+        // single one of them.
+        const applyMultiGrnBreakdown = async (grnIds: number[]) => {
+          try {
+            const results = await Promise.all(
+              grnIds.map((id) =>
+                fetchWithAuth(`/api/grns/${id}/gst-breakdown`)
+                  .then((r) => (r.ok ? r.json() : null))
+                  .catch(() => null),
+              ),
+            );
+            const valid = results.filter(
+              (bd): bd is NonNullable<typeof bd> =>
+                !!bd && bd.totals?.totalInclGST > 0,
+            );
+            if (valid.length === 0) return;
+
+            const totals = valid.reduce(
+              (acc, bd) => ({
+                totalBase: acc.totalBase + (bd.totals.totalBase || 0),
+                totalCGST: acc.totalCGST + (bd.totals.totalCGST || 0),
+                totalSGST: acc.totalSGST + (bd.totals.totalSGST || 0),
+                totalGST: acc.totalGST + (bd.totals.totalGST || 0),
+                totalInclGST: acc.totalInclGST + (bd.totals.totalInclGST || 0),
+              }),
+              { totalBase: 0, totalCGST: 0, totalSGST: 0, totalGST: 0, totalInclGST: 0 },
+            );
+            const items = valid.flatMap((bd) => bd.items ?? []);
+            const combined = { items, totals };
+            setGrnGstBreakdown(combined);
+
+            const avgCGST =
+              totals.totalBase > 0 ? (totals.totalCGST / totals.totalBase) * 100 : 0;
+            const avgSGST =
+              totals.totalBase > 0 ? (totals.totalSGST / totals.totalBase) * 100 : 0;
+
+            let billingTerms: any[] = [];
+            try {
+              const raw = detail.EBillingTermsData ?? detail.EDiscountData ?? null;
+              if (raw) {
+                let parsed = JSON.parse(raw);
+                if (typeof parsed === "string") parsed = JSON.parse(parsed);
+                billingTerms = Array.isArray(parsed) ? parsed : [];
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+
+            const netPayable =
+              billingTerms.length > 0
+                ? computeGrnNetWithTerms(
+                    totals.totalInclGST,
+                    billingTerms,
+                    totals.totalBase,
+                  )
+                : Math.round(totals.totalInclGST * 100) / 100;
+
+            setForm((prev) => ({
+              ...prev,
+              amount: amountOverride != null ? amountOverride : netPayable,
+              baseAmount: Math.round(totals.totalBase * 100) / 100,
+              cgstRate: Math.round(avgCGST * 100) / 100,
+              sgstRate: Math.round(avgSGST * 100) / 100,
+              igstRate: 0,
+            }));
+          } catch {
+            /* non-fatal */
+          }
+        };
+
+        // Multi-GRN combined invoices (see MaterialExpenseBooking's
+        // "combine multiple GRNs" flow) have several source GRNs, not one —
+        // applyGrnBreakdown(detail.ESourceId) would only fetch the primary
+        // GRN's breakdown and silently overwrite the correct combined
+        // amount with just that one GRN's total. Sum every linked GRN's
+        // breakdown instead.
+        let linkedGrnIds: number[] = [];
+        try {
+          const raw = (detail as any).ELinkedGrnIds;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) linkedGrnIds = parsed;
+          }
+        } catch {
+          /* not multi-GRN */
+        }
+
         // If this expense is linked to a GRN directly, fetch the per-item GST breakdown.
         // For PO/WO_PO-linked bookings, find the GRN created against that PO and use its breakdown —
         // because the actual GST lives in the GRN items (PO stores rates but GRN stores received actuals).
-        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+        if (linkedGrnIds.length > 1) {
+          await applyMultiGrnBreakdown(linkedGrnIds);
+        } else if (detail.ESourceType === "GRN" && detail.ESourceId) {
           await applyGrnBreakdown(detail.ESourceId);
         } else if (
           (detail.ESourceType === "PO" || detail.ESourceType === "WO_PO") &&
@@ -1095,6 +1189,15 @@ const Payment: React.FC = () => {
         } else {
           setGrnGstBreakdown(null);
         }
+
+        // Show any On Account adjustments already applied to this invoice
+        // (see backend/utils/oaAdjustments.js) — e.g. "On A/C adjusted with
+        // ₹30,000 from Shiv Shakti Building Materials" — so picking the
+        // same invoice again for payment doesn't look like the adjustment
+        // never happened.
+        getOAAdjustmentsForInvoice(detail.EDocNo || "").then(
+          setOaAdjustmentsForInvoice,
+        );
 
         // When amountOverride is provided (Pay Remaining / partial invoice click),
         // use it directly — it was computed from live chain data.
@@ -1262,6 +1365,7 @@ const Payment: React.FC = () => {
     }));
     setLinkedGRNs([]);
     setGrnGstBreakdown(null);
+    setOaAdjustmentsForInvoice([]);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setSupplierBookingFilter("");
@@ -2091,16 +2195,18 @@ const Payment: React.FC = () => {
               {form.expenseRef && (() => {
                 const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
                 if (!opt || opt.type === "emi") return null;
-                // Prefer the GRN item-level total (incl. GST) when breakdown has loaded;
-                // grn.TotalAmount stored in the DB is often the pre-tax base only.
-                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
-                const netAmt = grnTotal > 0 ? grnTotal : (opt.amount ?? 0);
+                // opt.amount is the stored ENetAmount (GST + billing terms
+                // already applied server-side). The GRN item-level breakdown
+                // total is GST-inclusive but never includes billing terms —
+                // preferring it here understated/overstated the invoice
+                // total for every billing-terms-adjusted booking.
+                const netAmt = opt.amount ?? 0;
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
                 // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
                 const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
                 const paid = livePaid ?? opt.totalPaid ?? 0;
                 const remaining = formLiveRemaining ?? (opt.remainingAmount != null
-                  ? (grnTotal > 0 ? Math.max(0, netAmt - (opt.totalPaid ?? 0)) : opt.remainingAmount)
+                  ? opt.remainingAmount
                   : Math.max(0, netAmt - paid));
                 const bStatus = deriveBillStatus(paid, remaining, netAmt);
                 return (
@@ -2290,6 +2396,17 @@ const Payment: React.FC = () => {
                     </div>
                   </Field>
                 </div>
+
+                {oaAdjustmentsForInvoice.length > 0 && (
+                  <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-1">
+                    {oaAdjustmentsForInvoice.map((adj, i) => (
+                      <p key={i} className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Wallet size={12} className="shrink-0" />
+                        On A/C adjusted with <span className="font-mono font-semibold">{formatINR(adj.amount)}</span> from <span className="font-semibold">{adj.partyName}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field

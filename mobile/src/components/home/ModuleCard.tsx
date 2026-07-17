@@ -3,7 +3,8 @@
 // 2x2 grid. The web card is information-dense because desktop has room;
 // on a phone that reads as noisy, so this keeps only stats[0] (each caller
 // already orders its stats array by importance) and drops the rest.
-import { View, Text, Pressable } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Easing, View, Text, Pressable } from "react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
@@ -22,6 +23,7 @@ export function ModuleCard({
   badge,
   loading,
   onPress,
+  delay = 0,
 }: {
   title: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
@@ -30,15 +32,32 @@ export function ModuleCard({
   badge?: number;
   loading?: boolean;
   onPress: () => void;
+  delay?: number;
 }) {
   const primary = stats[0];
 
+  // Own opacity/translateY rather than an external wrapper — a wrapper
+  // View has no width, and this card's width:"48%" resolves against
+  // whatever its *direct* parent is, so animating from outside would
+  // silently break the 2-column grid.
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 380, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [anim, delay]);
+
   return (
-    <Pressable onPress={onPress} style={{ width: "48%" }} className="rounded-lg overflow-hidden mb-2.5">
-      <View
-        className="flex-row items-center"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}
-      >
+    <Animated.View
+      style={{
+        width: "48%",
+        opacity: anim,
+        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
+      }}
+    >
+      <Pressable onPress={onPress} className="rounded-lg overflow-hidden mb-2.5">
+        <View
+          className="flex-row items-center"
+          style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}
+        >
         <View style={{ width: 3, alignSelf: "stretch", backgroundColor: accent }} />
         <View className="flex-1 flex-row items-center gap-2 pl-2.5 pr-2.5 py-2.5">
           <View
@@ -76,7 +95,8 @@ export function ModuleCard({
             ) : null}
           </View>
         </View>
-      </View>
-    </Pressable>
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 }
