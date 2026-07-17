@@ -2,10 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // GET /booking/:bookingId — co-applicants for a booking
 router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
