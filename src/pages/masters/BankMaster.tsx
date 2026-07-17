@@ -31,7 +31,6 @@ import {
   Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -1109,19 +1108,17 @@ const BankMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Account Group */}
+                {/* Account Group — always Banks (Assets > Current Assets >
+                    Banks), never picked manually (see bankMaster.js's
+                    getBanksGroupId, applied server-side on every
+                    create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <GroupTreePicker
-                    value={form.accountGroupId}
-                    onChange={(v) =>
-                      setValue("accountGroupId", v, { shouldValidate: true })
-                    }
-                    tree={accountGroupTree}
-                    allGroups={accountGroups}
-                  />
+                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                    Banks
+                  </div>
                 </div>
 
                 {/* Opening Balance */}
