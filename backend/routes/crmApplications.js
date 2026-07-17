@@ -31,6 +31,7 @@ const APP_SELECT = `
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes,
     a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
+    a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
     u.name  AS AssigneeName,
     ab.name AS AssignedByName,
     cu.name AS CreatedByName,
@@ -63,6 +64,7 @@ const APP_SELECT = `
   FROM dbo.CrmApplication a
   LEFT JOIN dbo.Users u   ON u.id  = a.AssignedTo
   LEFT JOIN dbo.Users ab  ON ab.id = a.AssignedBy
+  LEFT JOIN dbo.AccountHeadMaster brk ON brk.LHeadId = a.BrokerId
   LEFT JOIN dbo.Users cu  ON cu.id = a.CreatedBy
   LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = a.PaymentPlanId
   LEFT JOIN dbo.SaLead l  ON l.Id  = a.LeadId
@@ -250,6 +252,9 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int,           actor)
+      .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
+      .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
+      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled !== undefined ? (b.BrokerageSplitEnabled ? 1 : 0) : null)
       .query(`
         UPDATE dbo.CrmApplication SET
           ApplicantName = ISNULL(@name, ApplicantName),
@@ -265,6 +270,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId), TokenType = ISNULL(@ttype, TokenType),
           TokenValue = ISNULL(@tval, TokenValue), BookingAmount = ISNULL(@bamt, BookingAmount),
           PaymentMode = ISNULL(@pmode, PaymentMode),
+          BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),
+          BrokerageSplitEnabled = ISNULL(@brksplit, BrokerageSplitEnabled),
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
@@ -368,7 +375,8 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
       if (!already.recordset.length) {
         const app = await pool.request().input("id", sql.Int, id).query(`
           SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
-                 BookingAmount, PaymentMode, AssignedTo, Notes
+                 BookingAmount, PaymentMode, AssignedTo, Notes,
+                 BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
           FROM dbo.CrmApplication WHERE Id = @id
         `);
         const a = app.recordset[0];
@@ -379,6 +387,7 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
               PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
               TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
               AssignedTo: a.AssignedTo, Notes: a.Notes,
+              BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
             }, actorId(req));
             booking = created;
             // Backfilling Application-linked records (parking/bank/documents)
@@ -387,6 +396,34 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
             // crmEntityCreation.js) — that's the single shared place every
             // caller of it goes through, so it can't be missed by a future
             // second caller the way a route-local backfill here would be.
+
+            // createCrmBookingRecord always inserts Status='Pending' — correct
+            // for its OTHER caller (crmBookings.js's manual POST /, the
+            // documented fallback for when auto-booking fails, which has no
+            // upstream approval of its own and genuinely needs its own gate).
+            // A booking created HERE is different in kind, not just timing: it
+            // is a direct, same-request consequence of the Application
+            // approval that just happened, by the SAME actor, under the SAME
+            // role check — crm-bookings approve is gated to the identical
+            // CRM_APPROVER_ROLES (admin/super_admin/marketing_head) as
+            // crm-applications approve (see approvalService.js
+            // MODULE_APPROVER_ROLE_OVERRIDES), so this grants no authority the
+            // caller doesn't already hold. This is NOT the class of bug fixed
+            // in the SA promote-to-booking bypass (saHandoff.js) — that let a
+            // non-admin salesperson (only "sa-leads" edit rights) create and
+            // implicitly approve a booking with zero admin review. Here an
+            // admin has already reviewed and approved the Application; going
+            // through the real, audited approvalTransition (not a raw UPDATE)
+            // just reflects that same decision onto its direct byproduct,
+            // instead of leaving the booking stuck "Pending" its own
+            // rubber-stamp and silently blocking every downstream stage that
+            // gates on Booking.Status='Approved' (agreement prep, sales deed,
+            // etc.) until someone notices a second approval is waiting.
+            try {
+              await approvalTransition("crm-bookings", created.id, "Approved", userEmail, req.user?.role);
+            } catch (bookingApproveErr) {
+              console.error("[crm-applications] auto-booking approval failed:", bookingApproveErr.message);
+            }
 
             // If this Application originated from a Sales Automation lead
             // (promoteLeadToFollowup in saHandoff.js stamps LeadId at

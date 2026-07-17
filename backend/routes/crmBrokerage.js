@@ -196,6 +196,17 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    // Split-payout "After Agreement" tranche stays locked until the
+    // Agreement is actually Executed (see maybeUnlockBrokerageTranche) —
+    // can't be approved (or, by extension, paid) before then.
+    const pool = getPool();
+    const locked = await pool.request().input("id", sql.Int, id)
+      .query("SELECT IsLocked, TrancheLabel FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (locked.recordset[0]?.IsLocked) {
+      return res.status(400).json({ error: "This tranche unlocks once the Agreement is Executed" });
+    }
+
     const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
@@ -230,12 +241,16 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
 
     const br = await pool.request().input("id", sql.Int, brokerageId).query(`
-      SELECT br.Status, br.ComputedAmount,
+      SELECT br.Status, br.ComputedAmount, br.IsLocked,
              (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) AS TotalPaid
       FROM dbo.CrmBrokerageMaster br WHERE br.Id = @id
     `);
     if (!br.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     const row = br.recordset[0];
+
+    if (row.IsLocked) {
+      return res.status(400).json({ error: "This tranche unlocks once the Agreement is Executed" });
+    }
 
     if (row.Status !== "Approved") {
       return res.status(400).json({ error: `This brokerage record must be Approved before a payment can be recorded (currently '${row.Status}')` });

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
@@ -7,8 +7,8 @@ import {
   addRecord,
   updateRecord,
   deleteRecord,
-  getAccountGroups,
 } from "@/api/accountHeadApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   DataTable,
@@ -17,9 +17,8 @@ import {
 } from "@/components/ui/DataTable";
 import {
   Pencil, Trash2, X, Check, Plus, Search, AlertCircle, Eye, XCircle,
-  User, Phone, Mail, MapPin, CreditCard, UserRound,
+  User, Phone, Mail, MapPin, CreditCard, UserRound, FileBadge, Upload, FileText,
 } from "lucide-react";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 
 const BROKER_TYPE = "BR";
 
@@ -31,24 +30,12 @@ interface Broker {
   LHeadEmail: string | null;
   LGST: string | null;
   LHeadPan: string | null;
+  LHeadRera: string | null;
+  LHeadCertificateUrl: string | null;
+  LHeadCertificateFileName: string | null;
   LHeadPaymentTerms: string | null;
   LHeadAddress: string | null;
-  LBelongsTo: number | null;
   LHeadStatus: boolean;
-}
-
-interface AccountGroup { _id: string; name: string; code: string; parentId: string | null; }
-interface TreeNode extends AccountGroup { children: TreeNode[]; }
-
-function buildTree(items: AccountGroup[]): TreeNode[] {
-  const map: Record<string, TreeNode> = {};
-  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((i) => {
-    if (i.parentId && map[i.parentId]) map[i.parentId].children.push(map[i._id]);
-    else roots.push(map[i._id]);
-  });
-  return roots;
 }
 
 interface BrokerForm {
@@ -58,16 +45,16 @@ interface BrokerForm {
   LHeadEmail: string;
   LGST: string;
   LHeadPan: string;
+  LHeadRera: string;
   LHeadPaymentTerms: string;
   LHeadAddress: string;
-  LBelongsTo: number | "";
   LHeadStatus: boolean;
 }
 
 const EMPTY_FORM: BrokerForm = {
   LHeadName: "", LHeadContactPerson: "", LHeadPhone: "", LHeadEmail: "",
-  LGST: "", LHeadPan: "", LHeadPaymentTerms: "", LHeadAddress: "",
-  LBelongsTo: "", LHeadStatus: true,
+  LGST: "", LHeadPan: "", LHeadRera: "", LHeadPaymentTerms: "", LHeadAddress: "",
+  LHeadStatus: true,
 };
 
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -76,6 +63,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
   { header: "PAN Number", accessor: "LHeadPan" },
+  { header: "RERA Number", accessor: "LHeadRera" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
 ];
@@ -91,30 +79,15 @@ const CrmBrokerMaster: React.FC = () => {
   const [viewRecord, setViewRecord] = useState<Broker | null>(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [uploadingCert, setUploadingCert] = useState(false);
+  const certInputRef = useRef<HTMLInputElement>(null);
 
   const { data: rawData, isLoading, isError } = useQuery({
     queryKey: ["account-head", BROKER_TYPE],
     queryFn: () => getList(BROKER_TYPE),
     staleTime: 5 * 60 * 1000,
   });
-
-  const { data: groupsData } = useQuery({
-    queryKey: ["account-groups"],
-    queryFn: getAccountGroups,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const accountGroups: AccountGroup[] = useMemo(() => {
-    if (!Array.isArray(groupsData)) return [];
-    return (groupsData as any[])
-      .filter((item) => item.AGId != null && item.Name)
-      .map((item) => ({
-        _id: String(item.AGId), name: item.Name as string,
-        code: item.Code || "", parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
-      }));
-  }, [groupsData]);
-
-  const accountGroupTree = useMemo(() => buildTree(accountGroups), [accountGroups]);
 
   const brokers: Broker[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
@@ -126,15 +99,21 @@ const CrmBrokerMaster: React.FC = () => {
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
       LHeadPan: item.LHeadPan || null,
+      LHeadRera: item.LHeadRera || null,
+      LHeadCertificateUrl: item.LHeadCertificateUrl || null,
+      LHeadCertificateFileName: item.LHeadCertificateFileName || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
-      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
   }, [rawData]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["account-head", BROKER_TYPE] });
 
+  // LBelongsTo (Account Group) is intentionally never sent from here — the
+  // backend always auto-assigns brokers to SUNDRY CREDITORS server-side
+  // (accountHeadMaster.js), same reasoning as LHeadType itself not being
+  // staff-editable here.
   const buildPayload = (f: BrokerForm) => ({
     LHeadName: f.LHeadName,
     LHeadType: BROKER_TYPE,
@@ -143,19 +122,27 @@ const CrmBrokerMaster: React.FC = () => {
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
     LHeadPan: f.LHeadPan || null,
+    LHeadRera: f.LHeadRera || null,
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
-    LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
   const createMut = useMutation({
     mutationFn: (f: BrokerForm) => addRecord(buildPayload(f), BROKER_TYPE),
-    onSuccess: () => { toast.success("Broker created"); invalidate(); resetForm(); },
+    onSuccess: (data: any) => {
+      toast.success("Broker created");
+      invalidate();
+      // Stay in edit mode on the just-created broker (rather than resetting
+      // to a blank form) so staff can immediately attach the RERA
+      // certificate — the upload endpoint needs a real LHeadId to attach to.
+      if (data?.LHeadId) setEditingId(data.LHeadId);
+      else resetForm();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const updateMut = useMutation({
@@ -171,15 +158,35 @@ const CrmBrokerMaster: React.FC = () => {
 
   const saving = createMut.isPending || updateMut.isPending;
   const canSave = form.LHeadName.trim() !== "";
+  const editingBroker = editingId !== null ? brokers.find((b) => b.LHeadId === editingId) : null;
+
+  const handleUploadCertificate = async () => {
+    if (!certFile || editingId === null) return;
+    setUploadingCert(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", certFile);
+      const res = await fetchWithAuth(`/api/account-head/${editingId}/certificate`, { method: "POST", body: formData });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Upload failed");
+      toast.success("Certificate uploaded");
+      setCertFile(null);
+      if (certInputRef.current) certInputRef.current.value = "";
+      invalidate();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploadingCert(false);
+    }
+  };
 
   const startEdit = (b: Broker) => {
     setEditingId(b.LHeadId);
     setForm({
       LHeadName: b.LHeadName ?? "", LHeadContactPerson: b.LHeadContactPerson ?? "",
       LHeadPhone: b.LHeadPhone ?? "", LHeadEmail: b.LHeadEmail ?? "",
-      LGST: b.LGST ?? "", LHeadPan: b.LHeadPan ?? "",
+      LGST: b.LGST ?? "", LHeadPan: b.LHeadPan ?? "", LHeadRera: b.LHeadRera ?? "",
       LHeadPaymentTerms: b.LHeadPaymentTerms ?? "", LHeadAddress: b.LHeadAddress ?? "",
-      LBelongsTo: b.LBelongsTo ?? "", LHeadStatus: b.LHeadStatus,
+      LHeadStatus: b.LHeadStatus,
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -207,6 +214,7 @@ const CrmBrokerMaster: React.FC = () => {
     { accessorKey: "LHeadName", header: "Broker Name", cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span> },
     { accessorKey: "LHeadContactPerson", header: "Contact Person", cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{(getValue() as string) || "—"}</span> },
     { accessorKey: "LHeadPhone", header: "Phone", cell: ({ getValue }) => <span className="font-mono text-xs">{(getValue() as string) || "—"}</span> },
+    { accessorKey: "LHeadRera", header: "RERA Number", cell: ({ getValue }) => <span className="font-mono text-xs">{(getValue() as string) || "—"}</span> },
     { accessorKey: "LHeadPaymentTerms", header: "Payment Terms", cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{(getValue() as string) || "—"}</span> },
     {
       accessorKey: "LHeadStatus", header: "Status",
@@ -272,9 +280,13 @@ const CrmBrokerMaster: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Account Group</label>
-                <GroupTreePicker value={String(form.LBelongsTo)} onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v === "" ? "" : Number(v) }))}
-                  tree={accountGroupTree} allGroups={accountGroups} />
+                <label className="text-xs text-muted-foreground block mb-1">RERA Number</label>
+                <div className="relative">
+                  <FileBadge size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input value={form.LHeadRera} onChange={(e) => setForm((p) => ({ ...p, LHeadRera: e.target.value.toUpperCase() }))}
+                    placeholder="e.g. A51800000123"
+                    className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background font-mono" />
+                </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Phone Number</label>
@@ -314,6 +326,32 @@ const CrmBrokerMaster: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Certificate upload needs a real LHeadId to attach to — only
+                available once the broker exists (edit mode, including right
+                after a fresh create, since createMut switches into edit mode
+                on success instead of resetting the form). */}
+            {editingId !== null && (
+              <div className="rounded-lg border border-border p-3">
+                <label className="text-xs text-muted-foreground block mb-2 flex items-center gap-1.5"><FileBadge size={13} /> RERA / Broker Certificate</label>
+                {editingBroker?.LHeadCertificateFileName && (
+                  <a href={`/api/account-head/${editingId}/certificate/file`} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-primary hover:underline mb-2">
+                    <FileText size={12} /> {editingBroker.LHeadCertificateFileName} (uploaded — click to view)
+                  </a>
+                )}
+                <div className="flex items-center gap-2">
+                  <input ref={certInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    onChange={(e) => setCertFile(e.target.files?.[0] || null)}
+                    className="flex-1 text-xs text-muted-foreground file:mr-2 file:px-2.5 file:py-1.5 file:rounded-md file:border-0 file:text-xs file:bg-muted file:text-foreground" />
+                  <button type="button" onClick={handleUploadCertificate} disabled={!certFile || uploadingCert}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 flex items-center gap-1">
+                    <Upload size={12} /> {uploadingCert ? "Uploading..." : "Upload"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
               <button type="button" onClick={() => setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}>
@@ -370,6 +408,7 @@ const CrmBrokerMaster: React.FC = () => {
                 { label: "Phone", value: viewRecord.LHeadPhone || "—" },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
                 { label: "PAN Number", value: viewRecord.LHeadPan || "—" },
+                { label: "RERA Number", value: viewRecord.LHeadRera || "—" },
                 { label: "Payment Terms", value: viewRecord.LHeadPaymentTerms || "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value }) => (
@@ -378,6 +417,15 @@ const CrmBrokerMaster: React.FC = () => {
                   <p className="text-sm">{value}</p>
                 </div>
               ))}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Certificate</p>
+                {viewRecord.LHeadCertificateFileName ? (
+                  <a href={`/api/account-head/${viewRecord.LHeadId}/certificate/file`} target="_blank" rel="noreferrer"
+                    className="text-sm text-primary hover:underline flex items-center gap-1">
+                    <FileText size={13} /> {viewRecord.LHeadCertificateFileName}
+                  </a>
+                ) : <p className="text-sm text-muted-foreground">Not uploaded</p>}
+              </div>
             </div>
             <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
               <button onClick={() => setViewRecord(null)} className="px-4 py-2 rounded-lg text-sm border border-border text-muted-foreground hover:bg-muted">Close</button>

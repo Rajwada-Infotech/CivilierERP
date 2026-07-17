@@ -52,9 +52,25 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
 router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().input("bid", sql.Int, parseInt(req.params.bookingId))
+    const bid = parseInt(req.params.bookingId);
+    const result = await pool.request().input("bid", sql.Int, bid)
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
-    res.json(result.recordset[0] || null);
+    if (result.recordset.length) return res.json(result.recordset[0]);
+
+    // No bank-detail row saved yet — PAN and the account holder's name are
+    // already on file at Customer intake (dbo.CrmCustomer), so pre-fill them
+    // here instead of making staff retype a PAN the system already has.
+    // Everything else (bank/nominee/Aadhaar/occupation) is genuinely new
+    // information this form is the first place to capture, so it stays blank.
+    const prefill = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      WHERE b.Id = @bid
+    `);
+    if (!prefill.recordset.length) return res.json(null);
+    res.json({ PanNo: prefill.recordset[0].PanNo || null, AccountHolderName: prefill.recordset[0].AccountHolderName || null });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET error:", e.message);
     res.status(500).json({ error: e.message });

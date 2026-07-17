@@ -6,7 +6,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
-  ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User,
+  ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -44,6 +44,9 @@ const EMPTY_FORM = {
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
   PaymentPlanId: "", TokenType: "Percentage", TokenValue: "", BookingAmount: "", PaymentMode: "",
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
+  // ViaBroker is UI-only (never sent to the backend) — it just toggles the
+  // broker sub-block; BrokerId being set is what actually matters server-side.
+  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
   Notes: "",
 };
 
@@ -113,6 +116,9 @@ async function fetchAds(): Promise<any[]> {
 async function fetchChannelPartners(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/sa/channel-partners"); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchBrokers(): Promise<any[]> {
+  try { const r = await fetchWithAuth("/api/account-head?type=BR"); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchParkingMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(PARKING_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -152,6 +158,7 @@ const CrmApplication: React.FC = () => {
   const { data: campaigns = [] } = useQuery({ queryKey: ["sa-campaigns-dropdown"], queryFn: fetchCampaigns, staleTime: 5 * 60_000 });
   const { data: ads = [] } = useQuery({ queryKey: ["sa-ads-dropdown"], queryFn: fetchAds, staleTime: 5 * 60_000 });
   const { data: channelPartners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchChannelPartners, staleTime: 5 * 60_000 });
+  const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: parkingRates = [] } = useQuery({ queryKey: ["parking-master"], queryFn: fetchParkingMaster, staleTime: 5 * 60_000 });
   const { data: parkingSlots = [] } = useQuery({ queryKey: ["parking-slot-master"], queryFn: fetchParkingSlots, staleTime: 5 * 60_000 });
 
@@ -192,6 +199,16 @@ const CrmApplication: React.FC = () => {
   const selectedUnit = useMemo(() =>
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
+  );
+  // Broker Master is the single source of truth for a broker's own identity
+  // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
+  // Selecting a broker (auto-fetched from the customer, or picked manually)
+  // just pulls the already-registered record for read-only display; the
+  // ONLY thing staff can ever edit here is the deal-specific commission
+  // override % and the before/after-Agreement split.
+  const selectedBroker = useMemo(() =>
+    (brokers as any[]).find((b: any) => String(b.LHeadId) === form.BrokerId) || null,
+    [brokers, form.BrokerId]
   );
 
   // Payment plans scoped to the chosen Company/Project/Block — same scoped
@@ -242,15 +259,28 @@ const CrmApplication: React.FC = () => {
     });
   }, [apps, search, statusFilter, activeStage]);
 
+  // Which customer's Source the user has explicitly clicked "Change" on —
+  // the auto-fetch effect below must never re-lock for that same customer
+  // again, or a background refetch of the customers/leads list (new array/
+  // object identity, same data) would silently undo the override the
+  // moment it re-runs.
+  const sourceUnlockedForCustomerRef = useRef<number | null>(null);
+
   // The moment a customer with a linked lead is picked, auto-fetch that
   // lead's source chain onto the application and lock it (display-only,
   // with a "Change" escape hatch) — this is the customer's real, already-
   // known acquisition source, not something staff should have to re-pick.
   // Only fills fields still blank, so re-selecting a different customer
-  // never clobbers something staff already typed.
+  // never clobbers something staff already typed. Depends on primitive
+  // ids, not the selectedCustomer/leads object references, so a background
+  // query refetch (same data, new array identity) doesn't re-fire this and
+  // clobber a manual "Change".
   useEffect(() => {
-    if (!selectedCustomer?.LeadId) { setSourceLocked(false); return; }
-    const lead = (leads as any[]).find((l: any) => l.Id === selectedCustomer.LeadId);
+    const custId = selectedCustomer?.Id ?? null;
+    const leadId = selectedCustomer?.LeadId ?? null;
+    if (!leadId) { setSourceLocked(false); return; }
+    if (sourceUnlockedForCustomerRef.current === custId) return;
+    const lead = (leads as any[]).find((l: any) => l.Id === leadId);
     if (!lead?.SourceType) { setSourceLocked(false); return; }
     setForm((f) => ({
       ...f,
@@ -261,7 +291,8 @@ const CrmApplication: React.FC = () => {
       ChannelPartnerId: f.ChannelPartnerId || (lead.ChannelPartnerId ? String(lead.ChannelPartnerId) : ""),
     }));
     setSourceLocked(true);
-  }, [selectedCustomer, leads]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.Id, selectedCustomer?.LeadId]);
 
   // Rate auto-fills from the unit's own rate if UnitMaster carries one;
   // otherwise stays whatever staff typed (or blank, computed manually).
@@ -277,11 +308,25 @@ const CrmApplication: React.FC = () => {
     return area && rate ? Math.round(area * rate) : 0;
   }, [selectedUnit, form.RatePerSqFt]);
 
+  // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
+  // percentage/amount is computed server-side off the Booking's actual
+  // TotalValue once one exists (see maybeAutoCreateBrokerage in
+  // crmWorkflowGuards.js); this just gives staff a rate hint at intake time.
+  const brokerageTierDefault = computedTotal >= 10000000 ? 1 : 2;
+  const effectiveBrokerageRate = form.BrokerageRatePercent !== "" ? Number(form.BrokerageRatePercent) : brokerageTierDefault;
+  const brokerageHalfRate = (effectiveBrokerageRate / 2).toFixed(2).replace(/\.?0+$/, "");
+
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
     setStep(1);
     setApplicationId(null);
     setApplicationNo(null);
+    // Lock flag/unlock-guard is gated on the form that's about to be blown
+    // away — leaving it set would leak into the next customer picked in a
+    // freshly-opened wizard (e.g. a stale "unlocked" guard suppressing the
+    // auto-fetch for a customer who never actually clicked "Change").
+    setSourceLocked(false);
+    sourceUnlockedForCustomerRef.current = null;
   };
 
   // Step 1 -> creates the real Application record (a document-upload/bank-
@@ -307,6 +352,9 @@ const CrmApplication: React.FC = () => {
           CampaignId: form.CampaignId || null,
           AdId: form.AdId || null,
           ChannelPartnerId: form.ChannelPartnerId || null,
+          BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
+          BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
+          BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
         }),
       });
       const data = await res.json();
@@ -670,7 +718,7 @@ const CrmApplication: React.FC = () => {
                 {sourceLocked ? (
                   <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5">
                     <span className="text-sm text-foreground">{form.Source || "—"} <span className="text-xs text-muted-foreground">(auto-fetched from lead)</span></span>
-                    <button type="button" onClick={() => setSourceLocked(false)}
+                    <button type="button" onClick={() => { sourceUnlockedForCustomerRef.current = selectedCustomer?.Id ?? null; setSourceLocked(false); }}
                       className="text-xs text-primary hover:underline shrink-0">
                       Change
                     </button>
@@ -721,6 +769,90 @@ const CrmApplication: React.FC = () => {
                       <option value="">Select channel partner</option>
                       {(channelPartners as any[]).map((cp: any) => <option key={cp.Id} value={String(cp.Id)}>{cp.Name}</option>)}
                     </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Broker — separate from Source/Channel Partner. A deal can
+                  come from a Referral source AND still be brokered; the two
+                  concepts are unrelated (see CrmBrokerageMaster). The broker
+                  is introduced right here, at Application time — always
+                  picked from Broker Master (AccountHeadMaster, LHeadType=BR),
+                  never a fresh Customer-level concept. His own identity
+                  (name/phone/PAN/RERA) is never re-typed, only ever selected
+                  and shown read-only. The ONLY editable fields on this whole
+                  block are the per-deal commission override % and the
+                  before/after-Agreement split — everything else is fetched,
+                  not entered. Rate/split here are captured now but only
+                  become a real commission record once Milestone #1 is paid
+                  (maybeAutoCreateBrokerage). */}
+              <div className="rounded-lg border border-border p-3 space-y-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                  <input type="checkbox" checked={form.ViaBroker}
+                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false }) }))} />
+                  Via Broker
+                </label>
+                {form.ViaBroker && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className={labelCls}>Broker (from Broker Master)</label>
+                      <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
+                        <option value="">Select broker</option>
+                        {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Read-only, auto-fetched from Broker Master the moment a
+                        broker is on the form — mirrors the Supplier info card
+                        pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
+                        Nothing in here is ever an editable input. */}
+                    {selectedBroker && (
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                        {selectedBroker.LHeadPhone && (
+                          <div>
+                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                            <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
+                          </div>
+                        )}
+                        {selectedBroker.LHeadPan && (
+                          <div>
+                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
+                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
+                          </div>
+                        )}
+                        {selectedBroker.LHeadRera && (
+                          <div>
+                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
+                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
+                          </div>
+                        )}
+                        {selectedBroker.LHeadPaymentTerms && (
+                          <div>
+                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
+                            <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className={labelCls}>Default rate (preview)</label>
+                        <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
+                          className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Commission override % (only if this deal needs a custom rate)</label>
+                        <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
+                          onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
+                          placeholder={String(brokerageTierDefault)} className={inputCls} />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-foreground">
+                      <input type="checkbox" checked={form.BrokerageSplitEnabled}
+                        onChange={(e) => setForm((f) => ({ ...f, BrokerageSplitEnabled: e.target.checked }))} />
+                      Split {brokerageHalfRate}% before Agreement, {brokerageHalfRate}% (remaining) after Agreement
+                    </label>
                   </div>
                 )}
               </div>

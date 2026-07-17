@@ -19,6 +19,7 @@
 
 const { getPool, sql } = require("./db");
 const { logAudit } = require("./utils/auditLog");
+const logger = require("./logger");
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -316,7 +317,6 @@ async function escalateBookings() {
 
 async function runEscalation() {
   const start = Date.now();
-  console.log(`[EscalationEngine] Running at ${new Date().toISOString()}`);
 
   try {
     await assertRequiredSchema();
@@ -329,9 +329,9 @@ async function runEscalation() {
     ]);
 
     const elapsed = Date.now() - start;
-    console.log(`[EscalationEngine] Done in ${elapsed}ms`);
+    logger.info({ event: "ESCALATION_RUN_DONE", elapsedMs: elapsed }, "Escalation run complete");
   } catch (err) {
-    console.error("[EscalationEngine] Error:", err.message);
+    logger.error({ event: "ESCALATION_RUN_FAILED", err: err.message }, "Escalation run failed");
     // Re-throw so callers (the manual POST /api/followup-escalation/run
     // endpoint, in particular) see the real failure instead of this
     // function quietly resolving and the route reporting success: true.
@@ -352,9 +352,7 @@ function startEscalationEngine() {
   setInterval(() => {
     runEscalation().catch(() => {});
   }, INTERVAL_MS);
-  console.log(
-    `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`,
-  );
+  logger.info({ event: "ESCALATION_ENGINE_STARTED", intervalMinutes: INTERVAL_MS / 1000 / 60 }, "Escalation engine started");
 }
 
 module.exports = { startEscalationEngine, runEscalation, assertRequiredSchema };
