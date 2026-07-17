@@ -387,13 +387,13 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // Balance the way a NULL-group head would be (see trialBalance.js's
     // `WHERE ahm.LBelongsTo IS NOT NULL` filter).
     //
-    // LHeadType='C' collides with two other code paths that reuse 'C' to
-    // mean "Customer" rather than "Contractor" — crmLedger.js's
-    // ensureCrmCustomerLedgerHead (LHeadCode 'CRMCUST-<id>') and
-    // projectMaster.js's ensureProjectLedgerHeads (LHeadCode
-    // 'PRJ-<id>-CUST') — a pre-existing ambiguity in this codebase, not
-    // introduced here. Those rows belong in SUNDRY DEBTORS, not Creditors,
-    // so any code containing 'CUST' is excluded from this block.
+    // LHeadType='C' still collides with one remaining code path that reuses
+    // 'C' to mean "Customer" rather than "Contractor" —
+    // projectMaster.js's ensureProjectLedgerHeads (LHeadCode 'PRJ-<id>-CUST').
+    // crmLedger.js's ensureCrmCustomerLedgerHead used to collide here too but
+    // now correctly mints LHeadType='A' (see migration 224). Those rows
+    // belong in SUNDRY DEBTORS, not Creditors, so any code containing
+    // 'CUST' is excluded from this block.
     const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
     let effectiveLBelongsTo = LBelongsTo;
     if (
