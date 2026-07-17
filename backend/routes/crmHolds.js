@@ -2,12 +2,14 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { placeHold, releaseHold } = require("../services/crmHoldService");
 const { logCrmAudit } = require("../services/crmAudit");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 const HOLD_SELECT = `
   SELECT h.*, a.ApplicationNo, a.ApplicantName, a.Mobile, cb.name AS CreatedByName

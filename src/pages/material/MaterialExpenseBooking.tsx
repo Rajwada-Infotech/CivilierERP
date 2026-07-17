@@ -55,8 +55,6 @@ import {
   Building2,
   FolderKanban,
   SlidersHorizontal,
-  ClipboardList,
-  X,
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -1041,7 +1039,7 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
-  const { editingIdNum, bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
+  const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
       const editingIdNum = editingId ? parseInt(editingId, 10) : null;
       const bookedPOIds = new Set<number>();
