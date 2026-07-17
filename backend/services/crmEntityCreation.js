@@ -326,10 +326,38 @@ async function seedPrimaryCoApplicantFromCustomer(pool, bookingId, applicationId
     .input("mob",  sql.NVarChar(20), row.CoApplicantMobile || null)
     .input("pan",  sql.NVarChar(20), row.CoApplicantPanNo || null)
     .input("note", sql.NVarChar(sql.MAX), "Auto-seeded from customer intake")
+    .input("src",  sql.NVarChar(20), "CustomerIntake")
     .input("cb",   sql.Int, actorUserId)
     .query(`
-      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, CreatedBy, CreatedAt)
-      VALUES (@bid, @name, @rel, @mob, @pan, @note, @cb, SYSDATETIME())
+      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, SourceType, CreatedBy, CreatedAt)
+      VALUES (@bid, @name, @rel, @mob, @pan, @note, @src, @cb, SYSDATETIME())
+    `);
+}
+
+// The seed above only fires once, at booking creation — if staff correct a
+// typo in the customer's co-applicant name/relation/mobile/PAN afterward
+// (CrmCustomers.tsx edit form), that edit silently never reached the
+// CrmCoApplicant row Welcome Call/Booking Details actually display, leaving
+// two now-mismatched copies of the same person's details. SourceType marks
+// exactly which row was auto-seeded (never a manually-added co-applicant),
+// so this can re-sync it without ever touching rows staff entered themselves.
+// Called from crmCustomers.js PUT /:id, alongside its other lockstep syncs.
+async function syncCoApplicantFromCustomerEdit(pool, customerId, updates) {
+  if (!updates.CoApplicantName?.trim()) return;
+  await pool.request()
+    .input("cid",  sql.Int, customerId)
+    .input("name", sql.NVarChar(200), updates.CoApplicantName.trim())
+    .input("rel",  sql.NVarChar(50), updates.CoApplicantRelation || null)
+    .input("mob",  sql.NVarChar(20), updates.CoApplicantMobile || null)
+    .input("pan",  sql.NVarChar(20), updates.CoApplicantPanNo || null)
+    .query(`
+      UPDATE ca SET
+        ca.Name = @name, ca.Relation = @rel, ca.Mobile = @mob, ca.PanNo = @pan,
+        ca.UpdatedAt = SYSDATETIME()
+      FROM dbo.CrmCoApplicant ca
+      JOIN dbo.CrmBooking b ON b.Id = ca.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = @cid AND ca.SourceType = 'CustomerIntake' AND ca.IsActive = 1
     `);
 }
 
@@ -504,5 +532,5 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, validatePaymentPlanScope,
+  generateMilestonesForBooking, validatePaymentPlanScope, syncCoApplicantFromCustomerEdit,
 };
