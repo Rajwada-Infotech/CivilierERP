@@ -51,6 +51,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -1153,35 +1154,74 @@ export default function MaterialRequest() {
                       Unit (UOM) *
                     </label>
                     <div className="relative">
-                      <select
-                        value={ci.UOMCode}
-                        onChange={(e) =>
-                          updateCartItem(ci._key, "UOMCode", e.target.value)
-                        }
-                        disabled={!!ci.DefaultUOM}
-                        className={`${selectCls} ${ci.DefaultUOM ? "opacity-70 cursor-not-allowed bg-muted" : ""}`}
-                      >
-                        <option value="">UOM…</option>
-                        {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
-                          <option
-                            key={"default-" + ci.DefaultUOM}
-                            value={ci.DefaultUOM}
+                      {(() => {
+                        const defaultCategory = ci.DefaultUOM
+                          ? uomMap[ci.DefaultUOM]?.UOMCategory ?? null
+                          : null;
+                        // Only offer UOMs relevant to the item's own default
+                        // unit (same measurement category, e.g. Weight units
+                        // for a Weight item) — a water/liquid item no longer
+                        // gets offered something like "Running Meter".
+                        // Units with no category (Bags, Box, Set, ...) fall
+                        // back to the full list, same as before this feature.
+                        const relevant = relevantUOMs(
+                          uoms as any[],
+                          defaultCategory,
+                        ).filter((u: any) => u.UOMCode !== ci.DefaultUOM);
+                        return (
+                          <select
+                            value={ci.UOMCode}
+                            onChange={(e) => {
+                              const nextCode = e.target.value;
+                              const nextUom = uomMap[nextCode];
+                              const currentUom = uomMap[ci.UOMCode];
+                              // Same-category switch (e.g. tonne -> kg): convert
+                              // the already-entered quantity so it still means
+                              // the same physical amount in the new unit.
+                              const nextQty =
+                                currentUom?.UOMCategory &&
+                                nextUom?.UOMCategory === currentUom.UOMCategory &&
+                                currentUom.BaseFactor &&
+                                nextUom.BaseFactor
+                                  ? String(
+                                      convertQuantity(
+                                        parseFloat(ci.Quantity) || 0,
+                                        Number(currentUom.BaseFactor),
+                                        Number(nextUom.BaseFactor),
+                                      ),
+                                    )
+                                  : ci.Quantity;
+                              setCart((prev) =>
+                                prev.map((c) =>
+                                  c._key === ci._key
+                                    ? { ...c, UOMCode: nextCode, Quantity: nextQty }
+                                    : c,
+                                ),
+                              );
+                            }}
+                            className={selectCls}
                           >
-                            {uomMap[ci.DefaultUOM].UOMName}
-                            {uomMap[ci.DefaultUOM].Symbol
-                              ? ` (${uomMap[ci.DefaultUOM].Symbol}) · default`
-                              : " · default"}
-                          </option>
-                        )}
-                        {(uoms as any[])
-                          .filter((u) => u.UOMCode !== ci.DefaultUOM)
-                          .map((u) => (
-                            <option key={u.UOMCode} value={u.UOMCode}>
-                              {u.UOMName}
-                              {u.Symbol ? ` (${u.Symbol})` : ""}
-                            </option>
-                          ))}
-                      </select>
+                            <option value="">UOM…</option>
+                            {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
+                              <option
+                                key={"default-" + ci.DefaultUOM}
+                                value={ci.DefaultUOM}
+                              >
+                                {uomMap[ci.DefaultUOM].UOMName}
+                                {uomMap[ci.DefaultUOM].Symbol
+                                  ? ` (${uomMap[ci.DefaultUOM].Symbol}) · default`
+                                  : " · default"}
+                              </option>
+                            )}
+                            {relevant.map((u: any) => (
+                              <option key={u.UOMCode} value={u.UOMCode}>
+                                {u.UOMName}
+                                {u.Symbol ? ` (${u.Symbol})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                       <ChevronDown
                         size={13}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"

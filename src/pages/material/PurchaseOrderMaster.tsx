@@ -99,6 +99,7 @@ import {
   Lock,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { relevantUOMs, convertRate } from "@/lib/uomConversion";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 
@@ -655,6 +656,8 @@ const PurchaseOrderMaster: React.FC = () => {
           id: Number(u.Id),
           name: u.UOMName ?? "",
           code: (u.UOMCode ?? "").toString().trim(),
+          category: (u.UOMCategory ?? null) as string | null,
+          baseFactor: Number(u.BaseFactor) || 1,
         }))
         .filter((u) => u.name !== ""),
     [uomsRaw],
@@ -4300,33 +4303,51 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             <Lock size={11} className="shrink-0" />
                             {li.unit || "—"}
                           </span>
-                        ) : (
+                        ) : (() => {
+                          const currentUom = uoms.find(
+                            (u) =>
+                              u.id === li.uomId ||
+                              u.name.toLowerCase() === li.unit.toLowerCase() ||
+                              u.code.toLowerCase() === li.unit.toLowerCase(),
+                          );
+                          // Only offer UOMs relevant to the currently-selected
+                          // one (same measurement category — e.g. Weight units
+                          // for a Weight unit) so a liquid item can't be
+                          // switched to "Running Meter". Units with no category
+                          // (Bags, Box, Set, ...) fall back to the full list,
+                          // same as before this feature existed.
+                          const options = relevantUOMs(uoms, currentUom?.category);
+                          return (
                           <div className="relative">
                             <select
-                              value={
-                                li.uomId ??
-                                uoms.find(
-                                  (u) =>
-                                    u.name.toLowerCase() ===
-                                      li.unit.toLowerCase() ||
-                                    u.code.toLowerCase() ===
-                                      li.unit.toLowerCase(),
-                                )?.id ??
-                                ""
-                              }
+                              value={currentUom?.id ?? ""}
                               onChange={(e) => {
                                 const uom = uoms.find(
                                   (u) => u.id === Number(e.target.value),
                                 );
+                                if (!uom) return;
+                                // Same-category switch (e.g. tonne -> kg):
+                                // re-price the rate so the line's total value
+                                // doesn't silently change under the user —
+                                // a supplier quote of ₹100/tonne becomes
+                                // ₹0.1/kg, not ₹100/kg.
+                                const nextRate =
+                                  currentUom?.category &&
+                                  uom.category === currentUom.category &&
+                                  currentUom.baseFactor &&
+                                  uom.baseFactor
+                                    ? convertRate(li.rate, currentUom.baseFactor, uom.baseFactor)
+                                    : li.rate;
                                 updateLine(idx, {
-                                  uomId: uom?.id ?? null,
-                                  unit: uom?.name ?? "",
+                                  uomId: uom.id,
+                                  unit: uom.name,
+                                  rate: nextRate,
                                 });
                               }}
                               className={cellSelect}
                             >
                               <option value="">— UOM —</option>
-                              {uoms.map((u) => (
+                              {options.map((u) => (
                                 <option key={u.id} value={u.id}>
                                   {u.name}
                                 </option>
@@ -4337,7 +4358,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                             />
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
 
                       {/* Rate */}
