@@ -112,6 +112,7 @@ export interface RecentExpense {
   /** "TOD" = direct/Other Expenses booking (no linked PO/GRN/WO). */
   ESourceType: string | null;
   ECreatedAt: string;
+  SupplierName: string | null;
 }
 
 export interface AdminDashboardData {
