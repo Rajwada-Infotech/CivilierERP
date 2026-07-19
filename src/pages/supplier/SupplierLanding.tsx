@@ -134,47 +134,80 @@ function QuotationsSection({ quotations, loading }: {
             <p className="text-sm text-muted-foreground">No quotations yet. You'll be notified when an RFQ arrives.</p>
           </motion.div>
         ) : (
-          <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
-            {/* Tabs */}
-            <div className="flex border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-              <div className="px-5 py-2.5 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                Pending ({pending.length})
+          <>
+            {/* Desktop / tablet table */}
+            <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
+              {/* Tabs */}
+              <div className="flex border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                <div className="px-5 py-2.5 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  Pending ({pending.length})
+                </div>
+                <div className="px-5 py-2.5">Submitted ({submitted.length})</div>
               </div>
-              <div className="px-5 py-2.5">Submitted ({submitted.length})</div>
-            </div>
 
-            {/* Header */}
-            <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
-              <span>RFQ No.</span>
-              <span className="hidden sm:block">Description / Project</span>
-              <span>Company</span>
-              <span>Due Date</span>
-              <span>Status</span>
-            </div>
+              {/* Header */}
+              <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+                <span>RFQ No.</span>
+                <span>Description / Project</span>
+                <span>Company</span>
+                <span>Due Date</span>
+                <span>Status</span>
+              </div>
 
-            {quotations.slice(0, 8).map((q, i) => (
-              <motion.div key={q.QuotationId}
-                className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors cursor-pointer border-b border-border/60 last:border-0"
-                initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
-                onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
-                  <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
-                </div>
-                <div className="hidden sm:block min-w-0">
+              {quotations.slice(0, 8).map((q, i) => (
+                <motion.div key={q.QuotationId}
+                  className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors cursor-pointer border-b border-border/60 last:border-0"
+                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
+                    <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
+                  <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                    {fmtDate(q.DueDate)}
+                  </span>
+                  <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
+                </motion.div>
+              ))}
+            </motion.div>
+
+            {/* Mobile stacked cards */}
+            <div className="sm:hidden space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                Pending ({pending.length}) <span className="text-muted-foreground font-normal">· Submitted ({submitted.length})</span>
+              </div>
+              {quotations.slice(0, 8).map((q, i) => (
+                <motion.div key={q.QuotationId}
+                  className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden active:bg-emerald-500/5 transition-colors cursor-pointer p-4 space-y-2"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
+                      <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
+                    </div>
+                    <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
+                  </div>
                   <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
-                </div>
-                <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
-                <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
-                  {fmtDate(q.DueDate)}
-                </span>
-                <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
-              </motion.div>
-            ))}
-          </motion.div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {q.CompanyName ?? "—"} · {q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}
+                  </p>
+                  <p className={`text-[11px] ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                    Due {fmtDate(q.DueDate)}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </section>
