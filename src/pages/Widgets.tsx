@@ -744,7 +744,10 @@ function MapViewWidget() {
     );
   }, []);
 
-  if (geocoding) return <Spinner />;
+  // Only block on a full-page spinner while nothing has resolved yet — once
+  // at least one marker is ready, render the map and let the rest resolve
+  // in the background (surfaced via the "Resolving…" note below instead).
+  if (geocoding && markers.length === 0) return <Spinner />;
 
   if (!markers.length) {
     return (
