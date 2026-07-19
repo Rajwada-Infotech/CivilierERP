@@ -192,6 +192,7 @@ const ALL_ROUTES = [
   { path: "/api/trial-balance", file: "./routes/trialBalance" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/vehicle-in-out", file: "./routes/vehicleInOut" },
+  { path: "/api/quality-debit-note", file: "./routes/qualityRejectionDebitNote" },
   { path: "/api/stock-ledger", file: "./routes/stockLedger" },
   { path: "/api/inventory-master", file: "./routes/inventoryMaster" },
   { path: "/api/brs", file: "./routes/brs" },
