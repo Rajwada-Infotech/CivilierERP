@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, MessageCircle, Send, Users, X } from "lucide-react";
+import { Loader2, MessageCircle, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { connectSocket } from "@/lib/socket";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -238,23 +237,16 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
   };
 
   return (
-    <section className={cn("flex flex-col min-h-0 rounded-2xl border border-border bg-card overflow-hidden", className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3 shrink-0">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/10">
-            <MessageCircle size={15} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">Order Conversation</p>
-            <p className="text-[11px] text-muted-foreground">
-              {messages.length} message{messages.length === 1 ? "" : "s"}
-            </p>
-          </div>
-        </div>
+    <section className={cn("flex flex-col min-h-0 rounded-2xl border border-border/60 bg-card overflow-hidden", className)}>
+      {/* Header — plain text, no icon chip; message count folded in as a dot-separated suffix */}
+      <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5 shrink-0">
+        <p className="text-xs font-semibold text-foreground">
+          Conversation
+          <span className="text-muted-foreground font-normal"> · {messages.length}</span>
+        </p>
         {onClose && (
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
-            <X size={16} />
+          <button onClick={onClose} className="p-1 -mr-1 rounded-md hover:bg-muted transition-colors text-muted-foreground">
+            <X size={14} />
           </button>
         )}
       </div>
@@ -268,74 +260,69 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
           const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
           autoScrollRef.current = distance < 80;
         }}
-        className="flex-1 min-h-[160px] overflow-y-auto bg-muted/10 px-4 py-5 space-y-5"
+        className="flex-1 min-h-[160px] overflow-y-auto px-3 sm:px-4 py-4 space-y-4"
       >
         {(loading || isJoining) && (
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 size={12} className="animate-spin" />
             Loading conversation…
           </div>
         )}
 
         {joinError && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600">
+          <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600">
             {joinError} — messages will still send, but live updates are paused.
           </div>
         )}
 
         {!loading && groupedMessages.length === 0 && (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <Users size={18} />
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
+              <MessageCircle size={16} />
             </div>
             <p className="text-sm font-medium text-foreground">No messages yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">Start the conversation about this order.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Start the conversation about this order.</p>
           </div>
         )}
 
         {groupedMessages.map((group) => (
-          <div key={group.label} className="space-y-3">
-            <div className="flex items-center gap-3 py-1">
-              <div className="h-px flex-1 bg-border/50" />
-              <span className="rounded-full border border-border/50 bg-background/80 px-3 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 backdrop-blur-sm">
+          <div key={group.label} className="space-y-2.5">
+            <div className="flex items-center gap-3">
+              <span className="mx-auto rounded-full px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground/70">
                 {group.label}
               </span>
-              <div className="h-px flex-1 bg-border/50" />
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2">
               {group.items.map((message) => {
                 const isMine = message.author_id === currentUser.id;
                 const alignmentClass = isMine ? "flex-row-reverse" : "flex-row";
                 const textAlignment = isMine ? "items-end text-right" : "items-start text-left";
 
                 return (
-                  <div key={message.Id ?? message.id ?? message.tempId} className={cn("flex gap-2.5", alignmentClass)}>
-                    <Avatar className="h-8 w-8 shrink-0 border border-border/60 shadow-sm">
-                      <AvatarFallback className={cn("text-[10px] font-bold", roleTone(message.author_role))}>
+                  <div key={message.Id ?? message.id ?? message.tempId} className={cn("flex gap-2", alignmentClass)}>
+                    <Avatar className="h-6 w-6 shrink-0">
+                      <AvatarFallback className={cn("text-[9px] font-bold", roleTone(message.author_role))}>
                         {getInitials(message.author_name || "U")}
                       </AvatarFallback>
                     </Avatar>
 
-                    <div className={cn("flex min-w-0 max-w-[78%] flex-col gap-1", textAlignment)}>
-                      <div className={cn("flex flex-wrap items-center gap-1.5", isMine ? "justify-end" : "justify-start")}>
-                        <span className="text-[11px] font-semibold text-foreground">{message.author_name}</span>
-                        <Badge variant="outline" className="h-4 rounded-full px-1.5 text-[9px] capitalize text-muted-foreground border-border/50">
-                          {(message.author_role || "user").replaceAll("_", " ")}
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground/50">{formatTime(message.created_at)}</span>
+                    <div className={cn("flex min-w-0 max-w-[80%] sm:max-w-[75%] flex-col gap-0.5", textAlignment)}>
+                      <div className={cn("flex items-baseline gap-1.5", isMine ? "justify-end" : "justify-start")}>
+                        <span className="text-[11px] font-medium text-muted-foreground truncate">{message.author_name}</span>
+                        <span className="text-[10px] text-muted-foreground/50 shrink-0">{formatTime(message.created_at)}</span>
                       </div>
 
                       <div
                         className={cn(
-                          "relative rounded-2xl border px-3.5 py-2.5 shadow-sm transition-opacity",
-                          isMine ? "border-indigo-500/30 bg-indigo-600 text-white shadow-indigo-500/20 rounded-tr-sm" : "border-border/60 bg-card text-foreground shadow-sm rounded-tl-sm",
+                          "rounded-2xl px-3 py-2 transition-opacity",
+                          isMine ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm",
                           message.pending && "opacity-60",
                         )}
                       >
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.comment}</p>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.comment}</p>
                         {message.pending && (
-                          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest opacity-70">
+                          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium opacity-70">
                             <Loader2 size={10} className="animate-spin" /> Sending
                           </span>
                         )}
@@ -349,9 +336,9 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
         ))}
       </div>
 
-      {/* Input area */}
-      <div className="border-t border-border/60 bg-muted/10 px-4 py-4 shrink-0">
-        <div className="space-y-3">
+      {/* Input area — compact single-row pill */}
+      <div className="border-t border-border/60 px-3 py-2.5 shrink-0">
+        <div className="flex items-end gap-2">
           <Textarea
             ref={textareaRef}
             value={draft}
@@ -364,15 +351,16 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
             }}
             placeholder="Write a reply…"
             rows={1}
-            className="min-h-[52px] max-h-36 w-full resize-none rounded-2xl border-border bg-background px-4 py-3 text-sm shadow-sm focus-visible:ring-2 focus-visible:ring-primary/20"
+            className="min-h-[40px] max-h-36 flex-1 resize-none rounded-2xl border-border/60 bg-muted/40 px-4 py-2.5 text-sm shadow-none focus-visible:ring-1 focus-visible:ring-primary/30"
           />
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-muted-foreground">Press Enter to send, Shift+Enter for a new line</p>
-            <Button onClick={handleSend} disabled={!draft.trim() || isSending} className="min-w-24 rounded-xl px-4">
-              {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              {isSending ? "Sending" : "Send"}
-            </Button>
-          </div>
+          <Button
+            onClick={handleSend}
+            disabled={!draft.trim() || isSending}
+            size="icon"
+            className="h-10 w-10 shrink-0 rounded-full"
+          >
+            {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          </Button>
         </div>
       </div>
     </section>

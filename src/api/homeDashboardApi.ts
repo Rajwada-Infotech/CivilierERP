@@ -89,6 +89,7 @@ export interface MaterialDashboardData {
   workOrders: { total: number };
   recentGRNs: RecentGRN[];
   recentPOs: RecentPO[];
+  recentExpenses: RecentExpense[];
 }
 
 export interface RecentGRN {
@@ -98,6 +99,20 @@ export interface RecentGRN {
   Status: string;
   SupplierName: string;
   PONumber: string;
+}
+
+export interface RecentExpense {
+  Eid: number;
+  EDocNo: string;
+  EDocDate: string;
+  EAmount: number;
+  EStatus: string;
+  EProjectName: string | null;
+  EDocumentType: string | null;
+  /** "TOD" = direct/Other Expenses booking (no linked PO/GRN/WO). */
+  ESourceType: string | null;
+  ECreatedAt: string;
+  SupplierName: string | null;
 }
 
 export interface AdminDashboardData {
@@ -288,15 +303,17 @@ export async function fetchHomeDashboard(
     hasEngineeringAccess
       ? safeFetch<EngineeringSummaryData>("/api/engineering/dashboard")
       : skip,
-    hasFollowupAccess
-      ? safeFetch<unknown>("/api/followup-applications?pageSize=500")
-      : skip,
-    hasFollowupAccess
-      ? safeFetch<unknown>("/api/followup-bookings?pageSize=500")
-      : skip,
-    hasFollowupAccess
-      ? safeFetch<unknown>("/api/followup-agreements?pageSize=500")
-      : skip,
+    // /api/followup-applications, /api/followup-bookings, and
+    // /api/followup-agreements are retired (see server.js's ALL_ROUTES —
+    // route modules left on disk, no longer mounted; CRM Applications/
+    // Bookings/Agreements superseded them). Calling them here always 404'd,
+    // spamming the server log on every dashboard load for zero benefit —
+    // commented out rather than left hitting a dead route. `applications`,
+    // `bookings`, and `agreements` in the followup summary below stay
+    // permanently 0, same as they already were.
+    skip,
+    skip,
+    skip,
     hasFollowupAccess
       ? safeFetch<unknown>("/api/followup-noc?pageSize=500")
       : skip,

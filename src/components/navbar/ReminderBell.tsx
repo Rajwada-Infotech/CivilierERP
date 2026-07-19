@@ -169,7 +169,7 @@ export const ReminderBell = () => {
           <div
             ref={panelRef}
             style={accentVars}
-            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,320px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,420px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
           >
             {/* Header — gradient wash + live count, tinted to the active module */}
             <div className="relative px-4 py-3.5 border-b border-[var(--rb-accent-20)] bg-gradient-to-br from-[var(--rb-accent-10)] via-card to-card overflow-hidden">
@@ -279,7 +279,7 @@ export const ReminderBell = () => {
               </button>
             </div>
 
-            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px]">
+            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px] scrollbar-none">
               {filtered.length === 0 ? (
                 <div className="py-12 px-4 text-center">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
