@@ -46,6 +46,7 @@ import {
   Save,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
   Check,
   CheckCircle2,
   Filter,
@@ -61,6 +62,7 @@ import {
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
+import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -608,6 +610,12 @@ export default function VehicleInOut() {
   // the PO changes; prefilled from the record's own saved items on edit.
   const [receivedQtyByItem, setReceivedQtyByItem] = useState<Record<number, string>>({});
 
+  // Quality-rejection debit note modal — raised against a single received
+  // line item (VehicleInOutItemID) from the view modal.
+  const [debitNoteItem, setDebitNoteItem] = useState<any>(null);
+  const [debitNoteQty, setDebitNoteQty] = useState("");
+  const [debitNoteReason, setDebitNoteReason] = useState("");
+
   const [form, setForm] = useState(buildEmpty(activeFinYear));
   const pf = (patch: Partial<typeof form>) =>
     setForm((p) => ({ ...p, ...patch }));
@@ -808,6 +816,24 @@ export default function VehicleInOut() {
       toast.success("Record deleted");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete"),
+  });
+
+  const debitNoteMut = useMutation({
+    mutationFn: () =>
+      createQualityDebitNote({
+        vehicleInOutItemId: debitNoteItem.VehicleInOutItemID,
+        rejectedQty: parseFloat(debitNoteQty) || 0,
+        reason: debitNoteReason.trim() || undefined,
+      }),
+    onSuccess: (res) => {
+      toast.success(
+        `Debit note ${res.docNo} raised — ${res.percentBad}% bad, ₹${res.amount.toLocaleString("en-IN")}`,
+      );
+      setDebitNoteItem(null);
+      setDebitNoteQty("");
+      setDebitNoteReason("");
+    },
+    onError: (err: any) => toast.error(err.message || "Failed to raise debit note"),
   });
 
   // Received-qty entries as a payload array — only lines with a positive
@@ -2077,6 +2103,53 @@ export default function VehicleInOut() {
                   </div>
                 </div>
 
+                {/* Received Items — quality inspection can flag part or all
+                    of a line as inferior and raise a debit note against it
+                    (e.g. ordered Grade A steel, 20 of 100 tonnes received
+                    turn out inferior on inspection). */}
+                {Array.isArray(viewingRec.Items) && viewingRec.Items.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                      Received Items
+                    </p>
+                    <div className="rounded-xl border border-border/50 overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Item</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Received</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                          {viewingRec.Items.map((it: any) => (
+                            <tr key={it.VehicleInOutItemID}>
+                              <td className="px-3 py-2 font-medium text-foreground">{it.ItemName || "—"}</td>
+                              <td className="px-3 py-2 text-right font-mono text-foreground">
+                                {it.ReceivedQty} {it.UomName || ""}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {rights.canEdit && (
+                                  <button
+                                    onClick={() => {
+                                      setDebitNoteItem(it);
+                                      setDebitNoteQty("");
+                                      setDebitNoteReason("");
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 text-rose-600 text-[11px] font-medium hover:bg-rose-500/20 transition-colors"
+                                  >
+                                    <AlertTriangle size={11} /> Raise Debit Note
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Attachments — new records use the DB-backed Attachments[]
                     (binary stored in dbo.VehicleInOutAttachments); older
                     records created before this change may still only have
@@ -2177,6 +2250,96 @@ export default function VehicleInOut() {
             </div>
           </div>
         )}
+
+      {/* ── Raise Debit Note modal (quality rejection against a received line) ── */}
+      {debitNoteItem && (() => {
+        const qty = parseFloat(debitNoteQty) || 0;
+        const receivedQty = Number(debitNoteItem.ReceivedQty) || 0;
+        const overLimit = qty > receivedQty + 1e-6;
+        const percentBad = receivedQty > 0 ? Math.round((qty / receivedQty) * 10000) / 100 : 0;
+        return (
+          <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+            <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20">
+                    <AlertTriangle size={13} className="text-rose-500" />
+                  </div>
+                  <div>
+                    <h2 className="font-heading font-bold text-sm">Raise Debit Note</h2>
+                    <p className="text-[10px] text-muted-foreground">{debitNoteItem.ItemName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDebitNoteItem(null)}
+                  className="p-2 hover:bg-muted rounded-lg transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Received Quantity</p>
+                  <p className="text-sm font-semibold font-mono text-foreground">
+                    {receivedQty} {debitNoteItem.UomName || ""}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-foreground mb-1.5 block">
+                    Rejected / Inferior Quantity
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={receivedQty}
+                    step="any"
+                    value={debitNoteQty}
+                    onChange={(e) => setDebitNoteQty(e.target.value)}
+                    placeholder="0"
+                    className={overLimit ? "border-destructive text-destructive" : ""}
+                  />
+                  {qty > 0 && (
+                    <p className={`text-xs mt-1.5 ${overLimit ? "text-destructive" : "text-muted-foreground"}`}>
+                      {overLimit
+                        ? `Cannot reject more than the ${receivedQty} received.`
+                        : `${percentBad}% of this delivery — debit note will be raised for the rejected quantity at the PO rate.`}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-foreground mb-1.5 block">
+                    Reason (optional)
+                  </label>
+                  <textarea
+                    value={debitNoteReason}
+                    onChange={(e) => setDebitNoteReason(e.target.value)}
+                    placeholder="e.g. Visible rust and cracks on inspected batch"
+                    rows={3}
+                    className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-card border-t border-border px-5 py-4 flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setDebitNoteItem(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!(qty > 0) || overLimit || debitNoteMut.isPending}
+                  onClick={() => debitNoteMut.mutate()}
+                  className="bg-rose-600 hover:bg-rose-700 text-white"
+                >
+                  {debitNoteMut.isPending ? "Raising…" : "Raise Debit Note"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── PO Preview pop-out (above view modal) ── */}
       {showPODetails && viewingRec && (

@@ -147,6 +147,26 @@ export interface SupplierGrnOrder {
   totalRemaining: number;
 }
 
+export interface SupplierCreditNote {
+  DebitNoteId: number;
+  DocNo: string;
+  DebitDate: string;
+  Status: "Issued" | "Cancelled";
+  ItemName: string | null;
+  UomName: string | null;
+  ReceivedQty: number;
+  RejectedQty: number;
+  PercentBad: number;
+  Rate: number;
+  Amount: number;
+  Reason: string | null;
+  VehicleInOutDocNo: string | null;
+  PONumber: string | null;
+  VehicleNo: string | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+}
+
 export interface OrderChatMessage {
   Id: number;
   PurchaseOrderId: number;
@@ -239,3 +259,6 @@ export const postSupplierOrderComment = (id: number | string, comment: string) =
 
 export const getSupplierGrnSummary = () =>
   fetchWithAuth(`${BASE}/grns`).then((r) => handleResponse<SupplierGrnOrder[]>(r));
+
+export const getSupplierCreditNotes = () =>
+  fetchWithAuth(`${BASE}/credit-notes`).then((r) => handleResponse<SupplierCreditNote[]>(r));
