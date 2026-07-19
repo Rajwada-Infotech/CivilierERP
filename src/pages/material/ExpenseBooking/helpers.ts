@@ -9,7 +9,7 @@ import type {
   SelectedDoc,
   GRNItemLine,
 } from "./types";
-import { makeDirectLineItem, computeDirectTotal } from "./DirectItemsTable";
+import { makeDirectLineItem } from "./DirectItemsTable";
 import type { DirectLineItem } from "./DirectItemsTable";
 
 export function fmt(n: number) {

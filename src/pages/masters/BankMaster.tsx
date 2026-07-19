@@ -70,22 +70,6 @@ interface AccountGroup {
   parentId: string | null;
 }
 
-interface TreeNode extends AccountGroup {
-  children: TreeNode[];
-}
-
-function buildTree(items: AccountGroup[]): TreeNode[] {
-  const map: Record<string, TreeNode> = {};
-  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((i) => {
-    if (i.parentId && map[i.parentId])
-      map[i.parentId].children.push(map[i._id]);
-    else roots.push(map[i._id]);
-  });
-  return roots;
-}
-
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
@@ -444,11 +428,6 @@ const BankMaster: React.FC = () => {
         parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
-
-  const accountGroupTree = useMemo(
-    () => buildTree(accountGroups),
-    [accountGroups],
-  );
 
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
