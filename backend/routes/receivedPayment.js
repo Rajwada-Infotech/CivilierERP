@@ -111,6 +111,8 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       RPBankName,
       RPTransactionID,
       RPCheckNumber,
+      RPChequeDate,
+      RPIsPostDated,
       RPRemarks,
       RPDepositBankId,
       RPDepositBankName,
@@ -245,6 +247,8 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       .input("RPBankName", sql.NVarChar(255), RPBankName || null)
       .input("RPTransactionID", sql.NVarChar(255), RPTransactionID || null)
       .input("RPCheckNumber", sql.NVarChar(100), RPCheckNumber || null)
+      .input("RPChequeDate", sql.Date, RPChequeDate || null)
+      .input("RPIsPostDated", sql.Bit, RPIsPostDated ? 1 : 0)
       .input("RPRemarks", sql.NVarChar(sql.MAX), RPRemarks || null)
       .input("RPIsEmi", sql.Bit, RPIsEmi ? 1 : 0)
       .input("RPEmiTotal", sql.Decimal(18, 2), RPEmiTotal || null)
@@ -294,8 +298,8 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       )
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
 
-    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId`;
-    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId`;
+    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated`;
+    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated`;
 
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
@@ -374,6 +378,8 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       RPBankName,
       RPTransactionID,
       RPCheckNumber,
+      RPChequeDate,
+      RPIsPostDated,
       RPRemarks,
       RPDepositBankId,
       RPDepositBankName,
@@ -404,6 +410,8 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       .input("RPBankName", sql.NVarChar(255), RPBankName || null)
       .input("RPTransactionID", sql.NVarChar(255), RPTransactionID || null)
       .input("RPCheckNumber", sql.NVarChar(100), RPCheckNumber || null)
+      .input("RPChequeDate", sql.Date, RPChequeDate || null)
+      .input("RPIsPostDated", sql.Bit, RPIsPostDated ? 1 : 0)
       .input("RPRemarks", sql.NVarChar(sql.MAX), RPRemarks || null)
       .input("RPIsEmi", sql.Bit, RPIsEmi ? 1 : 0)
       .input("RPEmiTotal", sql.Decimal(18, 2), RPEmiTotal || null)
@@ -436,6 +444,8 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
           RPBankName      = @RPBankName,
           RPTransactionID = @RPTransactionID,
           RPCheckNumber   = @RPCheckNumber,
+          RPChequeDate    = @RPChequeDate,
+          RPIsPostDated   = @RPIsPostDated,
           RPRemarks       = @RPRemarks,
           RPIsEmi         = @RPIsEmi,
           RPEmiTotal      = @RPEmiTotal,

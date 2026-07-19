@@ -28,6 +28,7 @@ import {
   Hash,
   Filter,
   AlertTriangle,
+  FileWarning,
   Printer,
   CopyPlus,
   Warehouse,
@@ -76,6 +77,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
+import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
+import { RaiseDebitNoteModal } from "@/components/quality/RaiseDebitNoteModal";
 import { getProjects, getCompanies } from "@/api/grnApi";
 import { getGodowns } from "@/api/godownsApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -803,6 +806,31 @@ export default function GRN() {
   _canDelete = rights.canDelete;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Quality-rejection debit note — raised against a single GRN line item
+  // (identified by its position in the GRNItems JSON array) from the view
+  // modal's Received Items table.
+  const [debitNoteLine, setDebitNoteLine] = useState<{ index: number; item: GRNItemLine } | null>(null);
+  const [debitNoteQty, setDebitNoteQty] = useState("");
+  const [debitNoteReason, setDebitNoteReason] = useState("");
+  const debitNoteMut = useMutation({
+    mutationFn: () =>
+      createQualityDebitNote({
+        grnId: viewingGrn.GRNID,
+        grnItemIndex: debitNoteLine!.index,
+        rejectedQty: parseFloat(debitNoteQty) || 0,
+        reason: debitNoteReason.trim() || undefined,
+      }),
+    onSuccess: (res) => {
+      toast.success(
+        `Debit note ${res.docNo} raised — ${res.percentBad}% bad, ₹${res.amount.toLocaleString("en-IN")}`,
+      );
+      setDebitNoteLine(null);
+      setDebitNoteQty("");
+      setDebitNoteReason("");
+    },
+    onError: (err: any) => toast.error(err.message || "Failed to raise debit note"),
+  });
   const { finYears } = useFinYear();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -3030,6 +3058,19 @@ export default function GRN() {
                                   </p>
                                 </div>
                               </div>
+                              {rights.canEdit && item.receivedQty > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setDebitNoteLine({ index: i, item });
+                                    setDebitNoteQty("");
+                                    setDebitNoteReason("");
+                                  }}
+                                  title="Raise a debit note if part of this line was found below the ordered grade"
+                                  className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                >
+                                  <FileWarning size={12} /> Raise Debit Note
+                                </button>
+                              )}
                             </div>
                           ))
                         ) : (
@@ -3053,10 +3094,11 @@ export default function GRN() {
                                 "Rate (₹)",
                                 "Qty",
                                 "Total (₹)",
+                                "",
                               ].map((h) => (
                                 <th
                                   key={h}
-                                  className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" ? "text-left" : "text-right"}`}
+                                  className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" || h === "" ? "text-left" : "text-right"}`}
                                 >
                                   {h}
                                 </th>
@@ -3100,12 +3142,27 @@ export default function GRN() {
                                       ? `₹${fmt(Number(item.totalAmount))}`
                                       : "—"}
                                   </td>
+                                  <td className="px-3 py-2.5 text-right">
+                                    {rights.canEdit && item.receivedQty > 0 && (
+                                      <button
+                                        onClick={() => {
+                                          setDebitNoteLine({ index: i, item });
+                                          setDebitNoteQty("");
+                                          setDebitNoteReason("");
+                                        }}
+                                        title="Raise a debit note if part of this line was found below the ordered grade"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors whitespace-nowrap"
+                                      >
+                                        <FileWarning size={12} /> Debit Note
+                                      </button>
+                                    )}
+                                  </td>
                                 </tr>
                               ))
                             ) : (
                               <tr>
                                 <td
-                                  colSpan={8}
+                                  colSpan={9}
                                   className="px-4 py-6 text-center text-muted-foreground text-sm"
                                 >
                                   No items
@@ -3117,7 +3174,7 @@ export default function GRN() {
                             <tfoot>
                               <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
                                 <td
-                                  colSpan={7}
+                                  colSpan={8}
                                   className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
                                 >
                                   GRN Total (received)
@@ -3136,7 +3193,7 @@ export default function GRN() {
                                     <>
                                       <tr className="bg-muted/30 border-t border-border/50">
                                         <td
-                                          colSpan={7}
+                                          colSpan={8}
                                           className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
                                         >
                                           PO Value (incl. GST)
@@ -3153,7 +3210,7 @@ export default function GRN() {
                                         }
                                       >
                                         <td
-                                          colSpan={7}
+                                          colSpan={8}
                                           className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
                                         >
                                           Balance on PO
@@ -3396,6 +3453,24 @@ export default function GRN() {
             </div>
           );
         })()}
+
+      {/* ── Raise Debit Note modal (quality rejection against a GRN line) ── */}
+      {debitNoteLine && (
+        <RaiseDebitNoteModal
+          item={{
+            itemName: debitNoteLine.item.itemName || "Item",
+            uomName: debitNoteLine.item.uom,
+            receivedQty: Number(debitNoteLine.item.receivedQty) || 0,
+          }}
+          qty={debitNoteQty}
+          onQtyChange={setDebitNoteQty}
+          reason={debitNoteReason}
+          onReasonChange={setDebitNoteReason}
+          onClose={() => setDebitNoteLine(null)}
+          onSubmit={() => debitNoteMut.mutate()}
+          isPending={debitNoteMut.isPending}
+        />
+      )}
 
       {/* GRN Delete Block Dialog */}
       <Dialog

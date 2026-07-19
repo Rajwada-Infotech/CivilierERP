@@ -248,7 +248,7 @@ router.get("/uom-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT UOMCode, UOMName, Symbol, IsActive
+      SELECT UOMCode, UOMName, Symbol, IsActive, UOMCategory, BaseFactor
       FROM   dbo.UOMMaster
       ORDER  BY UOMName
     `);

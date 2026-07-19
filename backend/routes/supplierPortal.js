@@ -606,4 +606,33 @@ router.get("/grns", async (req, res) => {
   }
 });
 
+// ── GET /credit-notes — quality-rejection debit notes, the supplier's side ──
+// A "Quality Rejection Debit Note" the buyer raises against a delivery is,
+// from the supplier's own books, a Credit Note (money they're no longer
+// owed) — same row, opposite label. Scoped to this supplier only.
+router.get("/credit-notes", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("SupplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          q.DebitNoteId, q.DocNo, q.DebitDate, q.Status,
+          q.ItemName, q.UomName, q.ReceivedQty, q.RejectedQty, q.PercentBad,
+          q.Rate, q.Amount, q.Reason,
+          v.DocNo AS VehicleInOutDocNo, v.PONumber, v.VehicleNo,
+          c.Name AS CompanyName, p.Name AS ProjectName
+        FROM dbo.QualityRejectionDebitNote q
+        LEFT JOIN dbo.VehicleInOut v ON v.VehicleInOutID = q.VehicleInOutID
+        LEFT JOIN dbo.enterprise c ON c.id = q.CompanyID
+        LEFT JOIN dbo.enterprise p ON p.id = q.ProjectID
+        WHERE q.SupplierID = @SupplierId
+        ORDER BY q.DebitDate DESC, q.DebitNoteId DESC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

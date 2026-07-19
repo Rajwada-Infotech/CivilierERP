@@ -12,6 +12,7 @@ import {
   ClipboardList,
   ChevronLeft,
   ChevronRight,
+  Landmark,
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
 import { useModule } from "@/contexts/ModuleContext";
@@ -30,6 +31,7 @@ const TYPE_META: Record<string, ReminderMeta> = {
   grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
   emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
   material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
+  pdc: { icon: Landmark, label: "PDC", color: "text-sky-500" },
 };
 
 export const ReminderBell = () => {
@@ -244,6 +246,7 @@ export const ReminderBell = () => {
                   "tds",
                   "emi_installment",
                   "material_request",
+                  "pdc",
                 ].map((t) => {
                   const active = filter === t;
                   const meta = t !== "all" ? TYPE_META[t] : null;

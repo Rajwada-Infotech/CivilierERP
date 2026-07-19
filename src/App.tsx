@@ -191,6 +191,7 @@ const SupplierQuotationDetail = lazy(
 const SupplierCatalog = lazy(() => import("./pages/supplier/SupplierCatalog"));
 const SupplierCompanyProfile = lazy(() => import("./pages/supplier/SupplierCompanyProfile"));
 const SupplierNotifications = lazy(() => import("./pages/supplier/SupplierNotifications"));
+const SupplierCreditNotes = lazy(() => import("./pages/supplier/SupplierCreditNotes"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
 const AccountGroupMaster = lazy(
@@ -2094,6 +2095,20 @@ function AppRoutes() {
               <RouteErrorBoundary>
                 <Suspense fallback={<PageSkeleton />}>
                   <SupplierNotifications />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/supplier/credit-notes"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierCreditNotes />
                 </Suspense>
               </RouteErrorBoundary>
             </SupplierLayout>

@@ -46,6 +46,8 @@ import {
   Save,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
+  FileWarning,
   Check,
   CheckCircle2,
   Filter,
@@ -61,6 +63,8 @@ import {
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
+import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
+import { RaiseDebitNoteModal } from "@/components/quality/RaiseDebitNoteModal";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -608,6 +612,12 @@ export default function VehicleInOut() {
   // the PO changes; prefilled from the record's own saved items on edit.
   const [receivedQtyByItem, setReceivedQtyByItem] = useState<Record<number, string>>({});
 
+  // Quality-rejection debit note modal — raised against a single received
+  // line item (VehicleInOutItemID) from the view modal.
+  const [debitNoteItem, setDebitNoteItem] = useState<any>(null);
+  const [debitNoteQty, setDebitNoteQty] = useState("");
+  const [debitNoteReason, setDebitNoteReason] = useState("");
+
   const [form, setForm] = useState(buildEmpty(activeFinYear));
   const pf = (patch: Partial<typeof form>) =>
     setForm((p) => ({ ...p, ...patch }));
@@ -808,6 +818,24 @@ export default function VehicleInOut() {
       toast.success("Record deleted");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete"),
+  });
+
+  const debitNoteMut = useMutation({
+    mutationFn: () =>
+      createQualityDebitNote({
+        vehicleInOutItemId: debitNoteItem.VehicleInOutItemID,
+        rejectedQty: parseFloat(debitNoteQty) || 0,
+        reason: debitNoteReason.trim() || undefined,
+      }),
+    onSuccess: (res) => {
+      toast.success(
+        `Debit note ${res.docNo} raised — ${res.percentBad}% bad, ₹${res.amount.toLocaleString("en-IN")}`,
+      );
+      setDebitNoteItem(null);
+      setDebitNoteQty("");
+      setDebitNoteReason("");
+    },
+    onError: (err: any) => toast.error(err.message || "Failed to raise debit note"),
   });
 
   // Received-qty entries as a payload array — only lines with a positive
@@ -2077,6 +2105,54 @@ export default function VehicleInOut() {
                   </div>
                 </div>
 
+                {/* Received Items — quality inspection can flag part or all
+                    of a line as inferior and raise a debit note against it
+                    (e.g. ordered Grade A steel, 20 of 100 tonnes received
+                    turn out inferior on inspection). */}
+                {Array.isArray(viewingRec.Items) && viewingRec.Items.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                      Received Items
+                    </p>
+                    <div className="rounded-xl border border-border/50 overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Item</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Received</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                          {viewingRec.Items.map((it: any) => (
+                            <tr key={it.VehicleInOutItemID}>
+                              <td className="px-3 py-2 font-medium text-foreground">{it.ItemName || "—"}</td>
+                              <td className="px-3 py-2 text-right font-mono text-foreground">
+                                {it.ReceivedQty} {it.UomName || ""}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {rights.canEdit && (
+                                  <button
+                                    onClick={() => {
+                                      setDebitNoteItem(it);
+                                      setDebitNoteQty("");
+                                      setDebitNoteReason("");
+                                    }}
+                                    title="Raise a debit note if part of this line was found below the ordered grade"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                  >
+                                    <FileWarning size={12} /> Debit Note
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Attachments — new records use the DB-backed Attachments[]
                     (binary stored in dbo.VehicleInOutAttachments); older
                     records created before this change may still only have
@@ -2177,6 +2253,24 @@ export default function VehicleInOut() {
             </div>
           </div>
         )}
+
+      {/* ── Raise Debit Note modal (quality rejection against a received line) ── */}
+      {debitNoteItem && (
+        <RaiseDebitNoteModal
+          item={{
+            itemName: debitNoteItem.ItemName,
+            uomName: debitNoteItem.UomName,
+            receivedQty: Number(debitNoteItem.ReceivedQty) || 0,
+          }}
+          qty={debitNoteQty}
+          onQtyChange={setDebitNoteQty}
+          reason={debitNoteReason}
+          onReasonChange={setDebitNoteReason}
+          onClose={() => setDebitNoteItem(null)}
+          onSubmit={() => debitNoteMut.mutate()}
+          isPending={debitNoteMut.isPending}
+        />
+      )}
 
       {/* ── PO Preview pop-out (above view modal) ── */}
       {showPODetails && viewingRec && (
