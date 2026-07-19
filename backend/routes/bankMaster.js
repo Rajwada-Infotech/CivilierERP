@@ -163,7 +163,6 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
     BAddress,
     BStatus = true,
     BCompanyName,
-    BLBelongsTo,
   } = req.body;
 
   try {
@@ -335,7 +334,6 @@ router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMas
     BAddress,
     BStatus,
     BCompanyName,
-    BLBelongsTo,
   } = req.body;
 
   try {
