@@ -21,8 +21,10 @@ export interface QualityDebitNote {
   DebitNoteId: number;
   DocNo: string;
   DebitDate: string;
-  VehicleInOutID: number;
-  VehicleInOutItemID: number;
+  VehicleInOutID: number | null;
+  VehicleInOutItemID: number | null;
+  GRNID: number | null;
+  GRNItemIndex: number | null;
   POItemId: number | null;
   POID: number | null;
   ItemId: string | null;
@@ -42,16 +44,20 @@ export interface QualityDebitNote {
   VehicleInOutDocNo?: string | null;
   PONumber?: string | null;
   VehicleNo?: string | null;
+  GRNDocNo?: string | null;
+  GRNNo?: string | null;
   CompanyName?: string | null;
   ProjectName?: string | null;
 }
 
-export interface CreateQualityDebitNotePayload {
-  vehicleInOutItemId: number;
+export type CreateQualityDebitNotePayload = {
   rejectedQty: number;
   rate?: number;
   reason?: string;
-}
+} & (
+  | { vehicleInOutItemId: number; grnId?: never; grnItemIndex?: never }
+  | { grnId: number; grnItemIndex: number; vehicleInOutItemId?: never }
+);
 
 export const createQualityDebitNote = (payload: CreateQualityDebitNotePayload) =>
   fetchWithAuth(BASE, {
@@ -64,6 +70,7 @@ export const createQualityDebitNote = (payload: CreateQualityDebitNotePayload) =
 
 export const getQualityDebitNotes = (params?: {
   vehicleInOutId?: number | string;
+  grnId?: number | string;
   companyId?: number | string;
   projectId?: number | string;
   supplierId?: number | string;
@@ -71,6 +78,7 @@ export const getQualityDebitNotes = (params?: {
 }) => {
   const qs = new URLSearchParams();
   if (params?.vehicleInOutId) qs.set("vehicleInOutId", String(params.vehicleInOutId));
+  if (params?.grnId) qs.set("grnId", String(params.grnId));
   if (params?.companyId) qs.set("companyId", String(params.companyId));
   if (params?.projectId) qs.set("projectId", String(params.projectId));
   if (params?.supplierId) qs.set("supplierId", String(params.supplierId));
