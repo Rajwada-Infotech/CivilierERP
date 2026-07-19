@@ -639,8 +639,8 @@ export default function HomePage() {
       .slice(0, 2)
       .forEach((e: RecentExpense) => {
         feed.push({
-          label: `Other Expense ${e.EDocNo}`,
-          sub: `₹${Number(e.EAmount ?? 0).toLocaleString("en-IN")} · ${e.EStatus ?? "—"}`,
+          label: `${e.EDocNo} booked for ₹${Number(e.EAmount ?? 0).toLocaleString("en-IN")}`,
+          sub: e.SupplierName ? `for ${e.SupplierName}` : (e.EStatus ?? "—"),
           icon: Receipt,
           color: "#ec4899",
           time: e.EDocDate
@@ -658,8 +658,8 @@ export default function HomePage() {
       .slice(0, 2)
       .forEach((p: RecentPayment) => {
         feed.push({
-          label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
-          sub: p.PProject ?? p.PPaymentName ?? "—",
+          label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} paid via ${p.PMode ?? "—"}`,
+          sub: p.PPaymentName ? `to ${p.PPaymentName}` : (p.PProject ?? "—"),
           icon: IndianRupee,
           color: "#f59e0b",
           time: p.PDate

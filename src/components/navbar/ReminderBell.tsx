@@ -279,7 +279,7 @@ export const ReminderBell = () => {
               </button>
             </div>
 
-            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px]">
+            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px] scrollbar-none">
               {filtered.length === 0 ? (
                 <div className="py-12 px-4 text-center">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
