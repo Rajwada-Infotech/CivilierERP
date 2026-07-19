@@ -366,6 +366,15 @@
     scrollbar-color: rgba(128, 128, 128, 0.25) transparent;
 }
 
+/* ── Hidden scrollbar — scrolls normally, just no visible track/thumb ────── */
+.scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+    display: none;
+}
+
 /* ── Calendar picker icon ─────────────────────────────────────────────────── */
 /* All dark-background themes (dark/midnight/root/glass): icon is inverted via
    Tailwind class → white icon. Light theme needs a reset to keep the native

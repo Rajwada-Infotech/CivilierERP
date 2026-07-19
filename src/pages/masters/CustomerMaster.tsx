@@ -119,21 +119,6 @@ interface AccountGroup {
   parentId: string | null;
 }
 
-interface TreeNode extends AccountGroup {
-  children: TreeNode[];
-}
-
-function buildTree(items: AccountGroup[]): TreeNode[] {
-  const map: Record<string, TreeNode> = {};
-  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((i) => {
-    if (i.parentId && map[i.parentId])
-      map[i.parentId].children.push(map[i._id]);
-    else roots.push(map[i._id]);
-  });
-  return roots;
-}
 
 interface Customer {
   LHeadId: number;
@@ -423,11 +408,6 @@ const CustomerMaster: React.FC = () => {
         parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
-
-  const accountGroupTree = useMemo(
-    () => buildTree(accountGroups),
-    [accountGroups],
-  );
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>

@@ -141,6 +141,7 @@ export interface SupplierGrnOrder {
   status: string;
   companyName: string | null;
   projectName: string | null;
+  commentCount: number;
   items: SupplierGrnItem[];
   isFullyReceived: boolean;
   totalRemaining: number;

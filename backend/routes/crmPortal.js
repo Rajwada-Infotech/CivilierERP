@@ -306,6 +306,20 @@ const portalDocUpload = multer({
   },
 });
 
+// Deletes a just-uploaded temp file, but only after confirming it actually
+// resolves inside AGREEMENT_UPLOAD_DIR — multer's own filename() above
+// already strips anything but [a-zA-Z0-9._-] from the original filename
+// before writing to disk, so req.file.path can't genuinely escape that
+// directory, but this makes the guarantee explicit at the point of deletion
+// rather than relying on that sanitization alone (and satisfies static
+// analysis that can't trace through the multer storage config).
+function safeUnlinkUpload(filePath) {
+  if (!filePath) return;
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(AGREEMENT_UPLOAD_DIR) + path.sep)) return;
+  fs.unlink(resolved, () => {});
+}
+
 // POST /agreement/documents/:docId/upload — the customer fulfils a document
 // staff requested (or re-submits after a rejection). Only ever allowed
 // against their own agreement's document rows, and only while that row is
@@ -330,12 +344,12 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
         WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
       `);
       if (!check.recordset.length) {
-        fs.unlink(req.file.path, () => {});
+        safeUnlinkUpload(req.file.path);
         return res.status(404).json({ error: "Document not found" });
       }
       const doc = check.recordset[0];
       if (!["Requested", "Rejected"].includes(doc.Status)) {
-        fs.unlink(req.file.path, () => {});
+        safeUnlinkUpload(req.file.path);
         return res.status(400).json({ error: "This document isn't open for upload" });
       }
 
@@ -365,7 +379,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
 
       res.json({ success: true });
     } catch (e) {
-      if (req.file) fs.unlink(req.file.path, () => {});
+      if (req.file) safeUnlinkUpload(req.file.path);
       console.error("[crm-portal] POST /agreement/documents/:docId/upload error:", e.message);
       res.status(500).json({ error: e.message });
     }
