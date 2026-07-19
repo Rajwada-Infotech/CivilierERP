@@ -865,6 +865,33 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Notes",    accessor: (r) => (r.Notes ?? "—") as string },
     ],
   },
+  {
+    id: "pdc-report",
+    label: "PDC Report",
+    description: "Post-dated cheques — pending, cleared & bounced, both directions",
+    icon: Clock,
+    color: "#0ea5e9",
+    apiPath: "/api/reports/pdc",
+    // pdcReport.js: no company/finYear param — date range filters ChequeDate.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "from",
+      dateToParam: "to",
+    },
+    columns: [
+      { header: "Cheque No",       accessor: (r) => (r.ChequeNo ?? "—") as string },
+      { header: "Party",           accessor: (r) => (r.PartyName ?? "—") as string },
+      { header: "Direction",       accessor: (r) => (r.Direction ?? "—") as string },
+      { header: "Bank",            accessor: (r) => (r.BankName ?? "—") as string },
+      { header: "Cheque Date",     accessor: (r) => (r.ChequeDate ? String(r.ChequeDate).slice(0, 10) : "—") },
+      { header: "Amount",          accessor: (r) => fmt(r.Amount as number) },
+      { header: "Status",          accessor: (r) => (r.Status ?? "—") as string },
+      { header: "Days Remaining",  accessor: (r) => (r.DaysRemaining ?? "—") },
+      { header: "Cleared Date",    accessor: (r) => (r.ClearedDate ?? "—") as string },
+    ],
+  },
 
   // ── Sales Automation / CRM reports ──────────────────────────────────────────
   {
@@ -1452,6 +1479,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "ledger-report",
       "journal-voucher-report",
       "on-account-report",
+      "pdc-report",
     ],
   },
   {

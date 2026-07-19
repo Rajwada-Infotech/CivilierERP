@@ -196,6 +196,7 @@ const ALL_ROUTES = [
   { path: "/api/inventory-master", file: "./routes/inventoryMaster" },
   { path: "/api/brs", file: "./routes/brs" },
   { path: "/api/reports", file: "./routes/reports" },
+  { path: "/api/reports/pdc", file: "./routes/pdcReport" },
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
   { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
   { path: "/api/civilworkdpr-dashboard", file: "./routes/civilworkdprDashboard" },

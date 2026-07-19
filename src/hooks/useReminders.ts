@@ -8,7 +8,8 @@ export type ReminderType =
   | "tds"
   | "grn"
   | "emi_installment"
-  | "material_request";
+  | "material_request"
+  | "pdc";
 
 export interface ReminderItem {
   id: string | number;
@@ -95,6 +96,45 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
           dueDate,
           urgency: classifyUrgency(dueDate),
           path: `/material/material-request?view=${r.MRId}`,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+// Pending PDCs due soon plus overdue-but-unmatched ones — both surface as
+// bell reminders (the report itself is the source of truth; this just
+// re-shapes its rows into ReminderItems). "Overdue" from the report already
+// means Pending + ChequeDate < today, so a single fetch covers both halves
+// of the spec's due-soon/overdue split; classifyUrgency below re-derives the
+// bucket per row from ChequeDate so ordering (overdue > today > soon) stays
+// consistent with every other reminder source.
+async function fetchPdcReminders(): Promise<ReminderItem[]> {
+  try {
+    const res = await fetchWithAuth(
+      "/api/reports/pdc?status=Pending&limit=500",
+    );
+    const overdueRes = await fetchWithAuth(
+      "/api/reports/pdc?status=Overdue&limit=500",
+    );
+    const rows: any[] = [];
+    if (res.ok) rows.push(...((await res.json()).data ?? []));
+    if (overdueRes.ok) rows.push(...((await overdueRes.json()).data ?? []));
+
+    return rows
+      .filter((r) => r.ChequeDate)
+      .map((r) => {
+        const dueDate = String(r.ChequeDate).slice(0, 10);
+        return {
+          id: `pdc-${r.SourceType}-${r.SourceID}`,
+          type: "pdc" as ReminderType,
+          title: `Cheque ${r.ChequeNo || r.SourceID}`,
+          subtitle: `${r.PartyName || "Unknown"} · ${r.Direction} · ${r.BankName || "—"}`,
+          dueDate,
+          urgency: classifyUrgency(dueDate),
+          amount: r.Amount,
+          path: "/reports",
         };
       });
   } catch {
@@ -254,7 +294,7 @@ export async function fetchAllReminders(
     toList(tdsRes),
     toList(woRes),
   ]);
-  const [, emiItems, mrItems] = await Promise.all([
+  const [, emiItems, mrItems, pdcItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
@@ -263,10 +303,12 @@ export async function fetchAllReminders(
     }),
     fetchEmiReminders().catch(() => [] as ReminderItem[]),
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
+    fetchPdcReminders().catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
   items.push(...mrItems);
+  items.push(...pdcItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
