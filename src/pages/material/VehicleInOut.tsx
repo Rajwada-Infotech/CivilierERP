@@ -47,6 +47,7 @@ import {
   RefreshCw,
   AlertCircle,
   AlertTriangle,
+  FileWarning,
   Check,
   CheckCircle2,
   Filter,
@@ -2137,9 +2138,10 @@ export default function VehicleInOut() {
                                       setDebitNoteQty("");
                                       setDebitNoteReason("");
                                     }}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 text-rose-600 text-[11px] font-medium hover:bg-rose-500/20 transition-colors"
+                                    title="Raise a debit note if part of this line was found below the ordered grade"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
                                   >
-                                    <AlertTriangle size={11} /> Raise Debit Note
+                                    <FileWarning size={12} /> Debit Note
                                   </button>
                                 )}
                               </td>
