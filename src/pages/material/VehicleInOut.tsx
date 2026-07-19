@@ -9,6 +9,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { parseJsonArray } from "@/utils/parseJsonArray";
+import { useAuth } from "@/contexts/AuthContext";
+import { OrderChat } from "@/components/orders/OrderChat";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +56,7 @@ import {
   Upload,
   Loader2,
   Package,
+  MessageCircle,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
@@ -573,6 +576,7 @@ export default function VehicleInOut() {
   _canDelete = rights.canDelete;
   const qc = useQueryClient();
   const { finYears } = useFinYear();
+  const { currentUser } = useAuth();
 
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year ||
@@ -584,6 +588,7 @@ export default function VehicleInOut() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRec, setViewingRec] = useState<any | null>(null);
+  const [viewTab, setViewTab] = useState<"details" | "supplier">("details");
   const [showPODetails, setShowPODetails] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -886,6 +891,7 @@ export default function VehicleInOut() {
   // ── View / Edit ───────────────────────────────────────────────────────────────
   _onView = async (rec: any) => {
     setShowPODetails(false);
+    setViewTab("details");
     try {
       const full = await vehApi.getVehicleInOut(rec.VehicleInOutID);
       setViewingRec(full);
@@ -1942,6 +1948,43 @@ export default function VehicleInOut() {
                 </button>
               </div>
 
+              {/* Tabs — Supplier only makes sense once this entry is linked
+                  to a PO (chat is scoped to the PO, same conversation the
+                  supplier sees on their own "Received by Customer" card). */}
+              {viewingRec.POID && (
+                <div className="sticky top-[57px] bg-card z-10 flex border-b border-border px-6 gap-1">
+                  {[
+                    { id: "details" as const, label: "Details" },
+                    { id: "supplier" as const, label: "Supplier", icon: MessageCircle },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setViewTab(t.id)}
+                      className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
+                        viewTab === t.id
+                          ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t.icon && <t.icon size={12} />}
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {viewTab === "supplier" && viewingRec.POID ? (
+                <div className="p-5 sm:p-6 h-[60vh]">
+                  {currentUser && (
+                    <OrderChat
+                      poId={viewingRec.POID}
+                      apiBase="/api/purchase-orders"
+                      currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
+                      className="h-full"
+                    />
+                  )}
+                </div>
+              ) : (
               <div className="p-5 sm:p-6 space-y-5">
                 {/* Meta grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -2130,6 +2173,7 @@ export default function VehicleInOut() {
                   )}
                 </div>
               </div>
+              )}
             </div>
           </div>
         )}
