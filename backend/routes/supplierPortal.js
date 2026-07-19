@@ -555,7 +555,8 @@ router.get("/grns", async (req, res) => {
           po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
           co.name AS CompanyName, pr.name AS ProjectName,
           poi.Id AS ItemId, poi.ItemName, poi.Quantity AS OrderedQty,
-          ISNULL(poi.ReceivedQty, 0) AS ReceivedQty, poi.UomName
+          ISNULL(poi.ReceivedQty, 0) AS ReceivedQty, poi.UomName,
+          (SELECT COUNT(*) FROM dbo.PurchaseOrderComments c WHERE c.PurchaseOrderId = po.PurchaseOrderID) AS CommentCount
         FROM dbo.PurchaseOrders po
         JOIN dbo.PurchaseOrderItems poi ON poi.PurchaseOrderID = po.PurchaseOrderID
         LEFT JOIN dbo.enterprise co ON co.id = po.CompanyId
@@ -580,6 +581,7 @@ router.get("/grns", async (req, res) => {
           status: row.Status,
           companyName: row.CompanyName,
           projectName: row.ProjectName,
+          commentCount: row.CommentCount ?? 0,
           items: [],
         });
       }
