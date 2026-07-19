@@ -31,12 +31,14 @@ import {
   ShoppingCart,
   Megaphone,
   Pickaxe,
+  Receipt,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
   type HomeDashboardData,
   type RecentPayment,
   type RecentGRN,
+  type RecentExpense,
   type ApprovalInboxItem,
   type TaskSummary,
   type SalesSummaryData,
@@ -627,6 +629,28 @@ export default function HomePage() {
           : undefined,
       });
     });
+
+    // "Other Expenses" — direct invoices with no linked PO/GRN/WO
+    // (ESourceType='TOD'). GRN/PO-linked invoices already surface above via
+    // recentGRNs, so this only adds the ones that would otherwise never
+    // appear in the activity feed at all.
+    (data?.material?.recentExpenses ?? [])
+      .filter((e: RecentExpense) => e.ESourceType === "TOD")
+      .slice(0, 2)
+      .forEach((e: RecentExpense) => {
+        feed.push({
+          label: `Other Expense ${e.EDocNo}`,
+          sub: `₹${Number(e.EAmount ?? 0).toLocaleString("en-IN")} · ${e.EStatus ?? "—"}`,
+          icon: Receipt,
+          color: "#ec4899",
+          time: e.EDocDate
+            ? new Date(e.EDocDate).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+              })
+            : undefined,
+        });
+      });
   }
 
   if (access.finance) {

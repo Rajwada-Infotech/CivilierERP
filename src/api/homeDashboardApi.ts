@@ -89,6 +89,7 @@ export interface MaterialDashboardData {
   workOrders: { total: number };
   recentGRNs: RecentGRN[];
   recentPOs: RecentPO[];
+  recentExpenses: RecentExpense[];
 }
 
 export interface RecentGRN {
@@ -98,6 +99,19 @@ export interface RecentGRN {
   Status: string;
   SupplierName: string;
   PONumber: string;
+}
+
+export interface RecentExpense {
+  Eid: number;
+  EDocNo: string;
+  EDocDate: string;
+  EAmount: number;
+  EStatus: string;
+  EProjectName: string | null;
+  EDocumentType: string | null;
+  /** "TOD" = direct/Other Expenses booking (no linked PO/GRN/WO). */
+  ESourceType: string | null;
+  ECreatedAt: string;
 }
 
 export interface AdminDashboardData {

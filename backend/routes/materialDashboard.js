@@ -167,11 +167,15 @@ router.get("/", async (req, res) => {
       `),
 
       // ── Recent Expenses (last 6) ─────────────────────────────────────
+      // ESourceType='TOD' identifies "Other Expenses" (direct, no linked
+      // PO/GRN/WO) — EDocumentType is unreliable for this (sometimes holds
+      // a doc-type code like "INV-2026-00001" instead of the source kind).
       safeQuery(`
         SELECT TOP 6
           Eid, EDocNo, EDocDate, EAmount, EStatus,
-          EProjectName, EDocumentType, ECreatedAt
+          EProjectName, EDocumentType, ESourceType, ECreatedAt
         FROM dbo.ExpenseBooking
+        WHERE ISNULL(EStatus, '') != 'Draft'
         ORDER BY Eid DESC
       `),
 
