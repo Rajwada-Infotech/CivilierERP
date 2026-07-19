@@ -15,7 +15,8 @@ router.get("/", cache("uom-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, UOMName, UOMCode, CreatedAt, Symbol, Remarks, IsActive
+      SELECT Id, UOMName, UOMCode, CreatedAt, Symbol, Remarks, IsActive,
+             UOMCategory, BaseFactor
       FROM dbo.UOMMaster
       ORDER BY UOMName
     `);
@@ -38,7 +39,7 @@ router.post("/cache-bust", async (req, res) => {
 
 // ADD UOM
 router.post("/", requirePageRight("unit-of-measurement", "create"), async (req, res) => {
-  const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
+  const { UOMName, UOMCode, Symbol, Remarks, IsActive, UOMCategory, BaseFactor } = req.body;
   const createdBy = req.user?.userId || null;
 
   try {
@@ -50,12 +51,14 @@ router.post("/", requirePageRight("unit-of-measurement", "create"), async (req, 
       .input("Symbol", sql.NVarChar(20), Symbol || null)
       .input("Remarks", sql.NVarChar(250), Remarks || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("UOMCategory", sql.NVarChar(30), UOMCategory || null)
+      .input("BaseFactor", sql.Decimal(18, 6), BaseFactor != null && BaseFactor !== "" ? Number(BaseFactor) : 1)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.UOMMaster
-          (UOMName, UOMCode, Symbol, Remarks, IsActive, CreatedBy, CreatedAt)
+          (UOMName, UOMCode, Symbol, Remarks, IsActive, UOMCategory, BaseFactor, CreatedBy, CreatedAt)
         VALUES
-          (@UOMName, @UOMCode, @Symbol, @Remarks, @IsActive, @CreatedBy, @CreatedAt)
+          (@UOMName, @UOMCode, @Symbol, @Remarks, @IsActive, @UOMCategory, @BaseFactor, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("uom-master");
     await bumpCacheVersion("stock-ledger");
@@ -68,7 +71,7 @@ router.post("/", requirePageRight("unit-of-measurement", "create"), async (req, 
 // UPDATE UOM
 router.put("/:id", requirePageRight("unit-of-measurement", "edit"), async (req, res) => {
   const { id } = req.params;
-  const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
+  const { UOMName, UOMCode, Symbol, Remarks, IsActive, UOMCategory, BaseFactor } = req.body;
   const updatedBy = req.user?.userId || null;
 
   try {
@@ -81,16 +84,20 @@ router.put("/:id", requirePageRight("unit-of-measurement", "edit"), async (req, 
       .input("Symbol", sql.NVarChar(20), Symbol || null)
       .input("Remarks", sql.NVarChar(250), Remarks || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("UOMCategory", sql.NVarChar(30), UOMCategory || null)
+      .input("BaseFactor", sql.Decimal(18, 6), BaseFactor != null && BaseFactor !== "" ? Number(BaseFactor) : 1)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.UOMMaster SET
-          UOMName   = @UOMName,
-          UOMCode   = @UOMCode,
-          Symbol    = @Symbol,
-          Remarks   = @Remarks,
-          IsActive  = @IsActive,
-          UpdatedBy = @UpdatedBy,
-          UpdatedAt = @UpdatedAt
+          UOMName     = @UOMName,
+          UOMCode     = @UOMCode,
+          Symbol      = @Symbol,
+          Remarks     = @Remarks,
+          IsActive    = @IsActive,
+          UOMCategory = @UOMCategory,
+          BaseFactor  = @BaseFactor,
+          UpdatedBy   = @UpdatedBy,
+          UpdatedAt   = @UpdatedAt
         WHERE Id = @Id
       `);
     await bumpCacheVersion("uom-master");
