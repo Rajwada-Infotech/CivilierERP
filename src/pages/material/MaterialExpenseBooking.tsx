@@ -125,16 +125,20 @@ import type {
   DocSelectorProps,
 } from "./ExpenseBooking/types";
 
-const _mastersCache: {
-  po: POItem[] | null;
-  wo: WOItem[] | null;
-  woPO: POItem[] | null;
-  tod: TodItem[] | null;
-  grn: GRNItem[] | null;
-  workDone: WorkDoneItem[] | null;
-} = { po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null };
 export default function MaterialExpenseBooking() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  // Scoped to this component instance (not module-level) so a different
+  // user logging in within the same tab never sees a stale cache left
+  // behind by whoever used this page before them.
+  const mastersCacheRef = useRef<{
+    po: POItem[] | null;
+    wo: WOItem[] | null;
+    woPO: POItem[] | null;
+    tod: TodItem[] | null;
+    grn: GRNItem[] | null;
+    workDone: WorkDoneItem[] | null;
+  }>({ po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null });
+  const _mastersCache = mastersCacheRef.current;
   const [importing, setImporting] = useState(false);
   const rights = usePageRights("expense-booking");
   const navigate = useNavigate();
@@ -810,27 +814,31 @@ export default function MaterialExpenseBooking() {
 
   const disableEmi = async () => {
     if (!editingId) return;
-    const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
-    });
-    const ref =
-      result?.lumpSum?.docNo ||
-      (result?.lumpSum ? `#${result.lumpSum.id}` : null);
-    if (ref) {
-      toast.success(
-        `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
-        { duration: 8000 },
-      );
-    } else {
-      toast.success(
-        "EMI disabled. Booking reset to Draft — please resubmit for approval.",
-        { duration: 6000 },
-      );
+    try {
+      const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
+      });
+      const ref =
+        result?.lumpSum?.docNo ||
+        (result?.lumpSum ? `#${result.lumpSum.id}` : null);
+      if (ref) {
+        toast.success(
+          `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success(
+          "EMI disabled. Booking reset to Draft — please resubmit for approval.",
+          { duration: 6000 },
+        );
+      }
+      cancelForm();
+      await fetchRecords(page);
+      fetchBookedSources();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to disable EMI for this booking.");
     }
-    cancelForm();
-    await fetchRecords(page);
-    fetchBookedSources();
   };
 
 
@@ -1076,7 +1084,8 @@ export default function MaterialExpenseBooking() {
       const text = await file.text();
       const rows = parseCsv(text);
       if (!rows.length) { toast.error("CSV is empty"); return; }
-      toast.success(`${rows.length} rows read — full import coming soon`);
+      toast.info("CSV import is not available yet. Please add records manually for now.");
+      return;
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
     } finally {

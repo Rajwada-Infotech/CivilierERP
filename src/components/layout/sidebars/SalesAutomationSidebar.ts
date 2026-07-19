@@ -51,5 +51,5 @@ export const salesAutomationNavItems: NavItem[] = [
   },
 
   // ── Reports ────────────────────────────────────────────────────────────────
-  { label: "Reports", icon: Chart2, path: "/sales-automation/reports", pageKey: "sa-leads" },
+  { label: "Reports", icon: Chart2, path: "/sales-automation/reports", pageKey: "sa-reports" },
 ];

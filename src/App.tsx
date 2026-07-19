@@ -2177,7 +2177,7 @@ function AppRoutes() {
       <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-leads"><SaReports /></ProtectedRoute>} />
+      <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-reports"><SaReports /></ProtectedRoute>} />
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
