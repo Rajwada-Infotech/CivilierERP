@@ -141,6 +141,9 @@ async function postVoucher(pool, {
 
 /**
  * GRN approved — goods received, not yet invoiced (GR/IR clearing pattern).
+ * Also the single point where a GRN's items are credited to StockLedger —
+ * see the inline comment below for why that's gated on approval rather
+ * than GRN creation.
  *   Dr Purchase A/c ................. taxable/base amount
  *   Dr Provisional Credit Available .. GST amount (input tax credit, pending)
  *   Cr PROVISION FOR PENDING GRN A/C . total incl. GST
@@ -151,7 +154,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
 
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
-           grn.TotalAmount, grn.SupplierID, grn.POID,
+           grn.TotalAmount, grn.SupplierID, grn.POID, grn.GodownID,
            p.CompanyId, p.ProjectId
     FROM dbo.GoodsReceiptNotes grn
     LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
@@ -170,6 +173,36 @@ async function postGRNApproval(pool, grnId, userEmail) {
     items = [];
   }
 
+  const docNo = grn.DocNo || grn.GRNNo || `GRN-${grnId}`;
+
+  // Credit the warehouse now that the delivery has cleared approval — stock
+  // deliberately does NOT move at GRN creation (a Draft/Pending GRN hasn't
+  // been vetted yet, so it shouldn't inflate available stock). This is the
+  // single place a GRN's items ever get counted. Delete-then-insert makes
+  // it idempotent against re-entrant approval attempts. Runs independently
+  // of the GL voucher below — a zero/negative-value GRN (e.g. free samples)
+  // still received real, countable goods even if there's nothing to post
+  // to accounts.
+  await pool
+    .request()
+    .input("RefID", sql.Int, grnId)
+    .query(`DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID`);
+  for (const item of items) {
+    if (item.itemId && Number(item.receivedQty) > 0) {
+      await pool
+        .request()
+        .input("ItemID", sql.NVarChar(50), item.itemId)
+        .input("Qty", sql.Decimal(18, 2), Number(item.receivedQty))
+        .input("UOM", sql.NVarChar(20), item.uom || null)
+        .input("RefID", sql.Int, grnId)
+        .input("DocNo", sql.NVarChar(100), docNo)
+        .input("GodownID", sql.Int, grn.GodownID || null).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, 'IN', 'GRN', @RefID, @DocNo, @GodownID, GETDATE())
+        `);
+    }
+  }
+
   const baseAmount = items.reduce(
     (s, i) => s + (Number(i.totalAmount) || 0),
     0,
@@ -178,7 +211,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
   const gstAmount = Math.max(0, totalInclGst - baseAmount);
 
   if (totalInclGst <= 0)
-    return { posted: false, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
+    return { posted: false, stockPosted: true, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -190,7 +223,6 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
-  const docNo = grn.DocNo || grn.GRNNo || `GRN-${grnId}`;
   await postVoucher(pool, {
     voucherNo: docNo,
     voucherDate: grn.GRNDate,
@@ -217,7 +249,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
       },
     ],
   });
-  return { posted: true };
+  return { posted: true, stockPosted: true };
 }
 
 /**
