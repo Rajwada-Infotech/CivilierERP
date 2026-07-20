@@ -41,6 +41,31 @@ async function requireActiveBooking(pool, bookingId) {
   return null;
 }
 
+// Gate for Unit/Parking/Extra-Charge edits: once the booking's Agreement has
+// at least one uploaded document, the numbers may already be baked into a
+// document someone is reviewing/signing, so a direct edit is no longer safe
+// — it needs to go through the CrmBookingAmendmentRequest approval queue
+// instead (see crmExtraCharges.js / crmParking.js).
+//
+// Deliberately NOT keyed on CrmAgreement.Status: that column only ever
+// holds 'Draft' until the very end of the approval chain (mark-executed
+// flips it to 'Executed') — it stays 'Draft' through document upload,
+// senior approval, and customer approval, so gating on it would never
+// trigger during the actual verification window this is meant to protect.
+// SeniorApprovalStatus was considered too but defaults to 'Pending' at row
+// creation (before any document exists), so it can't distinguish "freshly
+// auto-created, nothing uploaded yet" from "under review" either. A real
+// uploaded document is the first unambiguous sign legal work has begun.
+async function isLegalWorkStarted(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT COUNT(*) AS DocCount
+    FROM dbo.CrmAgreementDocument d
+    JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+    WHERE ag.BookingId = @bid
+  `);
+  return row.recordset[0].DocCount > 0;
+}
+
 async function getBookingWorkflowContext(pool, bookingId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT
@@ -489,6 +514,103 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
     `);
 }
 
+// Redistributes the ₹ (and %) of every NOT-yet-settled milestone on a
+// booking so they still sum to the booking's authoritative GrandTotal,
+// while preserving each open milestone's relative weight. Two independent
+// call sites feed this:
+//   1. The booking's GrandTotal itself changes (rate correction, extra
+//      charges, parking) — every open milestone is fair game.
+//   2. Staff manually overrides one specific milestone's AmountDue — that
+//      milestone is held fixed at its new value (fixedMilestoneId); only
+//      the OTHER open ones get redistributed around it.
+//   3. Milestone #1 (the booking amount) is fixed at whatever the customer
+//      actually booked with — a real ₹ figure, not a plan percentage — right
+//      when the schedule is first generated (generateMilestonesForBooking).
+// Paid/Waived milestones are never touched — money already collected or
+// formally waived can't retroactively change. Legacy milestones with no
+// stored Percent (created before that column existed) fall back to the
+// booking's actual Payment Plan Template's own percentages (matched by
+// MilestoneNo) so a resync reproduces the plan's real shape (e.g.
+// 10/15/20/20/15/15) instead of flattening everything into an even split.
+// A genuine even split is the last-resort fallback only when no plan item
+// exists either (booking has no PaymentPlanId, or it's a free-form schedule).
+//
+// Percent is deliberately stored as each open milestone's share of
+// remainingTarget (grandTotal minus whatever's already settled), not of the
+// original grandTotal — every settlement "restarts" the percentage basis
+// onto what's actually still owed, so e.g. a booking amount of ₹5L against a
+// ₹50L total leaves the remaining milestones' percentages summing to 100%
+// of the ₹45L left, not 100% of the original ₹50L.
+async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneId } = {}) {
+  const bkRes = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT GrandTotal, TotalValue, PaymentPlanId FROM dbo.CrmBooking WHERE Id = @bid");
+  const booking = bkRes.recordset[0];
+  const grandTotal = Number(booking?.GrandTotal || booking?.TotalValue || 0);
+  if (!grandTotal) return;
+
+  const msRes = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id, MilestoneNo, AmountDue, [Percent], Status, ExtraChargeId, ParkingAllotmentId FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+  const rows = msRes.recordset;
+  if (!rows.length) return;
+
+  let planPercentByNo = {};
+  if (booking?.PaymentPlanId) {
+    const planRes = await pool.request().input("pid", sql.Int, booking.PaymentPlanId)
+      .query("SELECT MilestoneNo, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid");
+    for (const r of planRes.recordset) planPercentByNo[r.MilestoneNo] = Number(r.Percent);
+  }
+
+  // Extra-charge/parking milestones are fixed line items (their AmountDue
+  // comes straight from the charge itself), not %-based schedule steps —
+  // treat them the same as Paid/Waived: excluded from the proportional pool
+  // entirely, contributing their own AmountDue to settledTotal so the
+  // %-based milestones redistribute onto what's actually left over.
+  const isSettled = (r) =>
+    ["Paid", "Waived"].includes(r.Status) || r.Id === fixedMilestoneId ||
+    r.ExtraChargeId != null || r.ParkingAllotmentId != null;
+  const settled = rows.filter(isSettled);
+  const open = rows.filter((r) => !isSettled(r));
+  if (!open.length) return; // nothing left to redistribute onto
+
+  const settledTotal = settled.reduce((s, r) => s + Number(r.AmountDue), 0);
+  const remainingTarget = Math.max(0, grandTotal - settledTotal);
+  // Weight priority per milestone: its own stored Percent (preserves any
+  // prior redistribution or manual override) > the Payment Plan Template's
+  // percentage for that milestone number > an even share as the last resort.
+  const rawWeight = (r) => {
+    if (r.Percent != null && Number(r.Percent) > 0) return Number(r.Percent);
+    if (planPercentByNo[r.MilestoneNo] != null) return planPercentByNo[r.MilestoneNo];
+    return null;
+  };
+  const weights = open.map(rawWeight);
+  const knownSum = weights.reduce((s, w) => s + (w || 0), 0);
+  const evenShare = knownSum > 0 ? knownSum / open.length : 100 / open.length;
+  const resolvedWeights = weights.map((w) => w != null ? w : evenShare);
+  const openPercentSum = resolvedWeights.reduce((s, w) => s + w, 0);
+  const weight = (r, idx) => (openPercentSum > 0 ? resolvedWeights[idx] / openPercentSum : 1 / open.length);
+
+  let allocated = 0;
+  for (let i = 0; i < open.length; i++) {
+    const r = open[i];
+    const isLast = i === open.length - 1;
+    // The last open milestone absorbs whatever's left after rounding the
+    // others, so the schedule always sums exactly to GrandTotal instead of
+    // drifting a paisa or two off from independently-rounded shares.
+    const amount = isLast
+      ? Math.round((remainingTarget - allocated) * 100) / 100
+      : Math.round(remainingTarget * weight(r, i) * 100) / 100;
+    allocated += amount;
+    const finalAmount = Math.max(0, amount);
+    const percent = remainingTarget > 0 ? Math.round((finalAmount / remainingTarget) * 10000) / 100 : 0;
+
+    await pool.request()
+      .input("id", sql.Int, r.Id)
+      .input("amt", sql.Decimal(18, 2), finalAmount)
+      .input("pct", sql.Decimal(5, 2), percent)
+      .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+  }
+}
+
 // Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
 // leaves to a human to type in — this is the auto path's own default, used
 // only when the Application/Booking didn't carry an explicit override.
@@ -617,4 +739,6 @@ module.exports = {
   finalizeAgreementDate,
   syncLegalMilestoneStep,
   requireActiveBooking,
+  recalculateRemainingMilestones,
+  isLegalWorkStarted,
 };

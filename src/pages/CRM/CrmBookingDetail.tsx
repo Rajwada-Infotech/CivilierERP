@@ -6,13 +6,20 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
-  ChevronUp, ChevronDown, ChevronsUpDown,
+  ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const PLAN_API = "/api/crm/payment-plans";
+const AMEND_API = "/api/crm/booking-amendments";
+
+// Same approver set as CRM_APPROVER_ROLES on the backend (services/
+// approvalService.js) — kept in sync manually since it's a small, stable
+// list, same pattern CrmCustomerBankDetails.tsx already uses for its own
+// frontend-side permission preview.
+const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const TABS = ["Main", "Details", "Attachments", "Invoice"] as const;
 type Tab = typeof TABS[number];
@@ -66,10 +73,15 @@ async function fetchExtraChargeTypes(): Promise<any[]> {
   const r = await fetchWithAuth("/api/extra-charge-master");
   return r.ok ? r.json() : [];
 }
+async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
+  const r = await fetchWithAuth(`${AMEND_API}/booking/${bookingId}`);
+  return r.ok ? r.json() : [];
+}
 
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
-  const { canDoAction } = useAuth();
+  const { canDoAction, currentUser } = useAuth();
+  const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
   // Bookings is now a review + restricted-edit surface (Applications and
   // Bookings) — super admin grants "crm-bookings" edit per-user via Menu
   // Rights instead of it being a broad role default, so every mutating
@@ -85,6 +97,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
   const [chargesSaving, setChargesSaving] = useState(false);
+  const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
+  const [editingParkingId, setEditingParkingId] = useState<number | null>(null);
+  const [extraReason, setExtraReason] = useState("");
+  const [parkingReason, setParkingReason] = useState("");
   const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -93,6 +109,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   });
   const booking = data?.booking;
   const customer = data?.customer;
+  const agreement = data?.agreement;
+  // Once the booking's Agreement has at least one uploaded document, Unit/
+  // Parking/Extra-Charge changes route through the amendment-approval queue
+  // instead of applying directly (see isLegalWorkStarted in the backend) —
+  // the numbers may already be baked into a document under review.
+  const legalWorkStarted = !!(agreement && agreement.DocumentCount > 0);
   const paymentSummary = data?.paymentSummary || {};
 
   const { data: plans = [] } = useQuery({
@@ -143,6 +165,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Details",
     staleTime: 5 * 60_000,
   });
+  const { data: pendingAmendments = [] } = useQuery({
+    queryKey: ["crm-booking-amendments", bookingId],
+    queryFn: () => fetchPendingAmendments(bookingId),
+    enabled: tab === "Details",
+    staleTime: 15_000,
+  });
+  const [reviewingAmendmentId, setReviewingAmendmentId] = useState<number | null>(null);
 
   const applicableParkingRates = (parkingRates as any[]).filter(
     (r: any) => r.IsActive && r.ProjectId === booking?.ProjectId && (!r.BlockId || r.BlockId === booking?.BlockId)
@@ -157,9 +186,64 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     qc.invalidateQueries({ queryKey: ["crm-extra-charges", bookingId] });
     qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
     qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+    qc.invalidateQueries({ queryKey: ["crm-booking-amendments", bookingId] });
+  };
+
+  const handleApproveAmendment = async (id: number) => {
+    setReviewingAmendmentId(id);
+    try {
+      const res = await fetchWithAuth(`${AMEND_API}/${id}/approve`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success("Amendment approved and applied");
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setReviewingAmendmentId(null);
+    }
+  };
+
+  const handleRejectAmendment = async (id: number) => {
+    const notes = window.prompt("Reason for rejecting this amendment (optional):") || "";
+    setReviewingAmendmentId(id);
+    try {
+      const res = await fetchWithAuth(`${AMEND_API}/${id}/reject`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: notes || undefined }) });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success("Amendment rejected");
+      invalidateCharges();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setReviewingAmendmentId(null);
+    }
   };
 
   const handleAddParking = async () => {
+    if (legalWorkStarted && !parkingReason.trim()) { toast.error("A reason is required — legal documents are already under verification for this booking"); return; }
+    if (editingParkingId) {
+      setChargesSaving(true);
+      try {
+        const res = await fetchWithAuth(`/api/crm/parking/${editingParkingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ Quantity: parseInt(parkingForm.Quantity) || 1, Reason: legalWorkStarted ? parkingReason.trim() : undefined }),
+        });
+        const resData = await res.json();
+        if (!res.ok) throw new Error(resData.error);
+        toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+        setEditingParkingId(null);
+        setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+        setParkingReason("");
+        invalidateCharges();
+      } catch (e: any) {
+        toast.error(e.message);
+      } finally {
+        setChargesSaving(false);
+      }
+      return;
+    }
     if (!parkingForm.ParkingMasterId) { toast.error("Select a parking rate"); return; }
     setChargesSaving(true);
     try {
@@ -171,12 +255,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
           ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
           Quantity: parseInt(parkingForm.Quantity) || 1,
+          Reason: legalWorkStarted ? parkingReason.trim() : undefined,
         }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
-      toast.success(`Parking allotted — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+      toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking allotted — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
       setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+      setParkingReason("");
       qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking?.ProjectId, booking?.BlockId] });
       invalidateCharges();
     } catch (e: any) {
@@ -186,11 +272,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  const startEditParking = (p: any) => {
+    setEditingParkingId(p.Id);
+    setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: String(p.Quantity) });
+  };
+  const cancelEditParking = () => {
+    setEditingParkingId(null);
+    setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+    setParkingReason("");
+  };
+
   const handleRemoveParking = async (id: number) => {
+    let reason = "";
+    if (legalWorkStarted) {
+      reason = window.prompt("Legal documents are already under verification for this booking. Enter a reason for releasing this parking allotment:") || "";
+      if (!reason.trim()) return;
+    }
     try {
-      const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Parking allotment removed");
+      const url = legalWorkStarted ? `/api/crm/parking/${id}?reason=${encodeURIComponent(reason.trim())}` : `/api/crm/parking/${id}`;
+      const res = await fetchWithAuth(url, { method: "DELETE" });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment released");
       invalidateCharges();
     } catch (e: any) {
       toast.error(e.message);
@@ -199,22 +302,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   const handleAddExtra = async () => {
     if (!extraForm.Description.trim() || !extraForm.Amount) { toast.error("Description and Amount are required"); return; }
+    if (legalWorkStarted && !extraReason.trim()) { toast.error("A reason is required — legal documents are already under verification for this booking"); return; }
     setChargesSaving(true);
     try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`, {
-        method: "POST",
+      const isEdit = editingExtraId != null;
+      const res = await fetchWithAuth(isEdit ? `/api/crm/extra-charges/${editingExtraId}` : `/api/crm/extra-charges/${bookingId}`, {
+        method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
           Description: extraForm.Description.trim(),
           Amount: parseFloat(extraForm.Amount),
           GstRate: parseFloat(extraForm.GstRate) || 0,
+          Reason: legalWorkStarted ? extraReason.trim() : undefined,
         }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
-      toast.success(`Charge added — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+      toast.success(resData.pending ? "Amendment request submitted — pending approval" : (isEdit ? `Charge updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}` : `Charge added — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`));
+      setEditingExtraId(null);
       setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+      setExtraReason("");
       invalidateCharges();
     } catch (e: any) {
       toast.error(e.message);
@@ -223,11 +331,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  const startEditExtra = (c: any) => {
+    setEditingExtraId(c.Id);
+    setExtraForm({
+      ExtraChargeMasterId: c.ExtraChargeMasterId ? String(c.ExtraChargeMasterId) : "",
+      Description: c.Description || "",
+      Amount: c.Amount != null ? String(c.Amount) : "",
+      GstRate: c.GstRate != null ? String(c.GstRate) : "18",
+    });
+  };
+  const cancelEditExtra = () => {
+    setEditingExtraId(null);
+    setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+    setExtraReason("");
+  };
+
   const handleRemoveExtra = async (id: number) => {
+    let reason = "";
+    if (legalWorkStarted) {
+      reason = window.prompt("Legal documents are already under verification for this booking. Enter a reason for removing this charge:") || "";
+      if (!reason.trim()) return;
+    }
     try {
-      const res = await fetchWithAuth(`/api/crm/extra-charges/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Charge removed");
+      const url = legalWorkStarted ? `/api/crm/extra-charges/${id}?reason=${encodeURIComponent(reason.trim())}` : `/api/crm/extra-charges/${id}`;
+      const res = await fetchWithAuth(url, { method: "DELETE" });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Charge removed");
       invalidateCharges();
     } catch (e: any) {
       toast.error(e.message);
@@ -481,6 +611,43 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 </div>
 
+                {legalWorkStarted && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                    Legal documents are already under verification for this booking — Unit/Parking/Extra Charge changes below now require a reason and admin/marketing_head approval before they apply.
+                  </div>
+                )}
+
+                {pendingAmendments.length > 0 && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 space-y-2">
+                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                      <ShieldAlert size={13} className="text-primary" /> Pending Amendment Requests ({pendingAmendments.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {(pendingAmendments as any[]).map((r: any) => (
+                        <div key={r.Id} className="rounded-lg border border-border bg-card p-2.5 text-xs space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{r.Action} — {r.ChangeType === "ExtraCharge" ? "Extra Charge" : "Parking Allotment"}</span>
+                            <span className="text-muted-foreground">{r.RequestedByName || "—"} · {r.RequestedAt ? String(r.RequestedAt).slice(0, 10) : "—"}</span>
+                          </div>
+                          <p className="text-muted-foreground">Reason: {r.Reason}</p>
+                          {isAmendmentApprover && (
+                            <div className="flex items-center gap-1.5 pt-1">
+                              <button onClick={() => handleApproveAmendment(r.Id)} disabled={reviewingAmendmentId === r.Id}
+                                className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+                                <Check size={12} /> Approve
+                              </button>
+                              <button onClick={() => handleRejectAmendment(r.Id)} disabled={reviewingAmendmentId === r.Id}
+                                className="flex items-center gap-1 text-xs px-2.5 py-1 border border-border rounded-md hover:bg-muted disabled:opacity-40">
+                                <XIcon size={12} /> Reject
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Parking & Extra Charges — allot/remove directly here, not a
                     separate hidden dialog, so the numbers above and the
                     line items behind them live in the same place. */}
@@ -497,13 +664,34 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-semibold">{fmt(p.TotalAmount)}</span>
-                            {canEdit && <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">Remove</button>}
+                            {canEdit && p.Id !== editingParkingId && <button onClick={() => startEditParking(p)} className="text-primary hover:underline">Edit</button>}
+                            {canEdit && <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">{legalWorkStarted ? "Request Release" : "Release"}</button>}
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
-                  {canEdit && (
+                  {canEdit && editingParkingId != null && (
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 space-y-1.5">
+                      <p className="text-[11px] text-muted-foreground">Editing quantity only — to change rate or slot, release this allotment and add a new one.</p>
+                      {legalWorkStarted && (
+                        <input placeholder="Reason for this change (required)" value={parkingReason}
+                          onChange={(e) => setParkingReason(e.target.value)}
+                          className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
+                          onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                          className="w-24 text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                        <button onClick={handleAddParking} disabled={chargesSaving}
+                          className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          {chargesSaving ? "Saving..." : legalWorkStarted ? "Request Amendment" : "Save Changes"}
+                        </button>
+                        <button onClick={cancelEditParking} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                  {canEdit && editingParkingId == null && (
                     <>
                       <div className="grid grid-cols-4 gap-1.5">
                         <select value={parkingForm.ParkingMasterId}
@@ -531,9 +719,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
                           className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
                       </div>
+                      {legalWorkStarted && (
+                        <input placeholder="Reason for this change (required)" value={parkingReason}
+                          onChange={(e) => setParkingReason(e.target.value)}
+                          className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
+                      )}
                       <button onClick={handleAddParking} disabled={chargesSaving}
                         className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-                        + Allot Parking
+                        {legalWorkStarted ? "Request Amendment" : "+ Allot Parking"}
                       </button>
                       {applicableParkingRates.length === 0 && (
                         <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
@@ -550,7 +743,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             <span className="font-medium">{c.Description}</span>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold">{fmt(c.TotalAmount)}</span>
-                              {canEdit && <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">Remove</button>}
+                              {canEdit && c.Id !== editingExtraId && <button onClick={() => startEditExtra(c)} className="text-primary hover:underline">Edit</button>}
+                              {canEdit && <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">{legalWorkStarted ? "Request Removal" : "Remove"}</button>}
                             </div>
                           </div>
                         ))}
@@ -586,10 +780,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
                             className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
                         </div>
-                        <button onClick={handleAddExtra} disabled={chargesSaving}
-                          className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-                          + Add Charge
-                        </button>
+                        {legalWorkStarted && (
+                          <input placeholder="Reason for this change (required)" value={extraReason}
+                            onChange={(e) => setExtraReason(e.target.value)}
+                            className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={handleAddExtra} disabled={chargesSaving}
+                            className={editingExtraId != null || legalWorkStarted
+                              ? "text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
+                              : "text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40"}>
+                            {chargesSaving ? "Saving..." : legalWorkStarted ? "Request Amendment" : editingExtraId != null ? "Save Changes" : "+ Add Charge"}
+                          </button>
+                          {editingExtraId != null && (
+                            <button onClick={cancelEditExtra} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted">Cancel</button>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>

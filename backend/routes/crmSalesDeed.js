@@ -127,6 +127,11 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
       WHERE d.Id = @id
     `);
     if (!deed.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const bookingRow = await pool.request().input("id", sql.Int, id).query(`
+      SELECT d.BookingId FROM dbo.CrmSalesDeed d WHERE d.Id = @id
+    `);
+    const activeErr = await requireActiveBooking(pool, bookingRow.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (deed.recordset[0].AgreementStatus !== "Executed") {
       return res.status(400).json({ error: "Agreement must be executed before sending the sales deed to the customer" });
     }
@@ -164,6 +169,12 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
 router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
+    const pool0 = getPool();
+    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deedBooking.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const activeErr0 = await requireActiveBooking(pool0, deedBooking.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
@@ -213,6 +224,12 @@ router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), 
 router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
+    const pool0 = getPool();
+    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deedBooking.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const activeErr0 = await requireActiveBooking(pool0, deedBooking.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
@@ -245,6 +262,9 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
     const row = cur.recordset[0];
+
+    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const newStatus = deriveDeedStatus({
       bookingStatus: row.BookingStatus,

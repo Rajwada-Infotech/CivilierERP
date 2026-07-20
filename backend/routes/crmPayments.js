@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 
@@ -43,13 +43,74 @@ async function warnIfBrokerUnpaid(pool, bookingId, actorUserId) {
   return warning;
 }
 
-// POST /:id/demand — raise a payment demand for a milestone, notifying the applicant's assignee
+// Same DemandNo shape the Followup module's demand workflow already uses
+// (followupDemands.js buildDemandNo) — DEM-{BookingNo}-{3-digit milestone
+// sequence} — kept identical purely for staff familiarity across the two
+// modules; the tables themselves are entirely separate.
+function buildDemandNo(bookingNo, milestoneNo) {
+  return `DEM-${bookingNo}-${String(milestoneNo).padStart(3, "0")}`;
+}
+
+// GET /demands — every milestone across every booking, for the CRM Demand
+// page's list + summary. Deliberately not scoped to "has a demand raised
+// yet" — Pending ones are exactly what the page exists to surface.
+router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, search } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status && ["Pending", "Demanded", "Paid"].includes(status)) {
+      req0.input("st", sql.NVarChar(20), status);
+      conds.push("m.DemandStatus = @st");
+    }
+    if (search) {
+      req0.input("q", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR m.DemandNo LIKE @q OR m.MilestoneName LIKE @q)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`
+      SELECT m.Id, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.[Percent], m.DueDate, m.Status,
+             m.DemandStatus, m.DemandNo, m.DemandRaisedOn, m.DemandNotes,
+             b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.AssignedTo,
+             a.ApplicantName, a.Mobile
+      FROM dbo.CrmPaymentMilestone m
+      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      ${where}
+      ORDER BY CASE WHEN m.DemandStatus = 'Pending' THEN 0 ELSE 1 END, m.DueDate ASC, b.BookingNo, m.MilestoneNo
+    `);
+
+    const rows = result.recordset;
+    const summary = {
+      pendingCount: 0, pendingAmount: 0,
+      demandedCount: 0, demandedAmount: 0,
+      paidCount: 0, paidAmount: 0,
+    };
+    for (const r of rows) {
+      const balance = Number(r.AmountDue || 0) - Number(r.AmountPaid || 0);
+      if (r.DemandStatus === "Pending") { summary.pendingCount++; summary.pendingAmount += balance; }
+      else if (r.DemandStatus === "Demanded") { summary.demandedCount++; summary.demandedAmount += balance; }
+      else if (r.DemandStatus === "Paid") { summary.paidCount++; summary.paidAmount += balance; }
+    }
+    res.json({ demands: rows, summary });
+  } catch (e) {
+    console.error("[crm-payments] GET /demands error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/demand — raise a payment demand for a milestone: assigns a real
+// DemandNo, moves DemandStatus Pending -> Demanded, and notifies the
+// applicant's assignee. Blocked on an already-fully-paid milestone (nothing
+// left to demand) or one that's already been demanded/paid (use undo first).
 router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const m = await pool.request().input("id", sql.Int, id).query(`
-      SELECT m.MilestoneName, m.AmountDue, m.AmountPaid, b.BookingNo, b.AssignedTo, a.ApplicantName
+      SELECT m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.Status, m.DemandStatus,
+             b.BookingNo, b.AssignedTo, a.ApplicantName
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -57,10 +118,30 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
     `);
     if (!m.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     const row = m.recordset[0];
-    const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
+    if (row.Status === "Paid" || row.Status === "Waived") {
+      return res.status(400).json({ error: `This milestone is already ${row.Status.toLowerCase()} — nothing to demand` });
+    }
+    if (row.DemandStatus !== "Pending") {
+      return res.status(400).json({ error: `Cannot raise demand — current status is ${row.DemandStatus}` });
+    }
 
-    await pool.request().input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmPaymentMilestone SET DemandRaisedAt = SYSDATETIME() WHERE Id = @id");
+    const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
+    const demandNo = buildDemandNo(row.BookingNo, row.MilestoneNo);
+    const demandRaisedOn = new Date().toISOString().slice(0, 10);
+    const notes = (req.body?.Notes || "").trim() || null;
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("no", sql.NVarChar(60), demandNo)
+      .input("dt", sql.Date, demandRaisedOn)
+      .input("notes", sql.NVarChar(500), notes)
+      .query(`
+        UPDATE dbo.CrmPaymentMilestone SET
+          DemandStatus = 'Demanded', DemandNo = @no, DemandRaisedOn = @dt,
+          DemandNotes = ISNULL(@notes, DemandNotes),
+          DemandRaisedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
 
     if (row.AssignedTo) {
       await emitNotification(pool, row.AssignedTo, "payment_demand",
@@ -68,9 +149,36 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
         `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} demand raised (₹${balance.toLocaleString("en-IN")})`,
         id, "payment_milestone");
     }
-    res.json({ success: true });
+    res.json({ success: true, DemandNo: demandNo, DemandRaisedOn: demandRaisedOn });
   } catch (e) {
     console.error("[crm-payments] POST /:id/demand error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /:id/demand/undo — walk a wrongly-raised demand back to Pending.
+// Blocked once the milestone is actually paid (DemandStatus='Paid') —
+// undoing a settled demand would misrepresent real money already collected.
+router.patch("/:id/demand/undo", requirePageRight("crm-payments", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
+    if (cur.recordset[0].DemandStatus === "Paid") {
+      return res.status(400).json({ error: "Cannot undo a demand that's already paid" });
+    }
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmPaymentMilestone SET
+        DemandStatus = 'Pending', DemandNo = NULL, DemandRaisedOn = NULL,
+        DemandNotes = NULL, DemandRaisedAt = NULL
+      WHERE Id = @id
+    `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-payments] PATCH /:id/demand/undo error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -161,7 +269,10 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
     `);
   const receiptId = insResult.recordset[0].Id;
 
-  // Roll up receipts into the milestone's AmountPaid / Status
+  // Roll up receipts into the milestone's AmountPaid / Status. A milestone
+  // that just became Paid also settles its own demand (if one was ever
+  // raised) — DemandStatus tracks real money received, not left dangling
+  // at 'Demanded' forever once the customer has actually paid.
   const rollup = await pool.request().input("id", sql.Int, milestoneId).query(`
     UPDATE dbo.CrmPaymentMilestone SET
       AmountPaid = (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id),
@@ -169,6 +280,8 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
                      THEN 'Paid' ELSE Status END,
       PaidDate = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
                       THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
+      DemandStatus = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
+                      THEN 'Paid' ELSE DemandStatus END,
       UpdatedAt = SYSDATETIME()
     OUTPUT INSERTED.Status
     WHERE Id = @id
@@ -267,7 +380,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
         ORDER BY m.MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectName,
+        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectName, b.BookingAmount,
+               b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                a.ApplicantName, a.Mobile
         FROM dbo.CrmBooking b
         JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -340,12 +454,28 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     const id = parseInt(req.params.id);
 
     const paid = b.AmountPaid != null ? parseFloat(b.AmountPaid) : null;
+    const amountDueOverride = b.AmountDue != null ? parseFloat(b.AmountDue) : null;
+
+    // A manual AmountDue override changes this milestone's own weight in
+    // the schedule — recompute its stored Percent alongside it (against the
+    // booking's current GrandTotal), or the % shown right next to the new
+    // ₹ figure would silently go stale.
+    let percentOverride = null;
+    if (amountDueOverride != null) {
+      const bk = await pool.request().input("id", sql.Int, id).query(`
+        SELECT bk.GrandTotal, bk.TotalValue FROM dbo.CrmPaymentMilestone m
+        JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId WHERE m.Id = @id
+      `);
+      const grandTotal = Number(bk.recordset[0]?.GrandTotal || bk.recordset[0]?.TotalValue || 0);
+      if (grandTotal > 0) percentOverride = Math.round((amountDueOverride / grandTotal) * 10000) / 100;
+    }
 
     const result = await pool.request()
       .input("id",    sql.Int,           id)
       .input("mname", sql.NVarChar(200), b.MilestoneName || null)
       .input("due",   sql.Date,          b.DueDate || null)
-      .input("amt",   sql.Decimal(18,2), b.AmountDue  != null ? parseFloat(b.AmountDue) : null)
+      .input("amt",   sql.Decimal(18,2), amountDueOverride)
+      .input("pct",   sql.Decimal(5,2),  percentOverride)
       .input("paid",  sql.Decimal(18,2), paid)
       .input("pdate", sql.Date,          b.PaidDate || null)
       .input("pmode", sql.NVarChar(50),  b.PaymentMode || null)
@@ -353,22 +483,31 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
       .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("rem",   sql.NVarChar(sql.MAX), b.Remarks || null)
+      .input("bkid",  sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
+      .input("bkname",sql.NVarChar(200), b.DepositBankName || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
         UPDATE dbo.CrmPaymentMilestone SET
           MilestoneName  = ISNULL(@mname, MilestoneName),
           DueDate        = ISNULL(@due,   DueDate),
           AmountDue      = ISNULL(@amt,   AmountDue),
+          [Percent]      = ISNULL(@pct,   [Percent]),
           AmountPaid     = ISNULL(@paid,  AmountPaid),
           PaidDate       = ISNULL(@pdate, PaidDate),
           PaymentMode    = ISNULL(@pmode, PaymentMode),
           TransactionRef = ISNULL(@tref,  TransactionRef),
           RequiredDocuments = ISNULL(@rdocs, RequiredDocuments),
           ResponsibleDepartment = ISNULL(@dept, ResponsibleDepartment),
+          DepositBankId   = ISNULL(@bkid,   DepositBankId),
+          DepositBankName = ISNULL(@bkname, DepositBankName),
           Status = CASE
             WHEN Status = 'Waived' THEN Status
             WHEN @paid IS NOT NULL AND @paid >= AmountDue THEN 'Paid'
             ELSE Status
+          END,
+          DemandStatus = CASE
+            WHEN @paid IS NOT NULL AND @paid >= AmountDue THEN 'Paid'
+            ELSE DemandStatus
           END,
           Remarks   = @rem,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
@@ -384,6 +523,13 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       await maybeAutoCreateSalesDeed(pool, updated.BookingId, actorId(req));
       await maybeAutoGenerateInvoice(pool, updated.BookingId, actorId(req));
       brokerWarning = await warnIfBrokerUnpaid(pool, updated.BookingId, actorId(req));
+    }
+
+    // Manual override of this milestone's own AmountDue cascades to the
+    // OTHER still-open milestones so the schedule keeps summing to
+    // GrandTotal — this one stays fixed at what staff just typed in.
+    if (amountDueOverride != null && updated?.BookingId) {
+      await recalculateRemainingMilestones(pool, updated.BookingId, { fixedMilestoneId: id });
     }
 
     res.json({ success: true, brokerWarning });
@@ -572,6 +718,8 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
                        THEN 'Paid' ELSE Status END,
         PaidDate = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
                         THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
+        DemandStatus = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
+                        THEN 'Paid' ELSE DemandStatus END,
         UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
