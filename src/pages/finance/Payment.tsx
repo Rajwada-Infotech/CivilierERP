@@ -748,7 +748,16 @@ const Payment: React.FC = () => {
       // whatever (or nothing) was previously selected.
       partyId: contract.ContactPartyId ?? prev.partyId,
       paidTo: contract.ContactPerson || prev.paidTo,
-      amount: contract.ContractAmount ?? prev.amount,
+      // Default to what's still outstanding on the contract, not its full
+      // value — most payments against an already-active contract are
+      // another advance/installment, not the whole thing at once. Falls
+      // back to the full contract amount only for a brand-new contract
+      // with nothing paid yet (PendingAmount === ContractAmount then
+      // anyway, so this is really just a null/undefined guard).
+      amount:
+        contract.PendingAmount != null
+          ? Math.max(Number(contract.PendingAmount), 0)
+          : (contract.ContractAmount ?? prev.amount),
     }));
   };
   const clearContractLink = () => {
@@ -2442,9 +2451,11 @@ const Payment: React.FC = () => {
                     hint={
                       grnGstBreakdown
                         ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
-                        : form.expenseRef
-                          ? "Net amount from expense booking — editable if needed."
-                          : undefined
+                        : selectedContract
+                          ? "Defaults to the contract's pending balance — lower this for a partial advance."
+                          : form.expenseRef
+                            ? "Net amount from expense booking — editable if needed."
+                            : undefined
                     }
                   >
                     <div className="relative">
@@ -2985,9 +2996,16 @@ const Payment: React.FC = () => {
                     <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                       <History size={9} /> Payment Chain
                     </p>
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      {selectedContract && selectedContract.PendingAmount != null && (
+                        <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          Pending {formatINR(Math.max(selectedContract.PendingAmount, 0))}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
                   </div>
                   <div className="px-4 py-3 space-y-2">
                     {loadingFormChain ? (
