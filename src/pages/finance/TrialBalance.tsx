@@ -34,7 +34,6 @@ import {
   Loader2,
   Receipt,
   X,
-  Wallet,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,11 +54,6 @@ interface TBNode {
   opening: BalancePair;
   transactions: BalancePair;
   closing: BalancePair;
-  // Supplier/Contractor on-account advance (dbo.AccountHeadMaster.OnAccountBalance)
-  // — never posts a GeneralLedgerEntry leg, so it's kept as its own figure
-  // rather than blended into closing. 0 for every other head type/group
-  // that doesn't roll one up. Rolled up to group/parent-group level too.
-  onAccountBalance?: number;
 }
 
 interface TBSummary {
@@ -67,7 +61,6 @@ interface TBSummary {
   totalCredit: number;
   openingDebit: number;
   openingCredit: number;
-  totalOnAccount?: number;
 }
 
 interface TBResponse {
@@ -355,14 +348,6 @@ function TBRow({
           {!node.isGroup && !hasAnyValue && (
             <span className="text-[10px] text-muted-foreground/35 italic ml-0.5">
               no transactions
-            </span>
-          )}
-          {!!node.onAccountBalance && (
-            <span
-              title="Supplier on-account advance — not part of the GL-derived closing balance"
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-400/10 text-sky-400 text-[9px] font-heading uppercase tracking-wider"
-            >
-              On A/C {fmt(node.onAccountBalance)}
             </span>
           )}
         </div>
@@ -986,14 +971,6 @@ export default function TrialBalance() {
           bg: "bg-primary/10",
           border: "border-l-primary",
         },
-        {
-          label: "On Account (Suppliers)",
-          value: formatINR(summary.totalOnAccount ?? 0),
-          Icon: Wallet,
-          color: "text-sky-400",
-          bg: "bg-sky-400/10",
-          border: "border-l-sky-400",
-        },
       ]
     : [];
 
@@ -1009,10 +986,6 @@ export default function TrialBalance() {
         {
           label: "Net Balance",
           value: formatINR(Math.abs(summary.totalDebit - summary.totalCredit)),
-        },
-        {
-          label: "On Account (Suppliers)",
-          value: formatINR(summary.totalOnAccount ?? 0),
         },
       ]
     : undefined;
@@ -1289,11 +1262,6 @@ export default function TrialBalance() {
                       </span>
                       {node.code && (
                         <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0">{node.code}</span>
-                      )}
-                      {!!node.onAccountBalance && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-400/10 text-sky-400 text-[9px] font-heading uppercase tracking-wider shrink-0">
-                          On A/C {fmt(node.onAccountBalance)}
-                        </span>
                       )}
                     </div>
                     {/* Values grid: 3 cols × 2 rows (Dr/Cr per section) */}

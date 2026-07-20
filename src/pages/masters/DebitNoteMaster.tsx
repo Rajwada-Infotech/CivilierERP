@@ -708,6 +708,11 @@ const DebitNoteMaster: React.FC = () => {
 
   const fields: FieldDef[] = [
     {
+      name: "referenceSection",
+      label: "Reference",
+      type: "section",
+    },
+    {
       name: "billDiscountGroup",
       label: "Expense Booking / Bill",
       type: "custom",
@@ -715,6 +720,19 @@ const DebitNoteMaster: React.FC = () => {
       fullWidth: true,
       render: BillDiscountRenderer as FieldDef["render"],
     },
+    {
+      name: "partiesSection",
+      label: "Company, Project & Supplier",
+      type: "section",
+    },
+    {
+      name: "supplier",
+      label: "Supplier",
+      type: "select",
+      required: true,
+      options: SUPPLIER_OPTIONS.map((o) => o.label),
+    },
+    { name: "status", label: "Status", type: "toggle", defaultValue: true },
     {
       name: "company",
       label: "Company",
@@ -730,16 +748,13 @@ const DebitNoteMaster: React.FC = () => {
       options: PROJECT_OPTIONS.map((o) => o.label),
     },
     {
-      name: "supplier",
-      label: "Supplier",
-      type: "select",
-      required: true,
-      options: SUPPLIER_OPTIONS.map((o) => o.label),
+      name: "itemsSection",
+      label: "Line Items",
+      type: "section",
     },
-    { name: "status", label: "Status", type: "toggle", defaultValue: true },
     {
       name: "items",
-      label: "Line Items",
+      label: "",
       type: "custom",
       fullWidth: true,
       render: ({ value, onChange }: any) => (
