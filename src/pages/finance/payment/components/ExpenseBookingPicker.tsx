@@ -233,7 +233,17 @@ export function ExpenseBookingPicker({
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground">No approved contracts found</div>
               ) : filteredContracts.map((c: any) => (
                 <button key={c.ContractId} type="button"
-                  onClick={() => { if (onContractSelect) onContractSelect(c); onChange(""); setOpen(false); setSearch(""); }}
+                  onClick={() => {
+                    // Just onContractSelect(c) — it already resets the
+                    // invoice-side fields itself. Calling onChange("") here
+                    // too (the invoice-picker's own clear handler) used to
+                    // run right after in the same click and win the race,
+                    // wiping out the company/project/party fields
+                    // onContractSelect had just set.
+                    if (onContractSelect) onContractSelect(c);
+                    setOpen(false);
+                    setSearch("");
+                  }}
                   className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-violet-500/5" : ""}`}
                 >
                   <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
