@@ -715,14 +715,30 @@ const Payment: React.FC = () => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
     setLinkedGRNs([]);
+    // Resolve Company/Project against the actual dropdown option lists
+    // rather than trusting the contract's own denormalized name strings —
+    // the Company/Project <select>s match by exact label string, and a
+    // casing/whitespace difference between dbo.enterprise (source of these
+    // dropdowns) and the contract's own joined name silently left the
+    // select unmatched (shows "Select company…" despite a value being set).
+    // Matching by id first and reading the label back from the option list
+    // guarantees it's a string the select actually has.
+    const companyOpt = companyOptions.find((c) => c.id === contract.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === contract.ProjectId);
+    const companyLabel = companyOpt?.label || contract.CompanyName || String(contract.CompanyId || "");
+    const projectLabel = projectOpt?.label || contract.ProjectName || String(contract.ProjectId || "");
     setForm((prev) => ({
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
       contractId: contract.ContractId != null ? String(contract.ContractId) : "",
-      company: contract.CompanyName || String(contract.CompanyId || ""),
-      project: contract.ProjectName || String(contract.ProjectId || ""),
-      projectSite: contract.ProjectName || String(contract.ProjectId || ""),
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      // Payee/Party was never set here before — the field stayed on
+      // whatever (or nothing) was previously selected.
+      partyId: contract.ContactPartyId ?? prev.partyId,
+      paidTo: contract.ContactPerson || prev.paidTo,
       amount: contract.ContractAmount ?? prev.amount,
     }));
   };
@@ -736,6 +752,8 @@ const Payment: React.FC = () => {
       company: "",
       project: "",
       projectSite: "",
+      partyId: null,
+      paidTo: "",
       amount: null,
     }));
   };

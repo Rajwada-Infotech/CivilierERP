@@ -116,6 +116,20 @@ export function ExpenseBookingPicker({
           <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
 
+        {selectedContract && (selectedContract.TotalPaid > 0 || selectedContract.PendingAmount != null) && (
+          <p className="mt-1.5 px-0.5 text-[11px] flex items-center gap-3">
+            <span className="text-muted-foreground">
+              Contract value <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedContract.ContractAmount || 0).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-emerald-600 dark:text-emerald-400">
+              Already paid <span className="font-mono font-semibold">₹{Number(selectedContract.TotalPaid || 0).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-amber-600 dark:text-amber-400">
+              Pending <span className="font-mono font-semibold">₹{Number(Math.max(selectedContract.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
+            </span>
+          </p>
+        )}
+
         {/* Dropdown panel */}
         {open && (
           <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
@@ -227,6 +241,12 @@ export function ExpenseBookingPicker({
                     <p className="font-mono text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
                     {c.ContactPerson && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
                     {(c.Reason || c.NatureOfContract) && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{c.Reason || c.NatureOfContract}</p>}
+                    {(c.TotalPaid > 0 || c.PendingAmount != null) && (
+                      <p className="text-[10px] mt-1 flex items-center gap-2">
+                        <span className="text-emerald-600 dark:text-emerald-400">Paid ₹{Number(c.TotalPaid || 0).toLocaleString("en-IN")}</span>
+                        <span className="text-amber-600 dark:text-amber-400">Pending ₹{Number(Math.max(c.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
+                      </p>
+                    )}
                   </div>
                   {c.ContractAmount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
