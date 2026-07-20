@@ -134,7 +134,19 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
-          ), 0) AS txn_credit
+          ), 0) AS txn_credit,
+
+          -- Supplier/Contractor on-account advances (dbo.OnAccountLedger,
+          -- cached on AccountHeadMaster.OnAccountBalance) never post a
+          -- GeneralLedgerEntry leg — the payment-approval flow that creates
+          -- them (newPayment.js) only ever writes OnAccountLedger. Surfaced
+          -- here as its own figure rather than blended into opening/txn so
+          -- it's never mistaken for a GL-derived number. Scoped to S/C only:
+          -- the CRM customer-side on-account flow (crmLedger.js) DOES post
+          -- a matching GL voucher already, so including type 'A' here would
+          -- double-count.
+          CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
+            AS on_account_balance
 
         FROM dbo.AccountHeadMaster ahm
         WHERE ahm.LBelongsTo IS NOT NULL
@@ -177,6 +189,7 @@ router.get("/", async (req, res) => {
         opening: { debit: 0, credit: 0 },
         transactions: { debit: 0, credit: 0 },
         closing: { debit: 0, credit: 0 },
+        onAccountBalance: 0,
       });
     }
 
@@ -203,6 +216,7 @@ router.get("/", async (req, res) => {
       const oc = Number(h.opening_credit || 0);
       const td = Number(h.txn_debit || 0);
       const tc = Number(h.txn_credit || 0);
+      const oa = Number(h.on_account_balance || 0);
 
       const typeLabel =
         h.type === "C" && isReceivablesGroup(h.groupId)
@@ -219,12 +233,14 @@ router.get("/", async (req, res) => {
         opening: { debit: od, credit: oc },
         transactions: { debit: td, credit: tc },
         closing: { debit: od + td, credit: oc + tc },
+        onAccountBalance: oa,
       });
 
       g.opening.debit += od;
       g.opening.credit += oc;
       g.transactions.debit += td;
       g.transactions.credit += tc;
+      g.onAccountBalance += oa;
       g.closing.debit += od + td;
       g.closing.credit += oc + tc;
     }
@@ -249,6 +265,7 @@ router.get("/", async (req, res) => {
         node.transactions.credit += child.transactions.credit;
         node.closing.debit += child.closing.debit;
         node.closing.credit += child.closing.credit;
+        node.onAccountBalance += child.onAccountBalance;
       }
     }
     roots.forEach(rollUp);
@@ -264,6 +281,7 @@ router.get("/", async (req, res) => {
         opening: node.opening,
         transactions: node.transactions,
         closing: node.closing,
+        onAccountBalance: node.onAccountBalance,
         children: [
           ...node.entities.map((e) => ({ ...e, level: level + 1 })),
           ...node.children.map((c) => toFrontend(c, level + 1)),
@@ -277,17 +295,19 @@ router.get("/", async (req, res) => {
     let totalDebit = 0,
       totalCredit = 0,
       openingDebit = 0,
-      openingCredit = 0;
+      openingCredit = 0,
+      totalOnAccount = 0;
     for (const h of heads) {
       totalDebit += Number(h.txn_debit || 0);
       totalCredit += Number(h.txn_credit || 0);
       openingDebit += Number(h.opening_debit || 0);
       openingCredit += Number(h.opening_credit || 0);
+      totalOnAccount += Number(h.on_account_balance || 0);
     }
 
     res.json({
       rows,
-      summary: { totalDebit, totalCredit, openingDebit, openingCredit },
+      summary: { totalDebit, totalCredit, openingDebit, openingCredit, totalOnAccount },
       asOf: new Date().toISOString(),
       from,
       to,
