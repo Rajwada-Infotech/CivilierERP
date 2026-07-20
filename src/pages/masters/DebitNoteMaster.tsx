@@ -137,6 +137,8 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { getQualityDebitNotes } from "@/api/qualityRejectionDebitNoteApi";
+import { AlertTriangle } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -466,6 +468,18 @@ const DebitNoteMaster: React.FC = () => {
     refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
+
+  // Quality Rejection Debit Notes — a separate feature (raised from Vehicle
+  // In/Out & GRN inspections when part of a delivery is below the ordered
+  // grade) that lives in its own table, not dbo.DebitNote. Shown here
+  // read-only in its own section since both are conceptually "debit notes
+  // against a supplier" and people look for them in the same place.
+  const { data: qualityDebitNotesRes } = useQuery({
+    queryKey: ["quality-debit-notes"],
+    queryFn: () => getQualityDebitNotes(),
+    staleTime: 60 * 1000,
+  });
+  const qualityDebitNotes = qualityDebitNotesRes?.data ?? [];
 
   const { data: companyData } = useQuery({
     queryKey: ["enterprises-companies"],
@@ -957,6 +971,92 @@ const DebitNoteMaster: React.FC = () => {
           win.print();
         }}
       />
+
+      {/* ── Quality Rejection Debit Notes ─────────────────────────────────
+          Separate feature/table (dbo.QualityRejectionDebitNote) — raised
+          from a Vehicle In/Out or GRN entry when part of a delivery is
+          found below the ordered grade on inspection. Read-only here;
+          create/manage them from the originating Vehicle In/Out or GRN
+          entry's "Received Items" list. */}
+      <div className="rounded-xl bg-card border border-border overflow-hidden">
+        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
+            <AlertTriangle size={14} className="text-rose-500" />
+          </div>
+          <div>
+            <h2 className="font-heading font-semibold text-foreground text-sm">
+              Quality Rejection Debit Notes
+            </h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Raised from Vehicle In/Out & GRN entries when part of a delivery is below the ordered grade
+            </p>
+          </div>
+        </div>
+
+        {qualityDebitNotes.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No quality rejection debit notes yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Doc No</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Supplier</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Item</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {qualityDebitNotes.map((n) => (
+                  <tr key={n.DebitNoteId} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-xs text-foreground">{n.DocNo}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">
+                      {n.DebitDate ? String(n.DebitDate).slice(0, 10) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs font-mono text-foreground">
+                        {n.VehicleInOutDocNo ?? n.GRNDocNo ?? "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-foreground">{n.SupplierName ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="text-xs font-medium text-foreground">{n.ItemName ?? "—"}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {n.RejectedQty} of {n.ReceivedQty} {n.UomName ?? ""}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                        {Number(n.PercentBad).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-rose-600">
+                      ₹{Number(n.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          n.Status === "Cancelled"
+                            ? "bg-muted text-muted-foreground line-through"
+                            : "bg-emerald-500/10 text-emerald-600"
+                        }`}
+                      >
+                        {n.Status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
       </MaterialShell>
     </>
   );
