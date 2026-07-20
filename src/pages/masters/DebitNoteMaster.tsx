@@ -137,8 +137,8 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { getQualityDebitNotes } from "@/api/qualityRejectionDebitNoteApi";
-import { AlertTriangle } from "lucide-react";
+import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
+import { AlertTriangle, Eye, X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -480,6 +480,7 @@ const DebitNoteMaster: React.FC = () => {
     staleTime: 60 * 1000,
   });
   const qualityDebitNotes = qualityDebitNotesRes?.data ?? [];
+  const [viewingQDN, setViewingQDN] = useState<QualityDebitNote | null>(null);
 
   const { data: companyData } = useQuery({
     queryKey: ["enterprises-companies"],
@@ -1010,6 +1011,7 @@ const DebitNoteMaster: React.FC = () => {
                   <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
                   <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
                   <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -1050,6 +1052,15 @@ const DebitNoteMaster: React.FC = () => {
                         {n.Status}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => setViewingQDN(n)}
+                        title="View details"
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Eye size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1057,6 +1068,98 @@ const DebitNoteMaster: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ── Quality Rejection Debit Note — view modal ─────────────────── */}
+      {viewingQDN && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
+                  <AlertTriangle size={13} className="text-rose-500" />
+                </div>
+                <div>
+                  <h2 className="font-heading font-bold text-sm">{viewingQDN.DocNo}</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                    Quality Rejection Debit Note
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingQDN(null)}
+                className="p-2 hover:bg-muted rounded-lg transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Date", value: viewingQDN.DebitDate ? String(viewingQDN.DebitDate).slice(0, 10) : "—" },
+                  { label: "Status", value: viewingQDN.Status },
+                  { label: "Source Doc", value: viewingQDN.VehicleInOutDocNo ?? viewingQDN.GRNDocNo ?? "—", mono: true },
+                  { label: "PO Number", value: viewingQDN.PONumber ?? "—", mono: true },
+                  { label: "Supplier", value: viewingQDN.SupplierName ?? "—" },
+                  { label: "Item", value: viewingQDN.ItemName ?? "—" },
+                ].map(({ label, value, mono }: any) => (
+                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Received</p>
+                  <p className="text-xs font-semibold font-mono text-foreground">
+                    {viewingQDN.ReceivedQty} {viewingQDN.UomName ?? ""}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rejected</p>
+                  <p className="text-xs font-semibold font-mono text-rose-600">
+                    {viewingQDN.RejectedQty} {viewingQDN.UomName ?? ""}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">% Bad</p>
+                  <p className="text-xs font-semibold font-mono text-rose-600">
+                    {Number(viewingQDN.PercentBad).toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rate</p>
+                  <p className="text-xs font-semibold font-mono text-foreground">
+                    ₹{Number(viewingQDN.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Debit Amount</p>
+                  <p className="text-sm font-bold font-mono text-rose-600">
+                    ₹{Number(viewingQDN.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
+              {viewingQDN.Reason && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    Reason
+                  </p>
+                  <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                    {viewingQDN.Reason}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </MaterialShell>
     </>
   );
