@@ -902,16 +902,11 @@ async function createGRNInternal(pool, body, userEmail) {
         parseIdList(body.attachmentIds),
       );
 
-      // IMPORTANT: use transaction.request() not pool.request() ΓÇö the GRN row
-      // only exists inside this uncommitted transaction; pool sees nothing yet.
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        finalDocNo,
-        resolvedGodownId,
-      );
-
+      // Stock is intentionally NOT credited here — a freshly-created GRN
+      // starts Draft/Pending and hasn't been vetted yet. StockLedger only
+      // gets its IN rows once the GRN clears approval (postGRNApproval in
+      // services/generalLedger.js), so available stock never counts goods
+      // nobody has actually approved receipt of.
       await transaction.commit();
 
       // backPatchRecordId uses pool directly ΓÇö must run after commit
@@ -1132,6 +1127,16 @@ router.put(
         return res.status(404).json({ error: "GRN not found" });
       }
 
+      // Stock only ever reflects an Approved GRN's items (see
+      // postGRNApproval in services/generalLedger.js, which is what
+      // normally credits StockLedger). Editing a Draft/Pending GRN has
+      // nothing to resync since it was never counted. Editing an
+      // already-Approved GRN (allowed via allowPostApproval) DOES need a
+      // resync here, though, since transition() only fires its GL_POSTERS
+      // hook on a fresh Draft/Pending -> Approved transition, not on a
+      // same-status edit — this is the one path that has to redo it
+      // directly rather than going through that hook.
+      const resultingStatus = status || "Draft";
       await transaction
         .request()
         .input("RefID", sql.Int, grnId)
@@ -1139,29 +1144,31 @@ router.put(
           "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
         );
 
-      // Preserve the godown that was set when the GRN was created.
-      // Must read via `transaction`, not `pool` ΓÇö the UPDATE above is still
-      // uncommitted and holds a lock on this row on the transaction's
-      // connection. A read from a different pooled connection would block
-      // waiting on that lock until transaction.commit() runs, but commit()
-      // is sequenced after this read ΓÇö the same self-deadlock as the POST
-      // handler's old GodownID UPDATE, just with a SELECT instead.
-      const grnGodownRes = await transaction
-        .request()
-        .input("GID", sql.Int, grnId)
-        .query(
-          "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+      if (resultingStatus === "Approved") {
+        // Preserve the godown that was set when the GRN was created.
+        // Must read via `transaction`, not `pool` ΓÇö the UPDATE above is still
+        // uncommitted and holds a lock on this row on the transaction's
+        // connection. A read from a different pooled connection would block
+        // waiting on that lock until transaction.commit() runs, but commit()
+        // is sequenced after this read ΓÇö the same self-deadlock as the POST
+        // handler's old GodownID UPDATE, just with a SELECT instead.
+        const grnGodownRes = await transaction
+          .request()
+          .input("GID", sql.Int, grnId)
+          .query(
+            "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+          );
+        const putGodownId =
+          grnGodownRes.recordset[0]?.GodownID ??
+          (await resolveMainGodownId(pool));
+        await insertStockLedgerEntries(
+          transaction,
+          grnId,
+          grnItems,
+          docNo,
+          putGodownId,
         );
-      const putGodownId =
-        grnGodownRes.recordset[0]?.GodownID ??
-        (await resolveMainGodownId(pool));
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        docNo,
-        putGodownId,
-      );
+      }
       await transaction.commit();
       await linkGRNAttachments(
         pool,
@@ -1448,7 +1455,11 @@ router.put(
         userEmail,
         req.user?.role,
       );
+      // On full approval, transition()'s GL_POSTERS hook already ran
+      // postGRNApproval — the one place StockLedger gets credited for this
+      // GRN (see services/generalLedger.js). Just bust the caches here.
       await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
       await bumpCacheVersion("expense-booking-options");
       res.json({ message: "GRN approved", ...result });
     } catch (err) {
@@ -1478,7 +1489,18 @@ router.put(
         req.user?.role,
         note || null,
       );
+
+      // Reversal — normally a no-op today (reject only fires from Pending,
+      // and stock isn't credited until Approved), but this keeps the
+      // Approved -> Rejected path safe too if that transition is ever
+      // allowed, and guards against any stock rows a pre-approval-gate GRN
+      // may still be carrying.
+      await getPool()
+        .request()
+        .input("RefID", sql.Int, id)
+        .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
       await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
       await bumpCacheVersion("expense-booking-options");
       res.json({ message: "GRN rejected", ...result });
     } catch (err) {
@@ -2143,15 +2165,10 @@ router.post(
 
       const grnId = grnResult.recordset[0].GRNID;
 
-      // ΓöÇΓöÇ 6. Insert StockLedger IN entries for the destination godown ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        finalDocNo,
-        parseInt(transfer.ToGodownID, 10),
-      );
-
+      // Stock is credited on approval (postGRNApproval), not here — this
+      // GRN still starts Draft and gets auto-submitted to Pending below,
+      // same as any other GRN; it isn't exempt from being vetted just
+      // because it originated from a transfer.
       await transaction.commit();
 
       // Back-patch the doc number reservation record with the real GRNID

@@ -87,7 +87,10 @@ function ActionButtons({ record }: { record: UnifiedRecord }) {
     setLoading(action);
     try {
       const res = await fetchWithAuth(record.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
 
