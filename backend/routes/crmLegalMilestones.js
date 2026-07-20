@@ -98,7 +98,12 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
     if (!STEPS.includes(step)) return res.status(400).json({ error: `Invalid step. Must be one of: ${STEPS.join(", ")}` });
     const b = req.body;
 
-    await pool.request()
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmLegalMilestone WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Legal milestone tracker not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const result = await pool.request()
       .input("id",   sql.Int,  id)
       .input("due",  sql.Date, b.Due  || null)
       .input("done", sql.Date, b.Done || null)
@@ -117,6 +122,7 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Legal milestone tracker not found" });
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-legal-milestones] PUT error:", e.message);
