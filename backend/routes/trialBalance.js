@@ -114,7 +114,19 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
-          ), 0) AS opening_credit,
+          ), 0)
+          -- Supplier/Contractor on-account advances (dbo.OnAccountLedger,
+          -- cached on AccountHeadMaster.OnAccountBalance) never post a
+          -- GeneralLedgerEntry leg — the payment-approval flow that creates
+          -- them (newPayment.js) only ever writes OnAccountLedger. Folded
+          -- straight into the credit side here (same treatment as Banks'
+          -- BankOpeningBalance above) since it's what the party is
+          -- currently holding against the company. Scoped to S/C only: the
+          -- CRM customer-side on-account flow (crmLedger.js) DOES post a
+          -- matching GL voucher already, so including type 'A' here would
+          -- double-count.
+          + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
+            AS opening_credit,
 
           ISNULL((
             SELECT SUM(gle.DebitAmount)

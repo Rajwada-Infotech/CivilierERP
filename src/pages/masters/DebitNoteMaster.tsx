@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -137,6 +138,8 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
+import { AlertTriangle, Eye, X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -467,6 +470,19 @@ const DebitNoteMaster: React.FC = () => {
     refetchOnWindowFocus: false,
   });
 
+  // Quality Rejection Debit Notes — a separate feature (raised from Vehicle
+  // In/Out & GRN inspections when part of a delivery is below the ordered
+  // grade) that lives in its own table, not dbo.DebitNote. Shown here
+  // read-only in its own section since both are conceptually "debit notes
+  // against a supplier" and people look for them in the same place.
+  const { data: qualityDebitNotesRes } = useQuery({
+    queryKey: ["quality-debit-notes"],
+    queryFn: () => getQualityDebitNotes(),
+    staleTime: 60 * 1000,
+  });
+  const qualityDebitNotes = qualityDebitNotesRes?.data ?? [];
+  const [viewingQDN, setViewingQDN] = useState<QualityDebitNote | null>(null);
+
   const { data: companyData } = useQuery({
     queryKey: ["enterprises-companies"],
     queryFn: () =>
@@ -525,13 +541,16 @@ const DebitNoteMaster: React.FC = () => {
         .filter((o) => o.label)
     : [];
 
-  const PROJECT_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    projectData,
-  )
-    ? projectData
-        .map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" }))
-        .filter((o) => o.label)
-    : [];
+  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null }[] =
+    Array.isArray(projectData)
+      ? projectData
+          .map((o: any) => ({
+            id: o.id,
+            label: o.label ?? o.name ?? "",
+            companyId: o.company_id != null ? Number(o.company_id) : null,
+          }))
+          .filter((o) => o.label)
+      : [];
 
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
@@ -708,12 +727,29 @@ const DebitNoteMaster: React.FC = () => {
 
   const fields: FieldDef[] = [
     {
+      name: "referenceSection",
+      label: "Reference",
+      type: "section",
+    },
+    {
       name: "billDiscountGroup",
       label: "Expense Booking / Bill",
       type: "custom",
       required: true,
       fullWidth: true,
       render: BillDiscountRenderer as FieldDef["render"],
+    },
+    {
+      name: "partiesSection",
+      label: "Company, Project & Supplier",
+      type: "section",
+    },
+    {
+      name: "supplier",
+      label: "Supplier",
+      type: "select",
+      required: true,
+      options: SUPPLIER_OPTIONS.map((o) => o.label),
     },
     {
       name: "company",
@@ -727,19 +763,30 @@ const DebitNoteMaster: React.FC = () => {
       label: "Project",
       type: "select",
       required: true,
-      options: PROJECT_OPTIONS.map((o) => o.label),
+      // Scoped to the selected Company — a project belongs to exactly one
+      // company, so showing every project regardless of company invited
+      // mismatched selections. Projects with no company_id (data gaps)
+      // stay visible so nothing silently disappears.
+      optionsProvider: (_data, _currentId, form) => {
+        const companyOpt = COMPANY_OPTIONS.find(
+          (c) => c.label === (form?.company as string),
+        );
+        const list = companyOpt
+          ? PROJECT_OPTIONS.filter(
+              (p) => p.companyId == null || p.companyId === companyOpt.id,
+            )
+          : PROJECT_OPTIONS;
+        return list.map((p) => ({ value: p.label, label: p.label }));
+      },
     },
     {
-      name: "supplier",
-      label: "Supplier",
-      type: "select",
-      required: true,
-      options: SUPPLIER_OPTIONS.map((o) => o.label),
+      name: "itemsSection",
+      label: "Line Items",
+      type: "section",
     },
-    { name: "status", label: "Status", type: "toggle", defaultValue: true },
     {
       name: "items",
-      label: "Line Items",
+      label: "",
       type: "custom",
       fullWidth: true,
       render: ({ value, onChange }: any) => (
@@ -886,11 +933,33 @@ const DebitNoteMaster: React.FC = () => {
       </div>
       <MasterPage
         title="Debit Note"
+        gridCols={3}
         fields={fields}
         columns={columns}
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onCustomSave={handleCustomSave}
+        onFieldChange={(form, fieldName) => {
+          // Switching Company invalidates a previously-selected Project
+          // that belongs to a different company.
+          if (fieldName === "company") {
+            const companyOpt = COMPANY_OPTIONS.find(
+              (c) => c.label === (form.company as string),
+            );
+            const projectOpt = PROJECT_OPTIONS.find(
+              (p) => p.label === (form.project as string),
+            );
+            if (
+              companyOpt &&
+              projectOpt &&
+              projectOpt.companyId != null &&
+              projectOpt.companyId !== companyOpt.id
+            ) {
+              return { ...form, project: "" };
+            }
+          }
+          return form;
+        }}
         onDataEvent={handleDataEvent}
         externalFormPatch={autoFillPatch}
         externalFormPatchKey={autoFillPatchKey}
@@ -942,6 +1011,200 @@ const DebitNoteMaster: React.FC = () => {
           win.print();
         }}
       />
+
+      {/* ── Quality Rejection Debit Notes ─────────────────────────────────
+          Separate feature/table (dbo.QualityRejectionDebitNote) — raised
+          from a Vehicle In/Out or GRN entry when part of a delivery is
+          found below the ordered grade on inspection. Read-only here;
+          create/manage them from the originating Vehicle In/Out or GRN
+          entry's "Received Items" list. */}
+      <div className="rounded-xl bg-card border border-border overflow-hidden">
+        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
+            <AlertTriangle size={14} className="text-rose-500" />
+          </div>
+          <div>
+            <h2 className="font-heading font-semibold text-foreground text-sm">
+              Quality Rejection Debit Notes
+            </h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Raised from Vehicle In/Out & GRN entries when part of a delivery is below the ordered grade
+            </p>
+          </div>
+        </div>
+
+        {qualityDebitNotes.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No quality rejection debit notes yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Doc No</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Supplier</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Item</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
+                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {qualityDebitNotes.map((n) => (
+                  <tr key={n.DebitNoteId} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-xs text-foreground">{n.DocNo}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">
+                      {n.DebitDate ? String(n.DebitDate).slice(0, 10) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs font-mono text-foreground">
+                        {n.VehicleInOutDocNo ?? n.GRNDocNo ?? "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-foreground">{n.SupplierName ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="text-xs font-medium text-foreground">{n.ItemName ?? "—"}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {n.RejectedQty} of {n.ReceivedQty} {n.UomName ?? ""}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                        {Number(n.PercentBad).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-rose-600">
+                      ₹{Number(n.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          n.Status === "Cancelled"
+                            ? "bg-muted text-muted-foreground line-through"
+                            : "bg-emerald-500/10 text-emerald-600"
+                        }`}
+                      >
+                        {n.Status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => setViewingQDN(n)}
+                        title="View details"
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Eye size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Quality Rejection Debit Note — view modal ─────────────────── */}
+      {/* Portalled to <body> — this page's fixed/z-index modals otherwise
+          render behind MaterialShell's animated header, since the
+          framer-motion page-transition wrapper somewhere up the tree gives
+          `position: fixed` a transformed containing block instead of the
+          viewport. */}
+      {viewingQDN && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
+                  <AlertTriangle size={13} className="text-rose-500" />
+                </div>
+                <div>
+                  <h2 className="font-heading font-bold text-sm">{viewingQDN.DocNo}</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                    Quality Rejection Debit Note
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingQDN(null)}
+                className="p-2 hover:bg-muted rounded-lg transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Date", value: viewingQDN.DebitDate ? String(viewingQDN.DebitDate).slice(0, 10) : "—" },
+                  { label: "Status", value: viewingQDN.Status },
+                  { label: "Source Doc", value: viewingQDN.VehicleInOutDocNo ?? viewingQDN.GRNDocNo ?? "—", mono: true },
+                  { label: "PO Number", value: viewingQDN.PONumber ?? "—", mono: true },
+                  { label: "Supplier", value: viewingQDN.SupplierName ?? "—" },
+                  { label: "Item", value: viewingQDN.ItemName ?? "—" },
+                ].map(({ label, value, mono }: any) => (
+                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Received</p>
+                  <p className="text-xs font-semibold font-mono text-foreground">
+                    {viewingQDN.ReceivedQty} {viewingQDN.UomName ?? ""}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rejected</p>
+                  <p className="text-xs font-semibold font-mono text-rose-600">
+                    {viewingQDN.RejectedQty} {viewingQDN.UomName ?? ""}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">% Bad</p>
+                  <p className="text-xs font-semibold font-mono text-rose-600">
+                    {Number(viewingQDN.PercentBad).toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rate</p>
+                  <p className="text-xs font-semibold font-mono text-foreground">
+                    ₹{Number(viewingQDN.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Debit Amount</p>
+                  <p className="text-sm font-bold font-mono text-rose-600">
+                    ₹{Number(viewingQDN.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
+              {viewingQDN.Reason && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    Reason
+                  </p>
+                  <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                    {viewingQDN.Reason}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
       </MaterialShell>
     </>
   );

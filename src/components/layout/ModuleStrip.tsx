@@ -82,7 +82,7 @@ const MODULES = [
   },
   {
     id: "civilworkdpr" as Module,
-    icon: Chart21,
+    icon: Building3,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
@@ -100,7 +100,7 @@ const MODULES = [
   },
   {
     id: "crm" as Module,
-    icon: Building3,
+    icon: Chart21,
     label: "CRM",
     desc: "Applications, bookings & agreements",
     color: "#0ea5e9",
