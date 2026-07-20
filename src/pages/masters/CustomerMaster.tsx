@@ -47,7 +47,6 @@ import {
   FileText,
   Printer,
 } from "lucide-react";
-import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import TreeDropdown from "@/components/common/TreeDropdown";
 
@@ -111,14 +110,6 @@ const PAYMENT_TERMS = [
 ] as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AccountGroup {
-  _id: string;
-  name: string;
-  code: string;
-  parentId: string | null;
-}
-
 
 interface Customer {
   LHeadId: number;
@@ -390,24 +381,6 @@ const CustomerMaster: React.FC = () => {
       GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
-
-  const { data: groupsData } = useQuery({
-    queryKey: ["account-groups"],
-    queryFn: getAccountGroups,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const accountGroups: AccountGroup[] = useMemo(() => {
-    if (!Array.isArray(groupsData)) return [];
-    return (groupsData as any[])
-      .filter((item) => item.AGId != null && item.Name)
-      .map((item) => ({
-        _id: String(item.AGId),
-        name: item.Name as string,
-        code: item.Code || "",
-        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
-      }));
-  }, [groupsData]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>
