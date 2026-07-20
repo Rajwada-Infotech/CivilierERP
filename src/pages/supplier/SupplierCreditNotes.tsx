@@ -10,6 +10,12 @@ const fmt = (n: number | null | undefined) =>
     ? "—"
     : "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(Number(n));
 
+const fmtPercent1 = (n: number | null | undefined) => {
+  if (n == null) return "—";
+  const value = Number(n);
+  return Number.isFinite(value) ? `${value.toFixed(1)}%` : "—";
+};
+
 export default function SupplierCreditNotes() {
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -159,7 +165,7 @@ export default function SupplierCreditNotes() {
                     <td className="px-3 py-2.5 text-right">
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
                         <AlertTriangle className="w-3 h-3" />
-                        {Number(n.PercentBad).toFixed(1)}%
+                        {fmtPercent1(n.PercentBad)}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono font-semibold text-rose-600">
