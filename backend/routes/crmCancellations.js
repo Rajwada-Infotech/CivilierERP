@@ -13,6 +13,8 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
+const { releaseAllParkingForBooking } = require("./crmParking");
+const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -125,11 +127,20 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
 
 // PUT /:id — edit notes only. Status is never settable here — Approved/
 // Rejected go through the endpoints below, Refunded through /:id/mark-refunded.
+// Blocked once Refunded — that's the final, GL-posted state; the notes on a
+// completed refund shouldn't be quietly rewritable afterward.
 router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
+    if (cur.recordset[0].Status === "Refunded") {
+      return res.status(400).json({ error: "This cancellation has already been refunded — notes can no longer be edited" });
+    }
+
     await pool.request()
       .input("id",    sql.Int,           id)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
@@ -156,23 +167,90 @@ router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (
 });
 
 // PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
-// approvalTransition(). On approval, the underlying booking is cancelled.
-// Status='Cancelled' is what every active-workflow dropdown now excludes by
-// default (see crmBookings.js GET /) — IsActive is deliberately left alone
-// since it's an orthogonal soft-delete flag used elsewhere, not a
-// cancellation signal.
+// approvalTransition(). On approval:
+//   1. Refund figures are recomputed fresh (AmountPaidTillDate/DeductionAmount/
+//      RefundAmount were frozen at request time — if a payment landed on the
+//      booking while the request sat Pending, that would otherwise be
+//      silently absorbed into the refund liability without ever updating
+//      the record). Never blocks approval, just corrects the numbers.
+//   2. The underlying booking is cancelled. Status='Cancelled' is what every
+//      active-workflow dropdown now excludes by default (see crmBookings.js
+//      GET /) — IsActive is deliberately left alone since it's an orthogonal
+//      soft-delete flag used elsewhere, not a cancellation signal.
+//   3. Every parking slot allotted to this booking is released back to
+//      available inventory (previously a permanent leak — nothing released
+//      a cancelled booking's parking).
+//   4. Any pending CrmBookingAmendmentRequest for this booking is
+//      auto-rejected — approving one after the booking is cancelled would
+//      otherwise create a live Extra Charge/Parking allotment on a dead
+//      booking (the requireActiveBooking() guards added to those apply*
+//      functions would now reject it anyway, but leaving the request
+//      dangling forever as "Pending" is its own kind of clutter/confusion).
 router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const pool = getPool();
+
+    const before = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, AmountPaidTillDate, DeductionPercent, Notes FROM dbo.CrmCancellation WHERE Id = @id");
+    if (!before.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
+    const { BookingId: bookingId, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
+
+    const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+    const freshTotalPaid = freshPaidRes.recordset[0].TotalPaid || 0;
+    if (Math.abs(freshTotalPaid - Number(staleAmountPaid || 0)) >= 1) {
+      const deductionAmt = Math.round(freshTotalPaid * deductionPct) / 100;
+      const refundAmt = Math.max(0, freshTotalPaid - deductionAmt);
+      const note = `[Auto-recomputed at approval] Paid amount changed from ₹${Number(staleAmountPaid || 0).toLocaleString("en-IN")} to ₹${freshTotalPaid.toLocaleString("en-IN")} since the request was filed — refund figures updated accordingly.`;
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("paid", sql.Decimal(18, 2), freshTotalPaid)
+        .input("damt", sql.Decimal(18, 2), deductionAmt)
+        .input("ramt", sql.Decimal(18, 2), refundAmt)
+        .input("notes", sql.NVarChar(sql.MAX), existingNotes ? `${existingNotes}\n${note}` : note)
+        .query(`
+          UPDATE dbo.CrmCancellation SET
+            AmountPaidTillDate = @paid, DeductionAmount = @damt, RefundAmount = @ramt,
+            Notes = @notes, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+    }
+
     const result = await approvalTransition("crm-cancellations", id, "Approved", userEmail, req.user?.role);
 
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmCancellation WHERE Id = @id");
-    if (cur.recordset.length) {
-      await pool.request().input("bid", sql.Int, cur.recordset[0].BookingId)
-        .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+    // The generic approvalTransition() engine only ever writes the Status
+    // column — ApprovedBy/ApprovedAt exist on this table but were never
+    // populated by anything, permanently NULL despite CANCEL_SELECT joining
+    // them in as ApprovedByName. Set explicitly here rather than changing
+    // the shared engine (which every other approval-gated CRM module also
+    // uses, with its own column-naming conventions).
+    await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req))
+      .query("UPDATE dbo.CrmCancellation SET ApprovedBy = @ab, ApprovedAt = SYSDATETIME() WHERE Id = @id");
+
+    await pool.request().input("bid", sql.Int, bookingId)
+      .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+
+    await releaseAllParkingForBooking(pool, bookingId);
+
+    const pendingAmendments = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
+    for (const amend of pendingAmendments.recordset) {
+      await pool.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmBookingAmendmentRequest SET
+            Status = 'Rejected', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
+            ReviewNotes = 'Auto-rejected — the booking was cancelled'
+          WHERE Id = @id
+        `);
+      if (amend.RequestedBy) {
+        await emitNotification(pool, amend.RequestedBy, "crm_booking_amendment_rejected",
+          "Amendment Request Auto-Rejected",
+          "Your requested change was auto-rejected because the booking was cancelled.",
+          amend.Id, "crm_booking_amendment");
+      }
     }
 
     res.json({ success: true, status: result.newStatus });

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Pencil, ListOrdered } from "lucide-react";
+import { Plus, Trash2, Pencil, ListOrdered, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -21,12 +21,17 @@ const CrmMilestoneMaster: React.FC = () => {
   const [defaultPercent, setDefaultPercent] = useState("");
   const [sortOrder, setSortOrder] = useState("");
   const [saving, setSaving] = useState(false);
+  // Opens locked (read-only) whenever editing an existing row — "New
+  // Milestone" opens unlocked since there's nothing existing to protect.
+  const [locked, setLocked] = useState(false);
+  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: milestones = [], isLoading } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchAll, staleTime: 30_000 });
 
   const resetForm = () => {
     setEditingId(null);
     setName(""); setDefaultPercent(""); setSortOrder("");
+    setLocked(false);
   };
 
   const openEdit = (m: any) => {
@@ -34,6 +39,7 @@ const CrmMilestoneMaster: React.FC = () => {
     setName(m.Name);
     setDefaultPercent(m.DefaultPercent != null ? String(m.DefaultPercent) : "");
     setSortOrder(String(m.SortOrder));
+    setLocked(true);
     setDialogOpen(true);
   };
 
@@ -55,6 +61,7 @@ const CrmMilestoneMaster: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(isEdit ? "Milestone updated" : "Milestone created");
       setDialogOpen(false);
+      setLocked(true);
       resetForm();
       qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
     } catch (e: any) {
@@ -119,32 +126,53 @@ const CrmMilestoneMaster: React.FC = () => {
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Edit Milestone" : "New Milestone"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+              <span>{editingId != null ? "Edit Milestone" : "New Milestone"}</span>
+              {editingId != null && locked && (
+                <button onClick={() => setLocked(false)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {editingId != null && locked && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Name *</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <input type="text" value={name} readOnly={locked} onChange={(e) => setName(e.target.value)}
+                className={inputCls} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Default %</label>
-                <input type="number" value={defaultPercent} onChange={(e) => setDefaultPercent(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="number" value={defaultPercent} readOnly={locked} onChange={(e) => setDefaultPercent(e.target.value)}
+                  className={inputCls} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Sort Order</label>
-                <input type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)}
+                  className={inputCls} />
               </div>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
-            </button>
+            {editingId != null && locked ? (
+              <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
+                </button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

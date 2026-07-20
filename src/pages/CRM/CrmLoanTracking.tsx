@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Landmark, Search } from "lucide-react";
+import { Landmark, Search, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -39,6 +39,10 @@ const CrmLoanTracking: React.FC = () => {
   const [editingBookingId, setEditingBookingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  // Opens locked whenever a loan record already exists for this booking —
+  // "Add" (no existing record) opens unlocked since there's nothing to protect.
+  const [locked, setLocked] = useState(false);
+  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: bookings = [], isLoading } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 60_000 });
 
@@ -71,6 +75,7 @@ const CrmLoanTracking: React.FC = () => {
       LoanAccountNo: existing.LoanAccountNo || "", RmName: existing.RmName || "", RmContact: existing.RmContact || "",
       Notes: existing.Notes || "",
     } : { ...EMPTY_FORM });
+    setLocked(!!existing);
     setEditingBookingId(bookingId);
   };
 
@@ -86,6 +91,7 @@ const CrmLoanTracking: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Loan details updated");
       setEditingBookingId(null);
+      setLocked(false);
       qc.invalidateQueries({ queryKey: ["crm-loans"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -103,7 +109,7 @@ const CrmLoanTracking: React.FC = () => {
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
-    { accessorKey: "TotalValue", header: "Total Value", size: 110, cell: (i) => <span>{fmt(i.row.original.TotalValue)}</span> },
+    { accessorKey: "TotalValue", header: "Total Value", size: 110, cell: (i) => <span>{fmt(i.row.original.GrandTotal ?? i.row.original.TotalValue)}</span> },
     { id: "bankName", header: "Bank", size: 110, enableSorting: false,
       cell: (i) => <span>{loanMap[i.row.original.Id]?.BankName || "—"}</span> },
     { id: "loanAmount", header: "Loan Amount", size: 110, enableSorting: false,
@@ -146,9 +152,24 @@ const CrmLoanTracking: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      <Dialog open={!!editingBookingId} onOpenChange={(o) => { if (!o) setEditingBookingId(null); }}>
+      <Dialog open={!!editingBookingId} onOpenChange={(o) => { if (!o) { setEditingBookingId(null); setLocked(false); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-heading">Loan / Bank Details</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+              <span>Loan / Bank Details</span>
+              {locked && (
+                <button onClick={() => setLocked(false)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {locked && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             {[
               { key: "BankName",     label: "Bank Name",       type: "text"   },
@@ -162,30 +183,36 @@ const CrmLoanTracking: React.FC = () => {
             ].map(({ key, label, type }) => (
               <div key={key}>
                 <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type={type} value={form[key as keyof typeof form]}
+                <input type={type} value={form[key as keyof typeof form]} readOnly={locked}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  className={inputCls} />
               </div>
             ))}
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Sanction Status</label>
-              <select value={form.SanctionStatus} onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <select value={form.SanctionStatus} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value }))}
+                className={inputCls}>
                 {SANCTION_STATUSES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </div>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+              rows={2} className={`${inputCls} resize-none`} />
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setEditingBookingId(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Save"}
-            </button>
+            {locked ? (
+              <button onClick={() => { setEditingBookingId(null); setLocked(false); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setEditingBookingId(null); setLocked(false); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

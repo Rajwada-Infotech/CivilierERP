@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee } from "lucide-react";
+import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -45,6 +45,13 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
     Notes: customer.Notes || "",
   });
   const [saving, setSaving] = useState(false);
+  // Opens read-only every time — an explicit "Edit" click is required before
+  // any field becomes editable, and a successful save re-locks it. Prevents
+  // the classic "clicked a row to look, accidentally fat-fingered a field,
+  // hit Save without noticing" class of data-corruption mistake on a record
+  // this central (every Application/Booking reads its KYC off this row).
+  const [locked, setLocked] = useState(true);
+  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const handleSave = async () => {
     setSaving(true);
@@ -57,6 +64,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Customer updated");
+      setLocked(true);
       onSaved();
       onClose();
     } catch (e: any) {
@@ -70,10 +78,28 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <IdCard size={16} className="text-primary" /> {customer.CustomerNo} — Edit Customer
+          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+            <span className="flex items-center gap-2">
+              <IdCard size={16} className="text-primary" /> {customer.CustomerNo} — Edit Customer
+            </span>
+            {locked ? (
+              <button onClick={() => setLocked(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                <Pencil size={12} /> Edit
+              </button>
+            ) : (
+              <span className="flex items-center gap-1 text-xs font-medium text-amber-600 shrink-0">
+                <Pencil size={12} /> Editing
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
+
+        {locked && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -87,25 +113,25 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
             ].map(({ key, label, type }) => (
               <div key={key}>
                 <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type={type} value={(form as any)[key]}
+                <input type={type} value={(form as any)[key]} readOnly={locked}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  className={inputCls} />
               </div>
             ))}
           </div>
 
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Address *</label>
-            <textarea value={form.Address} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            <textarea value={form.Address} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))}
+              rows={2} className={`${inputCls} resize-none`} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             {["City", "State", "Pincode"].map((key) => (
               <div key={key}>
                 <label className="text-xs text-muted-foreground block mb-1">{key}</label>
-                <input type="text" value={(form as any)[key]}
+                <input type="text" value={(form as any)[key]} readOnly={locked}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  className={inputCls} />
               </div>
             ))}
           </div>
@@ -121,9 +147,9 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
               ].map(({ key, label }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type="text" value={(form as any)[key]}
+                  <input type="text" value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className={inputCls} />
                 </div>
               ))}
             </div>
@@ -131,8 +157,8 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+            <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+              rows={2} className={`${inputCls} resize-none`} />
           </div>
 
           {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 && (
@@ -163,11 +189,18 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
         </div>
 
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={handleSave} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Saving..." : "Save Changes"}
-          </button>
+          {locked ? (
+            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+          ) : (
+            <>
+              <button onClick={() => { setLocked(true); onClose(); }}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleSave} disabled={saving}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
