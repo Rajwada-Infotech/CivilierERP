@@ -39,6 +39,7 @@ router.get("/", authenticateToken, async (req, res) => {
         pr.name          AS ProjectName,
         c.FinYear,
         c.ContactPerson,
+        c.ContactPartyId,
         c.Reason,
         c.NatureOfContract,
         c.ContractAmount,
@@ -47,7 +48,19 @@ router.get("/", authenticateToken, async (req, res) => {
         c.Remarks,
         c.Status,
         c.CreatedBy,
-        c.CreatedAt
+        c.CreatedAt,
+        -- Already-paid (total advances recorded) and still-unpaid balance
+        -- of the contract value — lets pickers (e.g. the Payment page's
+        -- contract selector) show "Paid ₹X · Pending ₹Y" without a
+        -- separate round-trip per contract.
+        ISNULL((
+          SELECT SUM(cl.Amount) FROM dbo.ContractLedger cl
+          WHERE cl.ContractId = c.ContractId AND cl.TxnType = 'Advance'
+        ), 0) AS TotalPaid,
+        ISNULL(c.ContractAmount, 0) - ISNULL((
+          SELECT SUM(cl.Amount) FROM dbo.ContractLedger cl
+          WHERE cl.ContractId = c.ContractId AND cl.TxnType = 'Advance'
+        ), 0) AS PendingAmount
       FROM dbo.Contract c
       LEFT JOIN dbo.enterprise co ON co.id = c.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = c.ProjectId

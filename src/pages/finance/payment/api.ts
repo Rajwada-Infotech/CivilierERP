@@ -179,7 +179,9 @@ export const fetchProjectOptions = async (): Promise<
 export const fetchSupplierOptions = async (): Promise<
   { id: number; label: string }[]
 > => {
-  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  // Suppliers + Contractors — the Payee/Party field also has to resolve a
+  // Contract's ContactPartyId, which can point to either.
+  const res = await fetchWithAuth("/api/account-head/options?type=S,C");
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
 };
