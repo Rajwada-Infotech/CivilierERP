@@ -434,7 +434,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject
+             PCompany, PProject, ContractId, PPartyId
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
     `);
@@ -448,7 +448,21 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
   let supplierHeadId = null;
-  if (payment.PExpenseRef) {
+
+  // Contract-linked payment (advance against a Contract, no real invoice
+  // yet) — resolve the supplier/contractor straight from the Contract's own
+  // party tag. Takes priority over the PExpenseRef branch below because for
+  // this case PExpenseRef (if set at all) holds the Contract's own DocNo,
+  // not a real ExpenseBooking reference, and would never resolve there.
+  if (payment.ContractId) {
+    const contractResult = await pool
+      .request()
+      .input("ContractId", sql.Int, payment.ContractId)
+      .query(`SELECT ContactPartyId FROM dbo.Contract WHERE ContractId = @ContractId`);
+    supplierHeadId = contractResult.recordset[0]?.ContactPartyId ?? null;
+  }
+
+  if (!supplierHeadId && payment.PExpenseRef) {
     // EMI payments store PExpenseRef as "{parentEDocNo}-EMI-{n}".
     // Strip the suffix to resolve the parent booking for GL purposes.
     const lookupRef = payment.PExpenseRef.replace(/-EMI-\d+$/i, "");
@@ -474,12 +488,19 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       }
     }
   }
+
+  // Direct-invoice / manual payments carry PPartyId (AccountHeadMaster.LHeadId)
+  // straight from the party picker — the last, most literal fallback.
+  if (!supplierHeadId && payment.PPartyId) {
+    supplierHeadId = payment.PPartyId;
+  }
+
   if (!supplierHeadId)
     return {
       posted: false,
       reason: payment.PExpenseRef
         ? `Payment ${paymentId}: could not resolve supplier from expense ref "${payment.PExpenseRef}"`
-        : `Payment ${paymentId}: no PExpenseRef, cannot resolve counter-account`,
+        : `Payment ${paymentId}: no PExpenseRef/ContractId/PPartyId, cannot resolve counter-account`,
     };
 
   const companyId = parseInt(payment.PCompany, 10);
