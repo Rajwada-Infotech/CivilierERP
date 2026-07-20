@@ -103,7 +103,7 @@ const CrmLoanTracking: React.FC = () => {
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
-    { accessorKey: "TotalValue", header: "Total Value", size: 110, cell: (i) => <span>{fmt(i.row.original.TotalValue)}</span> },
+    { accessorKey: "TotalValue", header: "Total Value", size: 110, cell: (i) => <span>{fmt(i.row.original.GrandTotal ?? i.row.original.TotalValue)}</span> },
     { id: "bankName", header: "Bank", size: 110, enableSorting: false,
       cell: (i) => <span>{loanMap[i.row.original.Id]?.BankName || "—"}</span> },
     { id: "loanAmount", header: "Loan Amount", size: 110, enableSorting: false,

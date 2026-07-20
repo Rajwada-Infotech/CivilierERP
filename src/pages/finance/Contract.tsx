@@ -352,25 +352,29 @@ export default function Contract() {
   };
 
   // ── file upload ───────────────────────────────────────────────────────────────
+  // No dedicated attachments table/endpoint — files are base64-encoded
+  // client-side and stored directly in dbo.Contract.Attachments (JSON array),
+  // the same column that already round-trips on save/edit/detail-view.
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
       const newAtts: Attachment[] = [];
       for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetchWithAuth("/api/upload", { method: "POST", body: formData });
-        if (res.ok) {
-          const data = await res.json();
-          newAtts.push({ name: file.name, url: data.url || data.path || "", type: file.type, size: file.size });
-        } else {
-          newAtts.push({ name: file.name, url: URL.createObjectURL(file), type: file.type, size: file.size });
-        }
+        const url = await readFileAsDataUrl(file);
+        newAtts.push({ name: file.name, url, type: file.type, size: file.size });
       }
       setAttachments((prev) => [...prev, ...newAtts]);
     } catch {
-      toast.error("Failed to upload file(s)");
+      toast.error("Failed to read file(s)");
     }
     setUploading(false);
   };

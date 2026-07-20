@@ -31,6 +31,11 @@ const {
   resolveGRNPrefix,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+const {
+  assertVehicleInOutHasNoGRN,
+  assertGRNQuantitiesWithinVehicleInOut,
+  getDocumentChainForGRN,
+} = require("../services/poVehicleGrnChain");
 
 router.use(checkPermissionForMethod("Material", "GRN"));
 
@@ -660,8 +665,10 @@ router.get("/:id", async (req, res) => {
           grn.GRNID,
           grn.GRNNo,
           grn.GRNDate,
+          grn.DocDate,
           grn.SupplierID,
           grn.POID,
+          grn.VehicleInOutID,
           grn.GRNItems,
           grn.Status,
           grn.Remarks,
@@ -700,7 +707,9 @@ router.get("/:id", async (req, res) => {
     // an array, not a raw JSON string. This prevents double-parsing issues on
     // the frontend and handles cases where the NVARCHAR(MAX) column is returned
     // as a truncated string by some mssql driver versions.
-    res.json(normaliseGRNRow(result.recordset[0]));
+    const grnRow = normaliseGRNRow(result.recordset[0]);
+    const documentChain = await getDocumentChainForGRN(pool, grnId);
+    res.json({ ...grnRow, documentChain });
   } catch (err) {
     console.error("GET GRN by ID ERROR:", err);
     res
@@ -713,8 +722,12 @@ router.get("/:id", async (req, res) => {
 async function createGRNInternal(pool, body, userEmail) {
     const {
       grnDate,
+      // docDate is intentionally NOT read from the client — Doc Date is
+      // always the server's "today" (set below at insert time), never
+      // client-supplied, so it can't be backdated/postdated.
       supplierId,
       poId,
+      vehicleInOutId = null,
       grnItems,
       status,
       remarks,
@@ -747,6 +760,16 @@ async function createGRNInternal(pool, body, userEmail) {
       if (poStatus !== "Approved" && poStatus !== "Received") {
         throw Object.assign(new Error(`Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`), { status: 400 });
       }
+    }
+
+    // ── PO -> Vehicle In/Out -> GRN chain guards ─────────────────────────
+    // One Vehicle In/Out document can only ever have one active GRN, and a
+    // GRN can't confirm receipt of more than what that specific vehicle
+    // lot actually brought in.
+    if (vehicleInOutId) {
+      const vioId = parseInt(vehicleInOutId, 10);
+      await assertVehicleInOutHasNoGRN(pool, vioId);
+      await assertGRNQuantitiesWithinVehicleInOut(pool, vioId, grnItems);
     }
 
     const transaction = pool.transaction();
@@ -834,8 +857,17 @@ async function createGRNInternal(pool, body, userEmail) {
         .request()
         .input("GRNNo", sql.NVarChar(50), finalDocNo)
         .input("GRNDate", sql.Date, grnDate)
+        // Doc Date is always "today" — entries are dated when they're
+        // actually made, not backdated/postdated (mirrors VehicleInOut).
+        // Trust the server clock rather than whatever the client sends.
+        .input("DocDate", sql.Date, new Date())
         .input("SupplierID", sql.Int, supplierId)
         .input("POID", sql.Int, poId || null)
+        .input(
+          "VehicleInOutID",
+          sql.Int,
+          vehicleInOutId ? parseInt(vehicleInOutId, 10) : null,
+        )
         .input(
           "GRNItems",
           sql.NVarChar(sql.MAX),
@@ -853,12 +885,12 @@ async function createGRNInternal(pool, body, userEmail) {
         .input("GodownID", sql.Int, resolvedGodownId)
         .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
+          (GRNNo, GRNDate, DocDate, SupplierID, POID, VehicleInOutID, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
            TotalAmount, GodownID, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
+          (@GRNNo, @GRNDate, @DocDate, @SupplierID, @POID, @VehicleInOutID, @GRNItems, @Status, @Remarks,
            @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
            @TotalAmount, @GodownID, @CreatedDate)
       `);
@@ -2190,6 +2222,33 @@ router.get("/by-transfer/:transferId", async (req, res) => {
     return res.json(result.recordset);
   } catch (err) {
     console.error("[grns] by-transfer error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /by-vehicle-in-out/:id ────────────────────────────────────────
+// Returns the (at most one) active GRN linked to a specific Vehicle
+// In/Out document — lets the VehicleInOut UI show a "GRN Created" badge
+// with a link, and lets GRN.tsx re-check before letting a user pick an
+// already-consumed Vehicle In/Out record.
+router.get("/by-vehicle-in-out/:id", async (req, res) => {
+  const vehicleInOutId = parseInt(req.params.id, 10);
+  if (isNaN(vehicleInOutId)) {
+    return res.status(400).json({ error: "Invalid vehicle in/out id" });
+  }
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("VehicleInOutID", sql.Int, vehicleInOutId).query(`
+        SELECT GRNID, GRNNo, DocNo, GRNDate, Status, TotalAmount, POID
+        FROM dbo.GoodsReceiptNotes
+        WHERE VehicleInOutID = @VehicleInOutID AND Status <> 'Rejected'
+        ORDER BY CreatedDate DESC
+      `);
+    return res.json(result.recordset[0] || null);
+  } catch (err) {
+    console.error("[grns] by-vehicle-in-out error:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });

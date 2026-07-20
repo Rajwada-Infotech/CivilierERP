@@ -55,11 +55,13 @@ async function getSundryDebtorsGroupId(pool) {
 
 /**
  * Idempotent: returns the AccountHeadMaster.LHeadId for a CrmCustomer,
- * creating it on first use. LHeadType='C' (Customer) mirrors the only other
- * place in this codebase that mints a *new* Customer-type ledger head
- * (projectMaster.js's ensureProjectLedgerHeads — see its test file for the
- * 'C' = Customer convention). Unlike that project-level head, no GST gating
- * applies here — a CRM buyer is an individual, not a GST-registered company.
+ * creating it on first use. LHeadType='A' — the same code used by the
+ * manual Customer Master (CustomerMaster.tsx) — not 'C', which means
+ * Contractor everywhere else in this schema (accountHeadMaster.js). This
+ * used to be minted as 'C' too, colliding with real Contractor rows in
+ * every LHeadType='C' listing/report until it was corrected. Unlike the
+ * manual Customer Master, no GST gating applies here — a CRM buyer is an
+ * individual, not a GST-registered company.
  */
 async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
   const code = `CRMCUST-${crmCustomerId}`;
@@ -84,7 +86,7 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
     .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
     .input("LHeadPan", sql.NVarChar(50), c.PanNo || null)
     .input("LCountry", sql.VarChar(50), "India")
-    .input("LHeadType", sql.VarChar(50), "C")
+    .input("LHeadType", sql.VarChar(50), "A")
     .input("LHeadStatus", sql.Bit, 1)
     .input("Status", sql.NVarChar(20), "Approved")
     .input("LBelongsTo", sql.Int, groupId)

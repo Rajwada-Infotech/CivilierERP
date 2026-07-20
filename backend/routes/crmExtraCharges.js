@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
+const { recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -29,6 +30,11 @@ async function rollupBookingTotals(pool, bookingId) {
         GrandTotal = ISNULL(TotalValue, 0) + @pt + @et
       WHERE Id = @bid
     `);
+
+  // GrandTotal just moved — every not-yet-settled milestone's ₹/% needs to
+  // be re-derived against the new total, or the payment schedule silently
+  // stops adding up to what the customer actually owes.
+  await recalculateRemainingMilestones(pool, bookingId);
 }
 
 // GET /:bookingId — list extra charges for a booking

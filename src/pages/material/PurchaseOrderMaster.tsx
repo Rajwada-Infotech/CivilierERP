@@ -39,6 +39,7 @@ import {
   getUOMs,
   getSupplierDetails,
   getCompanyDetails,
+  getItemsWithGST,
   type CreatePOPayload,
   type SupplierDetails,
   type CompanyDetails,
@@ -95,8 +96,10 @@ import {
   Upload,
   Loader2 as Loader2Icon,
   MessageCircle,
+  Lock,
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { relevantUOMs, convertRate } from "@/lib/uomConversion";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 
@@ -171,6 +174,7 @@ interface POLineItem {
   gstRate: number; // effective total GST % (igst if set, else cgst+sgst)
   taxAmount: number; // qty * rate * gstRate / 100
   amount: number; // qty * rate + taxAmount (inclusive of GST)
+  uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
 }
 
 interface POForm {
@@ -186,8 +190,6 @@ interface POForm {
   docNo: string;
   status: string;
   costCenterId: string;
-  vendorInvoiceDate: string;
-  vendorInvoiceNo: string;
 }
 
 interface DropdownOption {
@@ -278,8 +280,6 @@ const EMPTY_FORM = (): POForm => ({
   docNo: "",
   status: "Draft",
   costCenterId: "",
-  vendorInvoiceDate: "",
-  vendorInvoiceNo: "",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -429,7 +429,12 @@ const PurchaseOrderMaster: React.FC = () => {
         }
       })
       .finally(() => setPoDocTypesLoading(false));
-  }, []);
+    // qtPrefill is included so arriving from the L1 chart via a
+    // location.state update (without a full remount of this page) still
+    // re-evaluates the QPO-vs-DPO auto-select instead of using whatever
+    // was captured on the very first mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtPrefill]);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter(
@@ -516,6 +521,20 @@ const PurchaseOrderMaster: React.FC = () => {
   const [companyDetails, setCompanyDetails] = useState<CompanyDetails | null>(
     null,
   );
+
+  // Whether the selected supplier and company are in the same GST state —
+  // drives CGST+SGST vs IGST on every line item below. Mirrors the same
+  // normalizeState + fallback-to-intrastate pattern used server-side in
+  // expenseBooking.js / buildGrnGstData.js, so a PO and its downstream
+  // GRN/invoice never disagree on tax mode. Defaults to intrastate when
+  // either state is unknown, rather than silently charging IGST.
+  const normalizeState = (v: string | null | undefined) =>
+    String(v || "").trim().toLowerCase();
+  const isIntraState = useMemo(() => {
+    const supState = normalizeState(supplierDetails?.LGSTState);
+    const compState = normalizeState(companyDetails?.state);
+    return !supState || !compState || supState === compState;
+  }, [supplierDetails?.LGSTState, companyDetails?.state]);
   // Reuses CompanyDetails shape — the enterprise table holds Project rows
   // too, so the same getCompanyDetails() lookup gives us the project's
   // address to show as the PO's delivery address.
@@ -561,6 +580,13 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: itemsRaw = [] } = useQuery({
     queryKey: ["item-master"],
     queryFn: getItems,
+  });
+  // HSN-resolved GST rates — authoritative source for GST%, since
+  // Item_Master_Group.M_CGST/M_SGST/M_IGST are often stale/unset while the
+  // HSN Master has the current rate (see getItemsWithGST for resolution order).
+  const { data: itemsGstRaw = [] } = useQuery({
+    queryKey: ["items-with-gst"],
+    queryFn: getItemsWithGST,
   });
   const { data: tcRaw = [] } = useQuery({
     queryKey: ["tc-master"],
@@ -630,10 +656,18 @@ const PurchaseOrderMaster: React.FC = () => {
           id: Number(u.Id),
           name: u.UOMName ?? "",
           code: (u.UOMCode ?? "").toString().trim(),
+          category: (u.UOMCategory ?? null) as string | null,
+          baseFactor: Number(u.BaseFactor) || 1,
         }))
         .filter((u) => u.name !== ""),
     [uomsRaw],
   );
+
+  const itemsGstById = useMemo(() => {
+    const map = new Map<string, { gstRate: number; hsnCode: string | null }>();
+    for (const i of itemsGstRaw) map.set(String(i.id), i);
+    return map;
+  }, [itemsGstRaw]);
 
   const items = useMemo(
     () =>
@@ -646,8 +680,11 @@ const PurchaseOrderMaster: React.FC = () => {
         cgst: Number(i.M_CGST ?? 0),
         sgst: Number(i.M_SGST ?? 0),
         igst: Number(i.M_IGST ?? 0),
+        // HSN-resolved rate — takes precedence over the raw item-master
+        // columns above, which are frequently stale/unset.
+        resolvedGstRate: itemsGstById.get(String(i.M_Id))?.gstRate ?? null,
       })),
-    [itemsRaw],
+    [itemsRaw, itemsGstById],
   );
 
   const tcRecords = useMemo(
@@ -1050,6 +1087,7 @@ const PurchaseOrderMaster: React.FC = () => {
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        uomLocked: true,
       };
     });
 
@@ -1441,21 +1479,54 @@ const PurchaseOrderMaster: React.FC = () => {
         u.code.toLowerCase() === itemUomNorm ||
         u.name.toLowerCase() === itemUomNorm,
     );
-    // Use CGST+SGST when either is set; otherwise IGST
+    // Items are tagged with CGST, SGST, and IGST rates all at once — which
+    // one actually applies depends on whether the supplier and the ordering
+    // company are in the same GST state (isIntraState, computed above from
+    // supplierDetails.LGSTState vs companyDetails.state). Same state →
+    // CGST+SGST; different state → IGST. This is why the identical item can
+    // price out differently on two POs raised against two different-state
+    // suppliers.
     const mc = Number(item.cgst ?? 0);
     const ms = Number(item.sgst ?? 0);
     const mi = Number(item.igst ?? 0);
-    const useCgstSgst = mc > 0 || ms > 0;
-    const gstRate = useCgstSgst ? mc + ms : mi;
+    const resolvedTotal = item.resolvedGstRate ?? 0;
+
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    if (isIntraState) {
+      if (mc > 0 || ms > 0) {
+        cgstRate = mc;
+        sgstRate = ms;
+      } else if (mi > 0) {
+        // Only an IGST rate is on file — split it evenly for an intrastate order.
+        cgstRate = mi / 2;
+        sgstRate = mi / 2;
+      } else if (resolvedTotal > 0) {
+        cgstRate = resolvedTotal / 2;
+        sgstRate = resolvedTotal / 2;
+      }
+    } else {
+      if (mi > 0) {
+        igstRate = mi;
+      } else if (mc > 0 || ms > 0) {
+        // Only a CGST/SGST split is on file — combine it for an interstate order.
+        igstRate = mc + ms;
+      } else if (resolvedTotal > 0) {
+        igstRate = resolvedTotal;
+      }
+    }
+    const gstRate = cgstRate + sgstRate + igstRate;
+
     updateLine(idx, {
       itemId,
       itemName: item.name,
       itemDescription: item.description,
       uomId: uomMatch?.id ?? null,
       unit: uomMatch?.name ?? item.uom,
-      cgstRate: useCgstSgst ? mc : 0,
-      sgstRate: useCgstSgst ? ms : 0,
-      igstRate: useCgstSgst ? 0 : mi,
+      cgstRate,
+      sgstRate,
+      igstRate,
       gstRate,
     });
   };
@@ -1525,8 +1596,6 @@ const PurchaseOrderMaster: React.FC = () => {
           : "Pending", // creation always auto-submits; backend ignores this field on create anyway
       Remarks: form.remarks || null,
       CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
-      VendorInvoiceDate: form.vendorInvoiceDate || null,
-      VendorInvoiceNo: form.vendorInvoiceNo || null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
         ? null
@@ -1980,10 +2049,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
       docNo,
       status: raw.Status ?? "Draft",
       costCenterId: String(raw.CostCenterId ?? ""),
-      vendorInvoiceDate: raw.VendorInvoiceDate
-        ? raw.VendorInvoiceDate.slice(0, 10)
-        : "",
-      vendorInvoiceNo: raw.VendorInvoiceNo ?? "",
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2787,21 +2852,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             "—",
                         },
                         {
-                          label: "Vendor Invoice No",
-                          value:
-                            viewingPO.VendorInvoiceNo ??
-                            viewingPO.vendorInvoiceNo ??
-                            "—",
-                        },
-                        {
-                          label: "Vendor Invoice Date",
-                          value: viewingPO.VendorInvoiceDate
-                            ? new Date(
-                                viewingPO.VendorInvoiceDate,
-                              ).toLocaleDateString("en-IN")
-                            : "—",
-                        },
-                        {
                           label: "Total Amount",
                           value:
                             (viewingPO.TotalAmount ?? viewingPO.totalAmount) !=
@@ -2873,8 +2923,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Supplier Details */}
                     {viewingPOSupplier && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <Building2 size={11} className="text-emerald-500" />{" "}
                           Supplier Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
@@ -2942,8 +2992,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Billing Details */}
                     {viewingPOCompany && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <Building2 size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <Building2 size={11} className="text-emerald-500" />{" "}
                           Billing Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
@@ -3009,8 +3059,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     {/* Project / Delivery Address */}
                     {viewingPOProject && (
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                          <MapPin size={9} className="text-emerald-500" />{" "}
+                        <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                          <MapPin size={11} className="text-emerald-500" />{" "}
                           Project Details
                         </p>
                         <dl className="space-y-1.5 text-xs">
@@ -3881,38 +3931,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 </select>
               </div>
 
-              {/* Vendor Invoice No */}
-              <div>
-                <FieldLabel>Vendor Invoice No</FieldLabel>
-                <input
-                  type="text"
-                  placeholder="Vendor invoice number"
-                  value={form.vendorInvoiceNo}
-                  onChange={(e) => setField("vendorInvoiceNo", e.target.value)}
-                  readOnly={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-                />
-              </div>
-
-              {/* Vendor Invoice Date */}
-              <div>
-                <FieldLabel>Vendor Invoice Date</FieldLabel>
-                <div className="relative">
-                  <CalendarDays
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <input
-                    type="date"
-                    value={form.vendorInvoiceDate}
-                    onChange={(e) =>
-                      setField("vendorInvoiceDate", e.target.value)
-                    }
-                    readOnly={isReadOnly}
-                    className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                  />
-                </div>
-              </div>
             </div>
           </div>
           {/* ── Supplier, Company & Project Info Panels (auto-fetched on selection) ──── */}
@@ -4277,33 +4295,59 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           <span className="text-sm text-muted-foreground">
                             {li.unit || "—"}
                           </span>
-                        ) : (
+                        ) : li.uomLocked ? (
+                          <span
+                            className="flex items-center gap-1 text-sm text-muted-foreground"
+                            title="UOM is locked to what was quoted — remove and re-add the item to change it"
+                          >
+                            <Lock size={11} className="shrink-0" />
+                            {li.unit || "—"}
+                          </span>
+                        ) : (() => {
+                          const currentUom = uoms.find(
+                            (u) =>
+                              u.id === li.uomId ||
+                              u.name.toLowerCase() === li.unit.toLowerCase() ||
+                              u.code.toLowerCase() === li.unit.toLowerCase(),
+                          );
+                          // Only offer UOMs relevant to the currently-selected
+                          // one (same measurement category — e.g. Weight units
+                          // for a Weight unit) so a liquid item can't be
+                          // switched to "Running Meter". Units with no category
+                          // (Bags, Box, Set, ...) fall back to the full list,
+                          // same as before this feature existed.
+                          const options = relevantUOMs(uoms, currentUom?.category);
+                          return (
                           <div className="relative">
                             <select
-                              value={
-                                li.uomId ??
-                                uoms.find(
-                                  (u) =>
-                                    u.name.toLowerCase() ===
-                                      li.unit.toLowerCase() ||
-                                    u.code.toLowerCase() ===
-                                      li.unit.toLowerCase(),
-                                )?.id ??
-                                ""
-                              }
+                              value={currentUom?.id ?? ""}
                               onChange={(e) => {
                                 const uom = uoms.find(
                                   (u) => u.id === Number(e.target.value),
                                 );
+                                if (!uom) return;
+                                // Same-category switch (e.g. tonne -> kg):
+                                // re-price the rate so the line's total value
+                                // doesn't silently change under the user —
+                                // a supplier quote of ₹100/tonne becomes
+                                // ₹0.1/kg, not ₹100/kg.
+                                const nextRate =
+                                  currentUom?.category &&
+                                  uom.category === currentUom.category &&
+                                  currentUom.baseFactor &&
+                                  uom.baseFactor
+                                    ? convertRate(li.rate, currentUom.baseFactor, uom.baseFactor)
+                                    : li.rate;
                                 updateLine(idx, {
-                                  uomId: uom?.id ?? null,
-                                  unit: uom?.name ?? "",
+                                  uomId: uom.id,
+                                  unit: uom.name,
+                                  rate: nextRate,
                                 });
                               }}
                               className={cellSelect}
                             >
                               <option value="">— UOM —</option>
-                              {uoms.map((u) => (
+                              {options.map((u) => (
                                 <option key={u.id} value={u.id}>
                                   {u.name}
                                 </option>
@@ -4314,7 +4358,8 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                             />
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
 
                       {/* Rate */}

@@ -280,7 +280,7 @@ function EditLogDialog({
                   <div><span className="text-muted-foreground block">Status</span><span className="font-medium">{relatedBooking.Status || "—"}</span></div>
                   <div><span className="text-muted-foreground block">Project</span><span className="font-medium">{relatedBooking.ProjectName || "—"}</span></div>
                   <div><span className="text-muted-foreground block">Unit</span><span className="font-medium">{relatedBooking.UnitNo || "—"}{relatedBooking.BlockName ? ` · ${relatedBooking.BlockName}` : ""}</span></div>
-                  <div><span className="text-muted-foreground block">Total Value</span><span className="font-medium">{relatedBooking.TotalValue ? `₹${Number(relatedBooking.TotalValue).toLocaleString("en-IN")}` : "—"}</span></div>
+                  <div><span className="text-muted-foreground block">Total Value</span><span className="font-medium">{relatedBooking.GrandTotal ?? relatedBooking.TotalValue ? `₹${Number(relatedBooking.GrandTotal ?? relatedBooking.TotalValue).toLocaleString("en-IN")}` : "—"}</span></div>
                   <div><span className="text-muted-foreground block">Booking Date</span><span className="font-medium">{relatedBooking.BookingDate ? String(relatedBooking.BookingDate).slice(0, 10) : "—"}</span></div>
                 </div>
               </div>

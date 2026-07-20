@@ -97,7 +97,6 @@ export default function Landing() {
 
       {/* ── Main content ── */}
       <div className="relative z-10 flex flex-col items-center justify-center flex-1 px-6 text-center">
-
         {/* Badge */}
         <motion.div
           initial={{ opacity: 0, y: 16, filter: "blur(6px)" }}

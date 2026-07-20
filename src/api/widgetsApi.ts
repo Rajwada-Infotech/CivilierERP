@@ -209,5 +209,5 @@ export async function getWidgetCatalog(): Promise<WidgetCatalogItem[]> {
     throw new Error("Failed to load widget catalog");
   }
 
-  return response.json().catch(() => ({}));
+  return response.json().catch(() => [] as WidgetCatalogItem[]);
 }

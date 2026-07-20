@@ -489,6 +489,73 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
     `);
 }
 
+// Redistributes the ₹ (and %) of every NOT-yet-settled milestone on a
+// booking so they still sum to the booking's authoritative GrandTotal,
+// while preserving each open milestone's relative weight. Two independent
+// call sites feed this:
+//   1. The booking's GrandTotal itself changes (rate correction, extra
+//      charges, parking) — every open milestone is fair game.
+//   2. Staff manually overrides one specific milestone's AmountDue — that
+//      milestone is held fixed at its new value (fixedMilestoneId); only
+//      the OTHER open ones get redistributed around it.
+//   3. Milestone #1 (the booking amount) is fixed at whatever the customer
+//      actually booked with — a real ₹ figure, not a plan percentage — right
+//      when the schedule is first generated (generateMilestonesForBooking).
+// Paid/Waived milestones are never touched — money already collected or
+// formally waived can't retroactively change. Legacy milestones with no
+// stored Percent (created before that column existed) fall back to an even
+// split among themselves rather than being silently skipped.
+//
+// Percent is deliberately stored as each open milestone's share of
+// remainingTarget (grandTotal minus whatever's already settled), not of the
+// original grandTotal — every settlement "restarts" the percentage basis
+// onto what's actually still owed, so e.g. a booking amount of ₹5L against a
+// ₹50L total leaves the remaining milestones' percentages summing to 100%
+// of the ₹45L left, not 100% of the original ₹50L.
+async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneId } = {}) {
+  const bkRes = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
+  const booking = bkRes.recordset[0];
+  const grandTotal = Number(booking?.GrandTotal || booking?.TotalValue || 0);
+  if (!grandTotal) return;
+
+  const msRes = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id, AmountDue, [Percent], Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+  const rows = msRes.recordset;
+  if (!rows.length) return;
+
+  const isSettled = (r) => ["Paid", "Waived"].includes(r.Status) || r.Id === fixedMilestoneId;
+  const settled = rows.filter(isSettled);
+  const open = rows.filter((r) => !isSettled(r));
+  if (!open.length) return; // nothing left to redistribute onto
+
+  const settledTotal = settled.reduce((s, r) => s + Number(r.AmountDue), 0);
+  const remainingTarget = Math.max(0, grandTotal - settledTotal);
+  const openPercentSum = open.reduce((s, r) => s + Number(r.Percent || 0), 0);
+  const weight = (r) => (openPercentSum > 0 ? Number(r.Percent || 0) / openPercentSum : 1 / open.length);
+
+  let allocated = 0;
+  for (let i = 0; i < open.length; i++) {
+    const r = open[i];
+    const isLast = i === open.length - 1;
+    // The last open milestone absorbs whatever's left after rounding the
+    // others, so the schedule always sums exactly to GrandTotal instead of
+    // drifting a paisa or two off from independently-rounded shares.
+    const amount = isLast
+      ? Math.round((remainingTarget - allocated) * 100) / 100
+      : Math.round(remainingTarget * weight(r) * 100) / 100;
+    allocated += amount;
+    const finalAmount = Math.max(0, amount);
+    const percent = remainingTarget > 0 ? Math.round((finalAmount / remainingTarget) * 10000) / 100 : 0;
+
+    await pool.request()
+      .input("id", sql.Int, r.Id)
+      .input("amt", sql.Decimal(18, 2), finalAmount)
+      .input("pct", sql.Decimal(5, 2), percent)
+      .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+  }
+}
+
 // Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
 // leaves to a human to type in — this is the auto path's own default, used
 // only when the Application/Booking didn't carry an explicit override.
@@ -617,4 +684,5 @@ module.exports = {
   finalizeAgreementDate,
   syncLegalMilestoneStep,
   requireActiveBooking,
+  recalculateRemainingMilestones,
 };

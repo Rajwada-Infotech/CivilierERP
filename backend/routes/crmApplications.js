@@ -5,7 +5,6 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
-const { logCrmAudit } = require("../services/crmAudit");
 const { validateSourceChain } = require("../services/sourceChain");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 // The generic multi-module approval engine — Submit/Approve/Reject go through
@@ -47,7 +46,7 @@ const APP_SELECT = `
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
     cust.CoApplicantName, cust.CoApplicantMobile, cust.CoApplicantPanNo, cust.CoApplicantRelation,
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
-    bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.BookingDate,
+    bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     -- Stage drives the Converted/In Process/Not Converted split every
     -- Applications view now works from: once ANY booking has ever been
     -- created for this application, it's Converted for good (even if that

@@ -20,6 +20,29 @@ export interface VehicleAttachment {
   url: string;
 }
 
+/** One line item as saved on this Vehicle In/Out record (GET /:id and GET /:id/items). */
+export interface VehicleInOutLineItem {
+  VehicleInOutItemID: number;
+  POItemId: number;
+  ItemId: string | null;
+  ItemName: string | null;
+  UomName: string | null;
+  ReceivedQty: number;
+}
+
+/** A PO line item together with how much has already been received across
+ *  all Vehicle In/Out lots (GET /po-items/:poId). */
+export interface POItemRemaining {
+  poItemId: number;
+  itemId: string | null;
+  itemName: string | null;
+  itemCode: string | null;
+  uomName: string | null;
+  orderedQty: number;
+  receivedSoFar: number;
+  remainingQty: number;
+}
+
 export interface VehicleInOutRecord {
   VehicleInOutID: number;
   DocNo: string | null;
@@ -41,6 +64,8 @@ export interface VehicleInOutRecord {
   AttachmentCount?: number;
   /** Present on the single-record GET /:id response. */
   Attachments?: VehicleAttachment[];
+  /** Present on the single-record GET /:id response. */
+  Items?: VehicleInOutLineItem[];
   Remarks: string | null;
   Status: string;
   CreatedAt: string;
@@ -65,6 +90,9 @@ export interface VehicleInOutPayload {
    *  be resent here. */
   attachmentIds: number[];
   remarks: string;
+  /** Quantity received against each PO line item in THIS lot — validated
+   *  server-side against what's left to receive on the PO before saving. */
+  items: { poItemId: number; receivedQty: number }[];
 }
 
 export interface VehicleInOutListResponse {
@@ -98,6 +126,49 @@ export async function getVehicleInOut(id: number): Promise<VehicleInOutRecord> {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json().catch(() => ({}));
+}
+
+/**
+ * PO line items with how much of each has already been received across
+ * all Vehicle In/Out lots, and how much is left. Pass excludeVehicleInOutId
+ * when editing an existing record so its own already-saved quantities
+ * don't count against its own remaining allowance.
+ */
+export async function getPOItemsRemaining(
+  poId: number,
+  excludeVehicleInOutId?: number,
+): Promise<POItemRemaining[]> {
+  const qs = excludeVehicleInOutId
+    ? `?excludeVehicleInOutId=${excludeVehicleInOutId}`
+    : "";
+  const res = await fetchWithAuth(`${BASE}/po-items/${poId}${qs}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json().catch(() => []);
+}
+
+/** One PO with goods still outstanding after partial Vehicle In/Out lots
+ *  (GET /pending-summary) — backs the "Pending Vehicle In/Out" widget. */
+export interface PendingVehicleInOutSummary {
+  poId: number;
+  poNumber: string | null;
+  supplierName: string | null;
+  companyId: number | null;
+  projectId: number | null;
+  totalOrdered: number;
+  totalReceived: number;
+  pendingQty: number;
+  /** Most recent Vehicle In/Out lot already logged against this PO, if any. */
+  lastVehicleInOutId: number | null;
+  lastVehicleInOutDocNo: string | null;
+  lastVehicleNo: string | null;
+}
+
+export async function getPendingVehicleSummary(): Promise<
+  PendingVehicleInOutSummary[]
+> {
+  const res = await fetchWithAuth(`${BASE}/pending-summary`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json().catch(() => []);
 }
 
 export async function previewNextVEHNumber(): Promise<{ nextDocNo: string }> {

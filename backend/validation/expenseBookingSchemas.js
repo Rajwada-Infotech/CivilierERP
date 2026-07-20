@@ -128,6 +128,10 @@ const expenseBookingBodySchema = z.object({
   EFinYear: optStr(20),
   ESourceType: eSourceType,
   ESourceId: z.coerce.number().int().positive().optional(),
+  // Multiple GRNs (same PO) combined into one invoice — see
+  // backend/services/invoiceLinking.js. Optional; a single-element or
+  // absent array means "book against ESourceId as usual".
+  linkedGrnIds: z.array(z.coerce.number().int().positive()).optional(),
   EBillingTermId: z.preprocess(
     (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
     z.number().optional(),

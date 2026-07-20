@@ -117,6 +117,8 @@ export type ReceivedPayment = {
   bankName?: string;
   transactionId?: string;
   checkNumber?: string;
+  chequeDate?: string;
+  isPostDated?: boolean;
   remarks?: string;
   status: "Draft" | "Pending" | "Approved" | "Rejected";
   createdAt: string;
@@ -182,6 +184,8 @@ const EMPTY_FORM = {
   bankName: "",
   transactionId: "",
   checkNumber: "",
+  chequeDate: "" as string,
+  isPostDated: false,
   remarks: "",
   // Optional: tags this payment as an on-account advance against a
   // Contract when no invoice exists yet (backend/services/contractLedger.js).
@@ -520,6 +524,10 @@ export default function ReceivedPaymentPage() {
           bankName: r.RPBankName ?? undefined,
           transactionId: r.RPTransactionID ?? undefined,
           checkNumber: r.RPCheckNumber ?? undefined,
+          chequeDate: r.RPChequeDate
+            ? String(r.RPChequeDate).slice(0, 10)
+            : undefined,
+          isPostDated: !!r.RPIsPostDated,
           remarks: r.RPRemarks ?? undefined,
           status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
           createdAt: r.RPCreatedAt,
@@ -536,12 +544,12 @@ export default function ReceivedPaymentPage() {
     loadPayments(1);
   }, [loadPayments]);
 
-  const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
+  const setField = (key: keyof typeof EMPTY_FORM, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  const formDefaults: Record<string, string> = { ...EMPTY_FORM as Record<string, string>, finYear: activeFinYear ?? "" };
+  const formDefaults: Record<string, any> = { ...EMPTY_FORM as Record<string, any>, finYear: activeFinYear ?? "" };
   const isDirty = Object.keys(EMPTY_FORM).some(
-    (k) => String((form as Record<string, string>)[k] ?? "") !== String(formDefaults[k] ?? ""),
+    (k) => String((form as Record<string, any>)[k] ?? "") !== String(formDefaults[k] ?? ""),
   );
 
   const canSave = !!(
@@ -594,6 +602,8 @@ export default function ReceivedPaymentPage() {
       bankName: p.bankName ?? "",
       transactionId: p.transactionId ?? "",
       checkNumber: p.checkNumber ?? "",
+      chequeDate: p.chequeDate ?? "",
+      isPostDated: !!p.isPostDated,
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
@@ -649,6 +659,8 @@ export default function ReceivedPaymentPage() {
       RPBankName: form.bankName || null,
       RPTransactionID: form.transactionId || null,
       RPCheckNumber: form.checkNumber || null,
+      RPChequeDate: form.chequeDate || null,
+      RPIsPostDated: !!form.isPostDated,
       RPRemarks: form.remarks || null,
       RPDepositBankId: Number(form.depositBankId) || null,
       RPDepositBankName: form.depositBankName || null,
@@ -1590,6 +1602,34 @@ export default function ReceivedPaymentPage() {
                             setField("checkNumber", e.target.value)
                           }
                         />
+                        <div className="flex items-end gap-2 mt-2">
+                          <div className="flex-1">
+                            <FieldLabel>Cheque Date</FieldLabel>
+                            <Input
+                              type="date"
+                              className="h-9 text-sm"
+                              value={form.chequeDate ?? ""}
+                              onChange={(e) => {
+                                const date = e.target.value;
+                                setField("chequeDate", date);
+                                // Auto-flag as post-dated when the cheque date
+                                // is in the future — same convention the
+                                // outgoing Payment page already uses for
+                                // PIsPostDated, applied here for parity.
+                                const today = new Date().toISOString().slice(0, 10);
+                                setField("isPostDated", !!date && date > today);
+                              }}
+                            />
+                          </div>
+                          <label className="flex items-center gap-1.5 h-9 text-xs text-muted-foreground select-none">
+                            <input
+                              type="checkbox"
+                              checked={form.isPostDated}
+                              onChange={(e) => setField("isPostDated", e.target.checked)}
+                            />
+                            Post-dated
+                          </label>
+                        </div>
                       </div>
                     ) : (
                       <div>

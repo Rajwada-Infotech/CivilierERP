@@ -5,10 +5,12 @@ const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
+router.use(apiRateLimit);
 
 // Standard checklist shown even before any row exists, so staff see what's
 // expected to be collected — not just what's already been uploaded.

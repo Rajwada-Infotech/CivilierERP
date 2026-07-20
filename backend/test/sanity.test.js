@@ -280,7 +280,8 @@ describe("backend sanity: route and migration inventory", () => {
 
   test("base auth migration is present before role/user-right migrations", () => {
     const migrations = fs
-      .readdirSync(path.join(backendRoot, "migrations"))
+      .readdirSync(path.join(backendRoot, "migrations"), { recursive: true })
+      .map((f) => path.basename(f))
       .filter((file) => file.endsWith(".sql"))
       .sort();
 

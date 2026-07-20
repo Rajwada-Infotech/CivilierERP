@@ -33,6 +33,14 @@ import {
   Calendar,
   Package,
   RotateCcw,
+  Wallet,
+  Car,
+  PlusCircle,
+  Truck,
+  Megaphone,
+  SlidersHorizontal,
+  UsersRound,
+  ShieldCheck,
 } from "lucide-react";
 import {
   Bank,
@@ -42,6 +50,7 @@ import {
   Message2,
   Archive,
   Building3,
+  Chart21,
   VideoPlay,
   Shield,
   ShieldTick,
@@ -73,6 +82,7 @@ import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
+import { crmNavItems } from "./sidebars/CrmSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -169,7 +179,7 @@ const MODULE_META: Record<
     h: 192,
     s: 91,
     l: 36,
-    icon: Building3,
+    icon: Chart21,
     label: "Civil Work DPR",
     route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
   },
@@ -180,6 +190,14 @@ const MODULE_META: Record<
     icon: VideoPlay,
     label: "Sales Automation",
     route: MODULE_DASHBOARD_ROUTES["sales-automation"],
+  },
+  crm: {
+    h: 199,
+    s: 89,
+    l: 48,
+    icon: Building3,
+    label: "CRM",
+    route: MODULE_DASHBOARD_ROUTES.crm,
   },
   admin: {
     h: 217,
@@ -197,67 +215,78 @@ const financeSetupItems: SetupItem[] = [
     icon: Layers,
     label: "AC Group",
     path: "/masters/account-group",
-    color: "text-indigo-500",
+    color: "text-indigo-400",
+    pageKey: "account-head",
   },
   {
     icon: Receipt,
     label: "General Ledger",
     path: "/masters/general-ledger",
     color: "text-orange-400",
+    pageKey: "general-ledger",
   },
   {
-    icon: HardHat,
+    icon: Truck,
     label: "Suppliers",
     path: "/masters/suppliers",
     color: "text-blue-400",
+    pageKey: "supplier-master",
   },
   {
     icon: HardHat,
     label: "Contractors",
     path: "/masters/contractors",
-    color: "text-yellow-500",
+    color: "text-amber-500",
+    pageKey: "contractor-master",
   },
   {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
-    color: "text-green-500",
+    color: "text-emerald-500",
+    pageKey: "bank-master",
   },
   {
     icon: Calendar,
     label: "Fin Year",
     path: "/masters/financial-year",
-    color: "text-amber-500",
+    color: "text-purple-400",
+    pageKey: "financial-year-master",
   },
   {
     icon: BookOpen,
     label: "Cheque",
     path: "/masters/cheque",
     color: "text-cyan-500",
+    pageKey: "cheque-master",
   },
   {
     icon: CreditCard,
     label: "Card",
     path: "/masters/card",
     color: "text-rose-500",
+    pageKey: "card-master",
   },
   {
     icon: FileText,
     label: "TDS",
     path: "/masters/tds",
-    color: "text-emerald-500",
+    color: "text-green-500",
+    pageKey: "tds-master",
   },
   {
     icon: Target,
     label: "Cost Center",
     path: "/masters/cost-center",
     color: "text-pink-500",
+    pageKey: "cost-center",
   },
   {
     icon: TrendingUp,
     label: "Profit Center",
     path: "/masters/profit-center",
     color: "text-teal-500",
+    pageKey: "profit-center",
   },
   {
     icon: RotateCcw,
@@ -267,11 +296,11 @@ const financeSetupItems: SetupItem[] = [
     pageKey: "return-reason-master",
   },
   {
-    icon: FileText,
-    label: "Contracts",
-    path: "/finance/contracts",
-    color: "text-violet-500",
-    pageKey: "finance-contracts",
+    icon: Wallet,
+    label: "Payment Reason",
+    path: "/masters/payment-reason",
+    color: "text-lime-500",
+    pageKey: "payment-reason-master",
   },
 ];
 
@@ -358,6 +387,27 @@ const followupSetupItems: SetupItem[] = [
     color: "text-emerald-500",
   },
   {
+    icon: Car,
+    label: "Parking Rates",
+    path: "/followup/setup/parking-master",
+    color: "text-blue-500",
+    pageKey: "followup-parking-master",
+  },
+  {
+    icon: Hash,
+    label: "Parking Slots",
+    path: "/followup/setup/parking-slot-master",
+    color: "text-sky-500",
+    pageKey: "followup-parking-slot-master",
+  },
+  {
+    icon: PlusCircle,
+    label: "Extra Charges",
+    path: "/followup/setup/extra-charge-master",
+    color: "text-pink-500",
+    pageKey: "followup-extra-charge-master",
+  },
+  {
     icon: Activity,
     label: "Pending Tasks",
     path: "/followup/setup/pending-tasks",
@@ -376,25 +426,63 @@ const engineeringSetupItems: SetupItem[] = [
     icon: Activity,
     label: "Activity Master",
     path: "/masters/activity",
-    color: "text-green-400",
+    color: "text-orange-400",
+    pageKey: "activity-master",
+  },
+];
+
+const salesAutomationSetupItems: SetupItem[] = [
+  {
+    icon: Megaphone,
+    label: "Social Media",
+    path: "/sales-automation/social-media",
+    color: "text-pink-500",
+    pageKey: "sa-social-media",
   },
   {
+    icon: SlidersHorizontal,
+    label: "Distribution Rules",
+    path: "/sales-automation/distribution-rules",
+    color: "text-amber-500",
+    pageKey: "sa-distribution-rules",
+  },
+  {
+    icon: UsersRound,
+    label: "Teams",
+    path: "/sales-automation/teams",
+    color: "text-purple-500",
+    pageKey: "sa-teams",
+  },
+  {
+    icon: ShieldCheck,
+    label: "Role Master",
+    path: "/sales-automation/role-master",
+    color: "text-orange-500",
+    pageKey: "sa-role-master",
+  },
+];
+
+const crmSetupItems: SetupItem[] = [
+  {
     icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-yellow-500",
+    label: "Broker Master",
+    path: "/masters/brokers",
+    color: "text-amber-500",
+    pageKey: "broker-master",
   },
   {
     icon: ClipboardList,
-    label: "Work Order",
-    path: "/engineering/work-order",
-    color: "text-orange-400",
+    label: "Payment Plan Master",
+    path: "/crm/payment-plans",
+    color: "text-emerald-500",
+    pageKey: "crm-payment-plans",
   },
   {
-    icon: Layers,
-    label: "BOQ",
-    path: "/engineering/boq",
-    color: "text-indigo-400",
+    icon: CreditCard,
+    label: "Home Loan Tracking",
+    path: "/crm/loan-details",
+    color: "text-cyan-500",
+    pageKey: "crm-loan-details",
   },
 ];
 
@@ -500,6 +588,14 @@ export const MobileNav: React.FC = () => {
       };
     if (activeModule === "finance")
       return { items: financeSetupItems, label: "Finance", available: true };
+    if (activeModule === "sales-automation")
+      return {
+        items: salesAutomationSetupItems,
+        label: "Sales Automation",
+        available: true,
+      };
+    if (activeModule === "crm")
+      return { items: crmSetupItems, label: "CRM", available: true };
     return { items: [] as SetupItem[], label: "", available: false };
   })();
 
@@ -574,6 +670,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(civilWorkDprNavItems as DesktopNavItem[]);
       case "sales-automation":
         return adaptItems(salesAutomationNavItems as DesktopNavItem[]);
+      case "crm":
+        return adaptItems(crmNavItems as DesktopNavItem[]);
       default:
         return [];
     }

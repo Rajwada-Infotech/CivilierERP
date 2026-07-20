@@ -42,6 +42,7 @@ import {
   RotateCcw,
   Car,
   PlusCircle,
+  Wallet,
 } from "lucide-react";
 import {
   Crown,
@@ -241,6 +242,13 @@ const financeSetupItems = [
     path: "/masters/return-reason",
     color: "text-red-400",
     pageKey: "return-reason-master",
+  },
+  {
+    icon: Wallet,
+    label: "Payment Reason",
+    path: "/masters/payment-reason",
+    color: "text-lime-500",
+    pageKey: "payment-reason-master",
   },
 ];
 

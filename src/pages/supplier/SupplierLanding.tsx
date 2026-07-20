@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as spApi from "@/api/supplierPortalApi";
@@ -134,46 +134,80 @@ function QuotationsSection({ quotations, loading }: {
             <p className="text-sm text-muted-foreground">No quotations yet. You'll be notified when an RFQ arrives.</p>
           </motion.div>
         ) : (
-          <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
-            {/* Tabs */}
-            <div className="flex border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-              <div className="px-5 py-2.5 border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400">
-                Pending ({pending.length})
+          <>
+            {/* Desktop / tablet table */}
+            <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
+              {/* Tabs */}
+              <div className="flex border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                <div className="px-5 py-2.5 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  Pending ({pending.length})
+                </div>
+                <div className="px-5 py-2.5">Submitted ({submitted.length})</div>
               </div>
-              <div className="px-5 py-2.5">Submitted ({submitted.length})</div>
-            </div>
 
-            {/* Header */}
-            <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
-              <span>RFQ No.</span>
-              <span className="hidden sm:block">Description / Project</span>
-              <span>Company</span>
-              <span>Due Date</span>
-              <span>Status</span>
-            </div>
+              {/* Header */}
+              <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+                <span>RFQ No.</span>
+                <span>Description / Project</span>
+                <span>Company</span>
+                <span>Due Date</span>
+                <span>Status</span>
+              </div>
 
-            {quotations.slice(0, 8).map((q, i) => (
-              <motion.div key={q.QuotationId}
-                className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors cursor-pointer border-b border-border/60 last:border-0"
-                initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
-                onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
-                  <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
-                </div>
-                <div className="hidden sm:block min-w-0">
+              {quotations.slice(0, 8).map((q, i) => (
+                <motion.div key={q.QuotationId}
+                  className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors cursor-pointer border-b border-border/60 last:border-0"
+                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
+                    <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
+                  <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                    {fmtDate(q.DueDate)}
+                  </span>
+                  <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
+                </motion.div>
+              ))}
+            </motion.div>
+
+            {/* Mobile stacked cards */}
+            <div className="sm:hidden space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                Pending ({pending.length}) <span className="text-muted-foreground font-normal">· Submitted ({submitted.length})</span>
+              </div>
+              {quotations.slice(0, 8).map((q, i) => (
+                <motion.div key={q.QuotationId}
+                  className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden active:bg-emerald-500/5 transition-colors cursor-pointer p-4 space-y-2"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier/quotation/${q.QuotationId}`)}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${q.MySubmissionStatus === "Submitted" ? "bg-emerald-400" : isOverdue(q.DueDate) ? "bg-red-400" : "bg-amber-400"}`} />
+                      <span className="text-xs font-mono font-semibold text-foreground truncate">{q.DocNo}</span>
+                    </div>
+                    <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
+                  </div>
                   <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
-                </div>
-                <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
-                <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
-                  {fmtDate(q.DueDate)}
-                </span>
-                <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
-              </motion.div>
-            ))}
-          </motion.div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {q.CompanyName ?? "—"} · {q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}
+                  </p>
+                  <p className={`text-[11px] ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                    Due {fmtDate(q.DueDate)}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </section>
@@ -262,6 +296,11 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
     queryKey: ["supplier-order-detail", orderId],
     queryFn: () => spApi.getSupplierOrderDetail(orderId),
   });
+  const { data: grnOrders = [] } = useQuery({
+    queryKey: ["supplier-grns"],
+    queryFn: spApi.getSupplierGrnSummary,
+  });
+  const grnOrder = grnOrders.find((o) => o.purchaseOrderId === orderId);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
@@ -346,6 +385,52 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                   {detail.ChallanNumber && <p className="text-xs text-muted-foreground">Challan: <span className="font-mono text-foreground">{detail.ChallanNumber}</span></p>}
                 </div>
               )}
+
+              {grnOrder && (
+                <div
+                  className={`rounded-lg border p-3 space-y-2 ${
+                    grnOrder.isFullyReceived
+                      ? "border-emerald-500/20 bg-emerald-500/5"
+                      : "border-amber-500/25 bg-amber-500/5"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p
+                      className={`text-[10px] uppercase tracking-wide font-semibold ${
+                        grnOrder.isFullyReceived
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-amber-700 dark:text-amber-400"
+                      }`}
+                    >
+                      Received by Customer
+                    </p>
+                    {grnOrder.isFullyReceived ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle size={11} /> Complete
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                        {grnOrder.totalRemaining} remaining
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    {grnOrder.items.map((it) => (
+                      <div key={it.itemId} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground truncate">{it.itemName}</span>
+                        <span className="font-mono text-muted-foreground shrink-0 ml-2">
+                          {it.receivedQty}/{it.orderedQty} {it.uom ?? ""}
+                          {it.remainingQty > 0 && (
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                              {" "}(−{it.remainingQty})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -354,13 +439,13 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
   );
 }
 
-function OrdersSection({ orders, loading }: {
-  orders: spApi.SupplierOrderSummary[]; loading: boolean;
+function OrdersSection({ orders, loading, initialOrderId }: {
+  orders: spApi.SupplierOrderSummary[]; loading: boolean; initialOrderId?: number | null;
 }) {
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   const [chatOrderId, setChatOrderId] = useState<number | null>(null);
-  const [detailOrderId, setDetailOrderId] = useState<number | null>(null);
+  const [detailOrderId, setDetailOrderId] = useState<number | null>(initialOrderId ?? null);
   const [markSuppliedOrderId, setMarkSuppliedOrderId] = useState<number | null>(null);
 
   const ackMutation = useMutation({
@@ -612,6 +697,203 @@ function OrdersSection({ orders, loading }: {
 }
 
 // ── Price catalog section (inline editable) ───────────────────────────────────
+function ReceivedItemProgress({ items }: { items: spApi.SupplierGrnItem[] }) {
+  return (
+    <div className="space-y-1">
+      {items.map((it) => {
+        const pct = it.orderedQty > 0 ? Math.min(100, (it.receivedQty / it.orderedQty) * 100) : 100;
+        return (
+          <div key={it.itemId}>
+            <div className="flex items-center justify-between text-[10px] mb-0.5 gap-2">
+              <span className="text-foreground truncate">{it.itemName}</span>
+              <span className="font-mono text-muted-foreground shrink-0">
+                {it.receivedQty}/{it.orderedQty} {it.uom ?? ""}
+              </span>
+            </div>
+            <div className="h-1 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full ${it.remainingQty > 0 ? "bg-amber-500" : "bg-emerald-500"}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReceivedByCustomerSection() {
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const [chatOrderId, setChatOrderId] = useState<number | null>(null);
+  const { data: orders = [], isLoading } = useQuery({
+    queryKey: ["supplier-grns"],
+    queryFn: spApi.getSupplierGrnSummary,
+    refetchInterval: 60_000,
+  });
+
+  const pending = orders.filter((o) => !o.isFullyReceived);
+  const complete = orders.filter((o) => o.isFullyReceived);
+  const sorted = [...pending, ...complete];
+  const chatOrder = sorted.find((o) => o.purchaseOrderId === chatOrderId) ?? null;
+
+  return (
+    <section className="px-6 sm:px-10 pt-8 pb-16 sm:pb-20 font-body bg-background border-t border-border">
+      <div className="max-w-6xl mx-auto">
+        <motion.div className="flex items-center justify-between mb-5" {...fade(0)}>
+          <div>
+            <h2 className="font-heading text-lg font-bold text-foreground flex items-center gap-2">
+              <Truck size={18} className="text-emerald-500" /> Received by Customer
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {pending.length === 0
+                ? "All shipments fully received"
+                : `${pending.length} order${pending.length !== 1 ? "s" : ""} still awaiting the remaining quantity`}
+            </p>
+          </div>
+        </motion.div>
+
+        {isLoading ? (
+          <div className="space-y-2.5">
+            {[1, 2, 3].map((i) => <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />)}
+          </div>
+        ) : sorted.length === 0 ? (
+          <motion.div className="text-center py-12 rounded-2xl border border-dashed border-border" {...fade(0.1)}>
+            <Package size={28} className="mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">
+              No goods receipts yet. Once the customer logs a GRN against one of your orders, its receipt progress will show up here.
+            </p>
+          </motion.div>
+        ) : (
+          <>
+            {/* Desktop / tablet table — matches Orders/Active Quotations */}
+            <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
+              <div className="grid grid-cols-[1.4fr_2.4fr_1.2fr_1fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+                <span>PO No.</span>
+                <span>Items / Project</span>
+                <span>PO Date</span>
+                <span>Status</span>
+                <span></span>
+              </div>
+
+              {sorted.map((o, i) => (
+                <motion.div key={o.purchaseOrderId}
+                  className="grid grid-cols-[1.4fr_2.4fr_1.2fr_1fr_auto] gap-4 px-5 py-3.5 items-center hover:bg-emerald-500/5 transition-colors border-b border-border/60 last:border-0 cursor-pointer"
+                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier?order=${o.purchaseOrderId}`)}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.isFullyReceived ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    <span className="text-xs font-mono font-semibold text-foreground truncate">{o.docNo}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <ReceivedItemProgress items={o.items} />
+                    <p className="text-[10px] text-muted-foreground truncate mt-1">
+                      {[o.companyName, o.projectName].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{fmtDate(o.poDate)}</span>
+                  {o.isFullyReceived ? (
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Complete</span>
+                  ) : (
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit">{o.totalRemaining} remaining</span>
+                  )}
+
+                  {/* Chat icon — same PO-scoped chat as Orders, so a supplier can
+                      discuss the vehicle-in/out delivery lots feeding this GRN
+                      with procurement in the same thread as the order itself. */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setChatOrderId(o.purchaseOrderId); }}
+                    className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                    title="Chat about this delivery"
+                  >
+                    <MessageCircle size={15} />
+                    {o.commentCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        {o.commentCount}
+                      </span>
+                    )}
+                  </button>
+                </motion.div>
+              ))}
+            </motion.div>
+
+            {/* Mobile stacked cards */}
+            <div className="sm:hidden space-y-3">
+              {sorted.map((o, i) => (
+                <motion.div key={o.purchaseOrderId}
+                  className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden active:bg-emerald-500/5 transition-colors cursor-pointer"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + i * 0.05, duration: 0.35 }}
+                  onClick={() => navigate(`/supplier?order=${o.purchaseOrderId}`)}>
+                  <div className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.isFullyReceived ? "bg-emerald-400" : "bg-amber-400"}`} />
+                        <span className="text-xs font-mono font-semibold text-foreground truncate">{o.docNo}</span>
+                      </div>
+                      {o.isFullyReceived ? (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit shrink-0">Complete</span>
+                      ) : (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit shrink-0">{o.totalRemaining} remaining</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {[o.companyName, o.projectName].filter(Boolean).join(" · ") || "—"} · {fmtDate(o.poDate)}
+                    </p>
+                    <ReceivedItemProgress items={o.items} />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border/60 bg-muted/20" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setChatOrderId(o.purchaseOrderId)}
+                      className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground shrink-0"
+                      title="Chat about this delivery"
+                    >
+                      <MessageCircle size={15} />
+                      {o.commentCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                          {o.commentCount}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Chat slide-over — same PO-scoped OrderChat component/backend as Orders */}
+      {chatOrder && currentUser && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="flex-1 bg-black/40" onClick={() => setChatOrderId(null)} />
+          <div className="w-full max-w-md shrink-0 bg-background border-l border-border flex flex-col shadow-2xl">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <p className="text-sm font-heading font-bold text-foreground">{chatOrder.docNo}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {[chatOrder.companyName, chatOrder.projectName].filter(Boolean).join(" · ") || "—"}
+                </p>
+              </div>
+              <button onClick={() => setChatOrderId(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <OrderChat
+              poId={chatOrder.purchaseOrderId}
+              apiBase="/api/supplier-portal/orders"
+              currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
+              className="flex-1 rounded-none border-0"
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PriceCatalogSection({ catalog, loading }: {
   catalog: spApi.SupplierCatalogItem[]; loading: boolean;
 }) {
@@ -845,6 +1127,13 @@ function QuickActions() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function SupplierLanding() {
+  const [searchParams] = useSearchParams();
+  const deepLinkOrderId = (() => {
+    const raw = searchParams.get("order");
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  })();
+
   const { data: profile } = useQuery({
     queryKey: ["supplier-profile"],
     queryFn: spApi.getSupplierProfile,
@@ -883,7 +1172,8 @@ export default function SupplierLanding() {
       />
       <div className="bg-background">
         <QuotationsSection quotations={quotations} loading={loadingQ} />
-        <OrdersSection orders={orders} loading={loadingO} />
+        <OrdersSection orders={orders} loading={loadingO} initialOrderId={deepLinkOrderId} />
+        <ReceivedByCustomerSection />
         <PriceCatalogSection catalog={catalog} loading={loadingC} />
         <QuickActions />
       </div>

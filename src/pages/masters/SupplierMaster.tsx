@@ -42,7 +42,6 @@ import {
   Copy,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -127,22 +126,6 @@ interface AccountGroup {
   name: string;
   code: string;
   parentId: string | null;
-}
-
-interface TreeNode extends AccountGroup {
-  children: TreeNode[];
-}
-
-function buildTree(items: AccountGroup[]): TreeNode[] {
-  const map: Record<string, TreeNode> = {};
-  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((i) => {
-    if (i.parentId && map[i.parentId])
-      map[i.parentId].children.push(map[i._id]);
-    else roots.push(map[i._id]);
-  });
-  return roots;
 }
 
 interface SupplierForm {
@@ -301,12 +284,31 @@ function buildSupplierColumns(
     },
     {
       accessorKey: "LGST",
-      header: "GST No.",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      header: "GST No. / Type",
+      cell: ({ getValue, row }) => {
+        const gst = getValue() as string | null;
+        const gstType = (row.original as any).LGSTType as string | null;
+        const badgeCls = gstType === "Registered"
+          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+          : gstType === "Unregistered"
+            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            : "bg-muted text-muted-foreground border-border";
+        const badgeLabel = gstType === "Registered"
+          ? "GST"
+          : gstType === "Unregistered"
+            ? "Non-GST"
+            : "Unknown";
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="font-mono text-xs font-semibold text-primary">
+              {gst || "—"}
+            </span>
+            <span className={`inline-flex w-fit items-center text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
+              {badgeLabel}
+            </span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "LHeadStatus",
@@ -467,11 +469,6 @@ const SupplierMaster: React.FC = () => {
         parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
-
-  const accountGroupTree = useMemo(
-    () => buildTree(accountGroups),
-    [accountGroups],
-  );
 
   const suppliers: Supplier[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
@@ -764,7 +761,6 @@ const SupplierMaster: React.FC = () => {
   const canSave =
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
-    !!form.LBelongsTo &&
     (form.LGSTType !== "Registered" || form.LGST.trim() !== "") &&
     // Password is optional — left blank on create, the backend defaults the
     // login to "123456" (changeable later from this form); on edit, blank
@@ -773,11 +769,18 @@ const SupplierMaster: React.FC = () => {
     (form.SupplierPassword.trim() === "" || form.SupplierPassword.trim().length >= 6);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  const normalizeGSTType = (t: string | null): string => {
-    if (!t) return "";
+  /** Normalises a raw LGSTType value from the DB into one of the two canonical
+   *  strings the form accepts.  When the DB value is NULL (supplier was created
+   *  before the field was added) we infer the type from the GST number:
+   *    - GST number present  → 'Registered'
+   *    - No GST number       → 'Unregistered'
+   *  This way the correct value is written back on the very next save, even
+   *  before the backfill migration (196) has run on a given environment. */
+  const normalizeGSTType = (t: string | null | undefined, lgst?: string | null): string => {
     if (t === "Unregistered") return "Unregistered";
-    // Legacy values (Regular, Composition, SEZ, Deemed Export) all imply a registered GSTIN
-    return "Registered";
+    if (t) return "Registered"; // Registered / Regular / Composition / SEZ / etc.
+    // t is null/undefined — infer from GST number
+    return lgst?.trim() ? "Registered" : "Unregistered";
   };
 
   const startEdit = (s: Supplier) => {
@@ -790,7 +793,7 @@ const SupplierMaster: React.FC = () => {
       LGST: s.LGST ?? "",
       LHeadPan: s.LHeadPan ?? "",
       supplierCategory: s.supplierCategory ?? "",
-      LGSTType: normalizeGSTType(s.LGSTType),
+      LGSTType: normalizeGSTType(s.LGSTType, s.LGST),
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
@@ -814,7 +817,7 @@ const SupplierMaster: React.FC = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
-    if (!form.LBelongsTo) e.LBelongsTo = true;
+    if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     // Optional on both create (defaults to "123456" server-side) and edit
     // (blank keeps the current password) — only flagged when typed but short.
@@ -1097,21 +1100,17 @@ const SupplierMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Account Group */}
+                {/* Account Group — always Sundry Creditors for suppliers, never
+                    picked manually (see accountHeadMaster.js's
+                    getSundryCreditorsGroupId, applied server-side on every
+                    create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Account Group <span className="text-red-500">*</span>
+                    Account Group
                   </label>
-                  <GroupTreePicker
-                    value={form.LBelongsTo}
-                    onChange={(v) => { setForm((p) => ({ ...p, LBelongsTo: v })); setErrors((p) => ({ ...p, LBelongsTo: false })); }}
-                    tree={accountGroupTree}
-                    allGroups={accountGroups}
-                    error={errors.LBelongsTo}
-                  />
-                  {errors.LBelongsTo && (
-                    <p className="text-xs text-red-500 mt-0.5">Account Group is required</p>
-                  )}
+                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                    Sundry Creditors
+                  </div>
                 </div>
               </div>
             </div>
@@ -1255,7 +1254,7 @@ const SupplierMaster: React.FC = () => {
                 {/* GST Type */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Type
+                    GST Type <span className="text-destructive">*</span>
                   </label>
                   <select
                     value={form.LGSTType}
@@ -1268,13 +1267,17 @@ const SupplierMaster: React.FC = () => {
                       }));
                       setErrors((p) => ({ ...p, LGST: false }));
                     }}
-                    className={`${inputCls} appearance-none`}
+                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
                   >
-                    <option value="">Select type…</option>
                     {GST_TYPES.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
+                  {errors.LGSTType && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required — determines GST Bill vs Non-GST Bill on invoices
+                    </p>
+                  )}
                 </div>
 
                 {/* GST Number — only when Registered */}

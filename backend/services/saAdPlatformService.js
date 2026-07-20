@@ -338,16 +338,25 @@ async function syncAdToPlatform(ad, platform, mode = "Preview") {
   throw new Error(`No production push adapter is configured for ${provider}.`);
 }
 
+// Escape a string value for safe embedding inside a GAQL single-quoted literal.
+// GAQL does not support backslash escaping — the only special character inside
+// a single-quoted string is the single-quote itself, which must be doubled ('').
+// Backslashes are also doubled so they are treated as literal characters.
+// Reference: https://developers.google.com/google-ads/api/docs/query/grammar
+function escapeGaqlString(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/'/g, "''");
+}
+
 async function fetchGoogleMetrics(ad, platform, dateRange = "LAST_30_DAYS") {
   const settings = parseAccountDetails(platform);
   const customerId = cleanCustomerId(platform.AdAccountId || settings.customerId);
   if (!customerId) throw new Error("Google Ads customer ID is required.");
   const external = String(ad.ExternalAdId || "");
   const where = external.startsWith("customers/")
-    ? `ad_group_ad.resource_name = '${external}'`
-    : external
-      ? `ad_group_ad.ad.id = ${external}`
-      : `ad_group.name = '${String(ad.Name || "").replace(/'/g, "\\'")}'`;
+    ? `ad_group_ad.resource_name = '${escapeGaqlString(external)}'`
+    : external && Number.isFinite(Number(external))
+      ? `ad_group_ad.ad.id = ${Number(external)}`
+      : `ad_group.name = '${escapeGaqlString(String(ad.Name || ""))}'`;
   const query = `
     SELECT ad_group_ad.resource_name, ad_group_ad.ad.id, metrics.impressions,
            metrics.clicks, metrics.cost_micros, metrics.conversions,

@@ -31,6 +31,7 @@ export interface SupplierQuotationSummary {
   ProjectName?: string;
   MySubmissionStatus: "Pending" | "Submitted";
   InvitedAt: string;
+  SubmittedAt?: string | null;
   ItemCount: number;
 }
 
@@ -123,6 +124,49 @@ export interface SupplierOrderDetail extends Omit<SupplierOrderSummary, "Comment
   POItems: any[];
 }
 
+export interface SupplierGrnItem {
+  itemId: number;
+  itemName: string;
+  orderedQty: number;
+  receivedQty: number;
+  remainingQty: number;
+  uom: string | null;
+}
+
+export interface SupplierGrnOrder {
+  purchaseOrderId: number;
+  purchaseOrderNo: string | null;
+  docNo: string | null;
+  poDate: string | null;
+  status: string;
+  companyName: string | null;
+  projectName: string | null;
+  commentCount: number;
+  items: SupplierGrnItem[];
+  isFullyReceived: boolean;
+  totalRemaining: number;
+}
+
+export interface SupplierCreditNote {
+  DebitNoteId: number;
+  DocNo: string;
+  DebitDate: string;
+  Status: "Issued" | "Cancelled";
+  ItemName: string | null;
+  UomName: string | null;
+  ReceivedQty: number;
+  RejectedQty: number;
+  PercentBad: number;
+  Rate: number;
+  Amount: number;
+  Reason: string | null;
+  VehicleInOutDocNo: string | null;
+  PONumber: string | null;
+  VehicleNo: string | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+}
+
 export interface OrderChatMessage {
   Id: number;
   PurchaseOrderId: number;
@@ -212,3 +256,9 @@ export const postSupplierOrderComment = (id: number | string, comment: string) =
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ comment }),
   }).then((r) => handleResponse<{ comment: OrderChatMessage }>(r));
+
+export const getSupplierGrnSummary = () =>
+  fetchWithAuth(`${BASE}/grns`).then((r) => handleResponse<SupplierGrnOrder[]>(r));
+
+export const getSupplierCreditNotes = () =>
+  fetchWithAuth(`${BASE}/credit-notes`).then((r) => handleResponse<SupplierCreditNote[]>(r));

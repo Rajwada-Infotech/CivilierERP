@@ -70,7 +70,7 @@ export const followupNavItems: NavItem[] = [
     icon: Message2,
     children: [
       { label: "Tasks",        path: "/followup/follow-ups/tasks", pageKey: "followup-tasks" },
-      { label: "Follow-Up Log",path: "/followup/follow-ups/log",   pageKey: "followup-tasks" },
+      { label: "Follow-Up Log",path: "/followup/follow-ups/log",   pageKey: "followup-log" },
     ],
   },
 

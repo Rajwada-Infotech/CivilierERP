@@ -9,6 +9,7 @@ import {
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
@@ -22,6 +23,13 @@ import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCatego
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const ASSET_STATUS_OPTIONS = ["Active", "Sold", "Scrapped", "Under Maintenance"] as const;
+
+// Solid fills for the "Book Value by Category" bar chart — CATEGORY_COLORS
+// are subtle badge tints (bg-x/10), too washed out to read as a bar fill.
+const BAR_PALETTE = [
+  "bg-emerald-500", "bg-blue-500", "bg-violet-500",
+  "bg-amber-500", "bg-teal-500", "bg-rose-500",
+];
 
 const STATUS_COLORS: Record<string, string> = {
   Active:              "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
@@ -150,21 +158,6 @@ function SummaryCard({ label, value, color = "", icon: Icon }: { label: string; 
       {Icon && <Icon size={13} className={`mx-auto mb-1 ${color || "text-muted-foreground"}`} />}
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={`text-base font-bold tabular-nums ${color}`}>{value}</p>
-    </div>
-  );
-}
-
-function StatCard({ icon: Icon, label, value, sub, accent }: { icon: React.ElementType; label: string; value: string; sub?: string; accent: string }) {
-  return (
-    <div className="relative overflow-hidden bg-card border border-border rounded-xl p-4 flex items-center gap-3">
-      <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${accent}`}>
-        <Icon size={18} />
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground truncate">{label}</p>
-        <p className="text-lg font-bold tabular-nums leading-tight truncate">{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground truncate">{sub}</p>}
-      </div>
     </div>
   );
 }
@@ -339,6 +332,25 @@ export default function FixedAssetRecord() {
       if (a.AssetStatus === "Sold") soldCount++;
     }
     return { count: live.length, totalCost, totalBookValue, activeCount, soldCount };
+  }, [assets]);
+
+  // ── book value by category (for the portfolio-style bar chart) ───────────
+  const categoryBreakdown = useMemo(() => {
+    const live = ensureArray<FixedAssetListItem>(assets).filter((a) => a.Status !== "Deleted");
+    const map = new Map<string, number>();
+    for (const a of live) {
+      const dc = a.PurchaseDate && a.DepreciationRate
+        ? calcDepreciation(a.PurchaseCost, a.DepreciationRate, a.PurchaseDate)
+        : null;
+      const bv = dc ? dc.bookValue : (a.PurchaseCost || 0);
+      map.set(a.AssetCategory, (map.get(a.AssetCategory) || 0) + bv);
+    }
+    const entries = Array.from(map.entries())
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+    const max = entries.length ? entries[0][1] : 0;
+    return { entries, max };
   }, [assets]);
 
   // ── filtered list ─────────────────────────────────────────────────────────
@@ -726,12 +738,12 @@ export default function FixedAssetRecord() {
           </div>
         }
       >
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 lg:gap-8 items-start max-w-6xl">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 xl:gap-8 items-start w-full max-w-[1600px]">
         <div className="space-y-5 min-w-0">
           {/* ── Header Info ── */}
           <div className={sectionCls}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
                 <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
@@ -769,7 +781,7 @@ export default function FixedAssetRecord() {
           {/* ── Asset Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}>Fixed Asset Name *</label>
                 <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
@@ -851,7 +863,7 @@ export default function FixedAssetRecord() {
           {/* ── Depreciation Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}>Depreciation Type</label>
                 <input type="text" value={form.depreciationType} readOnly placeholder="Auto-fetched…"
@@ -896,7 +908,7 @@ export default function FixedAssetRecord() {
           {(form.assetStatus === "Sold" || form.sellingPrice) && (
             <div className={sectionCls}>
               <SectionHeader icon={IndianRupee}>Asset Sale</SectionHeader>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
                 <div>
                   <label className={labelCls}>Selling Price (₹)</label>
                   <input type="number" min="0" step="0.01" value={form.sellingPrice} onChange={(e) => setField("sellingPrice", e.target.value)} placeholder="0.00" className={inputCls} />
@@ -964,16 +976,82 @@ export default function FixedAssetRecord() {
         )
       }
     >
-      {/* ── KPI strip ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Total Assets" value={fmt(portfolioStats.count)}
-          sub={`${portfolioStats.activeCount} active`} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400" />
-        <StatCard icon={Wallet} label="Purchase Value" value={fmtCurCompact(portfolioStats.totalCost)}
-          sub="original cost" accent="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
-        <StatCard icon={PackageCheck} label="Current Book Value" value={fmtCurCompact(portfolioStats.totalBookValue)}
-          sub="after depreciation" accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
-        <StatCard icon={IndianRupee} label="Sold Assets" value={fmt(portfolioStats.soldCount)}
-          sub="lifetime disposals" accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+      {/* ── Portfolio summary — value hero + book-value-by-category chart,
+          styled the same as PO/GRN's Card-based summary sections ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4 mb-5">
+        <Card className="border-border shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 px-5 py-4 text-white">
+            <p className="text-[10px] uppercase tracking-widest text-white/70">
+              Total Book Value
+            </p>
+            <p className="text-3xl font-bold tabular-nums mt-1">
+              {fmtCur(portfolioStats.totalBookValue)}
+            </p>
+            <p className="text-xs text-white/70 mt-1">
+              of {fmtCur(portfolioStats.totalCost)} original purchase value
+            </p>
+          </div>
+          <CardContent className="p-4">
+            <div className="grid grid-cols-3 gap-3">
+              <SummaryCard label="Total Assets" value={fmt(portfolioStats.count)} icon={Boxes} />
+              <SummaryCard label="Active" value={fmt(portfolioStats.activeCount)} color="text-emerald-600 dark:text-emerald-400" icon={PlayCircle} />
+              <SummaryCard label="Sold" value={fmt(portfolioStats.soldCount)} color="text-amber-600 dark:text-amber-400" icon={IndianRupee} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp size={14} className="text-violet-600 dark:text-violet-400" />
+              Book Value by Category
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            {categoryBreakdown.entries.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-9">
+                No assets yet
+              </p>
+            ) : (
+              <div className="flex items-end justify-between gap-2.5 h-[148px]">
+                {categoryBreakdown.entries.map(([cat, value], i) => {
+                  const Icon = CATEGORY_ICONS[cat] || Package;
+                  const barColor = BAR_PALETTE[i % BAR_PALETTE.length];
+                  const pct =
+                    categoryBreakdown.max > 0
+                      ? Math.max(8, (value / categoryBreakdown.max) * 100)
+                      : 0;
+                  return (
+                    <div
+                      key={cat}
+                      className="flex-1 flex flex-col items-center gap-1.5 min-w-0 h-full"
+                    >
+                      <span
+                        className="text-[9px] font-mono text-muted-foreground truncate w-full text-center"
+                        title={fmtCurCompact(value)}
+                      >
+                        {fmtCurCompact(value)}
+                      </span>
+                      <div className="flex-1 w-full flex items-end justify-center">
+                        <div
+                          className={`w-6 rounded-t-md ${barColor} transition-all`}
+                          style={{ height: `${pct}%` }}
+                        />
+                      </div>
+                      <Icon size={11} className="text-muted-foreground shrink-0" />
+                      <span
+                        className="text-[9px] text-muted-foreground truncate w-full text-center"
+                        title={cat}
+                      >
+                        {cat}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── filters ── */}
@@ -1012,7 +1090,15 @@ export default function FixedAssetRecord() {
         <span className="w-full sm:w-auto sm:ml-auto text-xs text-muted-foreground shrink-0">{filtered.length} of {portfolioStats.count} assets</span>
       </div>
 
-      {/* ── table ── */}
+      {/* ── register — same Card wrapper GRN.tsx uses for its register ── */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-3 border-b border-border">
+          <CardTitle className="text-base font-semibold">Asset Register</CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {filtered.length} of {portfolioStats.count} asset{portfolioStats.count !== 1 ? "s" : ""}
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
       {isLoading ? (
         <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
       ) : filtered.length === 0 ? (
@@ -1029,7 +1115,7 @@ export default function FixedAssetRecord() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
@@ -1103,6 +1189,8 @@ export default function FixedAssetRecord() {
           </table>
         </div>
       )}
+        </CardContent>
+      </Card>
 
       {/* ── delete confirm ── */}
       {deleteId && createPortal(

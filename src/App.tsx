@@ -191,6 +191,7 @@ const SupplierQuotationDetail = lazy(
 const SupplierCatalog = lazy(() => import("./pages/supplier/SupplierCatalog"));
 const SupplierCompanyProfile = lazy(() => import("./pages/supplier/SupplierCompanyProfile"));
 const SupplierNotifications = lazy(() => import("./pages/supplier/SupplierNotifications"));
+const SupplierCreditNotes = lazy(() => import("./pages/supplier/SupplierCreditNotes"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
 const AccountGroupMaster = lazy(
@@ -289,6 +290,9 @@ const ProfitCenterMaster = lazy(
 const ReturnReasonMaster = lazy(
   () => import("./pages/masters/ReturnReasonMaster"),
 );
+const PaymentReasonMaster = lazy(
+  () => import("./pages/masters/PaymentReasonMaster"),
+);
 
 // New hierarchy pages
 const SuperAdminDashboard = lazy(
@@ -383,6 +387,7 @@ const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
 const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
+const CrmDemands           = lazy(() => import("./pages/CRM/CrmDemands"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
@@ -1634,6 +1639,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/payment-reason"
+        element={
+          <ProtectedRoute pageKey="payment-reason-master">
+            <PaymentReasonMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/debit-note"
         element={
           <ProtectedRoute pageKey="debit-note">
@@ -2090,6 +2103,20 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/supplier/credit-notes"
+        element={
+          <RequireAuth>
+            <SupplierLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>
+                  <SupplierCreditNotes />
+                </Suspense>
+              </RouteErrorBoundary>
+            </SupplierLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/supplier-login"
         element={
           currentUser
@@ -2166,7 +2193,7 @@ function AppRoutes() {
       <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
       <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-leads"><SaReports /></ProtectedRoute>} />
+      <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-reports"><SaReports /></ProtectedRoute>} />
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
@@ -2179,6 +2206,7 @@ function AppRoutes() {
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
       <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
+      <Route path="/crm/demands"          element={<ProtectedRoute pageKey="crm-payments"><CrmDemands /></ProtectedRoute>} />
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />

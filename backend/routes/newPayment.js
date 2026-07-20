@@ -994,7 +994,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo, OASkipAutoApply FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1095,6 +1095,59 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
           }
         } catch (oaErr) {
           console.warn("[OA] On Account hook on approve failed (non-fatal):", oaErr.message);
+        }
+      } else if (!approvedRef && approvedRow?.PPartyId) {
+        // ── Standalone advance / on-account payment (no invoice or contract linked) ──
+        // If the Payment Reason (from Payment Reason Master) marks this as an
+        // advance / on-account payment, credit it straight to the party's OA
+        // balance so it's immediately available in the On A/C Adjustment page.
+        try {
+          const reasonNorm = (approvedRow.PPaymentName || "").trim().toLowerCase();
+          const isAdvanceReason =
+            reasonNorm.includes("advance") ||
+            reasonNorm.includes("on a/c") ||
+            reasonNorm.includes("on ac") ||
+            reasonNorm.includes("on-account") ||
+            reasonNorm.includes("on account");
+          if (isAdvanceReason) {
+            const partyRes = await pool.request()
+              .input("PartyId", sql.Int, approvedRow.PPartyId)
+              .query(`SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId`);
+            if (partyRes.recordset.length) {
+              const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+              const partyType = partyRes.recordset[0].LHeadType;
+              const payAmt = parseFloat(approvedRow.PAmount) || 0;
+              const bounceAmt = parseFloat(approvedRow.BounceCharge ?? 0);
+              const netPaid = payAmt - bounceAmt;
+              const finalDocNo = approvedRow.DocNo || "";
+              if (netPaid > 0.005) {
+                await pool.request()
+                  .input("PartyId",   sql.Int,           approvedRow.PPartyId)
+                  .input("PartyType", sql.NVarChar(20),  partyTypeLabel[partyType] ?? partyType)
+                  .input("TxnDate",   sql.Date,          approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+                  .input("TxnType",   sql.NVarChar(10),  "CREDIT")
+                  .input("Amount",    sql.Decimal(18,2), netPaid)
+                  .input("RefType",   sql.NVarChar(30),  "Payment")
+                  .input("RefDocNo",  sql.NVarChar(100), finalDocNo)
+                  .input("RefId",     sql.Int,           id)
+                  .input("CompanyRaw", sql.NVarChar(200), approvedRow.PCompany || null)
+                  .input("ProjectRaw", sql.NVarChar(200), approvedRow.PProject || null)
+                  .input("Notes",     sql.NVarChar(500), `Standalone ${approvedRow.PPaymentName} ₹${netPaid} via ${finalDocNo}`)
+                  .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
+                  .query(`
+                    INSERT INTO dbo.OnAccountLedger
+                      (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+                    VALUES
+                      (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,TRY_CAST(@CompanyRaw AS INT),TRY_CAST(@ProjectRaw AS INT),@Notes,@CreatedBy);
+                    UPDATE dbo.AccountHeadMaster
+                      SET OnAccountBalance = OnAccountBalance + @Amount
+                      WHERE LHeadId = @PartyId;
+                  `);
+              }
+            }
+          }
+        } catch (oaErr) {
+          console.warn("[OA] Standalone advance OA hook on approve failed (non-fatal):", oaErr.message);
         }
       }
     } catch (syncErr) {

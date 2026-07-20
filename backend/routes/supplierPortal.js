@@ -75,7 +75,13 @@ router.get("/quotations", async (req, res) => {
           q.QuotationId, q.DocNo, q.Status AS QuotationStatus, q.DocDate, q.DueDate, q.Remarks,
           ec.name AS CompanyName, ep.name AS ProjectName,
           qs.Status AS MySubmissionStatus, qs.InvitedAt,
-          (SELECT COUNT(*) FROM dbo.QuotationItems qi WHERE qi.QuotationId = q.QuotationId) AS ItemCount
+          (SELECT COUNT(*) FROM dbo.QuotationItems qi WHERE qi.QuotationId = q.QuotationId) AS ItemCount,
+          (
+            SELECT MAX(qsp.SubmittedAt)
+            FROM dbo.QuotationSupplierPrices qsp
+            JOIN dbo.QuotationItems qi2 ON qi2.QuotationItemId = qsp.QuotationItemId
+            WHERE qi2.QuotationId = q.QuotationId AND qsp.SupplierLHeadId = qs.SupplierLHeadId
+          ) AS SubmittedAt
         FROM dbo.QuotationSuppliers qs
         JOIN dbo.Quotations q ON q.QuotationId = qs.QuotationId
         LEFT JOIN dbo.enterprise ec ON ec.id = q.CompanyId
@@ -527,6 +533,103 @@ router.post("/orders/:id/comment", async (req, res) => {
     const saved = insert.recordset[0];
     res.json({ comment: saved });
     emitPOMessage(id, saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /grns — "Received by Customer": per-order goods-received progress ───
+// One row per PO that has at least one item with GRN activity recorded
+// against it (PurchaseOrderItems.ReceivedQty synced by grns.js on every
+// Approved GRN). isFullyReceived flips true once every line's ReceivedQty
+// has caught up to its ordered Quantity — the frontend renders a tick for
+// that order and, while any item still has a shortfall, surfaces it as a
+// reminder (see /grns/reminders below).
+router.get("/grns", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("supplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
+          co.name AS CompanyName, pr.name AS ProjectName,
+          poi.Id AS ItemId, poi.ItemName, poi.Quantity AS OrderedQty,
+          ISNULL(poi.ReceivedQty, 0) AS ReceivedQty, poi.UomName,
+          (SELECT COUNT(*) FROM dbo.PurchaseOrderComments c WHERE c.PurchaseOrderId = po.PurchaseOrderID) AS CommentCount
+        FROM dbo.PurchaseOrders po
+        JOIN dbo.PurchaseOrderItems poi ON poi.PurchaseOrderID = po.PurchaseOrderID
+        LEFT JOIN dbo.enterprise co ON co.id = po.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = po.ProjectId
+        WHERE po.SupplierID = @supplierId
+          AND po.Status NOT IN ('Draft', 'Rejected')
+          AND EXISTS (
+            SELECT 1 FROM dbo.PurchaseOrderItems x
+            WHERE x.PurchaseOrderID = po.PurchaseOrderID AND ISNULL(x.ReceivedQty, 0) > 0
+          )
+        ORDER BY po.PODate DESC, po.PurchaseOrderID DESC, poi.SortOrder ASC
+      `);
+
+    const byOrder = new Map();
+    for (const row of result.recordset) {
+      if (!byOrder.has(row.PurchaseOrderID)) {
+        byOrder.set(row.PurchaseOrderID, {
+          purchaseOrderId: row.PurchaseOrderID,
+          purchaseOrderNo: row.PurchaseOrderNo,
+          docNo: row.DocNo || row.PurchaseOrderNo,
+          poDate: row.PODate,
+          status: row.Status,
+          companyName: row.CompanyName,
+          projectName: row.ProjectName,
+          commentCount: row.CommentCount ?? 0,
+          items: [],
+        });
+      }
+      byOrder.get(row.PurchaseOrderID).items.push({
+        itemId: row.ItemId,
+        itemName: row.ItemName,
+        orderedQty: Number(row.OrderedQty) || 0,
+        receivedQty: Number(row.ReceivedQty) || 0,
+        remainingQty: Math.max(0, (Number(row.OrderedQty) || 0) - (Number(row.ReceivedQty) || 0)),
+        uom: row.UomName,
+      });
+    }
+
+    const orders = Array.from(byOrder.values()).map((o) => {
+      const totalRemaining = o.items.reduce((s, i) => s + i.remainingQty, 0);
+      return { ...o, isFullyReceived: totalRemaining <= 0, totalRemaining };
+    });
+
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /credit-notes — quality-rejection debit notes, the supplier's side ──
+// A "Quality Rejection Debit Note" the buyer raises against a delivery is,
+// from the supplier's own books, a Credit Note (money they're no longer
+// owed) — same row, opposite label. Scoped to this supplier only.
+router.get("/credit-notes", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("SupplierId", sql.Int, req.supplierLHeadId).query(`
+        SELECT
+          q.DebitNoteId, q.DocNo, q.DebitDate, q.Status,
+          q.ItemName, q.UomName, q.ReceivedQty, q.RejectedQty, q.PercentBad,
+          q.Rate, q.Amount, q.Reason,
+          v.DocNo AS VehicleInOutDocNo, v.PONumber, v.VehicleNo,
+          c.Name AS CompanyName, p.Name AS ProjectName
+        FROM dbo.QualityRejectionDebitNote q
+        LEFT JOIN dbo.VehicleInOut v ON v.VehicleInOutID = q.VehicleInOutID
+        LEFT JOIN dbo.enterprise c ON c.id = q.CompanyID
+        LEFT JOIN dbo.enterprise p ON p.id = q.ProjectID
+        WHERE q.SupplierID = @SupplierId
+        ORDER BY q.DebitDate DESC, q.DebitNoteId DESC
+      `);
+    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
