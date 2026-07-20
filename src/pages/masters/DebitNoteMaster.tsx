@@ -746,7 +746,6 @@ const DebitNoteMaster: React.FC = () => {
       required: true,
       options: SUPPLIER_OPTIONS.map((o) => o.label),
     },
-    { name: "status", label: "Status", type: "toggle", defaultValue: true },
     {
       name: "company",
       label: "Company",
@@ -915,6 +914,7 @@ const DebitNoteMaster: React.FC = () => {
       </div>
       <MasterPage
         title="Debit Note"
+        gridCols={3}
         fields={fields}
         columns={columns}
         columnRenderers={columnRenderers}

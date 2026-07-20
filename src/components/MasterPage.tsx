@@ -162,6 +162,8 @@ interface MasterPageProps {
   canEdit?: boolean;
   canDelete?: boolean;
   canExport?: boolean;
+  /** Form field grid columns at the md breakpoint. Defaults to 2. */
+  gridCols?: 2 | 3;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -205,6 +207,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   canEdit = true,
   canDelete = true,
   canExport = true,
+  gridCols = 2,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -483,14 +486,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         </div>
 
         <div className="p-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className={`grid grid-cols-1 gap-4 ${gridCols === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
             {fields.map((field) => {
               const isFullWidth =
                 field.fullWidth || field.type === "textarea" || field.type === "section";
               return (
                 <div
                   key={field.name}
-                  className={isFullWidth ? "md:col-span-2" : ""}
+                  className={isFullWidth ? (gridCols === 3 ? "md:col-span-3" : "md:col-span-2") : ""}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
                     <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
