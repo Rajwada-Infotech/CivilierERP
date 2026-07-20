@@ -133,8 +133,10 @@ router.put("/:id", requirePageRight("crm-service-tickets", "edit"), async (req, 
     const id = parseInt(req.params.id);
 
     const prev = await pool.request().input("id", sql.Int, id)
-      .query("SELECT AssignedTo, TicketNo, Subject, Status FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT AssignedTo, TicketNo, Subject, Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!prev.recordset.length) return res.status(404).json({ error: "Ticket not found" });
+    const activeErr = await requireActiveBooking(pool, prev.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     await pool.request()
       .input("id",   sql.Int,           id)
@@ -172,8 +174,10 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     const pool = getPool();
     const id = parseInt(req.params.id);
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, AssignedTo, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (cur.recordset[0].Status !== "Assigned") {
       return res.status(400).json({ error: `Cannot mark-in-progress from status '${cur.recordset[0].Status}'` });
     }
@@ -200,8 +204,10 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!b.ResolutionNotes?.trim()) return res.status(400).json({ error: "ResolutionNotes is required to resolve a ticket" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (!["Assigned", "InProgress"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot resolve from status '${cur.recordset[0].Status}'` });
     }
@@ -230,8 +236,10 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
     const id = parseInt(req.params.id);
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (cur.recordset[0].Status !== "Resolved") {
       return res.status(400).json({ error: `Cannot close from status '${cur.recordset[0].Status}'` });
     }
@@ -264,8 +272,10 @@ router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to reopen a ticket" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (!["Resolved", "Closed"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot reopen from status '${cur.recordset[0].Status}'` });
     }

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2 } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -150,6 +150,9 @@ const CrmAgreement: React.FC = () => {
   const docFileInputRef = useRef<HTMLInputElement>(null);
   const [editDialog, setEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "", LegalExecutiveId: "" });
+  // Always opens on an existing agreement, so always opens locked.
+  const [editLocked, setEditLocked] = useState(true);
+  const editInputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${editLocked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
   const [saving, setSaving] = useState(false);
 
   const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
@@ -371,6 +374,7 @@ const CrmAgreement: React.FC = () => {
       RevisionReason: "",
       LegalExecutiveId: detail.agreement.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : "",
     });
+    setEditLocked(true);
     setEditDialog(true);
   };
 
@@ -387,6 +391,7 @@ const CrmAgreement: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(data.versionBumped ? "Details updated — prior version preserved in history" : "Details updated");
       setEditDialog(false);
+      setEditLocked(true);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreement-revisions", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
@@ -947,14 +952,29 @@ const CrmAgreement: React.FC = () => {
 
       {/* Edit Details — every save snapshots the prior values into Version
           History (see backend PUT /:id) rather than silently overwriting them. */}
-      <Dialog open={editDialog} onOpenChange={(o) => !o && setEditDialog(false)}>
+      <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="font-heading">Edit Agreement Details</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+              <span>Edit Agreement Details</span>
+              {editLocked && (
+                <button onClick={() => setEditLocked(false)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {editLocked && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-              <select value={editForm.LegalExecutiveId} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <select value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                className={editInputCls}>
                 <option value="">— Unassigned —</option>
                 {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
               </select>
@@ -962,38 +982,46 @@ const CrmAgreement: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
-                <input type="text" value={editForm.LegalName} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
+                  className={editInputCls} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
-                <input type="text" value={editForm.PanNo} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value }))}
+                  className={editInputCls} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
-                <input type="text" value={editForm.AadhaarNo} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="text" value={editForm.AadhaarNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
+                  className={editInputCls} />
               </div>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
-              <textarea value={editForm.LegalAddress} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              <textarea value={editForm.LegalAddress} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
+                rows={2} className={`${editInputCls} resize-none`} />
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Reason for this revision</label>
-              <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
-                placeholder="e.g. Customer requested recheck — corrected spelling"
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
+            {!editLocked && (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Reason for this revision</label>
+                <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
+                  placeholder="e.g. Customer requested recheck — corrected spelling"
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setEditDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSaveEdit} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Save"}
-            </button>
+            {editLocked ? (
+              <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSaveEdit} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

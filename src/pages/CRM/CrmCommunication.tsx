@@ -8,7 +8,7 @@ import {
   Plus, Phone, Mail, MessageSquare, MapPin, FileText, X, Search,
   Trash2, Cog, MessageCircle, ArrowDownLeft, ArrowUpRight,
   Clock, History, Building2, User, Target, IndianRupee, UserCheck, CalendarClock,
-  Send, Pencil,
+  Send, Pencil, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
@@ -71,28 +71,29 @@ async function fetchApps(): Promise<any[]> {
 // Shared form body used by both the "Log Communication" create dialog and
 // the edit dialog opened when a message bubble is clicked.
 function LogForm({
-  form, setForm, apps, bookings, lockLinkage,
+  form, setForm, apps, bookings, lockLinkage, locked,
 }: {
   form: typeof EMPTY_FORM; setForm: React.Dispatch<React.SetStateAction<typeof EMPTY_FORM>>;
-  apps: any[]; bookings: any[]; lockLinkage?: boolean;
+  apps: any[]; bookings: any[]; lockLinkage?: boolean; locked?: boolean;
 }) {
+  const inputCls = `w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60 ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Application</label>
-          <select value={form.ApplicationId} disabled={lockLinkage}
+          <select value={form.ApplicationId} disabled={lockLinkage || locked}
             onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
-            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
+            className={inputCls}>
             <option value="">—</option>
             {apps.map((a: any) => <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName}</option>)}
           </select>
         </div>
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Booking</label>
-          <select value={form.BookingId} disabled={lockLinkage}
+          <select value={form.BookingId} disabled={lockLinkage || locked}
             onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
+            className={inputCls}>
             <option value="">—</option>
             {bookings.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>)}
           </select>
@@ -101,33 +102,33 @@ function LogForm({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Channel</label>
-          <select value={form.Channel} onChange={(e) => setForm((f) => ({ ...f, Channel: e.target.value }))}
-            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+          <select value={form.Channel} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Channel: e.target.value }))}
+            className={inputCls}>
             {CHANNELS.map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Direction</label>
-          <select value={form.Direction} onChange={(e) => setForm((f) => ({ ...f, Direction: e.target.value }))}
-            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+          <select value={form.Direction} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Direction: e.target.value }))}
+            className={inputCls}>
             {DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
           </select>
         </div>
       </div>
       <div>
         <label className="text-xs text-muted-foreground block mb-1">Contacted At</label>
-        <input type="datetime-local" value={form.ContactedAt} onChange={(e) => setForm((f) => ({ ...f, ContactedAt: e.target.value }))}
-          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+        <input type="datetime-local" value={form.ContactedAt} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, ContactedAt: e.target.value }))}
+          className={inputCls} />
       </div>
       <div>
         <label className="text-xs text-muted-foreground block mb-1">Subject</label>
-        <input type="text" value={form.Subject} onChange={(e) => setForm((f) => ({ ...f, Subject: e.target.value }))}
-          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+        <input type="text" value={form.Subject} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Subject: e.target.value }))}
+          className={inputCls} />
       </div>
       <div>
         <label className="text-xs text-muted-foreground block mb-1">Summary</label>
-        <textarea value={form.Summary} onChange={(e) => setForm((f) => ({ ...f, Summary: e.target.value }))}
-          rows={3} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" />
+        <textarea value={form.Summary} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Summary: e.target.value }))}
+          rows={3} className={`${inputCls} resize-none`} />
       </div>
     </div>
   );
@@ -150,6 +151,8 @@ function EditLogDialog({
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Always opens on an existing log entry, so always opens locked.
+  const [locked, setLocked] = useState(true);
 
   const relatedBooking = useMemo(() =>
     log.BookingId ? bookings.find((b) => b.Id === log.BookingId) : null,
@@ -195,6 +198,7 @@ function EditLogDialog({
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Communication log updated");
+      setLocked(true);
       onSaved();
       onClose();
     } catch (e: any) {
@@ -223,10 +227,23 @@ function EditLogDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <MessageSquare size={16} className="text-primary" /> Communication Detail
+          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+            <span className="flex items-center gap-2">
+              <MessageSquare size={16} className="text-primary" /> Communication Detail
+            </span>
+            {locked && (
+              <button onClick={() => setLocked(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
           </DialogTitle>
         </DialogHeader>
+        {locked && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-4">
@@ -280,7 +297,7 @@ function EditLogDialog({
                   <div><span className="text-muted-foreground block">Status</span><span className="font-medium">{relatedBooking.Status || "—"}</span></div>
                   <div><span className="text-muted-foreground block">Project</span><span className="font-medium">{relatedBooking.ProjectName || "—"}</span></div>
                   <div><span className="text-muted-foreground block">Unit</span><span className="font-medium">{relatedBooking.UnitNo || "—"}{relatedBooking.BlockName ? ` · ${relatedBooking.BlockName}` : ""}</span></div>
-                  <div><span className="text-muted-foreground block">Total Value</span><span className="font-medium">{relatedBooking.TotalValue ? `₹${Number(relatedBooking.TotalValue).toLocaleString("en-IN")}` : "—"}</span></div>
+                  <div><span className="text-muted-foreground block">Total Value</span><span className="font-medium">{relatedBooking.GrandTotal ?? relatedBooking.TotalValue ? `₹${Number(relatedBooking.GrandTotal ?? relatedBooking.TotalValue).toLocaleString("en-IN")}` : "—"}</span></div>
                   <div><span className="text-muted-foreground block">Booking Date</span><span className="font-medium">{relatedBooking.BookingDate ? String(relatedBooking.BookingDate).slice(0, 10) : "—"}</span></div>
                 </div>
               </div>
@@ -342,7 +359,7 @@ function EditLogDialog({
 
             <div className="rounded-xl border border-border p-4">
               <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground mb-3"><FileText size={14} /> Log Details</h3>
-              <LogForm form={form} setForm={setForm} apps={apps} bookings={bookings} lockLinkage />
+              <LogForm form={form} setForm={setForm} apps={apps} bookings={bookings} lockLinkage locked={locked} />
             </div>
 
             <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 px-1">
@@ -357,11 +374,17 @@ function EditLogDialog({
             <Trash2 size={13} /> {deleting ? "Removing..." : "Delete"}
           </button>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
+            {locked ? (
+              <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </DialogContent>

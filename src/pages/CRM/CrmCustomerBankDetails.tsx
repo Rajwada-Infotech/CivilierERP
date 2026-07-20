@@ -4,14 +4,23 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark, Users,
-  IdCard, Briefcase, Phone, Building2, Search,
+  IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
+
+// Same "always allowed regardless of assignment" role set the backend
+// enforces (backend/services/approvalService.js CRM_APPROVER_ROLES) — kept
+// in sync manually since it's a small, stable list. The real gate is
+// server-side (PUT rejects with 403 for anyone else); this only drives the
+// UI so non-assigned staff see the lock before they try to save and get
+// rejected, instead of after.
+const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
@@ -75,9 +84,24 @@ function SectionCard({ icon: Icon, iconClass, title, children }: { icon: any; ic
 function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => void; onSaved: () => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
+
+  // Once KYC data is on file it's sensitive — only the salesperson this
+  // booking is assigned to, or an admin-tier role, can edit it. Everyone
+  // else sees the whole form read-only. Backend enforces the real gate on
+  // save; this just reflects it in the UI ahead of time.
+  const isApprover = CRM_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
+  const isAssigned = row.AssignedTo != null && currentUser?.id != null && Number(currentUser.id) === Number(row.AssignedTo);
+  const canEdit = isApprover || isAssigned;
+  // Even for someone who CAN edit, the form still opens read-only by
+  // default — an explicit "Edit" click is required, and a successful save
+  // re-locks it. Layered on top of (not a replacement for) the permission
+  // gate above: someone without canEdit never sees an Edit button at all.
+  const [uiLocked, setUiLocked] = useState(true);
+  const locked = !canEdit || uiLocked;
 
   useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
@@ -108,6 +132,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   const isComplete = missingRequired.length === 0 && !hasErrors;
 
   const handleSave = async () => {
+    if (locked) { toast.error("This record is locked — only the assigned salesperson or an admin can edit it"); return; }
     setTouched(true);
     if (hasErrors) { toast.error("Fix the highlighted fields before saving"); return; }
     setSaving(true);
@@ -121,6 +146,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       toast.success(isComplete
         ? (checklist?.welcomeCall?.done ? "KYC complete — agreement prep will proceed automatically" : "KYC complete — waiting on the welcome call to proceed")
         : "Bank & nominee details saved");
+      setUiLocked(true);
       qc.invalidateQueries({ queryKey: ["crm-bank-detail", row.BookingId] });
       qc.invalidateQueries({ queryKey: ["crm-welcome-checklist", row.BookingId] });
       onSaved();
@@ -134,10 +160,10 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   const field = (key: keyof typeof form, label: string, type = "text", required = false) => (
     <div>
       <label className="text-xs text-muted-foreground block mb-1">{label}{required && " *"}</label>
-      <input type={type} value={form[key]}
-        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+      <input type={type} value={form[key]} readOnly={locked}
+        onChange={(e) => !locked && setForm((f) => ({ ...f, [key]: e.target.value }))}
         onBlur={() => setTouched(true)}
-        className={`w-full text-sm border rounded-lg px-2.5 py-2 bg-background ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
+        className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
       {touched && errors[key] && <p className="text-[11px] text-rose-500 mt-0.5">{errors[key]}</p>}
     </div>
   );
@@ -146,10 +172,28 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <Landmark size={16} className="text-primary" /> Bank & Nominee Details
+          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+            <span className="flex items-center gap-2">
+              <Landmark size={16} className="text-primary" /> Bank & Nominee Details
+            </span>
+            {canEdit && uiLocked && (
+              <button onClick={() => setUiLocked(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
           </DialogTitle>
         </DialogHeader>
+
+        {!canEdit ? (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
+          </div>
+        ) : uiLocked ? (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
+            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+          </div>
+        ) : null}
 
         {/* ── Customer context + progress + workflow status ── */}
         <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
@@ -225,8 +269,9 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Nominee Address</label>
-            <textarea value={form.NomineeAddress} onChange={(e) => setForm((f) => ({ ...f, NomineeAddress: e.target.value }))}
-              rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" />
+            <textarea value={form.NomineeAddress} readOnly={locked}
+              onChange={(e) => !locked && setForm((f) => ({ ...f, NomineeAddress: e.target.value }))}
+              rows={2} className={`w-full text-sm border border-border rounded-lg px-2.5 py-2 resize-none ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
           </div>
         </SectionCard>
 
@@ -243,14 +288,20 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         <div className="flex justify-between items-center pt-3 border-t border-border">
           <span className="text-xs text-muted-foreground">
-            {hasErrors ? "Fix highlighted errors before saving" : missingRequired.length > 0 ? `${missingRequired.length} required field(s) remaining` : "All required fields captured"}
+            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : missingRequired.length > 0 ? `${missingRequired.length} required field(s) remaining` : "All required fields captured"}
           </span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-            <button onClick={handleSave} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-40">
-              <Save size={14} /> {saving ? "Saving..." : "Save Details"}
-            </button>
+            {locked ? (
+              <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setUiLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                  <Save size={14} /> {saving ? "Saving..." : "Save Details"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </DialogContent>
