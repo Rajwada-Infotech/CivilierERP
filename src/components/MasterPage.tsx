@@ -36,7 +36,11 @@ export interface FieldDef {
     | "textarea"
     | "toggle"
     | "multiselect"
-    | "custom";
+    | "custom"
+    /** Full-width section heading/divider — no input, no value. Purely
+     * visual grouping for forms with several logically-distinct field
+     * clusters (e.g. "Reference", "Parties", "Line Items"). */
+    | "section";
   required?: boolean;
   options?: string[];
   optionsProvider?: (
@@ -481,13 +485,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         <div className="p-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {fields.map((field) => {
-              const isFullWidth = field.fullWidth || field.type === "textarea";
+              const isFullWidth =
+                field.fullWidth || field.type === "textarea" || field.type === "section";
               return (
                 <div
                   key={field.name}
                   className={isFullWidth ? "md:col-span-2" : ""}
                 >
-                  {field.type !== "toggle" && (
+                  {field.type !== "toggle" && field.type !== "section" && field.label && (
                     <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                       {field.label}
                       {field.required && (
@@ -496,7 +501,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     </label>
                   )}
 
-                  {field.type === "custom" && field.render ? (
+                  {field.type === "section" ? (
+                    <div className={fields[0] === field ? "" : "pt-1 -mb-1"}>
+                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
+                        {field.label}
+                      </p>
+                    </div>
+                  ) : field.type === "custom" && field.render ? (
                     field.render({
                       value: form[field.name],
                       onChange: (v) => updateCustomField(field.name, v),
