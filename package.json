@@ -52,7 +52,7 @@
     "@tanstack/react-table": "^8.21.0",
     "@types/react-webcam": "^3.0.0",
     "@vitejs/plugin-react": "^6.0.2",
-    "axios": "^1.16.0",
+    "axios": "^1.18.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
