@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -540,13 +541,16 @@ const DebitNoteMaster: React.FC = () => {
         .filter((o) => o.label)
     : [];
 
-  const PROJECT_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    projectData,
-  )
-    ? projectData
-        .map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" }))
-        .filter((o) => o.label)
-    : [];
+  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null }[] =
+    Array.isArray(projectData)
+      ? projectData
+          .map((o: any) => ({
+            id: o.id,
+            label: o.label ?? o.name ?? "",
+            companyId: o.company_id != null ? Number(o.company_id) : null,
+          }))
+          .filter((o) => o.label)
+      : [];
 
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
@@ -759,7 +763,21 @@ const DebitNoteMaster: React.FC = () => {
       label: "Project",
       type: "select",
       required: true,
-      options: PROJECT_OPTIONS.map((o) => o.label),
+      // Scoped to the selected Company — a project belongs to exactly one
+      // company, so showing every project regardless of company invited
+      // mismatched selections. Projects with no company_id (data gaps)
+      // stay visible so nothing silently disappears.
+      optionsProvider: (_data, _currentId, form) => {
+        const companyOpt = COMPANY_OPTIONS.find(
+          (c) => c.label === (form?.company as string),
+        );
+        const list = companyOpt
+          ? PROJECT_OPTIONS.filter(
+              (p) => p.companyId == null || p.companyId === companyOpt.id,
+            )
+          : PROJECT_OPTIONS;
+        return list.map((p) => ({ value: p.label, label: p.label }));
+      },
     },
     {
       name: "itemsSection",
@@ -921,6 +939,27 @@ const DebitNoteMaster: React.FC = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onCustomSave={handleCustomSave}
+        onFieldChange={(form, fieldName) => {
+          // Switching Company invalidates a previously-selected Project
+          // that belongs to a different company.
+          if (fieldName === "company") {
+            const companyOpt = COMPANY_OPTIONS.find(
+              (c) => c.label === (form.company as string),
+            );
+            const projectOpt = PROJECT_OPTIONS.find(
+              (p) => p.label === (form.project as string),
+            );
+            if (
+              companyOpt &&
+              projectOpt &&
+              projectOpt.companyId != null &&
+              projectOpt.companyId !== companyOpt.id
+            ) {
+              return { ...form, project: "" };
+            }
+          }
+          return form;
+        }}
         onDataEvent={handleDataEvent}
         externalFormPatch={autoFillPatch}
         externalFormPatchKey={autoFillPatchKey}
@@ -1070,7 +1109,12 @@ const DebitNoteMaster: React.FC = () => {
       </div>
 
       {/* ── Quality Rejection Debit Note — view modal ─────────────────── */}
-      {viewingQDN && (
+      {/* Portalled to <body> — this page's fixed/z-index modals otherwise
+          render behind MaterialShell's animated header, since the
+          framer-motion page-transition wrapper somewhere up the tree gives
+          `position: fixed` a transformed containing block instead of the
+          viewport. */}
+      {viewingQDN && createPortal(
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -1158,7 +1202,8 @@ const DebitNoteMaster: React.FC = () => {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       </MaterialShell>
     </>
