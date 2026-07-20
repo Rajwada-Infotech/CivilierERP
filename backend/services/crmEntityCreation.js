@@ -15,6 +15,7 @@ const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationW
 const { guardAndConvertHold } = require("./crmHoldService");
 const { rollupBookingTotals } = require("../routes/crmParking");
 const { createReceiptForMilestone } = require("../routes/crmPayments");
+const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 
@@ -223,7 +224,7 @@ const DEFAULT_MILESTONES = [
 // a plan (or the 7-stage default, when none is selected) into real
 // CrmPaymentMilestone rows, so a plan switch produces an identical shape
 // to what creation would have produced.
-async function generateMilestonesForBooking(pool, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId) {
+async function generateMilestonesForBooking(pool, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   let milestones;
   if (paymentPlanId) {
@@ -250,6 +251,17 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   const MILESTONE_DEFAULT_INTERVAL_DAYS = 30;
   let runningDue = bookingDate ? new Date(bookingDate) : new Date();
 
+  // Milestone #1 ("booking amount") is a real ₹ figure the customer actually
+  // booked with — it can be any amount, not a fixed plan percentage. When one
+  // is known, it overrides the plan's own milestone-1 %/₹; the plan's other
+  // milestones are inserted at their normal plan-relative amounts below and
+  // then redistributed (after the loop) across whatever's actually left —
+  // (totalValue - bookingAmount) — preserving their relative weighting to
+  // each other, via the same machinery that handles a later total/override
+  // change (recalculateRemainingMilestones).
+  const bookingAmt = Number(bookingAmount) > 0 ? Number(bookingAmount) : 0;
+  let milestone1Id = null;
+
   for (const m of milestones) {
     let dueDate;
     if (m.no === 1) {
@@ -259,19 +271,30 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
       runningDue.setDate(runningDue.getDate() + MILESTONE_DEFAULT_INTERVAL_DAYS);
       dueDate = runningDue;
     }
-    await pool.request()
+    const isFirst = m.no === 1;
+    const amt = isFirst && bookingAmt > 0 ? bookingAmt : Math.round(totalValue * m.pct) / 100;
+    const pct = isFirst && bookingAmt > 0 ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct;
+
+    const ins = await pool.request()
       .input("bid",  sql.Int,           bookingId)
       .input("mno",  sql.Int,           m.no)
       .input("mname",sql.NVarChar(200), m.name)
-      .input("amt",  sql.Decimal(18,2), Math.round(totalValue * m.pct) / 100)
+      .input("amt",  sql.Decimal(18,2), amt)
+      .input("pct",  sql.Decimal(5,2),  pct)
       .input("due",  sql.Date,          dueDate)
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
-        VALUES (@bid, @mno, @mname, @amt, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
       `);
+    if (isFirst) milestone1Id = ins.recordset[0].Id;
+  }
+
+  if (bookingAmt > 0 && milestone1Id && milestones.length > 1) {
+    await recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneId: milestone1Id });
   }
 }
 
@@ -326,10 +349,38 @@ async function seedPrimaryCoApplicantFromCustomer(pool, bookingId, applicationId
     .input("mob",  sql.NVarChar(20), row.CoApplicantMobile || null)
     .input("pan",  sql.NVarChar(20), row.CoApplicantPanNo || null)
     .input("note", sql.NVarChar(sql.MAX), "Auto-seeded from customer intake")
+    .input("src",  sql.NVarChar(20), "CustomerIntake")
     .input("cb",   sql.Int, actorUserId)
     .query(`
-      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, CreatedBy, CreatedAt)
-      VALUES (@bid, @name, @rel, @mob, @pan, @note, @cb, SYSDATETIME())
+      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, SourceType, CreatedBy, CreatedAt)
+      VALUES (@bid, @name, @rel, @mob, @pan, @note, @src, @cb, SYSDATETIME())
+    `);
+}
+
+// The seed above only fires once, at booking creation — if staff correct a
+// typo in the customer's co-applicant name/relation/mobile/PAN afterward
+// (CrmCustomers.tsx edit form), that edit silently never reached the
+// CrmCoApplicant row Welcome Call/Booking Details actually display, leaving
+// two now-mismatched copies of the same person's details. SourceType marks
+// exactly which row was auto-seeded (never a manually-added co-applicant),
+// so this can re-sync it without ever touching rows staff entered themselves.
+// Called from crmCustomers.js PUT /:id, alongside its other lockstep syncs.
+async function syncCoApplicantFromCustomerEdit(pool, customerId, updates) {
+  if (!updates.CoApplicantName?.trim()) return;
+  await pool.request()
+    .input("cid",  sql.Int, customerId)
+    .input("name", sql.NVarChar(200), updates.CoApplicantName.trim())
+    .input("rel",  sql.NVarChar(50), updates.CoApplicantRelation || null)
+    .input("mob",  sql.NVarChar(20), updates.CoApplicantMobile || null)
+    .input("pan",  sql.NVarChar(20), updates.CoApplicantPanNo || null)
+    .query(`
+      UPDATE ca SET
+        ca.Name = @name, ca.Relation = @rel, ca.Mobile = @mob, ca.PanNo = @pan,
+        ca.UpdatedAt = SYSDATETIME()
+      FROM dbo.CrmCoApplicant ca
+      JOIN dbo.CrmBooking b ON b.Id = ca.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = @cid AND ca.SourceType = 'CustomerIntake' AND ca.IsActive = 1
     `);
 }
 
@@ -440,7 +491,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
 
-  await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId);
+  await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
 
   // The Application's Payment Details step already captured the token
   // amount as "paid" (PaymentMode + a cheque/transaction reference, see
@@ -504,5 +555,5 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, validatePaymentPlanScope,
+  generateMilestonesForBooking, validatePaymentPlanScope, syncCoApplicantFromCustomerEdit,
 };

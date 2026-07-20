@@ -352,6 +352,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/parking",              file: "./routes/crmParking"             },
   { path: "/api/crm/holds",                file: "./routes/crmHolds"               },
   { path: "/api/crm/extra-charges",        file: "./routes/crmExtraCharges"        },
+  { path: "/api/crm/booking-amendments",   file: "./routes/crmBookingAmendments"   },
   { path: "/api/crm/sla-engine",           file: "./routes/crmSlaEngine"           },
   // /api/crm-portal is registered earlier, before the blanket authMiddleware
   // wall (see above) — it must NOT also be registered here.

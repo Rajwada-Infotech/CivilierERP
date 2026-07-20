@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/DataTable";
 import {
   Pencil, Trash2, X, Check, Plus, Search, AlertCircle, Eye, XCircle,
-  User, Phone, Mail, MapPin, CreditCard, UserRound, FileBadge, Upload, FileText,
+  User, Phone, Mail, MapPin, CreditCard, UserRound, FileBadge, Upload, FileText, Lock,
 } from "lucide-react";
 
 const BROKER_TYPE = "BR";
@@ -82,6 +82,9 @@ const CrmBrokerMaster: React.FC = () => {
   const [certFile, setCertFile] = useState<File | null>(null);
   const [uploadingCert, setUploadingCert] = useState(false);
   const certInputRef = useRef<HTMLInputElement>(null);
+  // Panel opens locked whenever editing an existing broker — "Add Broker"
+  // (no editingId yet) opens unlocked since there's nothing to protect.
+  const [locked, setLocked] = useState(false);
 
   const { data: rawData, isLoading, isError } = useQuery({
     queryKey: ["account-head", BROKER_TYPE],
@@ -189,10 +192,11 @@ const CrmBrokerMaster: React.FC = () => {
       LHeadStatus: b.LHeadStatus,
     });
     setErrors({});
+    setLocked(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const resetForm = () => { setEditingId(null); setForm(EMPTY_FORM); setErrors({}); };
+  const resetForm = () => { setEditingId(null); setForm(EMPTY_FORM); setErrors({}); setLocked(false); };
 
   const handleSave = () => {
     if (!form.LHeadName.trim()) { setErrors({ LHeadName: true }); return; }
@@ -248,24 +252,37 @@ const CrmBrokerMaster: React.FC = () => {
     },
   ], [deleteConfirm, rights.canEdit, rights.canDelete]);
 
-  const inputCls = "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+  const inputCls = `w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   return (
     <SalesAutoShell title="Broker Master" subtitle="Manage broker ledger accounts — same account-head pattern as Contractors">
       {(rights.canCreate || rights.canEdit) && (
         <div className="rounded-xl border border-border overflow-hidden">
-          <div className="flex items-center gap-3 px-5 py-4 bg-muted/20 border-b border-border">
-            <UserRound size={16} className="text-primary" />
-            <div>
-              <h2 className="text-sm font-semibold">{editingId ? "Edit Broker" : "Add Broker"}</h2>
-              <p className="text-[11px] text-muted-foreground">Brokers are ledger accounts (LHeadType='BR'), same as Contractors</p>
+          <div className="flex items-center justify-between gap-3 px-5 py-4 bg-muted/20 border-b border-border">
+            <div className="flex items-center gap-3">
+              <UserRound size={16} className="text-primary" />
+              <div>
+                <h2 className="text-sm font-semibold">{editingId ? "Edit Broker" : "Add Broker"}</h2>
+                <p className="text-[11px] text-muted-foreground">Brokers are ledger accounts (LHeadType='BR'), same as Contractors</p>
+              </div>
             </div>
+            {editingId != null && locked && (
+              <button onClick={() => setLocked(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
           </div>
+          {editingId != null && locked && (
+            <div className="mx-5 mt-3 flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
           <div className="px-5 py-5 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Broker Name *</label>
-                <input value={form.LHeadName}
+                <input value={form.LHeadName} readOnly={locked}
                   onChange={(e) => { setForm((p) => ({ ...p, LHeadName: e.target.value })); setErrors((p) => ({ ...p, LHeadName: false })); }}
                   placeholder="e.g. Ramesh Realty Brokers"
                   className={`${inputCls} ${errors.LHeadName ? "border-red-400" : ""}`} />
@@ -275,54 +292,54 @@ const CrmBrokerMaster: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">Contact Person</label>
                 <div className="relative">
                   <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={form.LHeadContactPerson} onChange={(e) => setForm((p) => ({ ...p, LHeadContactPerson: e.target.value }))}
-                    className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background" />
+                  <input value={form.LHeadContactPerson} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadContactPerson: e.target.value }))}
+                    className={`${inputCls} pl-8`} />
                 </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">RERA Number</label>
                 <div className="relative">
                   <FileBadge size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={form.LHeadRera} onChange={(e) => setForm((p) => ({ ...p, LHeadRera: e.target.value.toUpperCase() }))}
+                  <input value={form.LHeadRera} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadRera: e.target.value.toUpperCase() }))}
                     placeholder="e.g. A51800000123"
-                    className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background font-mono" />
+                    className={`${inputCls} pl-8 font-mono`} />
                 </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Phone Number</label>
                 <div className="relative">
                   <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={form.LHeadPhone} onChange={(e) => setForm((p) => ({ ...p, LHeadPhone: e.target.value }))}
-                    className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background font-mono" />
+                  <input value={form.LHeadPhone} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadPhone: e.target.value }))}
+                    className={`${inputCls} pl-8 font-mono`} />
                 </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Email</label>
                 <div className="relative">
                   <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={form.LHeadEmail} onChange={(e) => setForm((p) => ({ ...p, LHeadEmail: e.target.value }))}
-                    className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background" />
+                  <input value={form.LHeadEmail} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadEmail: e.target.value }))}
+                    className={`${inputCls} pl-8`} />
                 </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">PAN Number</label>
-                <input value={form.LHeadPan} onChange={(e) => setForm((p) => ({ ...p, LHeadPan: e.target.value.toUpperCase() }))}
+                <input value={form.LHeadPan} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadPan: e.target.value.toUpperCase() }))}
                   maxLength={10} className={`${inputCls} font-mono`} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Payment Terms</label>
                 <div className="relative">
                   <CreditCard size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={form.LHeadPaymentTerms} onChange={(e) => setForm((p) => ({ ...p, LHeadPaymentTerms: e.target.value }))}
-                    placeholder="e.g. Post-registration" className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background" />
+                  <input value={form.LHeadPaymentTerms} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadPaymentTerms: e.target.value }))}
+                    placeholder="e.g. Post-registration" className={`${inputCls} pl-8`} />
                 </div>
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">Address</label>
                 <div className="relative">
                   <MapPin size={13} className="absolute left-3 top-3 text-muted-foreground" />
-                  <textarea value={form.LHeadAddress} onChange={(e) => setForm((p) => ({ ...p, LHeadAddress: e.target.value }))}
-                    rows={2} className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background resize-none" />
+                  <textarea value={form.LHeadAddress} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadAddress: e.target.value }))}
+                    rows={2} className={`${inputCls} pl-8 resize-none`} />
                 </div>
               </div>
             </div>
@@ -341,10 +358,10 @@ const CrmBrokerMaster: React.FC = () => {
                   </a>
                 )}
                 <div className="flex items-center gap-2">
-                  <input ref={certInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  <input ref={certInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={locked}
                     onChange={(e) => setCertFile(e.target.files?.[0] || null)}
-                    className="flex-1 text-xs text-muted-foreground file:mr-2 file:px-2.5 file:py-1.5 file:rounded-md file:border-0 file:text-xs file:bg-muted file:text-foreground" />
-                  <button type="button" onClick={handleUploadCertificate} disabled={!certFile || uploadingCert}
+                    className="flex-1 text-xs text-muted-foreground file:mr-2 file:px-2.5 file:py-1.5 file:rounded-md file:border-0 file:text-xs file:bg-muted file:text-foreground disabled:opacity-40" />
+                  <button type="button" onClick={handleUploadCertificate} disabled={!certFile || uploadingCert || locked}
                     className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 flex items-center gap-1">
                     <Upload size={12} /> {uploadingCert ? "Uploading..." : "Upload"}
                   </button>
@@ -353,19 +370,25 @@ const CrmBrokerMaster: React.FC = () => {
             )}
 
             <div className="flex items-center gap-3">
-              <button type="button" onClick={() => setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}>
+              <button type="button" disabled={locked} onClick={() => setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}>
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
               <span className="text-xs text-muted-foreground">{form.LHeadStatus ? "Active" : "Inactive"}</span>
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
-            <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId ? "Cancel" : "Reset"}</button>
-            <button onClick={handleSave} disabled={saving || !canSave}
-              className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground disabled:opacity-40 flex items-center gap-1.5">
-              {editingId ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId ? "Update Broker" : "Save Broker"}
-            </button>
+            {editingId != null && locked ? (
+              <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId ? "Cancel" : "Reset"}</button>
+                <button onClick={handleSave} disabled={saving || !canSave}
+                  className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground disabled:opacity-40 flex items-center gap-1.5">
+                  {editingId ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId ? "Update Broker" : "Save Broker"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

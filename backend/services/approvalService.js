@@ -627,4 +627,5 @@ module.exports = {
   validateApprovalModuleMap,
   recordGLPosting,
   writeAuditLog,
+  CRM_APPROVER_ROLES,
 };

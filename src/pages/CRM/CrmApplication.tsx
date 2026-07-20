@@ -147,6 +147,9 @@ const CrmApplication: React.FC = () => {
   // original lead's source. Unlocked by default for customers with no
   // linked lead, since there is nothing to auto-fetch.
   const [sourceLocked, setSourceLocked] = useState(false);
+  const [invoiceRow, setInvoiceRow] = useState<any | null>(null);
+  const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
 
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
@@ -423,6 +426,35 @@ const CrmApplication: React.FC = () => {
     }
   };
 
+  const handleGenerateInvoice = async () => {
+    if (!invoiceRow) return;
+    const amount = parseFloat(invoiceForm.Amount);
+    if (!Number.isFinite(amount) || amount <= 0) { toast.error("Amount must be greater than 0"); return; }
+    setInvoiceSaving(true);
+    try {
+      const res = await fetchWithAuth(`/api/crm/bookings/${invoiceRow.BookingId}/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          Amount: amount,
+          InvoiceType: invoiceForm.InvoiceType,
+          InvoiceDate: invoiceForm.InvoiceDate || undefined,
+          Description: invoiceForm.Description || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to generate invoice");
+      toast.success("Booking invoice generated");
+      setInvoiceRow(null);
+      setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setInvoiceSaving(false);
+    }
+  };
+
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 110,
       cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
@@ -444,15 +476,26 @@ const CrmApplication: React.FC = () => {
     { id: "unitProject", header: "Unit / Project", size: 140, enableSorting: false,
       cell: (i) => <span className="text-xs">{[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}</span> },
     { accessorKey: "BookingTotalValue", header: "Value", size: 110,
-      cell: (i) => <span className="text-xs font-medium">{i.row.original.BookingTotalValue ? `₹${Number(i.row.original.BookingTotalValue).toLocaleString("en-IN")}` : "—"}</span> },
+      cell: (i) => {
+        const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
+        return <span className="text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
+      } },
     { accessorKey: "BookingDate", header: "Booked On", size: 110,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
-    { id: "actions", header: "", size: 100, enableSorting: false,
+    { id: "actions", header: "", size: 180, enableSorting: false,
       cell: (i) => (
-        <button onClick={() => window.open(`/crm/bookings?applicationId=${i.row.original.Id}`, "_blank")}
-          className="flex items-center gap-1 text-xs text-primary hover:underline">
-          <Building2 size={12} /> View Booking <ChevronRight size={12} />
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button onClick={() => window.open(`/crm/bookings?applicationId=${i.row.original.Id}`, "_blank")}
+            className="flex items-center gap-1 text-xs text-primary hover:underline">
+            <Building2 size={12} /> View Booking <ChevronRight size={12} />
+          </button>
+          <button
+            onClick={() => setInvoiceRow(i.row.original)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+          >
+            <FileText size={12} /> Generate Invoice
+          </button>
+        </div>
       ) },
   ];
 
@@ -864,6 +907,7 @@ const CrmApplication: React.FC = () => {
               form={form} setForm={setForm}
               paymentPlans={paymentPlans}
               applicationId={applicationId}
+              computedTotal={computedTotal}
             />
           )}
 
@@ -943,6 +987,61 @@ const CrmApplication: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Generate Booking Invoice ── */}
+      <Dialog open={!!invoiceRow} onOpenChange={(o) => { if (!o) { setInvoiceRow(null); setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" }); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="font-heading">Generate Booking Invoice</DialogTitle></DialogHeader>
+          {invoiceRow && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                <div className="flex justify-between items-center px-3 py-2">
+                  <span className="text-xs text-muted-foreground">Booking</span>
+                  <span className="text-sm font-medium font-mono">{invoiceRow.BookingNo}</span>
+                </div>
+                <div className="flex justify-between items-center px-3 py-2">
+                  <span className="text-xs text-muted-foreground">Applicant</span>
+                  <span className="text-sm font-medium">{invoiceRow.ApplicantName}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Amount *</label>
+                  <input type="number" value={invoiceForm.Amount} onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Invoice Type</label>
+                  <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="Booking">Booking</option>
+                    <option value="Milestone">Milestone</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Invoice Date</label>
+                  <input type="date" value={invoiceForm.InvoiceDate} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Description</label>
+                <textarea value={invoiceForm.Description} onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
+                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setInvoiceRow(null); setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" }); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleGenerateInvoice} disabled={invoiceSaving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {invoiceSaving ? "Generating..." : "Generate Invoice"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </SalesAutoShell>
   );
 };
@@ -950,11 +1049,25 @@ const CrmApplication: React.FC = () => {
 // ── Step 2: Payment details — plan selection + bank/KYC/cheque form ───────────
 const PaymentDetailsStep: React.FC<{
   form: any; setForm: (fn: (f: any) => any) => void;
-  paymentPlans: any[]; applicationId: number;
-}> = ({ form, setForm, paymentPlans, applicationId }) => {
+  paymentPlans: any[]; applicationId: number; computedTotal: number;
+}> = ({ form, setForm, paymentPlans, applicationId, computedTotal }) => {
   const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [bankSaving, setBankSaving] = useState(false);
   const [bankLoaded, setBankLoaded] = useState(false);
+
+  // Selecting a plan used to just set an id with zero visibility into what
+  // it actually commits the customer to — fetch its real milestone
+  // breakdown the moment one's picked, so staff (and the customer, over
+  // their shoulder) can see the %/₹ split before finalizing the application.
+  const { data: planDetail } = useQuery({
+    queryKey: ["crm-payment-plan-detail", form.PaymentPlanId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${PAYMENT_PLAN_API}/${form.PaymentPlanId}`);
+      return r.ok ? r.json() : null;
+    },
+    enabled: !!form.PaymentPlanId,
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -1006,6 +1119,37 @@ const PaymentDetailsStep: React.FC<{
             <option key={p.Id} value={String(p.Id)}>{p.PlanName} ({p.ItemCount} milestones)</option>
           ))}
         </select>
+
+        {/* Breakdown — % and ₹ together, computed against the unit's own
+            total. The ₹ figures are a preview only (final amounts are
+            re-derived from GrandTotal, including parking/extras, once the
+            Booking actually exists) but give staff/customer real visibility
+            before finalizing, instead of a bare plan-name dropdown. */}
+        {form.PaymentPlanId && planDetail?.items?.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/20 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left px-2 py-1.5 font-medium">Milestone</th>
+                  <th className="text-right px-2 py-1.5 font-medium">%</th>
+                  <th className="text-right px-2 py-1.5 font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {planDetail.items.map((item: any) => (
+                  <tr key={item.MilestoneNo} className="border-b border-border last:border-0">
+                    <td className="px-2 py-1.5">{item.MilestoneName}</td>
+                    <td className="px-2 py-1.5 text-right font-mono">{Number(item.Percent)}%</td>
+                    <td className="px-2 py-1.5 text-right font-mono">
+                      {computedTotal ? `₹${Math.round(computedTotal * Number(item.Percent) / 100).toLocaleString("en-IN")}` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="grid grid-cols-3 gap-2">
           <div>
             <label className={labelCls}>Token Type</label>

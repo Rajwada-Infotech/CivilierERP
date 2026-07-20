@@ -153,6 +153,12 @@ router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+
+    const cur0 = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     await pool.request()
       .input("id",    sql.Int,  id)
       .input("lss",   sql.NVarChar(50),  b.LoanSanctionStatus || null)
@@ -179,6 +185,12 @@ router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
 router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-noc", id, "Pending", userEmail, req.user?.role);
@@ -194,6 +206,12 @@ router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) 
 router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-noc", id, "Approved", userEmail, req.user?.role);
@@ -211,6 +229,12 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
 router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-noc", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
@@ -228,8 +252,10 @@ router.put("/:id/mark-issued", requirePageRight("crm-noc", "edit"), async (req, 
     const pool = getPool();
     const id = parseInt(req.params.id);
 
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmNoc WHERE Id = @id");
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status, BookingId FROM dbo.CrmNoc WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     if (cur.recordset[0].Status !== "Approved") {
       return res.status(400).json({ error: `Cannot mark issued — NOC must be Approved (currently '${cur.recordset[0].Status}')` });
     }

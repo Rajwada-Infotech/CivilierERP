@@ -153,6 +153,11 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     const b = req.body;
     const id = parseInt(req.params.id);
 
+    const cur0 = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "Handover not found" });
+    const activeErr0 = await requireActiveBooking(pool, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     // Guard: cannot mark Completed while open snags remain
     if (b.Status === "Completed") {
       const openSnags = await pool.request().input("id", sql.Int, id)
@@ -196,6 +201,12 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
     const pool = getPool();
     const handoverId = parseInt(req.params.id);
     const b = req.body;
+
+    const cur0 = await pool.request().input("id", sql.Int, handoverId).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "Handover not found" });
+    const activeErr0 = await requireActiveBooking(pool, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     if (!SNAG_CATEGORIES.includes(b.Category))
       return res.status(400).json({ error: `Invalid Category. Must be: ${SNAG_CATEGORIES.join(", ")}` });
     if (!b.Description?.trim()) return res.status(400).json({ error: "Description is required" });
@@ -230,6 +241,14 @@ router.put("/:id/snags/:snagId", requirePageRight("crm-handover", "edit"), async
     const b = req.body;
     const snagId = parseInt(req.params.snagId);
     if (!Number.isFinite(snagId)) return res.status(400).json({ error: "Invalid snag id" });
+
+    const snagCur = await pool.request().input("id", sql.Int, snagId).query(`
+      SELECT h.BookingId FROM dbo.CrmSnagItem s JOIN dbo.CrmHandover h ON h.Id = s.HandoverId WHERE s.Id = @id
+    `);
+    if (!snagCur.recordset.length) return res.status(404).json({ error: "Snag not found" });
+    const activeErr0 = await requireActiveBooking(pool, snagCur.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
     const result = await pool.request()
       .input("id", sql.Int, snagId)
       .input("st", sql.NVarChar(30), b.Status || null)

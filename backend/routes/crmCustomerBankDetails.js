@@ -6,9 +6,34 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// Once KYC data is on file it's sensitive (bank account, PAN, Aadhaar) and
+// shouldn't be casually editable by any staff member with page rights —
+// only the salesperson this booking/application is actually assigned to, or
+// an admin-tier role, may save changes here. requirePageRight already gates
+// who can reach this route at all; this is the second, ownership-specific
+// gate on top of it, mirroring the "same actor/role" reasoning already used
+// for the Booking auto-approve-on-Application-approve flow elsewhere in CRM.
+async function requireAssignedOrApprover(req, res, pool, { bookingId, applicationId }) {
+  const role = String(req.user?.role || "").trim().toLowerCase();
+  if (CRM_APPROVER_ROLES.includes(role)) return true;
+
+  const actor = actorId(req);
+  const query = bookingId
+    ? pool.request().input("bid", sql.Int, bookingId).query("SELECT AssignedTo FROM dbo.CrmBooking WHERE Id = @bid")
+    : pool.request().input("aid", sql.Int, applicationId).query("SELECT AssignedTo FROM dbo.CrmApplication WHERE Id = @aid");
+  const row = await query;
+  const assignedTo = row.recordset[0]?.AssignedTo ?? null;
+
+  if (assignedTo != null && actor != null && assignedTo === actor) return true;
+
+  res.status(403).json({ error: "This record is locked — only the assigned salesperson or an admin can edit it" });
+  return false;
+}
 
 // GET / — every Approved booking with its live KYC-completeness status, so
 // the list page can group by Pending/Complete without a per-row fetch.
@@ -19,7 +44,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.Status AS BookingStatus,
+        b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.Status AS BookingStatus, b.AssignedTo,
         a.ApplicantName, a.Mobile,
         wc.Outcome AS LastCallOutcome,
         CASE WHEN
@@ -83,6 +108,8 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     const bid = parseInt(req.params.bookingId);
     const b = req.body;
     const actor = actorId(req);
+
+    if (!(await requireAssignedOrApprover(req, res, pool, { bookingId: bid }))) return;
 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -185,6 +212,8 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
 
     const app = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    if (!(await requireAssignedOrApprover(req, res, pool, { applicationId: aid }))) return;
 
     const existing = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
 

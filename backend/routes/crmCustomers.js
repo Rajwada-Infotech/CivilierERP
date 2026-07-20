@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
+const { syncCoApplicantFromCustomerEdit } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -239,6 +240,22 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);
+    }
+
+    // Same lockstep guarantee, extended to any already-created CrmCoApplicant
+    // row that was auto-seeded from this customer's intake-time co-applicant
+    // fields (see seedPrimaryCoApplicantFromCustomer) — that seed only fires
+    // once, at booking creation, so without this an edit here would silently
+    // never reach the row Welcome Call/Booking Details actually display.
+    // No-op if no booking/co-applicant exists yet, or the edit didn't touch
+    // any CoApplicant* field.
+    try {
+      await syncCoApplicantFromCustomerEdit(pool, id, {
+        CoApplicantName: b.CoApplicantName, CoApplicantRelation: b.CoApplicantRelation,
+        CoApplicantMobile: b.CoApplicantMobile, CoApplicantPanNo: b.CoApplicantPanNo,
+      });
+    } catch (coAppErr) {
+      console.error("[crm-customers] co-applicant sync failed:", coAppErr.message);
     }
 
     res.json({ success: true });

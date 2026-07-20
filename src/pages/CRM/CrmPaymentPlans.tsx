@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Building2, Layers, Pencil } from "lucide-react";
+import { Plus, Trash2, Building2, Layers, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
@@ -48,6 +48,9 @@ const CrmPaymentPlans: React.FC = () => {
   const [blockId, setBlockId] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
   const [saving, setSaving] = useState(false);
+  // Opens locked whenever editing an existing plan — "New Plan" opens unlocked.
+  const [locked, setLocked] = useState(false);
+  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
@@ -70,6 +73,7 @@ const CrmPaymentPlans: React.FC = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
+    setLocked(false);
   };
 
   const openEdit = async (id: number) => {
@@ -77,6 +81,7 @@ const CrmPaymentPlans: React.FC = () => {
     if (!detail) { toast.error("Could not load plan"); return; }
     const { plan, items: planItems } = detail;
     setEditingId(id);
+    setLocked(true);
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
     setCompanyId(plan.CompanyId ? String(plan.CompanyId) : "");
@@ -118,6 +123,7 @@ const CrmPaymentPlans: React.FC = () => {
         toast.success(isEdit ? "Payment plan updated" : "Payment plan created");
       }
       setDialogOpen(false);
+      setLocked(true);
       resetForm();
       qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
     } catch (e: any) {
@@ -173,34 +179,49 @@ const CrmPaymentPlans: React.FC = () => {
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Edit Payment Plan" : "New Payment Plan"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+              <span>{editingId != null ? "Edit Payment Plan" : "New Payment Plan"}</span>
+              {editingId != null && locked && (
+                <button onClick={() => setLocked(false)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {editingId != null && locked && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Plan Name *</label>
-              <input type="text" value={planName} onChange={(e) => setPlanName(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <input type="text" value={planName} readOnly={locked} onChange={(e) => setPlanName(e.target.value)}
+                className={inputCls} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
-              <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <input type="text" value={description} readOnly={locked} onChange={(e) => setDescription(e.target.value)}
+                className={inputCls} />
             </div>
 
             <div className="rounded-lg border border-border p-3 space-y-2">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} /> Scope (leave blank for a global default plan)</label>
               <div className="grid grid-cols-3 gap-2">
-                <select value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); setBlockId(""); }}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); setBlockId(""); }}
+                  className={inputCls}>
                   <option value="">Any company</option>
                   {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
                 </select>
-                <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <select value={projectId} disabled={locked} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }}
+                  className={inputCls}>
                   <option value="">Any project</option>
                   {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
                 </select>
-                <select value={blockId} onChange={(e) => setBlockId(e.target.value)}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <select value={blockId} disabled={locked} onChange={(e) => setBlockId(e.target.value)}
+                  className={inputCls}>
                   <option value="">Any block</option>
                   {(blocksForProject as any[]).map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
                 </select>
@@ -215,7 +236,7 @@ const CrmPaymentPlans: React.FC = () => {
               <div className="space-y-2">
                 {items.map((it, idx) => (
                   <div key={idx} className="flex gap-2">
-                    <select value={it.MilestoneMasterId}
+                    <select value={it.MilestoneMasterId} disabled={locked}
                       onChange={(e) => {
                         const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
                         setItems((arr) => arr.map((x, i) => i === idx ? {
@@ -225,33 +246,39 @@ const CrmPaymentPlans: React.FC = () => {
                           Percent: master?.DefaultPercent != null && !x.Percent ? String(master.DefaultPercent) : x.Percent,
                         } : x));
                       }}
-                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
+                      className={`flex-1 ${inputCls}`}>
                       <option value="">Custom (type below)</option>
                       {(milestoneMaster as any[]).filter((m: any) => m.IsActive).map((m: any) => (
                         <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
                       ))}
                     </select>
-                    <input type="text" placeholder="Milestone name" value={it.MilestoneName}
+                    <input type="text" placeholder="Milestone name" value={it.MilestoneName} readOnly={locked}
                       onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value, MilestoneMasterId: "" } : x))}
-                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                    <input type="number" placeholder="%" value={it.Percent}
+                      className={`flex-1 ${inputCls}`} />
+                    <input type="number" placeholder="%" value={it.Percent} readOnly={locked}
                       onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
-                      className="w-20 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                    <button onClick={() => setItems((arr) => arr.filter((_, i) => i !== idx))}
-                      className="p-1.5 text-muted-foreground hover:text-red-600"><Trash2 size={14} /></button>
+                      className={`w-20 ${inputCls}`} />
+                    <button onClick={() => setItems((arr) => arr.filter((_, i) => i !== idx))} disabled={locked}
+                      className="p-1.5 text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"><Trash2 size={14} /></button>
                   </div>
                 ))}
               </div>
-              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
-                className="text-xs text-primary hover:underline mt-2">+ Add milestone</button>
+              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])} disabled={locked}
+                className="text-xs text-primary hover:underline mt-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add milestone</button>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
-            </button>
+            {editingId != null && locked ? (
+              <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
+                </button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
