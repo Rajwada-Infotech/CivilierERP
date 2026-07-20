@@ -10,6 +10,7 @@ const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -38,6 +39,11 @@ async function rollupBookingTotals(pool, bookingId) {
         GrandTotal = ISNULL(TotalValue, 0) + @pt + @et
       WHERE Id = @bid
     `);
+
+  // GrandTotal just moved — every not-yet-settled milestone's ₹/% needs to
+  // be re-derived against the new total, or the payment schedule silently
+  // stops adding up to what the customer actually owes.
+  await recalculateRemainingMilestones(pool, bookingId);
 
   return { parkingTotal, extraTotal };
 }

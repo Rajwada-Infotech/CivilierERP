@@ -123,6 +123,14 @@ beforeEach(() => {
 });
 
 describe("Purchase Orders: PODate and SupplierID are required (not silently nulled)", () => {
+  // This is the first `require("../server")` in this Jest worker, so it pays
+  // the one-time cost of loading and JIT-warming the entire route tree
+  // (every route file server.js registers) before the first request can even
+  // be dispatched — every later test reuses the cached module and a warm
+  // app, which is why they all come in well under a second. That one-time
+  // cost has grown with the route tree and, under parallel worker load, can
+  // exceed Jest's default 5s test timeout even though nothing is actually
+  // hung — see the package.json `jest.testTimeout` override.
   test("POST /api/purchase-orders without PODate -> 400 'PODate is required.'", async () => {
     const { createApp } = require("../server");
     const app = await createApp();

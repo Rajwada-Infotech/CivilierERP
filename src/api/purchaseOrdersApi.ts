@@ -313,6 +313,10 @@ export interface SupplierDetails {
   LHeadAddress: string | null;
   LHeadContactPerson: string | null;
   LGST: string | null;
+  /** Supplier's GST-registered state (free text, e.g. "Maharashtra") — used
+   *  to decide CGST+SGST vs IGST on PO line items relative to the company's
+   *  own state. */
+  LGSTState: string | null;
   LHeadPhone: string | null;
   LHeadEmail: string | null;
 }
@@ -330,6 +334,7 @@ export const getSupplierDetails = (
         LHeadAddress: data.LHeadAddress ?? null,
         LHeadContactPerson: data.LHeadContactPerson ?? null,
         LGST: data.LGST ?? null,
+        LGSTState: data.LGSTState ?? null,
         LHeadPhone: data.LHeadPhone ?? null,
         LHeadEmail: data.LHeadEmail ?? null,
       };

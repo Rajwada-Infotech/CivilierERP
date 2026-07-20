@@ -9,6 +9,8 @@ import type {
   SelectedDoc,
   GRNItemLine,
 } from "./types";
+import { makeDirectLineItem } from "./DirectItemsTable";
+import type { DirectLineItem } from "./DirectItemsTable";
 
 export function fmt(n: number) {
   return n.toLocaleString("en-IN", {
@@ -259,6 +261,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     poId: null,
     supplier: "",
     supplierLHeadId: null,
+    supplierGstRegistered: undefined,
     projectSite: "",
     materialCategory: "",
     invoiceReference: "",
@@ -288,6 +291,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     workDoneRef: "",
     additionalCharges: [],
     paymentTermId: null,
+    directItems: [],
   };
 }
 
@@ -375,6 +379,20 @@ export function dbToRecord(row: any): ExpenseRecord {
     poId: null,
     supplier: row.ESupplierName ?? row.EName ?? "",
     supplierLHeadId: row.ESupplierId ?? row.LHeadId ?? null,
+    supplierGstRegistered:
+      row.ESupplierGstRegistered != null
+        ? Boolean(Number(row.ESupplierGstRegistered))
+        : undefined,
+    // Direct (TOD) line items
+    directItems: (() => {
+      try {
+        if (!row.EDirectItemsData) return [];
+        const parsed: any[] = JSON.parse(row.EDirectItemsData);
+        return Array.isArray(parsed)
+          ? (parsed as DirectLineItem[]).map(makeDirectLineItem)
+          : [];
+      } catch { return []; }
+    })(),
     projectSite: projectEnterpriseIdValid ? String(projectEnterpriseId) : "",
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
@@ -516,6 +534,13 @@ export function recordToDb(
     EGLAccount: form.glAccount || null,
     EWorkDoneRef: form.workDoneRef || null,
     PaymentTermId: form.paymentTermId ?? null,
+    // Persist direct (TOD) line items as JSON; null when no items.
+    EDirectItemsData:
+      form.directItems && form.directItems.length > 0
+        ? JSON.stringify(
+            form.directItems.map(({ _key: _k, ...rest }) => rest),
+          )
+        : null,
   };
 }
 

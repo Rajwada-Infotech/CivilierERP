@@ -44,7 +44,6 @@ import {
   Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
-import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import {
   exportToCsv,
   parseCsv,
@@ -92,21 +91,6 @@ interface AccountGroup {
   parentId: string | null;
 }
 
-interface TreeNode extends AccountGroup {
-  children: TreeNode[];
-}
-
-function buildTree(items: AccountGroup[]): TreeNode[] {
-  const map: Record<string, TreeNode> = {};
-  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: TreeNode[] = [];
-  items.forEach((i) => {
-    if (i.parentId && map[i.parentId])
-      map[i.parentId].children.push(map[i._id]);
-    else roots.push(map[i._id]);
-  });
-  return roots;
-}
 
 interface ContractorForm {
   LHeadName: string;
@@ -399,11 +383,6 @@ const ContractorMaster: React.FC = () => {
         parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
-
-  const accountGroupTree = useMemo(
-    () => buildTree(accountGroups),
-    [accountGroups],
-  );
 
   const contractorCategories: string[] = useMemo(
     () =>
@@ -955,22 +934,17 @@ const ContractorMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Account Group */}
+                {/* Account Group — always Sundry Creditors for contractors,
+                    never picked manually (see accountHeadMaster.js's
+                    getSundryCreditorsGroupId, applied server-side on every
+                    create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <GroupTreePicker
-                    value={String(form.LBelongsTo)}
-                    onChange={(v) =>
-                      setForm((p) => ({
-                        ...p,
-                        LBelongsTo: v === "" ? "" : Number(v),
-                      }))
-                    }
-                    tree={accountGroupTree}
-                    allGroups={accountGroups}
-                  />
+                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                    Sundry Creditors
+                  </div>
                 </div>
               </div>
             </div>

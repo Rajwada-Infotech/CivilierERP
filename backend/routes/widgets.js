@@ -684,7 +684,11 @@ router.get("/", async (req, res) => {
                 WHERE Status IN ('Draft','Pending') OR Status IS NULL
               ) AS PendingCheques,
               (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'S') AS SupplierCount,
-              (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'C') AS CustomerCount,
+              -- 'C' means Contractor, not Customer, in this schema — 'A' is
+              -- the real Customer type (see accountHeadMaster.js). This was
+              -- previously miscounting Contractors under a "CustomerCount"
+              -- label.
+              (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'A') AS CustomerCount,
               (
                 SELECT COUNT(*)
                 FROM dbo.AccountHeadMaster

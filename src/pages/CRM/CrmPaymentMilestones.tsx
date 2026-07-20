@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -11,6 +11,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
+const BANK_MASTER_API = "/api/bank-master";
+const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 
@@ -49,6 +51,16 @@ async function fetchOnAccount(bookingId: string): Promise<any> {
     return r.ok ? r.json() : null;
   } catch { return null; }
 }
+async function fetchCompanyBanks(): Promise<any[]> {
+  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchCustomerBank(bookingId: string): Promise<any> {
+  if (!bookingId) return null;
+  try {
+    const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
 const CrmPaymentMilestones: React.FC = () => {
   const qc = useQueryClient();
@@ -57,7 +69,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const bkgParam = sp.get("bookingId") || "";
   const [selectedBookingId, setSelectedBookingId] = useState(bkgParam);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "" });
+  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
@@ -78,11 +90,27 @@ const CrmPaymentMilestones: React.FC = () => {
     enabled: !!selectedBookingId,
     staleTime: 15_000,
   });
+  const { data: companyBanks = [] } = useQuery({ queryKey: ["bank-master-dropdown"], queryFn: fetchCompanyBanks, staleTime: 5 * 60_000 });
+  const { data: customerBank } = useQuery({
+    queryKey: ["crm-customer-bank", selectedBookingId],
+    queryFn: () => fetchCustomerBank(selectedBookingId),
+    enabled: !!selectedBookingId,
+    staleTime: 30_000,
+  });
 
   const milestones: any[] = milestoneData?.milestones || [];
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
+  // Bookings created before the payment-logic fix have Milestone #1 sized
+  // off the payment plan's fixed % instead of the real BookingAmount — flag
+  // that mismatch here so staff can one-click resync the schedule.
+  const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
+  const needsResync = !!(
+    booking?.BookingAmount &&
+    milestone1 &&
+    Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1
+  );
 
   const handleOpenPayment = (m: any) => {
     setEditingId(m.Id);
@@ -92,6 +120,7 @@ const CrmPaymentMilestones: React.FC = () => {
       PaymentMode: m.PaymentMode || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
+      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId) : "",
     });
   };
 
@@ -132,6 +161,10 @@ const CrmPaymentMilestones: React.FC = () => {
           PaymentMode:   payForm.PaymentMode   || undefined,
           TransactionRef:payForm.TransactionRef|| undefined,
           Remarks:       payForm.Remarks       || undefined,
+          DepositBankId: payForm.DepositBankId || undefined,
+          DepositBankName: payForm.DepositBankId
+            ? (companyBanks as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -155,6 +188,23 @@ const CrmPaymentMilestones: React.FC = () => {
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [resyncing, setResyncing] = useState(false);
+  const handleResyncSchedule = async () => {
+    if (!selectedBookingId) return;
+    setResyncing(true);
+    try {
+      const res = await fetchWithAuth(`${BKG_API}/${selectedBookingId}/resync-schedule`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.changed ? "Payment schedule resynced to the booking amount" : "Already up to date");
+      qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setResyncing(false);
     }
   };
 
@@ -266,8 +316,15 @@ const CrmPaymentMilestones: React.FC = () => {
           </span>
         );
       } },
-    { accessorKey: "AmountDue", header: "Amount Due", size: 100,
-      cell: (i) => <span className="font-semibold">{fmt(i.row.original.AmountDue)}</span> },
+    { accessorKey: "AmountDue", header: "Amount Due", size: 120,
+      cell: (i) => (
+        <span className="font-semibold">
+          {fmt(i.row.original.AmountDue)}
+          {i.row.original.Percent != null && (
+            <span className="ml-1 text-[10px] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
+          )}
+        </span>
+      ) },
     { accessorKey: "AmountPaid", header: "Amount Paid", size: 100,
       cell: (i) => <span className="text-green-600 font-semibold">{fmt(i.row.original.AmountPaid)}</span> },
     { id: "balance", header: "Balance", size: 100, enableSorting: false,
@@ -348,9 +405,21 @@ const CrmPaymentMilestones: React.FC = () => {
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
               <Wallet size={14} /> Deposit On Account
             </button>
+            {needsResync && (
+              <button onClick={handleResyncSchedule} disabled={resyncing}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
+              </button>
+            )}
           </>
         )}
       </div>
+
+      {needsResync && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2.5 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+          Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
+        </div>
+      )}
 
       {!selectedBookingId ? (
         <div className="py-16 text-center text-muted-foreground text-sm">Select a booking to view its payment schedule</div>
@@ -360,45 +429,97 @@ const CrmPaymentMilestones: React.FC = () => {
         <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>
       ) : (
         <>
-          {/* Summary cards */}
-          {booking && (
-            <div className="rounded-xl border border-border p-4">
-              <div className="flex items-center justify-between mb-3">
+          {/* Booking summary — "Booking" is the whole deal (unit + parking +
+              extra charges), not just the unit price, so the total shown
+              here must be the same GrandTotal the milestone schedule is
+              actually generated/redistributed against. Showing bare
+              TotalValue here (as before) silently disagreed with what the
+              milestones summed to whenever a booking had parking or extra
+              charges attached. */}
+          {booking && (() => {
+            const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
+            const parkingTotal = Number(booking.ParkingTotal || 0);
+            const extraTotal = Number(booking.ExtraChargesTotal || 0);
+            const hasExtras = parkingTotal > 0 || extraTotal > 0;
+            return (
+              <div className="rounded-xl border border-border p-4 space-y-4">
                 <div>
                   <div className="font-semibold text-foreground">{booking.ApplicantName}</div>
                   <div className="text-xs text-muted-foreground">{booking.BookingNo} · {booking.UnitNo} {booking.ProjectName ? `· ${booking.ProjectName}` : ""}</div>
                 </div>
-                <div className="text-right">
-                  <div className="text-xs text-muted-foreground">Total Value</div>
-                  <div className="font-bold text-foreground">{fmt(booking.TotalValue)}</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-3">
-                {[
-                  { label: "Total Due",  value: fmt(summary.totalDue),  color: "text-foreground"  },
-                  { label: "Paid",       value: fmt(summary.totalPaid), color: "text-green-600"   },
-                  { label: "Balance",    value: fmt(summary.balance),   color: "text-orange-600"  },
-                  { label: "Overdue",    value: `${summary.overdue || 0} milestone(s)`, color: "text-red-600" },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="rounded-lg border border-border p-3 text-center">
-                    <div className="text-xs text-muted-foreground">{label}</div>
-                    <div className={`text-sm font-bold mt-0.5 ${color}`}>{value}</div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Price breakdown */}
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-muted-foreground">Unit Value</span>
+                        <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
+                      </div>
+                      {parkingTotal > 0 && (
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-muted-foreground">+ Parking</span>
+                          <span className="font-medium tabular-nums">{fmt(parkingTotal)}</span>
+                        </div>
+                      )}
+                      {extraTotal > 0 && (
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-muted-foreground">+ Extra Charges</span>
+                          <span className="font-medium tabular-nums">{fmt(extraTotal)}</span>
+                        </div>
+                      )}
+                      <div className={`flex items-baseline justify-between ${hasExtras ? "pt-1.5 mt-0.5 border-t border-border" : ""}`}>
+                        <span className="font-semibold text-foreground">Grand Total</span>
+                        <span className="font-bold text-foreground tabular-nums">{fmt(grandTotal)}</span>
+                      </div>
+                      {booking.BookingAmount > 0 && (
+                        <div className="flex items-baseline justify-between text-xs pt-1">
+                          <span className="text-muted-foreground">Booking Amount (Milestone 1)</span>
+                          <span className="text-muted-foreground tabular-nums">{fmt(booking.BookingAmount)}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
-              {/* Progress bar */}
-              <div className="mt-3">
-                <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                  <span>Collection Progress</span>
-                  <span>{pct(summary.totalPaid, summary.totalDue)}%</span>
+
+                  {/* Collection summary */}
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-muted-foreground">Total Due</span>
+                        <span className="font-medium tabular-nums">{fmt(summary.totalDue)}</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-muted-foreground">Paid</span>
+                        <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
+                      </div>
+                      <div className="flex items-baseline justify-between pt-1.5 mt-0.5 border-t border-border">
+                        <span className="font-semibold text-foreground">Balance</span>
+                        <span className="font-bold text-orange-600 tabular-nums">{fmt(summary.balance)}</span>
+                      </div>
+                      {summary.overdue > 0 && (
+                        <div className="flex items-baseline justify-between text-xs pt-1">
+                          <span className="text-red-600 flex items-center gap-1"><AlertCircle size={11} /> Overdue</span>
+                          <span className="text-red-600 font-medium">{summary.overdue} milestone(s)</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                        <span>Collection Progress</span>
+                        <span>{pct(summary.totalPaid, summary.totalDue)}%</span>
+                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-green-500 rounded-full transition-all"
+                          style={{ width: `${pct(summary.totalPaid, summary.totalDue)}%` }} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-green-500 rounded-full transition-all"
-                    style={{ width: `${pct(summary.totalPaid, summary.totalDue)}%` }} />
-                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* On-Account balance */}
           {onAccountData && (onAccountData.payments?.length > 0) && (
@@ -462,11 +583,35 @@ const CrmPaymentMilestones: React.FC = () => {
                 </select>
               </div>
               <div className="col-span-2">
+                <label className="text-xs text-muted-foreground block mb-1">Deposited To (Company Bank)</label>
+                <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">Select company bank</option>
+                  {(companyBanks as any[]).map((b: any) => (
+                    <option key={b.BId} value={String(b.BId)}>{b.BName} — {b.BAccountNumber}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
                 <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))}
                   rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
               </div>
             </div>
+
+            {customerBank && (customerBank.BankName || customerBank.AccountNo) && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Bank (on file, reference only)</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <span className="text-muted-foreground">Bank</span>
+                  <span className="font-medium text-right">{customerBank.BankName || "—"}</span>
+                  <span className="text-muted-foreground">A/C No.</span>
+                  <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
+                  <span className="text-muted-foreground">IFSC</span>
+                  <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setEditingId(null)}

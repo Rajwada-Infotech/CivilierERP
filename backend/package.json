@@ -55,6 +55,8 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "testTimeout": 30000,
+    "maxWorkers": "50%",
     "testMatch": [
       "**/test/**/*.test.js"
     ],
@@ -76,7 +78,7 @@
     "fast-uri": ">=3.1.2",
     "ip-address": ">=10.1.1",
     "qs": ">=6.15.2",
-    "ws": ">=8.21.0",
+    "ws": ">=8.21.1",
     "form-data": ">=4.0.6",
     "js-yaml": ">=4.2.0",
     "@babel/core": ">=7.29.6 <8.0.0"

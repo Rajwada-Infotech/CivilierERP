@@ -35,6 +35,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
       `),
       pool.request().input("mob", sql.NVarChar(20), mobile).query(`
         SELECT b.Id, b.BookingNo, b.ProjectName, b.UnitNo, b.TotalValue, b.Status,
+               b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                b.BookingDate, a.ApplicationNo,
                ag.Status AS AgreementStatus,
                h.Status AS HandoverStatus, h.ActualHandoverDate,

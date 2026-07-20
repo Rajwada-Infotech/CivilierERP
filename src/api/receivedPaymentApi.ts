@@ -19,6 +19,8 @@ export interface ReceivedPaymentRecord {
   RPBankName: string | null;
   RPTransactionID: string | null;
   RPCheckNumber: string | null;
+  RPChequeDate: string | null;
+  RPIsPostDated: boolean;
   RPRemarks: string | null;
   RPIsEmi: boolean;
   RPEmiTotal: number | null;

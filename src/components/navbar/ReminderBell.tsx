@@ -12,6 +12,7 @@ import {
   ClipboardList,
   ChevronLeft,
   ChevronRight,
+  Landmark,
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
 import { useModule } from "@/contexts/ModuleContext";
@@ -30,6 +31,7 @@ const TYPE_META: Record<string, ReminderMeta> = {
   grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
   emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
   material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
+  pdc: { icon: Landmark, label: "PDC", color: "text-sky-500" },
 };
 
 export const ReminderBell = () => {
@@ -169,7 +171,7 @@ export const ReminderBell = () => {
           <div
             ref={panelRef}
             style={accentVars}
-            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,320px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,420px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
           >
             {/* Header — gradient wash + live count, tinted to the active module */}
             <div className="relative px-4 py-3.5 border-b border-[var(--rb-accent-20)] bg-gradient-to-br from-[var(--rb-accent-10)] via-card to-card overflow-hidden">
@@ -244,6 +246,7 @@ export const ReminderBell = () => {
                   "tds",
                   "emi_installment",
                   "material_request",
+                  "pdc",
                 ].map((t) => {
                   const active = filter === t;
                   const meta = t !== "all" ? TYPE_META[t] : null;
@@ -279,7 +282,7 @@ export const ReminderBell = () => {
               </button>
             </div>
 
-            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px]">
+            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px] scrollbar-none">
               {filtered.length === 0 ? (
                 <div className="py-12 px-4 text-center">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">

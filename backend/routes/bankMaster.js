@@ -13,6 +13,18 @@ const {
   bankMasterUpdateSchema,
 } = require("../utils/bankMasterSchemas");
 
+// BANKS (ASSETS > CURRENT ASSETS > BANKS, Code='BNK') — every bank ledger
+// head lands here automatically instead of staff manually picking an
+// Account Group. Mirrors accountHeadMaster.js's getSundryCreditorsGroupId /
+// getSundryDebtorsGroupId cache-once pattern.
+let _banksGroupId;
+async function getBanksGroupId(pool) {
+  if (_banksGroupId !== undefined) return _banksGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'BNK'");
+  _banksGroupId = r.recordset[0]?.AGId ?? null;
+  return _banksGroupId;
+}
+
 let accountHeadColumnMetaPromise = null;
 
 async function getAccountHeadColumnMeta() {
@@ -151,7 +163,6 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
     BAddress,
     BStatus = true,
     BCompanyName,
-    BLBelongsTo,
   } = req.body;
 
   try {
@@ -165,6 +176,10 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
       ["CompanyName", "companyname", "LCompanyName"],
       "LDescription",
     );
+
+    // Never trust a client-supplied BLBelongsTo — every bank always lands
+    // in BANKS.
+    const effectiveLBelongsTo = await getBanksGroupId(pool);
 
     const request = pool
       .request()
@@ -208,7 +223,7 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
       .input(
         "LBelongsTo",
         sql.Int,
-        BLBelongsTo != null ? Number(BLBelongsTo) : null,
+        effectiveLBelongsTo,
       );
 
     if (companyColumn === "LDescription") {
@@ -319,7 +334,6 @@ router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMas
     BAddress,
     BStatus,
     BCompanyName,
-    BLBelongsTo,
   } = req.body;
 
   try {
@@ -333,6 +347,10 @@ router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMas
       ["CompanyName", "companyname", "LCompanyName"],
       "LDescription",
     );
+
+    // Never trust a client-supplied BLBelongsTo — every bank always lands
+    // in BANKS.
+    const effectiveLBelongsTo = await getBanksGroupId(pool);
 
     const request = pool
       .request()
@@ -362,7 +380,7 @@ router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMas
       .input(
         "LBelongsTo",
         sql.Int,
-        BLBelongsTo != null ? Number(BLBelongsTo) : null,
+        effectiveLBelongsTo,
       );
 
     if (companyColumn === "LDescription") {

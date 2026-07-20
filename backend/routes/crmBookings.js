@@ -12,7 +12,7 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -204,7 +204,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Status, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const oldRow = old.recordset[0];
     const existingArea = oldRow.AreaSqFt;
@@ -286,7 +286,14 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     if (planIsChanging) {
       await pool.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
       const effectiveTotal = total || oldRow.TotalValue;
-      await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor);
+      const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
+      await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
+    } else if (total != null && total !== oldRow.TotalValue) {
+      // TotalValue moved (rate correction) without a plan switch — the
+      // existing schedule's ₹/% no longer add up to what's actually owed.
+      // A plan switch already regenerates the whole schedule from scratch
+      // above, so this only fires on the "same plan, new total" path.
+      await recalculateRemainingMilestones(pool, id);
     }
 
     res.json({ success: true, milestonesRegenerated: planIsChanging });
@@ -594,6 +601,68 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     res.status(201).json({ success: true, id: result.recordset[0].Id, InvoiceNo: invoiceNo });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/resync-schedule — retroactive fix for bookings whose payment
+// schedule was generated before Milestone #1 tracked the booking's real
+// BookingAmount (it used to be sized off the payment plan's own fixed %,
+// which could badly mismatch what the customer actually booked with — see
+// generateMilestonesForBooking). Pulls Milestone #1's AmountDue/Percent into
+// line with the booking's real BookingAmount, then redistributes every other
+// still-open milestone across (GrandTotal - BookingAmount), preserving their
+// relative weighting to each other — the exact same math new bookings get at
+// creation time, just re-run on demand for one already created. Safe/
+// idempotent: a no-op if Milestone #1 already matches, and never touches a
+// Waived milestone or reduces AmountDue below what's already been collected.
+router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const bk = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingAmount, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @id");
+    if (!bk.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const booking = bk.recordset[0];
+    const bookingAmount = Number(booking.BookingAmount || 0);
+    if (!bookingAmount) return res.status(400).json({ error: "This booking has no BookingAmount recorded — nothing to resync against" });
+    const grandTotal = Number(booking.GrandTotal || booking.TotalValue || 0);
+    if (!grandTotal) return res.status(400).json({ error: "This booking has no total value set" });
+
+    const m1Res = await pool.request().input("bid", sql.Int, id)
+      .query("SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+    if (!m1Res.recordset.length) return res.status(400).json({ error: "No milestones found on this booking" });
+    const m1 = m1Res.recordset[0];
+    if (m1.Status === "Waived") return res.status(400).json({ error: "Milestone 1 has been waived — nothing to resync" });
+
+    if (Math.abs(Number(m1.AmountDue) - bookingAmount) < 1) {
+      return res.json({ success: true, changed: false, message: "Milestone 1 already matches the booking amount — nothing to do" });
+    }
+
+    const newAmountDue = Math.max(bookingAmount, Number(m1.AmountPaid || 0));
+    const newPercent = Math.round((newAmountDue / grandTotal) * 10000) / 100;
+    await pool.request()
+      .input("id", sql.Int, m1.Id)
+      .input("amt", sql.Decimal(18, 2), newAmountDue)
+      .input("pct", sql.Decimal(5, 2), newPercent)
+      .query(`
+        UPDATE dbo.CrmPaymentMilestone SET
+          AmountDue = @amt,
+          [Percent] = @pct,
+          Status = CASE WHEN Status = 'Paid' THEN Status WHEN AmountPaid >= @amt THEN 'Paid' ELSE Status END,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await recalculateRemainingMilestones(pool, id, { fixedMilestoneId: m1.Id });
+
+    res.json({ success: true, changed: true });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/resync-schedule error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

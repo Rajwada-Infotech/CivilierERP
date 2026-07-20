@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -17,8 +17,8 @@ import {
 } from "@/api/newPaymentApi";
 import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { getOABalanceByRef } from "@/api/onAccountApi";
-import { getContractOptions, type ContractOption } from "@/api/contractApi";
+import { getOABalanceByRef, getOAAdjustmentsForInvoice, type OAInvoiceAdjustment } from "@/api/onAccountApi";
+import { getPaymentReasonOptions } from "@/api/paymentReasonApi";
 import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -133,12 +133,6 @@ const Payment: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
-  const [contracts, setContracts] = useState<ContractOption[]>([]);
-  useEffect(() => {
-    getContractOptions()
-      .then(setContracts)
-      .catch(() => {});
-  }, []);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Re-issue (bounced cheque replacement) context
@@ -587,6 +581,9 @@ const Payment: React.FC = () => {
       totalInclGST: number;
     };
   } | null>(null);
+  const [oaAdjustmentsForInvoice, setOaAdjustmentsForInvoice] = useState<
+    OAInvoiceAdjustment[]
+  >([]);
   const [, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
@@ -683,6 +680,12 @@ const Payment: React.FC = () => {
     },
   );
 
+  const { data: paymentReasons = [] } = useQuery({
+    queryKey: ["payment-reason-options"],
+    queryFn: getPaymentReasonOptions,
+    staleTime: 5 * 60_000,
+  });
+
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
     queryFn: async () => {
@@ -711,10 +714,12 @@ const Payment: React.FC = () => {
   const handleContractSelect = (contract: any) => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
+    setLinkedGRNs([]);
     setForm((prev) => ({
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
+      contractId: contract.ContractId != null ? String(contract.ContractId) : "",
       company: contract.CompanyName || String(contract.CompanyId || ""),
       project: contract.ProjectName || String(contract.ProjectId || ""),
       projectSite: contract.ProjectName || String(contract.ProjectId || ""),
@@ -727,6 +732,7 @@ const Payment: React.FC = () => {
       ...prev,
       paymentName: "",
       expenseRef: "",
+      contractId: "",
       company: "",
       project: "",
       projectSite: "",
@@ -1066,10 +1072,101 @@ const Payment: React.FC = () => {
           }
         };
 
+        // Same as applyGrnBreakdown, but sums the breakdown across every
+        // linked GRN instead of fetching just one — the total for a
+        // combined invoice is the sum of all its source GRNs, not any
+        // single one of them.
+        const applyMultiGrnBreakdown = async (grnIds: number[]) => {
+          try {
+            const results = await Promise.all(
+              grnIds.map((id) =>
+                fetchWithAuth(`/api/grns/${id}/gst-breakdown`)
+                  .then((r) => (r.ok ? r.json() : null))
+                  .catch(() => null),
+              ),
+            );
+            const valid = results.filter(
+              (bd): bd is NonNullable<typeof bd> =>
+                !!bd && bd.totals?.totalInclGST > 0,
+            );
+            if (valid.length === 0) return;
+
+            const totals = valid.reduce(
+              (acc, bd) => ({
+                totalBase: acc.totalBase + (bd.totals.totalBase || 0),
+                totalCGST: acc.totalCGST + (bd.totals.totalCGST || 0),
+                totalSGST: acc.totalSGST + (bd.totals.totalSGST || 0),
+                totalGST: acc.totalGST + (bd.totals.totalGST || 0),
+                totalInclGST: acc.totalInclGST + (bd.totals.totalInclGST || 0),
+              }),
+              { totalBase: 0, totalCGST: 0, totalSGST: 0, totalGST: 0, totalInclGST: 0 },
+            );
+            const items = valid.flatMap((bd) => bd.items ?? []);
+            const combined = { items, totals };
+            setGrnGstBreakdown(combined);
+
+            const avgCGST =
+              totals.totalBase > 0 ? (totals.totalCGST / totals.totalBase) * 100 : 0;
+            const avgSGST =
+              totals.totalBase > 0 ? (totals.totalSGST / totals.totalBase) * 100 : 0;
+
+            let billingTerms: any[] = [];
+            try {
+              const raw = detail.EBillingTermsData ?? detail.EDiscountData ?? null;
+              if (raw) {
+                let parsed = JSON.parse(raw);
+                if (typeof parsed === "string") parsed = JSON.parse(parsed);
+                billingTerms = Array.isArray(parsed) ? parsed : [];
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+
+            const netPayable =
+              billingTerms.length > 0
+                ? computeGrnNetWithTerms(
+                    totals.totalInclGST,
+                    billingTerms,
+                    totals.totalBase,
+                  )
+                : Math.round(totals.totalInclGST * 100) / 100;
+
+            setForm((prev) => ({
+              ...prev,
+              amount: amountOverride != null ? amountOverride : netPayable,
+              baseAmount: Math.round(totals.totalBase * 100) / 100,
+              cgstRate: Math.round(avgCGST * 100) / 100,
+              sgstRate: Math.round(avgSGST * 100) / 100,
+              igstRate: 0,
+            }));
+          } catch {
+            /* non-fatal */
+          }
+        };
+
+        // Multi-GRN combined invoices (see MaterialExpenseBooking's
+        // "combine multiple GRNs" flow) have several source GRNs, not one —
+        // applyGrnBreakdown(detail.ESourceId) would only fetch the primary
+        // GRN's breakdown and silently overwrite the correct combined
+        // amount with just that one GRN's total. Sum every linked GRN's
+        // breakdown instead.
+        let linkedGrnIds: number[] = [];
+        try {
+          const raw = (detail as any).ELinkedGrnIds;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) linkedGrnIds = parsed;
+          }
+        } catch {
+          /* not multi-GRN */
+        }
+
         // If this expense is linked to a GRN directly, fetch the per-item GST breakdown.
         // For PO/WO_PO-linked bookings, find the GRN created against that PO and use its breakdown —
         // because the actual GST lives in the GRN items (PO stores rates but GRN stores received actuals).
-        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+        if (linkedGrnIds.length > 1) {
+          await applyMultiGrnBreakdown(linkedGrnIds);
+        } else if (detail.ESourceType === "GRN" && detail.ESourceId) {
           await applyGrnBreakdown(detail.ESourceId);
         } else if (
           (detail.ESourceType === "PO" || detail.ESourceType === "WO_PO") &&
@@ -1092,6 +1189,15 @@ const Payment: React.FC = () => {
         } else {
           setGrnGstBreakdown(null);
         }
+
+        // Show any On Account adjustments already applied to this invoice
+        // (see backend/utils/oaAdjustments.js) — e.g. "On A/C adjusted with
+        // ₹30,000 from Shiv Shakti Building Materials" — so picking the
+        // same invoice again for payment doesn't look like the adjustment
+        // never happened.
+        getOAAdjustmentsForInvoice(detail.EDocNo || "").then(
+          setOaAdjustmentsForInvoice,
+        );
 
         // When amountOverride is provided (Pay Remaining / partial invoice click),
         // use it directly — it was computed from live chain data.
@@ -1165,6 +1271,34 @@ const Payment: React.FC = () => {
       .catch(() => setOaBalance(0));
   }, [form.expenseRef]);
 
+  // Invoice outstanding before any on-account offset — same computation the
+  // "On Account Balance" card's preview uses, hoisted here so the actual
+  // Amount field (what gets paid via this bank/cheque transaction) can react
+  // to it too instead of only the informational preview text reacting.
+  const oaInvoiceRemaining = useMemo(() => {
+    if (!form.expenseRef) return 0;
+    const opt = expenseOptions.find(
+      (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+    );
+    const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+    const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
+    return resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
+  }, [form.expenseRef, form.expenseId, expenseOptions, grnGstBreakdown, formLiveRemaining, formKnownTotalPaid]);
+
+  const oaPreview = useMemo(
+    () => (oaBalance > 0.01 ? previewOAAdjustment(oaBalance, oaInvoiceRemaining) : null),
+    [oaBalance, oaInvoiceRemaining],
+  );
+
+  // Real-time: the actual bank/cheque Amount due is the invoice outstanding
+  // minus whatever on-account credit is being applied — recompute the moment
+  // the toggle changes (or the balance/invoice does), not just the preview text.
+  useEffect(() => {
+    if (!form.expenseRef || !oaPreview || oaPreview.applyAmount <= 0) return;
+    const target = useOnAccountBalance ? oaPreview.invoiceRemainingAfter : oaInvoiceRemaining;
+    setForm((prev) => (prev.amount === target ? prev : { ...prev, amount: target }));
+  }, [useOnAccountBalance, oaPreview, oaInvoiceRemaining, form.expenseRef]);
+
   // Fetch payment chain for the form view whenever an invoice is linked
   useEffect(() => {
     if (!form.expenseRef) {
@@ -1231,6 +1365,7 @@ const Payment: React.FC = () => {
     }));
     setLinkedGRNs([]);
     setGrnGstBreakdown(null);
+    setOaAdjustmentsForInvoice([]);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setSupplierBookingFilter("");
@@ -1879,44 +2014,78 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
-                    <Field
-                      label="Contract (optional)"
-                      hint="Record this as an on-account advance against a contract"
-                    >
-                      <div className="relative">
-                        <FileText
-                          size={13}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <select
-                          value={form.contractId}
-                          onChange={(e) => set("contractId", e.target.value)}
-                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">Not linked to a contract</option>
-                          {contracts.map((c) => (
-                            <option key={c.id} value={String(c.id)}>
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          size={11}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                      </div>
-                    </Field>
                   </div>
                 )}
 
-                {form.expenseRef && (
+                {form.expenseRef && selectedContract && (
+                  <AutoFillBanner
+                    docNo={selectedContract.DocNo || form.expenseRef}
+                    label="Linked to contract"
+                    onClear={clearContractLink}
+                  />
+                )}
+
+                {form.expenseRef && !selectedContract && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
                   />
                 )}
 
-                {form.expenseRef && (
+                {form.expenseRef && selectedContract && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="flex items-center gap-2">
+                        <Building2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.company}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contractor">
+                      <div className="flex items-center gap-2">
+                        <Users
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.ContactPerson || form.paidTo || ""}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contract Doc No">
+                      <div className="flex items-center gap-2">
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.DocNo || form.expenseRef}
+                          placeholder="Auto-fetched"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
+                {form.expenseRef && !selectedContract && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
                     <Field label="Company">
                       <div className="flex items-center gap-2">
@@ -2026,16 +2195,18 @@ const Payment: React.FC = () => {
               {form.expenseRef && (() => {
                 const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
                 if (!opt || opt.type === "emi") return null;
-                // Prefer the GRN item-level total (incl. GST) when breakdown has loaded;
-                // grn.TotalAmount stored in the DB is often the pre-tax base only.
-                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
-                const netAmt = grnTotal > 0 ? grnTotal : (opt.amount ?? 0);
+                // opt.amount is the stored ENetAmount (GST + billing terms
+                // already applied server-side). The GRN item-level breakdown
+                // total is GST-inclusive but never includes billing terms —
+                // preferring it here understated/overstated the invoice
+                // total for every billing-terms-adjusted booking.
+                const netAmt = opt.amount ?? 0;
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
                 // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
                 const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
                 const paid = livePaid ?? opt.totalPaid ?? 0;
                 const remaining = formLiveRemaining ?? (opt.remainingAmount != null
-                  ? (grnTotal > 0 ? Math.max(0, netAmt - (opt.totalPaid ?? 0)) : opt.remainingAmount)
+                  ? opt.remainingAmount
                   : Math.max(0, netAmt - paid));
                 const bStatus = deriveBillStatus(paid, remaining, netAmt);
                 return (
@@ -2106,47 +2277,75 @@ const Payment: React.FC = () => {
 
               {/* ── On Account Balance section ── */}
               {form.expenseRef && oaBalance > 0.01 && (() => {
-                const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
-                const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
-                const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
-                const invoiceRemaining = resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
-                const preview = previewOAAdjustment(oaBalance, invoiceRemaining);
-                if (preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
+                const preview = oaPreview;
+                if (!preview || preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
 
                 return (
-                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
-                        On Account Balance
-                      </p>
-                      <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.07] via-emerald-500/[0.03] to-transparent overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3.5 border-b border-emerald-500/10">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/15 shrink-0">
+                          <Wallet size={15} className="text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                            On Account Balance
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Available for this supplier</p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">
                         {formatINR(oaBalance)}
                       </span>
                     </div>
 
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useOnAccountBalance}
-                        onChange={(e) => setUseOnAccountBalance(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-border text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer"
-                      />
-                      <div className="text-xs">
-                        <p className="font-medium text-foreground">Use on-account balance for this payment</p>
+                    <button
+                      type="button"
+                      onClick={() => setUseOnAccountBalance(!useOnAccountBalance)}
+                      className="w-full flex items-start gap-3 px-4 py-3.5 text-left hover:bg-emerald-500/[0.04] transition-colors"
+                    >
+                      {/* Toggle switch */}
+                      <span
+                        className={`relative shrink-0 mt-0.5 w-9 h-5 rounded-full transition-colors ${useOnAccountBalance ? "bg-emerald-500" : "bg-muted-foreground/25"}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${useOnAccountBalance ? "translate-x-4" : "translate-x-0"}`}
+                        />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-foreground">
+                          Use on-account balance for this payment
+                        </p>
                         {useOnAccountBalance ? (
-                          <p className="text-muted-foreground mt-0.5">
-                            {formatINR(preview.applyAmount)} will be adjusted from balance
-                            {preview.isFullyCovered
-                              ? " — this fully settles the invoice."
-                              : `, leaving ${formatINR(preview.invoiceRemainingAfter)} still outstanding.`}
-                          </p>
+                          <div className="mt-2 rounded-lg border border-emerald-500/20 bg-background/60 divide-y divide-emerald-500/10 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                              <span className="text-muted-foreground">Adjusted from balance</span>
+                              <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                {formatINR(preview.applyAmount)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                              <span className="text-muted-foreground">
+                                {preview.isFullyCovered ? "Invoice status" : "Remaining outstanding"}
+                              </span>
+                              {preview.isFullyCovered ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                                  <CheckCircle2 size={11} /> Fully settled
+                                </span>
+                              ) : (
+                                <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                                  {formatINR(preview.invoiceRemainingAfter)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         ) : (
-                          <p className="text-muted-foreground mt-0.5">
+                          <p className="text-[11px] text-muted-foreground mt-1">
                             Balance stays untouched — {formatINR(oaBalance)} kept on his on-account.
                           </p>
                         )}
                       </div>
-                    </label>
+                    </button>
                   </div>
                 );
               })()}
@@ -2169,13 +2368,18 @@ const Payment: React.FC = () => {
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Payment Purpose" required>
-                    <input
-                      type="text"
+                    <select
                       value={form.paymentName}
                       onChange={(e) => set("paymentName", e.target.value)}
-                      placeholder="e.g. Advance payment for cement"
-                      className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60"
-                    />
+                      className="w-full appearance-none px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">— Select reason —</option>
+                      {paymentReasons.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Payment Date" required>
                     <div className="relative">
@@ -2192,6 +2396,17 @@ const Payment: React.FC = () => {
                     </div>
                   </Field>
                 </div>
+
+                {oaAdjustmentsForInvoice.length > 0 && (
+                  <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-1">
+                    {oaAdjustmentsForInvoice.map((adj, i) => (
+                      <p key={i} className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Wallet size={12} className="shrink-0" />
+                        On A/C adjusted with <span className="font-mono font-semibold">{formatINR(adj.amount)}</span> from <span className="font-semibold">{adj.partyName}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field

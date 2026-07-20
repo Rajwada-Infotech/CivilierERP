@@ -6,7 +6,7 @@ import * as spApi from "@/api/supplierPortalApi";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   AlertTriangle, Clock, CheckCircle2, Bell, ChevronRight,
-  RefreshCw, FileText, Zap,
+  RefreshCw, FileText, Zap, Package,
 } from "lucide-react";
 
 const fade = (delay = 0) => ({
@@ -31,7 +31,7 @@ const fmtRelative = (d?: string | null) => {
 
 type Alert = {
   id: string;
-  type: "overdue" | "due_soon" | "new" | "submitted";
+  type: "overdue" | "due_soon" | "new" | "submitted" | "goods_pending";
   title: string;
   subtitle: string;
   time?: string;
@@ -43,11 +43,19 @@ export default function SupplierNotifications() {
   const { theme } = useTheme();
   const isDark = theme !== "light";
 
-  const { data: quotations = [], isLoading, refetch, isFetching } = useQuery({
+  const { data: quotations = [], isLoading: loadingQ, refetch: refetchQ, isFetching: fetchingQ } = useQuery({
     queryKey: ["supplier-quotations"],
     queryFn: spApi.getSupplierQuotations,
     refetchInterval: 60_000,
   });
+  const { data: grnOrders = [], isLoading: loadingG, refetch: refetchG, isFetching: fetchingG } = useQuery({
+    queryKey: ["supplier-grns"],
+    queryFn: spApi.getSupplierGrnSummary,
+    refetchInterval: 60_000,
+  });
+  const isLoading = loadingQ || loadingG;
+  const isFetching = fetchingQ || fetchingG;
+  const refetch = () => { refetchQ(); refetchG(); };
 
   const now = Date.now();
   const THREE_DAYS = 3 * 86_400_000;
@@ -93,14 +101,28 @@ export default function SupplierNotifications() {
         type: "submitted",
         title: `${q.DocNo} submitted`,
         subtitle: `Your prices have been shared with the procurement team`,
-        time: q.InvitedAt,
+        time: q.SubmittedAt ?? q.InvitedAt,
         href: `/supplier/quotation/${q.QuotationId}`,
       });
     }
   });
 
-  // Sort: overdue first, then due_soon, then new, then submitted
-  const ORDER: Record<string, number> = { overdue: 0, due_soon: 1, new: 2, submitted: 3 };
+  grnOrders.forEach((o) => {
+    if (o.isFullyReceived) return;
+    const shortfall = o.items.filter((it) => it.remainingQty > 0);
+    alerts.push({
+      id: `goods-${o.purchaseOrderId}`,
+      type: "goods_pending",
+      title: `${o.docNo}: ${o.totalRemaining} item${o.totalRemaining !== 1 ? "s" : ""} still pending`,
+      subtitle: shortfall
+        .map((it) => `${it.remainingQty} ${it.uom ?? ""} ${it.itemName}`.trim())
+        .join(", "),
+      href: `/supplier?order=${o.purchaseOrderId}`,
+    });
+  });
+
+  // Sort: overdue first, then due_soon, then new, then goods_pending, then submitted
+  const ORDER: Record<string, number> = { overdue: 0, due_soon: 1, new: 2, goods_pending: 3, submitted: 4 };
   alerts.sort((a, b) => ORDER[a.type] - ORDER[b.type]);
 
   const META = {
@@ -135,6 +157,14 @@ export default function SupplierNotifications() {
       border: "border-emerald-200 dark:border-emerald-500/20",
       label: "Submitted",
       labelColor: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20",
+    },
+    goods_pending: {
+      icon: Package,
+      color: "text-amber-500",
+      bg: "bg-amber-50 dark:bg-amber-500/10",
+      border: "border-amber-200 dark:border-amber-500/20",
+      label: "Pending Delivery",
+      labelColor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20",
     },
   };
 

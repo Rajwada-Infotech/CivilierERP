@@ -43,7 +43,6 @@ import {
   CalendarDays,
   FileText,
   CreditCard,
-  ChevronDown,
   Loader2,
   User,
   Eye,
@@ -56,8 +55,6 @@ import {
   Building2,
   FolderKanban,
   SlidersHorizontal,
-  ClipboardList,
-  X,
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -91,7 +88,6 @@ import { API, apiFetch } from "./ExpenseBooking/apiFetch";
 import {
   PAGE_SIZE,
   INVOICE_TEMPLATE_COLUMNS,
-  selectCls,
   selectTriggerCls,
 } from "./ExpenseBooking/constants";
 import {
@@ -109,7 +105,9 @@ import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
-import { resolveGstRates, parseGRNItemsFromRaw } from "./ExpenseBooking/helpers";
+import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
+import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import type {
   CompanyOption,
   ProjectOption,
@@ -123,21 +121,24 @@ import type {
   SelectedDoc,
   GRNItem,
   BillingTermOption,
-  TCOption,
   CostCenterOption,
   DocSelectorProps,
 } from "./ExpenseBooking/types";
 
-const _mastersCache: {
-  po: POItem[] | null;
-  wo: WOItem[] | null;
-  woPO: POItem[] | null;
-  tod: TodItem[] | null;
-  grn: GRNItem[] | null;
-  workDone: WorkDoneItem[] | null;
-} = { po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null };
 export default function MaterialExpenseBooking() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  // Scoped to this component instance (not module-level) so a different
+  // user logging in within the same tab never sees a stale cache left
+  // behind by whoever used this page before them.
+  const mastersCacheRef = useRef<{
+    po: POItem[] | null;
+    wo: WOItem[] | null;
+    woPO: POItem[] | null;
+    tod: TodItem[] | null;
+    grn: GRNItem[] | null;
+    workDone: WorkDoneItem[] | null;
+  }>({ po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null });
+  const _mastersCache = mastersCacheRef.current;
   const [importing, setImporting] = useState(false);
   const rights = usePageRights("expense-booking");
   const navigate = useNavigate();
@@ -207,7 +208,6 @@ export default function MaterialExpenseBooking() {
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
-  const [loadingEmi, _setLoadingEmi] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
@@ -226,9 +226,6 @@ export default function MaterialExpenseBooking() {
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
-  const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
-  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
-  const [tcLoading, setTcLoading] = useState(true);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
 
@@ -307,7 +304,10 @@ export default function MaterialExpenseBooking() {
 
     _mastersCache.po = null;
     _mastersCache.woPO = null;
-    load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
+    // Only Service-type POs are eligible for a direct (no-GRN) invoice —
+    // goods always have to be received via a GRN first. Filtering happens
+    // server-side (see backend/services/invoiceLinking.js).
+    load("po", "/api/purchase-orders/service-eligible", setPoList, setLoadingPO);
     _mastersCache.workDone = null;
     setLoadingWorkDone(true);
     apiFetch("/api/engineering/work-done?status=Approved&limit=500")
@@ -442,15 +442,6 @@ export default function MaterialExpenseBooking() {
           err instanceof Error ? err.message : "Something went wrong",
         );
       });
-    apiFetch("/api/tc-master")
-      .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
-      .catch((err) => {
-        toast.error(
-          "Could not load Terms & Conditions: " +
-            (err instanceof Error ? err.message : "Something went wrong"),
-        );
-      })
-      .finally(() => setTcLoading(false));
     apiFetch("/api/cost-center/options")
       .then((list: CostCenterOption[]) =>
         setCostCenterOptions(Array.isArray(list) ? list : []),
@@ -479,6 +470,61 @@ export default function MaterialExpenseBooking() {
 
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
+
+    // Multi-GRN combined invoices already carry their full merged
+    // grnItems/amount (computed by aggregateGRNsForInvoice before this
+    // was called) — skip the single-GRN refetch below, which would
+    // otherwise overwrite the combined totals with just the primary GRN's.
+    // computeGrnBd() (the actual GRN price-breakdown math) reads gstBreakdown,
+    // not form.cgstRate/sgstRate, so build a synthetic breakdown from the
+    // merged items' own per-item GST amounts instead of resolveGstRates.
+    if (doc.kind === "GRN" && doc.linkedGrnIds && doc.linkedGrnIds.length > 1) {
+      const items = doc.grnItems ?? [];
+      const totalBase = items.reduce(
+        (s, i) => s + (Number(i.receivedQty) || 0) * (Number(i.rate) || 0),
+        0,
+      );
+      const totalGST = items.reduce(
+        (s, i) => s + (Number((i as any).gstAmount) || 0),
+        0,
+      );
+      setGstBreakdown({
+        items,
+        totals: {
+          totalBase,
+          totalCGST: totalGST / 2,
+          totalSGST: totalGST / 2,
+          totalGST,
+          totalInclGST: totalBase + totalGST,
+        },
+      } as any);
+
+      const mAutoCostCenter = resolveCostCenterForProject(doc.projectId);
+      setForm((prev) => {
+        const linkedSupplier = linkSupplierToInvoice(doc, {
+          supplier: prev.supplier,
+          supplierLHeadId: prev.supplierLHeadId ?? null,
+        });
+        return {
+          ...prev,
+          // GST rates — fetched from the linked PO's line items when
+          // available (applyMultiGRNDoc), else the merged GRN items'
+          // own rates. Stored on the booking so the list's CGST/SGST
+          // columns show something other than 0%.
+          cgstRate: doc.derivedCgstRate ?? prev.cgstRate,
+          sgstRate: doc.derivedSgstRate ?? prev.sgstRate,
+          bookingReference: doc.docNo,
+          bookingName: doc.nameLabel ?? prev.bookingName,
+          basicAmount: totalBase > 0 ? totalBase : (doc.amount ?? prev.basicAmount),
+          companyId: doc.companyId ?? prev.companyId,
+          projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
+          ...linkedSupplier,
+          costCenter: mAutoCostCenter || prev.costCenter,
+          materialCategory: "GRN",
+        };
+      });
+      return;
+    }
 
     if (doc.kind === "GRN") {
       setSelectedDoc({ ...doc, grnItems: [] });
@@ -594,11 +640,77 @@ export default function MaterialExpenseBooking() {
         workDoneRef:
           doc.kind === "WORK_DONE"
             ? doc.docNo
-            : doc.kind === "WO_PO" && (doc as any).sourcWDDocNo
+            : doc.kind === "WO_PO" && (doc as any).sourceWDDocNo
               ? (doc as any).sourceWDDocNo
               : undefined,
       };
     });
+  };
+
+  // ── Combine multiple GRNs (same PO) into one invoice — the second way to
+  // link GRNs, alongside picking one at a time. Uses grnList's already-
+  // loaded data (GRNItems/TotalAmount), no refetch needed.
+  const applyMultiGRNDoc = async (grns: GRNItem[]) => {
+    const agg = aggregateGRNsForInvoice(grns);
+    if (!agg.valid) {
+      toast.error(agg.error || "Can't combine these GRNs.");
+      return;
+    }
+    const ordered = [...grns].sort((a, b) => a.GRNID - b.GRNID);
+    const primary = ordered[0];
+
+    // GST rates for a combined invoice come from the linked PO's own line
+    // items (the authoritative HSN-driven rate) rather than back-derived
+    // from the GRNs' item totals — falls back to the GRN-derived rate
+    // (agg.cgstRate/sgstRate) if the PO can't be fetched.
+    let cgstRate = agg.cgstRate;
+    let sgstRate = agg.sgstRate;
+    if (agg.poId) {
+      try {
+        const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
+        const { cgstRate: poCgst, sgstRate: poSgst } = derivePOGst(
+          po?.POItems ?? [],
+        );
+        if (poCgst > 0 || poSgst > 0) {
+          cgstRate = poCgst;
+          sgstRate = poSgst;
+        }
+      } catch {
+        /* non-fatal: keep the GRN-derived fallback rate */
+      }
+    }
+
+    applyDoc({
+      kind: "GRN",
+      docNo: agg.grnDocNos.join(" + "),
+      sourceId: agg.grnIds[0],
+      vendorLabel: agg.supplierLabel ?? primary.SupplierName,
+      status: "Approved",
+      date: primary.GRNDate,
+      nameLabel: agg.poNo ? `Combined GRNs — PO ${agg.poNo}` : "Combined GRNs",
+      grnItems: agg.items,
+      amount: agg.totalAmount,
+      subtotal: agg.basicAmount,
+      derivedCgstRate: cgstRate,
+      derivedSgstRate: sgstRate,
+      projectId: primary.ProjectId,
+      companyId: primary.CompanyId,
+      gst:
+        typeof primary.ParentGST === "string"
+          ? (() => {
+              try {
+                return JSON.parse(primary.ParentGST!);
+              } catch {
+                return null;
+              }
+            })()
+          : (primary.ParentGST ?? null),
+      linkedGrnIds: agg.grnIds,
+      linkedGrnDocNos: agg.grnDocNos,
+    });
+    toast.success(
+      `Combined ${agg.grnIds.length} GRNs into one invoice — total ₹${agg.totalAmount.toLocaleString("en-IN")}`,
+    );
   };
 
   const clearDoc = () => {
@@ -702,27 +814,31 @@ export default function MaterialExpenseBooking() {
 
   const disableEmi = async () => {
     if (!editingId) return;
-    const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
-    });
-    const ref =
-      result?.lumpSum?.docNo ||
-      (result?.lumpSum ? `#${result.lumpSum.id}` : null);
-    if (ref) {
-      toast.success(
-        `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
-        { duration: 8000 },
-      );
-    } else {
-      toast.success(
-        "EMI disabled. Booking reset to Draft — please resubmit for approval.",
-        { duration: 6000 },
-      );
+    try {
+      const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
+      });
+      const ref =
+        result?.lumpSum?.docNo ||
+        (result?.lumpSum ? `#${result.lumpSum.id}` : null);
+      if (ref) {
+        toast.success(
+          `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success(
+          "EMI disabled. Booking reset to Draft — please resubmit for approval.",
+          { duration: 6000 },
+        );
+      }
+      cancelForm();
+      await fetchRecords(page);
+      fetchBookedSources();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to disable EMI for this booking.");
     }
-    cancelForm();
-    await fetchRecords(page);
-    fetchBookedSources();
   };
 
 
@@ -802,6 +918,11 @@ export default function MaterialExpenseBooking() {
       ),
       ESourceType: selectedDoc?.kind ?? null,
       ESourceId: selectedDoc?.sourceId ?? null,
+      // Present only when multiple GRNs (same PO) were combined into this
+      // one invoice — see ExpenseBooking/invoiceLinking.ts.
+      ...(selectedDoc?.linkedGrnIds && selectedDoc.linkedGrnIds.length > 1
+        ? { linkedGrnIds: selectedDoc.linkedGrnIds }
+        : {}),
     };
     saveInFlight.current = true;
     setSaving(true);
@@ -927,18 +1048,25 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
-  const editingIdNum = editingId ? parseInt(editingId, 10) : null;
-  const bookedPOIds = new Set<number>();
-  const bookedWorkDoneIds = new Set<number>();
-  const bookedWOPOIds = new Set<number>();
-  const bookedGRNIds = new Set<number>();
-  for (const r of bookedSourceIds) {
-    if (editingIdNum && r.Eid === editingIdNum) continue;
-    if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
-    if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
-    if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
-    if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
-  }
+  /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
+  const isDirect = !isGRN && !isPOorWO;
+  const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
+    useMemo(() => {
+      const editingIdNum = editingId ? parseInt(editingId, 10) : null;
+      const bookedPOIds = new Set<number>();
+      const bookedWorkDoneIds = new Set<number>();
+      const bookedWOPOIds = new Set<number>();
+      const bookedGRNIds = new Set<number>();
+
+      for (const r of bookedSourceIds) {
+        if (editingIdNum && r.Eid === editingIdNum) continue;
+        if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
+        if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
+        if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
+        if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
+      }
+      return { editingIdNum, bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds };
+    }, [bookedSourceIds, editingId]);
 
   const showDocSection = !!form.companyId;
 
@@ -956,7 +1084,8 @@ export default function MaterialExpenseBooking() {
       const text = await file.text();
       const rows = parseCsv(text);
       if (!rows.length) { toast.error("CSV is empty"); return; }
-      toast.success(`${rows.length} rows read — full import coming soon`);
+      toast.info("CSV import is not available yet. Please add records manually for now.");
+      return;
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
     } finally {
@@ -1261,6 +1390,7 @@ export default function MaterialExpenseBooking() {
                       onSelect={applyDoc}
                       onClear={clearDoc}
                       onTodSelected={setSelectedTod}
+                      onSelectMultiGRN={applyMultiGRNDoc}
                     />
 
                     {/* Source chain banner */}
@@ -1436,6 +1566,23 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
+              {/* ── Direct (Other Expenses) Items ──────────────────────── */}
+              {isDirect && selectedDoc?.kind === "TOD" && (
+                <DirectItemsTable
+                  items={form.directItems ?? []}
+                  readOnly={
+                    form.status === "Approved" ||
+                    form.status === "Pending" ||
+                    form.status === "Booked"
+                  }
+                  onChange={(items) => {
+                    setForm((prev) => ({ ...prev, directItems: items }));
+                  }}
+                  onTotalChange={(total) => {
+                    setForm((prev) => ({ ...prev, basicAmount: total }));
+                  }}
+                />
+              )}
 
               {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <AmountGstSection
@@ -1586,7 +1733,6 @@ export default function MaterialExpenseBooking() {
                     baseDocNo={form.bookingReference}
                     onChange={(emi) => set("emi", emi)}
                     liveSchedule={isEditing ? liveEmiSchedule : null}
-                    loadingEmi={loadingEmi}
                     onDisableEmi={isEditing ? disableEmi : undefined}
                   />
                 </div>
@@ -1603,126 +1749,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 6. Terms & Conditions ─────────────────────────────── */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <SectionHeader label="Terms & Conditions" />
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setTcDropdownOpen((o) => !o)}
-                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
-                    >
-                      <Plus size={13} />
-                      {form.tcId ? "Change T&C" : "Add T&C"}
-                    </button>
-                    {tcDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setTcDropdownOpen(false)}
-                        />
-                        <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
-                          <div className="px-3 py-2 border-b border-border">
-                            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              Select Terms &amp; Conditions
-                            </p>
-                          </div>
-                          <div className="max-h-56 overflow-y-auto divide-y divide-border">
-                            {tcLoading ? (
-                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
-                                Loading&hellip;
-                              </p>
-                            ) : tcOptions.length === 0 ? (
-                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
-                                No T&amp;C records found
-                              </p>
-                            ) : (
-                              tcOptions.map((tc) => {
-                                const isSelected = form.tcId === tc.Id;
-                                return (
-                                  <button
-                                    key={tc.Id}
-                                    type="button"
-                                    onClick={() => {
-                                      set("tcId", isSelected ? null : tc.Id);
-                                      set("tcName", isSelected ? "" : (tc.Name ?? ""));
-                                      set("tcText", isSelected ? "" : (tc.TermsAndCondition ?? ""));
-                                      setTcDropdownOpen(false);
-                                    }}
-                                    className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
-                                  >
-                                    <span
-                                      className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}
-                                    >
-                                      {isSelected && (
-                                        <Check size={10} className="text-primary-foreground" />
-                                      )}
-                                    </span>
-                                    <span className="flex-1 min-w-0">
-                                      <span className="block text-sm font-medium text-foreground truncate">
-                                        {tc.Name}
-                                      </span>
-                                      <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
-                                        {tc.TermsAndCondition}
-                                      </span>
-                                    </span>
-                                  </button>
-                                );
-                              })
-                            )}
-                          </div>
-                          <div className="px-3 py-2 border-t border-border">
-                            <button
-                              type="button"
-                              onClick={() => setTcDropdownOpen(false)}
-                              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
-                            >
-                              Done
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {form.tcId ? (
-                  <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
-                      1
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground">
-                        {form.tcName}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
-                        {form.tcText}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        set("tcId", null);
-                        set("tcName", "");
-                        set("tcText", "");
-                      }}
-                      className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-5 text-muted-foreground text-xs">
-                    <ClipboardList size={14} className="opacity-40" />
-                    <span>
-                      No terms selected — click <strong>Add T&amp;C</strong> to add from master
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* ── 7. Remarks ─────────────────────────────────────────── */}
+              {/* ── 6. Remarks ─────────────────────────────────────────── */}
               <div className="space-y-3">
                 <SectionHeader label="Remarks" />
                 <textarea
@@ -1862,7 +1889,10 @@ export default function MaterialExpenseBooking() {
 
                     {/* Records table */}
                     <div className="hidden sm:block">
-                      <div className="rounded-md">
+                      {/* Table still scrolls horizontally on narrow
+                          viewports — just without the visible scrollbar
+                          track taking up a row of its own. */}
+                      <div className="rounded-md [&>div]:[scrollbar-width:none] [&>div]:[-ms-overflow-style:none] [&>div::-webkit-scrollbar]:hidden">
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/30">
@@ -1878,11 +1908,8 @@ export default function MaterialExpenseBooking() {
                               <TableHead className="text-xs font-heading w-[10%] text-right">
                                 Basic Amt
                               </TableHead>
-                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                                CGST
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                                SGST
+                              <TableHead className="text-xs font-heading w-[9%] text-right hidden md:table-cell">
+                                GST
                               </TableHead>
                               <TableHead className="text-xs font-heading w-[12%] text-right">
                                 Net Amt
@@ -1975,8 +2002,19 @@ export default function MaterialExpenseBooking() {
                                       ) : null}
                                     </p>
                                   </TableCell>
-                                  <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
-                                    {rec.supplier || "—"}
+                                  <TableCell className="text-xs max-w-[120px] py-3 text-foreground/80">
+                                    <p className="truncate">{rec.supplier || "—"}</p>
+                                    {rec.supplierGstRegistered !== undefined ? (
+                                      <span
+                                        className={`inline-flex items-center mt-1 text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
+                                          rec.supplierGstRegistered
+                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                        }`}
+                                      >
+                                        {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
+                                      </span>
+                                    ) : null}
                                   </TableCell>
                                   <TableCell className="hidden xl:table-cell py-3">
                                     <p className="text-xs truncate max-w-[110px]">
@@ -2000,8 +2038,10 @@ export default function MaterialExpenseBooking() {
                                           rec.grnTotalAmount != null
                                         ) {
                                           const gstRate =
-                                            (rec.cgstRate ?? 0) +
-                                            (rec.sgstRate ?? 0);
+                                            (rec.igstRate ?? 0) > 0
+                                              ? rec.igstRate ?? 0
+                                              : (rec.cgstRate ?? 0) +
+                                                (rec.sgstRate ?? 0);
                                           const base =
                                             gstRate > 0
                                               ? rec.grnTotalAmount /
@@ -2014,14 +2054,15 @@ export default function MaterialExpenseBooking() {
                                     )}
                                   </TableCell>
                                   <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft"
-                                      ? "—"
-                                      : `${rec.cgstRate}%`}
-                                  </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft"
-                                      ? "—"
-                                      : `${rec.sgstRate}%`}
+                                    {rec.status === "Draft" ? (
+                                      "—"
+                                    ) : (rec.igstRate ?? 0) > 0 ? (
+                                      <span title="IGST (interstate)">
+                                        {rec.igstRate}%
+                                      </span>
+                                    ) : (
+                                      `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`
+                                    )}
                                   </TableCell>
                                   <TableCell className="font-mono text-xs font-semibold text-right py-3">
                                     {rec.status === "Draft" ? (

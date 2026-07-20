@@ -45,3 +45,24 @@ export function previewOAAdjustment(
     isFullBalanceUsed: balance > 0 && balanceAfter <= 0.005,
   };
 }
+
+/**
+ * Filters the invoice picker for the On A/C Adjustment dialog so the bill
+ * that originally generated this on-account credit (the one overpaid to
+ * create the excess) never shows up as something to adjust the same credit
+ * back onto — that invoice is where the credit came FROM, not a target for
+ * it. Every OTHER outstanding invoice for the same party remains selectable.
+ *
+ * @param invoices          the party's full invoice list from getInvoicesForParty
+ * @param originatingDocNo  the CreditEntry's InvoiceRef (nullable — some
+ *                          credits, e.g. a straight advance payment with no
+ *                          linked invoice, have none, in which case nothing
+ *                          is excluded)
+ */
+export function excludeOriginatingInvoice<T extends { docNo: string }>(
+  invoices: T[],
+  originatingDocNo: string | null | undefined,
+): T[] {
+  if (!originatingDocNo) return invoices;
+  return invoices.filter((inv) => inv.docNo !== originatingDocNo);
+}

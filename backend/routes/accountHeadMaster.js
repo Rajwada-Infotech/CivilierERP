@@ -49,6 +49,21 @@ async function getSundryCreditorsGroupId(pool) {
   return _sundryCreditorsGroupId;
 }
 
+// SUNDRY DEBTORS (ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY
+// DEBTORS, Code='SDS') — the receivable-side equivalent of
+// getSundryCreditorsGroupId above. Every Customer/Applicant (LHeadType='A')
+// created via CustomerMaster.tsx lands here automatically. Mirrors
+// crmLedger.js's getSundryDebtorsGroupId() (kept as a separate cache here
+// rather than importing that module, matching how this file already
+// duplicates the Creditors pattern instead of sharing it).
+let _sundryDebtorsGroupId;
+async function getSundryDebtorsGroupId(pool) {
+  if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'");
+  _sundryDebtorsGroupId = r.recordset[0]?.AGId ?? null;
+  return _sundryDebtorsGroupId;
+}
+
 // Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
 // bcrypt library and cost factor per the "no new encryption mechanism" spec,
 // not introducing a second constant that could silently drift out of sync.
@@ -366,13 +381,31 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
 
-    // Brokers always land in SUNDRY CREDITORS — never trust a client-supplied
-    // LBelongsTo for LHeadType='BR' (the frontend no longer even shows a
-    // picker for it), so a broker's ledger head is never invisible in Trial
-    // Balance the way a NULL-group head would be.
+    // Brokers, Suppliers, and Contractors all always land in SUNDRY
+    // CREDITORS — never trust a client-supplied LBelongsTo for these types
+    // (payable-side ledger heads), so one is never left invisible in Trial
+    // Balance the way a NULL-group head would be (see trialBalance.js's
+    // `WHERE ahm.LBelongsTo IS NOT NULL` filter).
+    //
+    // LHeadType='C' still collides with one remaining code path that reuses
+    // 'C' to mean "Customer" rather than "Contractor" —
+    // projectMaster.js's ensureProjectLedgerHeads (LHeadCode 'PRJ-<id>-CUST').
+    // crmLedger.js's ensureCrmCustomerLedgerHead used to collide here too but
+    // now correctly mints LHeadType='A' (see migration 224). Those rows
+    // belong in SUNDRY DEBTORS, not Creditors, so any code containing
+    // 'CUST' is excluded from this block.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR") {
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      // Customers/Applicants (CustomerMaster.tsx) always land in SUNDRY
+      // DEBTORS — same never-trust-the-client treatment as the Creditors
+      // block above, just the receivable side.
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
     // Both need to be resolved before the insert (email generation queries
@@ -787,11 +820,19 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
 
     const columnMeta = await getAccountHeadColumnMeta();
 
-    // Same auto-assignment as POST / — a broker's group is never
-    // client-editable, even on update.
+    // Same auto-assignment as POST / — a broker/supplier/contractor's group
+    // is never client-editable, even on update. Excludes any 'CUST'-coded
+    // head, which also uses LHeadType='C' but means "Customer" (Sundry
+    // Debtors), not Contractor — see POST / for detail.
+    const isCustomerHeadMislabelledC = (LHeadCode || "").includes("CUST");
     let effectiveLBelongsTo = LBelongsTo;
-    if (LHeadType === "BR") {
+    if (
+      !isCustomerHeadMislabelledC &&
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+    ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+    } else if (LHeadType === "A") {
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
     let newSupplierPasswordHash = null;

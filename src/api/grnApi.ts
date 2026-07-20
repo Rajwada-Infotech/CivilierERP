@@ -100,6 +100,7 @@ export interface GRNFormDataPayload {
   grnDate: string;
   supplierId: number;
   poId: number;
+  vehicleInOutId?: number | null;
   grnItems: GRNItemLine[];
   status: string;
   remarks?: string;

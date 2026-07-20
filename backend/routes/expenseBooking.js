@@ -20,6 +20,7 @@ const {
 } = require("../validation/expenseBookingSchemas");
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
+const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
@@ -488,36 +489,27 @@ router.get("/options", async (req, res) => {
             WHEN eb.ESourceType = 'WO'                                     THEN wo_supp_opt.LHeadId
             ELSE eb.LHeadId
           END                             AS supplierId,
-          -- Use live GRN total when available so the amount in the picker is accurate
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-            THEN grn.TotalAmount
-            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-          END AS amount,
+          -- Trust the stored net amount, which already has GST AND billing
+          -- terms applied at booking time (see applyBillingTermsToAmount).
+          -- grn.TotalAmount is GST-inclusive but NEVER includes billing
+          -- terms — preferring it here used to silently understate/overstate
+          -- the invoice amount for every billing-terms-adjusted booking.
+          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
           eb.EEmiPayment                  AS emiEnabled,
           ISNULL(eb.EBillStatus, 'Payment Due') AS billStatus,
           ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
-          ISNULL(eb.ERemainingAmount,
-            CASE
-              WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-              THEN grn.TotalAmount
-              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-            END
-          )                               AS remainingAmount,
+          ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)))
+                                          AS remainingAmount,
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
             CAST(CAST(
-              CASE
-                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-                THEN grn.TotalAmount
-                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-              END
+              ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
             AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
@@ -719,6 +711,18 @@ async function ebHasPaymentTermId(pool) {
   return _ebHasPaymentTermId;
 }
 
+// Cached flag for EDirectItemsData column (added in migration for direct-expense line items)
+let _ebHasDirectItemsData = null;
+async function ebHasDirectItemsData(pool) {
+  if (_ebHasDirectItemsData !== null) return _ebHasDirectItemsData;
+  const r = await pool.request()
+    .input("T", sql.NVarChar(128), "ExpenseBooking")
+    .input("C", sql.NVarChar(128), "EDirectItemsData")
+    .query("SELECT 1 AS f FROM sys.columns WHERE object_id=OBJECT_ID(@T) AND name=@C");
+  _ebHasDirectItemsData = !!r.recordset[0];
+  return _ebHasDirectItemsData;
+}
+
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -728,6 +732,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const offset = (page - 1) * limit;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
+    const hasDirectItemsCol = await ebHasDirectItemsData(pool);
     const ebSupplierList = expenseBookingSupplierSql("eb", "lsup");
 
     // Run status counts and paginated list in parallel
@@ -736,16 +741,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         SELECT
           eb.EStatus,
           COUNT(*) AS cnt,
-          SUM(
-            CASE
-              WHEN eb.ESourceType = 'GRN' AND grn_cnt.TotalAmount IS NOT NULL AND grn_cnt.TotalAmount > 0
-              THEN grn_cnt.TotalAmount
-              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-            END
-          ) AS totalAmount
+          SUM(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS totalAmount
         FROM dbo.ExpenseBooking eb
-        LEFT JOIN dbo.GoodsReceiptNotes grn_cnt
-          ON eb.ESourceType = 'GRN' AND grn_cnt.GRNID = TRY_CAST(eb.ESourceId AS INT)
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         GROUP BY eb.EStatus
@@ -769,6 +766,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
+          ${hasDirectItemsCol ? "eb.EDirectItemsData," : "CAST(NULL AS NVARCHAR(MAX)) AS EDirectItemsData,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
@@ -790,10 +788,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           -- the supplier itself.
           ${ebSupplierList.nameExpr} AS ESupplierName,
           ${ebSupplierList.idExpr} AS ESupplierId,
+          ${ebSupplierList.gstRegisteredExpr} AS ESupplierGstRegistered,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
           -- Frontend uses this as the authoritative Net Amt for GRN rows.
           CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
+            WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
             THEN grn_list.TotalAmount
             ELSE NULL
           END AS EGrnTotalAmount,
@@ -857,14 +856,33 @@ router.get(
       // and must keep the source document out of the picker. Only a hard
       // delete of the booking reopens the source.
       const result = await pool.request().query(`
-        SELECT ESourceType, ESourceId, Eid
+        SELECT ESourceType, ESourceId, Eid, ELinkedGrnIds
         FROM dbo.ExpenseBooking
         WHERE EStatus != 'Deleted'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
 
       `);
-      res.json(result.recordset);
+      // Multi-GRN combined invoices only store the primary GRN as
+      // ESourceId — expand ELinkedGrnIds so every GRN that went into the
+      // combine (not just the first) gets excluded from future pickers.
+      const rows = result.recordset.flatMap((r) => {
+        if (r.ESourceType !== "GRN" || !r.ELinkedGrnIds) return [r];
+        try {
+          const ids = JSON.parse(r.ELinkedGrnIds);
+          if (Array.isArray(ids) && ids.length > 0) {
+            return ids.map((id) => ({
+              ESourceType: "GRN",
+              ESourceId: id,
+              Eid: r.Eid,
+            }));
+          }
+        } catch {
+          /* fall through to the single row below */
+        }
+        return [r];
+      });
+      res.json(rows);
     } catch (err) {
       console.error("source-ids error:", err.message);
       res.status(500).json({ error: err.message });
@@ -1088,9 +1106,10 @@ router.get("/:id", async (req, res) => {
                -- last-resort fallback baked into the helper's expression.
                ${ebSupplierDet.nameExpr} AS ESupplierName,
                ${ebSupplierDet.idExpr} AS ESupplierId,
+               ${ebSupplierDet.gstRegisteredExpr} AS ESupplierGstRegistered,
                -- Live GRN total (incl. GST) so detail modal always shows current value
                CASE
-                 WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
+                 WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
                  THEN grn_det.TotalAmount
                  ELSE NULL
                END AS EGrnTotalAmount,
@@ -1120,10 +1139,19 @@ router.get("/:id", async (req, res) => {
     // not mutate them in-place (delete/assignment throws in strict contexts).
     const { _ESourceType, _ESourceId, ...row } = result.recordset[0];
 
+    // Multi-GRN combined invoices (see backend/services/invoiceLinking.js)
+    // have no single source GRN to recompute a "live" total from — ESourceId
+    // is only the primary/first of several linked GRNs. Recomputing from it
+    // alone previously overwrote the correct combined ENetAmount with just
+    // that one GRN's total, silently understating the invoice. For these,
+    // always trust the stored ENetAmount (already correctly summed across
+    // every linked GRN at booking time) and skip the live recompute below.
+    const isMultiGRN = !!row.ELinkedGrnIds;
+
     // If EGrnTotalAmount is NULL (grn.TotalAmount not populated for older records),
     // compute the authoritative total from buildGrnGstData (item qty x PO rate + GST).
     let EGrnTotalAmount = row.EGrnTotalAmount ?? null;
-    if (!EGrnTotalAmount && _ESourceType === "GRN" && _ESourceId) {
+    if (!EGrnTotalAmount && !isMultiGRN && _ESourceType === "GRN" && _ESourceId) {
       try {
         const grnId = parseInt(String(_ESourceId), 10);
         if (Number.isFinite(grnId) && grnId > 0) {
@@ -1141,6 +1169,7 @@ router.get("/:id", async (req, res) => {
     // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
     let liveENetAmount = row.ENetAmount;
     if (
+      !isMultiGRN &&
       _ESourceType === "GRN" &&
       EGrnTotalAmount != null &&
       parseFloat(EGrnTotalAmount) > 0
@@ -1314,6 +1343,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   }
 
   const hasPayTermCol = await ebHasPaymentTermId(pool);
+  const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -1607,6 +1637,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+    if (hasDirectItemsCol) insertReq.input("EDirectItemsData", sql.NVarChar(sql.MAX), null);
 
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
@@ -1622,6 +1653,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
           ECostCenter, EGLAccount, EWorkDoneRef
           ${hasPayTermCol ? ", PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -1635,6 +1667,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
           @ECostCenter, @EGLAccount, @EWorkDoneRef
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1693,6 +1726,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EFinYear,
     ESourceType,
     ESourceId,
+    // Multiple GRNs raised against the same PO, combined into one
+    // total-amount invoice — see backend/services/invoiceLinking.js.
+    // Undefined/empty/single-element means "book against ESourceId as
+    // usual", exactly like before this existed.
+    linkedGrnIds,
     EBillingTermId,
     EBillingTermName,
     EBillingTermsData,
@@ -1706,6 +1744,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EGLAccount,
     EWorkDoneRef,
     PaymentTermId,
+    EDirectItemsData,
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
     LHeadId,
@@ -1732,6 +1771,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
   const pool = getPool();
   const hasPayTermCol = await ebHasPaymentTermId(pool);
+  const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -1740,11 +1780,34 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   let bookingCgstRate;
   let bookingSgstRate;
   let bookingIgstRate;
+  let resolvedSourceId = ESourceId;
+  const grnIdsToLink = Array.isArray(linkedGrnIds)
+    ? linkedGrnIds
+        .map((id) => parseInt(id, 10))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    : [];
 
   try {
     await transaction.begin();
 
-    if (ESourceType === "GRN") {
+    if (ESourceType === "GRN" && grnIdsToLink.length > 1) {
+      // ── Multi-GRN combined invoice ──────────────────────────────────────
+      // Several GRNs raised against the same PO, booked as one invoice.
+      // Validation (same PO, all Approved, none already booked) lives in
+      // computeMultiGRNInvoice; amounts still come from the client (which
+      // computed them from the same aggregate via the frontend's sibling
+      // logic), matching how PO/WORK_DONE-sourced bookings already trust
+      // EAmountBody — bookingAmount stays unset here so it falls through
+      // to buildDirectExpenseBooking below.
+      let agg;
+      try {
+        agg = await computeMultiGRNInvoice(transaction, grnIdsToLink);
+      } catch (err) {
+        await transaction.rollback();
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+      resolvedSourceId = agg.primaryGrnId;
+    } else if (ESourceType === "GRN") {
       const grnId = parseInt(ESourceId, 10);
       if (!Number.isFinite(grnId) || grnId <= 0) {
         await transaction.rollback();
@@ -2120,7 +2183,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
-      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
+      .input("ESourceId", sql.Int, resolvedSourceId ? parseInt(resolvedSourceId, 10) : null)
       .input(
         "EBillingTermId",
         sql.Int,
@@ -2154,6 +2217,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
+    if (hasDirectItemsCol) insertReq.input("EDirectItemsData", sql.NVarChar(sql.MAX), EDirectItemsData || null);
 
     const insertResult = await insertReq.query(`
         INSERT INTO dbo.ExpenseBooking (
@@ -2169,6 +2233,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
           ECostCenter, EGLAccount, EWorkDoneRef, ContractId, LHeadId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EIgstRate, @EPaymentType, @EPartialAmount, @EDiscountData, @EDocNo,
@@ -2182,6 +2247,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
           @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId, @LHeadId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
+          ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -2197,6 +2263,16 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           SET RecordId = @RecordId
           WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
         `);
+    }
+
+    if (grnIdsToLink.length > 1 && newExpenseId) {
+      await transaction
+        .request()
+        .input("EId", sql.Int, parseInt(newExpenseId, 10))
+        .input("ELinkedGrnIds", sql.NVarChar(sql.MAX), JSON.stringify(grnIdsToLink))
+        .query(
+          "UPDATE dbo.ExpenseBooking SET ELinkedGrnIds = @ELinkedGrnIds WHERE EId = @EId",
+        );
     }
 
     await transaction.commit();
@@ -2736,6 +2812,7 @@ router.put(
       EGLAccount,
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
+      EDirectItemsData: EDirectItemsDataPut,
       LHeadId,
     } = req.body;
 
@@ -2759,6 +2836,8 @@ router.put(
     try {
       const pool = getPool();
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
+      const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
+
       // Default to a direct/manual booking's own amounts + supplier link;
       // the GRN branch below overrides amounts/GST (never IGST — GRN
       // bookings are always CGST/SGST) with the live GRN totals instead.
@@ -2899,6 +2978,8 @@ router.put(
         .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
+      if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
+
 
       const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET
@@ -2919,6 +3000,7 @@ router.put(
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef,
           LHeadId=@LHeadId
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
+          ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
         WHERE Eid = @Eid
       `);
 

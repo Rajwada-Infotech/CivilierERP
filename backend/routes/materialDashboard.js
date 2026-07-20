@@ -167,12 +167,20 @@ router.get("/", async (req, res) => {
       `),
 
       // ── Recent Expenses (last 6) ─────────────────────────────────────
+      // ESourceType='TOD' identifies "Other Expenses" (direct, no linked
+      // PO/GRN/WO) — EDocumentType is unreliable for this (sometimes holds
+      // a doc-type code like "INV-2026-00001" instead of the source kind).
+      // LHeadId is the supplier/contractor tagged directly on a TOD booking
+      // (no source document to derive it from otherwise).
       safeQuery(`
         SELECT TOP 6
-          Eid, EDocNo, EDocDate, EAmount, EStatus,
-          EProjectName, EDocumentType, ECreatedAt
-        FROM dbo.ExpenseBooking
-        ORDER BY Eid DESC
+          eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.EStatus,
+          eb.EProjectName, eb.EDocumentType, eb.ESourceType, eb.ECreatedAt,
+          ah.LHeadName AS SupplierName
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = eb.LHeadId
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'
+        ORDER BY eb.Eid DESC
       `),
 
       // ── PO Status Breakdown ──────────────────────────────────────────
