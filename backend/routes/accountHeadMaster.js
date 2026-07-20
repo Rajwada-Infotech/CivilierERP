@@ -990,7 +990,8 @@ router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, 
       const row = await pool.request().input("id", sql.Int, id)
         .query("SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
       if (!row.recordset.length || row.recordset[0].LHeadType !== "BR") {
-        fs.unlink(req.file.path, () => {});
+        const resolved = path.resolve(req.file.path);
+        if (resolved.startsWith(path.resolve(BROKER_CERT_DIR) + path.sep)) fs.unlink(resolved, () => {});
         return res.status(404).json({ error: "Broker not found" });
       }
       await pool.request()
