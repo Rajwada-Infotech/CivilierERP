@@ -715,15 +715,49 @@ const Payment: React.FC = () => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
     setLinkedGRNs([]);
+    // Resolve Company/Project against the actual dropdown option lists
+    // rather than trusting the contract's own denormalized name strings —
+    // the Company/Project <select>s match by exact label string, and a
+    // casing/whitespace difference between dbo.enterprise (source of these
+    // dropdowns) and the contract's own joined name silently left the
+    // select unmatched (shows "Select company…" despite a value being set).
+    // Matching by id first and reading the label back from the option list
+    // guarantees it's a string the select actually has.
+    const companyOpt = companyOptions.find((c) => c.id === contract.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === contract.ProjectId);
+    const companyLabel = companyOpt?.label || contract.CompanyName || String(contract.CompanyId || "");
+    const projectLabel = projectOpt?.label || contract.ProjectName || String(contract.ProjectId || "");
     setForm((prev) => ({
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
+      // Clear any stale invoice-side link — picking a contract supersedes
+      // it. Previously this cleanup happened via a *separate* onChange("")
+      // call fired right after this handler by the picker, which raced
+      // with this setForm and usually won, wiping out the company/project/
+      // party fields being set below. Doing it in the same update instead.
+      expenseId: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
       contractId: contract.ContractId != null ? String(contract.ContractId) : "",
-      company: contract.CompanyName || String(contract.CompanyId || ""),
-      project: contract.ProjectName || String(contract.ProjectId || ""),
-      projectSite: contract.ProjectName || String(contract.ProjectId || ""),
-      amount: contract.ContractAmount ?? prev.amount,
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      // Payee/Party was never set here before — the field stayed on
+      // whatever (or nothing) was previously selected.
+      partyId: contract.ContactPartyId ?? prev.partyId,
+      paidTo: contract.ContactPerson || prev.paidTo,
+      // Default to what's still outstanding on the contract, not its full
+      // value — most payments against an already-active contract are
+      // another advance/installment, not the whole thing at once. Falls
+      // back to the full contract amount only for a brand-new contract
+      // with nothing paid yet (PendingAmount === ContractAmount then
+      // anyway, so this is really just a null/undefined guard).
+      amount:
+        contract.PendingAmount != null
+          ? Math.max(Number(contract.PendingAmount), 0)
+          : (contract.ContractAmount ?? prev.amount),
     }));
   };
   const clearContractLink = () => {
@@ -736,6 +770,8 @@ const Payment: React.FC = () => {
       company: "",
       project: "",
       projectSite: "",
+      partyId: null,
+      paidTo: "",
       amount: null,
     }));
   };
@@ -2415,9 +2451,11 @@ const Payment: React.FC = () => {
                     hint={
                       grnGstBreakdown
                         ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
-                        : form.expenseRef
-                          ? "Net amount from expense booking — editable if needed."
-                          : undefined
+                        : selectedContract
+                          ? "Defaults to the contract's pending balance — lower this for a partial advance."
+                          : form.expenseRef
+                            ? "Net amount from expense booking — editable if needed."
+                            : undefined
                     }
                   >
                     <div className="relative">
@@ -2958,9 +2996,16 @@ const Payment: React.FC = () => {
                     <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                       <History size={9} /> Payment Chain
                     </p>
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      {selectedContract && selectedContract.PendingAmount != null && (
+                        <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          Pending {formatINR(Math.max(selectedContract.PendingAmount, 0))}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
                   </div>
                   <div className="px-4 py-3 space-y-2">
                     {loadingFormChain ? (
