@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -678,6 +678,9 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Always opens on an existing logged call, so always opens locked.
+  const [locked, setLocked] = useState(true);
+  const inputCls = `w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
 
@@ -700,6 +703,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Call updated");
+      setLocked(true);
       onSaved();
       onClose();
     } catch (e: any) {
@@ -730,10 +734,23 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <Phone size={16} className="text-primary" /> Edit Welcome Call
+          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+            <span className="flex items-center gap-2">
+              <Phone size={16} className="text-primary" /> Edit Welcome Call
+            </span>
+            {locked && (
+              <button onClick={() => setLocked(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
           </DialogTitle>
         </DialogHeader>
+        {locked && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
+            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+          </div>
+        )}
 
         {/* ── Customer / booking context ── */}
         <div className="rounded-xl border border-border bg-muted/20 p-3.5 flex items-start justify-between gap-3">
@@ -766,23 +783,23 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-                <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                <select value={form.CalledBy} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                  className={inputCls}>
                   <option value="">—</option>
                   {users.map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Call Date/Time</label>
-                <input type="datetime-local" value={form.CallDate} onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                <input type="datetime-local" value={form.CallDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
+                  className={inputCls} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
-                <select value={form.Outcome} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
-                  className={`w-full text-sm border rounded-lg px-2.5 py-2 font-medium ${selectedOutcomeStyle || "bg-background border-border"}`}>
+                <select value={form.Outcome} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
+                  className={`w-full text-sm border rounded-lg px-2.5 py-2 font-medium ${selectedOutcomeStyle || "bg-background border-border"} ${locked ? "opacity-70 cursor-not-allowed" : ""}`}>
                   <option value="">—</option>
                   {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -790,8 +807,8 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Duration</label>
                 <div className="relative">
-                  <input type="number" min={0} value={form.DurationSeconds} onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background pr-16" placeholder="seconds" />
+                  <input type="number" min={0} value={form.DurationSeconds} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
+                    className={`${inputCls} pr-16`} placeholder="seconds" />
                   {form.DurationSeconds && Number(form.DurationSeconds) > 0 && (
                     <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
                       {Math.floor(Number(form.DurationSeconds) / 60)}m {Number(form.DurationSeconds) % 60}s
@@ -808,13 +825,13 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Next Call Date</label>
-                <input type="date" value={form.NextCallDate} onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                <input type="date" value={form.NextCallDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
+                  className={inputCls} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Preferred Agreement Date</label>
-                <input type="date" value={form.PreferredAgreementDate} onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                <input type="date" value={form.PreferredAgreementDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
+                  className={inputCls} />
               </div>
             </div>
           </div>
@@ -822,9 +839,9 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
           {/* ── Notes ── */}
           <div className="rounded-xl border border-border p-4 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><FileCheck size={14} /> Notes</h3>
-            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+            <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
               rows={3} placeholder="What was discussed on this call..."
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" />
+              className={`${inputCls} resize-none`} />
           </div>
 
           {/* ── Custom fields ── */}
@@ -833,20 +850,20 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
             {customFields.length === 0 && <p className="text-xs text-muted-foreground">No custom fields added for this call.</p>}
             {customFields.map((f, i) => (
               <div key={i} className="flex items-center gap-2">
-                <input placeholder="Field name" value={f.key}
+                <input placeholder="Field name" value={f.key} readOnly={locked}
                   onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
-                  className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                <input placeholder="Value" value={f.value}
+                  className={`flex-1 ${inputCls}`} />
+                <input placeholder="Value" value={f.value} readOnly={locked}
                   onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                  className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
-                  className="text-muted-foreground hover:text-red-600 shrink-0">
+                  className={`flex-1 ${inputCls}`} />
+                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))} disabled={locked}
+                  className="text-muted-foreground hover:text-red-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
                   <X size={14} />
                 </button>
               </div>
             ))}
-            <button onClick={() => setCustomFields((cf) => [...cf, { key: "", value: "" }])}
-              className="text-xs text-primary hover:underline font-medium">+ Add field</button>
+            <button onClick={() => setCustomFields((cf) => [...cf, { key: "", value: "" }])} disabled={locked}
+              className="text-xs text-primary hover:underline font-medium disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add field</button>
           </div>
         </div>
 
@@ -856,11 +873,17 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
             {deleting ? "Removing..." : "Delete Call"}
           </button>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
+            {locked ? (
+              <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
+              <>
+                <button onClick={() => { setLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </DialogContent>

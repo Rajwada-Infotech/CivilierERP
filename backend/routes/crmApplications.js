@@ -77,7 +77,7 @@ const APP_SELECT = `
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
   LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
-    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, BookingDate
+    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
     ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected') THEN 0 ELSE 1 END, CreatedAt DESC
