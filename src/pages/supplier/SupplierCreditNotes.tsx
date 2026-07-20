@@ -34,9 +34,13 @@ export default function SupplierCreditNotes() {
     );
   }, [notes, search]);
 
-  const totalAmount = notes
-    .filter((n) => n.Status !== "Cancelled")
-    .reduce((s, n) => s + Number(n.Amount || 0), 0);
+  const totalAmount = useMemo(
+    () =>
+      notes
+        .filter((n) => n.Status !== "Cancelled")
+        .reduce((s, n) => s + Number(n.Amount || 0), 0),
+    [notes],
+  );
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-background">
@@ -105,10 +109,15 @@ export default function SupplierCreditNotes() {
           <div className="flex items-center justify-center py-16 text-muted-foreground text-sm gap-2">
             <RefreshCw className="w-4 h-4 animate-spin" /> Loading…
           </div>
-        ) : filtered.length === 0 ? (
+        ) : notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
             <ReceiptText className="w-8 h-8 opacity-30" />
             <p className="text-sm">No credit notes yet</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+            <Search className="w-8 h-8 opacity-30" />
+            <p className="text-sm">No results match your search</p>
           </div>
         ) : (
           <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
