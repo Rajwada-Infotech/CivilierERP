@@ -511,7 +511,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
-    if (PExpenseRef) {
+    // Skipped for Contract-linked payments — the frontend's Contract picker
+    // (Payment.tsx's handleContractSelect) reuses this same PExpenseRef field
+    // to hold the Contract's own DocNo (purely so existing "is a source
+    // linked?" UI gating keeps working), not a real ExpenseBooking reference,
+    // so looking it up against dbo.ExpenseBooking would always 404.
+    if (PExpenseRef && !ContractId) {
       const isEmiRef = /-EMI-\d+$/.test(PExpenseRef);
       let ebCheck;
       if (isEmiRef) {
@@ -643,10 +648,13 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // A Pending payment has not moved funds yet, so recording OA at creation would
     // create balances that may never materialise (if the payment is rejected).
 
-    // Contract Master: record as an advance ONLY when this payment isn't
-    // already tied to an Expense Booking — a payment against a real
-    // expense booking settles that document directly.
-    if (ContractId && !PExpenseRef) {
+    // Contract Master: any payment tagged with a ContractId records an
+    // advance against that contract. PExpenseRef isn't a useful signal to
+    // gate on here — the frontend's Contract picker sets it to the
+    // Contract's own DocNo (see the validation skip above), so it's always
+    // truthy whenever ContractId is; ContractId alone is what actually
+    // means "this payment is against a contract, not a real invoice".
+    if (ContractId) {
       const { recordAdvance } = require("../services/contractLedger");
       await recordAdvance(pool, {
         contractId: parseInt(ContractId, 10),

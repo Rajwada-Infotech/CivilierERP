@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   Plus, X, Check, FileText, Upload, Eye,
   RefreshCw, Search, Trash2, ArrowLeft, ChevronDown,
+  Wallet, ArrowDownCircle, ArrowUpCircle, AlertTriangle,
 } from "lucide-react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
@@ -12,6 +13,7 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import {
   getContracts, getContract,
   createContract, updateContract, deleteContract,
+  getContractLedger,
   type ContractListItem, type ContractDetail, type Attachment,
 } from "@/api/contractApi";
 import {
@@ -185,6 +187,16 @@ export default function Contract() {
   const { data: tcRaw = [] } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
+  });
+
+  // Advance/adjustment history + live balance summary for the contract
+  // currently open in detail view — dbo.ContractLedger via contractLedger.js,
+  // the single source of truth for a contract's running balance.
+  const { data: contractLedgerData, isLoading: contractLedgerLoading } = useQuery({
+    queryKey: ["contract-ledger", viewingContract?.ContractId],
+    queryFn: () => getContractLedger(viewingContract!.ContractId),
+    enabled: viewMode === "detail" && !!viewingContract?.ContractId,
+    staleTime: 30_000,
   });
 
 
@@ -429,7 +441,7 @@ export default function Contract() {
     {
       id: "nature",
       accessorKey: "NatureOfContract",
-      header: "Nature",
+      header: "Type",
       size: 160,
       meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }: any) => (
@@ -825,7 +837,7 @@ export default function Contract() {
                 )}
 
                 <div>
-                  <label className={labelCls}>Reason for Contract</label>
+                  <label className={labelCls}>Purpose / Description</label>
                   <textarea
                     rows={3}
                     value={form.reason}
@@ -837,7 +849,7 @@ export default function Contract() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className={labelCls}>Nature of Contract</label>
+                    <label className={labelCls}>Contract Type</label>
                     <input
                       value={form.natureOfContract}
                       onChange={(e) => setField("natureOfContract", e.target.value)}
@@ -1060,7 +1072,7 @@ export default function Contract() {
                     <p className="text-sm">{c.ContactPerson || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Nature of Contract</p>
+                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Type</p>
                     <p className="text-sm">{c.NatureOfContract || "—"}</p>
                   </div>
                   <div>
@@ -1079,7 +1091,7 @@ export default function Contract() {
                 </div>
                 {c.Reason && (
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Reason</p>
+                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Purpose / Description</p>
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{c.Reason}</p>
                   </div>
                 )}
@@ -1088,6 +1100,106 @@ export default function Contract() {
                     <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{c.Remarks}</p>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── Contract Ledger — advances paid/received against this contract,
+                automatic adjustments applied when an invoice/expense booking is
+                raised against it, and the live unallocated balance. Same party
+                (the supplier/contractor this contract is tagged to) that the
+                amounts post to in the General Ledger / Trial Balance — no
+                separate account group needed, this is just the transparency
+                view for that same money. ── */}
+            <Card className="border-border shadow-sm">
+              <CardHeader className="pb-3 border-b border-border">
+                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                  <Wallet size={14} className="text-violet-500" />
+                  Contract Ledger
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                {contractLedgerLoading ? (
+                  <div className="flex items-center justify-center py-8 text-muted-foreground text-sm gap-2">
+                    <RefreshCw size={14} className="animate-spin" /> Loading ledger…
+                  </div>
+                ) : contractLedgerData ? (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        ["Total Advance", fmtAmt(contractLedgerData.summary.TotalAdvance), "text-emerald-600 dark:text-emerald-400"],
+                        ["Allocated", fmtAmt(contractLedgerData.summary.TotalAllocated), "text-amber-600 dark:text-amber-400"],
+                        ["Unallocated Balance", fmtAmt(contractLedgerData.summary.UnallocatedBalance), "text-violet-600 dark:text-violet-400"],
+                        ["Documented (Invoiced/Booked)", fmtAmt(contractLedgerData.summary.TotalDocumented), "text-foreground"],
+                      ].map(([label, value, cls]) => (
+                        <div key={String(label)} className="rounded-xl border border-border bg-muted/10 px-3 py-2.5">
+                          <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">{label}</p>
+                          <p className={`text-sm font-semibold ${cls}`}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {contractLedgerData.summary.OverBilled && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs">
+                        <AlertTriangle size={13} className="shrink-0" />
+                        Total documented against this contract exceeds its contract value — legitimate for change orders, but worth a look.
+                      </div>
+                    )}
+
+                    {contractLedgerData.ledger.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No advances or adjustments recorded yet — pay this contractor/supplier with the contract selected on the Payment page to start one.
+                      </p>
+                    ) : (
+                      <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/40">
+                            <tr>
+                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Type</th>
+                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
+                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Remarks</th>
+                              <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {contractLedgerData.ledger.map((entry) => (
+                              <tr key={entry.LedgerId} className="hover:bg-muted/20 transition-colors">
+                                <td className="px-3 py-2 text-xs text-muted-foreground font-mono whitespace-nowrap">
+                                  {fmtDate(entry.CreatedAt)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                                    entry.Amount >= 0
+                                      ? "bg-emerald-500/10 text-emerald-600"
+                                      : "bg-amber-500/10 text-amber-600"
+                                  }`}>
+                                    {entry.Amount >= 0
+                                      ? <ArrowDownCircle size={11} />
+                                      : <ArrowUpCircle size={11} />}
+                                    {entry.TxnType}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-xs font-mono text-foreground">
+                                  {entry.SourceDocNo || `${entry.SourceType} #${entry.SourceId}`}
+                                </td>
+                                <td className="px-3 py-2 text-xs text-muted-foreground max-w-[240px] truncate">
+                                  {entry.Remarks || "—"}
+                                </td>
+                                <td className={`px-3 py-2 text-right font-mono font-semibold ${
+                                  entry.Amount >= 0 ? "text-emerald-600" : "text-amber-600"
+                                }`}>
+                                  {entry.Amount >= 0 ? "+" : "−"}{fmtAmt(Math.abs(entry.Amount))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">Ledger unavailable.</p>
                 )}
               </CardContent>
             </Card>

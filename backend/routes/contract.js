@@ -39,6 +39,7 @@ router.get("/", authenticateToken, async (req, res) => {
         pr.name          AS ProjectName,
         c.FinYear,
         c.ContactPerson,
+        c.ContactPartyId,
         c.Reason,
         c.NatureOfContract,
         c.ContractAmount,
