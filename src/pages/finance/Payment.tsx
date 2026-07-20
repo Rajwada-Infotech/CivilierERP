@@ -731,6 +731,15 @@ const Payment: React.FC = () => {
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
+      // Clear any stale invoice-side link — picking a contract supersedes
+      // it. Previously this cleanup happened via a *separate* onChange("")
+      // call fired right after this handler by the picker, which raced
+      // with this setForm and usually won, wiping out the company/project/
+      // party fields being set below. Doing it in the same update instead.
+      expenseId: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
       contractId: contract.ContractId != null ? String(contract.ContractId) : "",
       company: companyLabel,
       project: projectLabel,
