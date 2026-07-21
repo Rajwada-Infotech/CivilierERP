@@ -634,6 +634,7 @@ export function DocSelectorPanel({
                       subtotal,
                       cgstRate: dCgst,
                       sgstRate: dSgst,
+                      igstRate: dIgst,
                     } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "WO_PO",
@@ -647,6 +648,7 @@ export function DocSelectorPanel({
                       subtotal: subtotal > 0 ? subtotal : undefined,
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
+                      derivedIgstRate: dIgst,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,
@@ -908,6 +910,7 @@ export function DocSelectorPanel({
                       subtotal,
                       cgstRate: dCgst,
                       sgstRate: dSgst,
+                      igstRate: dIgst,
                     } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "PO",
@@ -921,6 +924,7 @@ export function DocSelectorPanel({
                       subtotal: subtotal > 0 ? subtotal : undefined,
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
+                      derivedIgstRate: dIgst,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,

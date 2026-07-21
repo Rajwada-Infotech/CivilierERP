@@ -454,10 +454,23 @@ function isIdField(key: string): boolean {
 // Serialized JSON blobs (billing terms, EMI config, discount config, ...)
 // read as noise dumped raw — hide any string value that's actually JSON
 // rather than trying to name every such column across every module.
+// Some columns (EMI data) come back double-encoded — a JSON string whose
+// own contents are themselves JSON, e.g. "{\"enabled\":false,...}" — which
+// starts with a literal `"` rather than `{`, so a plain prefix/suffix check
+// misses it and the escaped raw text leaks into the preview. Try parsing
+// instead: valid JSON that parses to an object/array is a blob regardless
+// of how many times it was encoded.
 function isJsonBlob(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const s = value.trim();
-  return (s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"));
+  if (!s) return false;
+  try {
+    let parsed = JSON.parse(s);
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    return typeof parsed === "object" && parsed !== null;
+  } catch {
+    return false;
+  }
 }
 
 function labelizeKey(key: string): string {
