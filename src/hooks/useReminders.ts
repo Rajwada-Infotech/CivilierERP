@@ -84,10 +84,13 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
     return list
       .filter((r) => {
         const status = (r.Status || "").toLowerCase();
-        return ACTIONABLE.has(status) && r.RequiredByDate;
+        // RequiredByDate is an optional field most requesters never fill
+        // in — falling back to RequestDate (always set) is what actually
+        // keeps MRs from being dropped out of the bell entirely.
+        return ACTIONABLE.has(status) && (r.RequiredByDate || r.RequestDate);
       })
       .map((r) => {
-        const dueDate = String(r.RequiredByDate).slice(0, 10);
+        const dueDate = String(r.RequiredByDate || r.RequestDate).slice(0, 10);
         return {
           id: `mr-${r.MRId}`,
           type: "material_request" as ReminderType,
