@@ -513,6 +513,7 @@ export default function MaterialExpenseBooking() {
           // columns show something other than 0%.
           cgstRate: doc.derivedCgstRate ?? prev.cgstRate,
           sgstRate: doc.derivedSgstRate ?? prev.sgstRate,
+          igstRate: doc.derivedIgstRate ?? prev.igstRate,
           bookingReference: doc.docNo,
           bookingName: doc.nameLabel ?? prev.bookingName,
           basicAmount: totalBase > 0 ? totalBase : (doc.amount ?? prev.basicAmount),
@@ -596,7 +597,12 @@ export default function MaterialExpenseBooking() {
         .finally(() => setGrnItemsLoading(false));
     }
 
-    const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
+    const { cgst, sgst, igst } = resolveGstRates(
+      doc,
+      form.cgstRate,
+      form.sgstRate,
+      form.igstRate ?? 0,
+    );
     const autoCostCenter = resolveCostCenterForProject(doc.projectId);
     setForm((prev) => {
       const linkedSupplier = linkSupplierToInvoice(doc, {
@@ -637,6 +643,7 @@ export default function MaterialExpenseBooking() {
                   : doc.docNo.split("/")[0],
         cgstRate: cgst,
         sgstRate: sgst,
+        igstRate: igst,
         workDoneRef:
           doc.kind === "WORK_DONE"
             ? doc.docNo
@@ -665,13 +672,20 @@ export default function MaterialExpenseBooking() {
     // (agg.cgstRate/sgstRate) if the PO can't be fetched.
     let cgstRate = agg.cgstRate;
     let sgstRate = agg.sgstRate;
+    let igstRate = 0;
     if (agg.poId) {
       try {
         const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
-        const { cgstRate: poCgst, sgstRate: poSgst } = derivePOGst(
-          po?.POItems ?? [],
-        );
-        if (poCgst > 0 || poSgst > 0) {
+        const {
+          cgstRate: poCgst,
+          sgstRate: poSgst,
+          igstRate: poIgst,
+        } = derivePOGst(po?.POItems ?? []);
+        if (poIgst > 0) {
+          cgstRate = 0;
+          sgstRate = 0;
+          igstRate = poIgst;
+        } else if (poCgst > 0 || poSgst > 0) {
           cgstRate = poCgst;
           sgstRate = poSgst;
         }
@@ -693,6 +707,7 @@ export default function MaterialExpenseBooking() {
       subtotal: agg.basicAmount,
       derivedCgstRate: cgstRate,
       derivedSgstRate: sgstRate,
+      derivedIgstRate: igstRate,
       projectId: primary.ProjectId,
       companyId: primary.CompanyId,
       gst:
