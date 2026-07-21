@@ -138,6 +138,9 @@ export interface ExpenseRecord {
   eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null;
   /** Source document DB id — saved to DB and restored on edit */
   eSourceId?: number | null;
+  /** Every GRN id merged into this invoice when it combines multiple GRNs
+   *  raised against the same PO — eSourceId is only the primary/first one. */
+  linkedGrnIds?: number[] | null;
 
   // ── Invoice Details (Step 6 spec) ───────────────────────────────────────────
   /** Vendor/supplier invoice number (from their physical invoice) */
@@ -277,6 +280,9 @@ export interface POItem {
   SourceWDDocNo?: string | null;
   POType?: string | null;
   POItems?: Record<string, unknown>[];
+  CostCenterId?: number | null;
+  CostCenterName?: string | null;
+  CostCenterCode?: string | null;
 }
 export interface WOItem {
   Id: number;
@@ -357,6 +363,9 @@ export interface SelectedDoc {
   derivedSgstRate?: number;
   /** IGST rate derived from PO line items (weighted avg) — interstate items */
   derivedIgstRate?: number;
+  /** Cost centre inherited from the linked PO's own CostCenterId — takes
+   *  priority over guessing one from the project. */
+  costCenterLabel?: string | null;
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
