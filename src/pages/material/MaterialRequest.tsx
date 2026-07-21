@@ -1161,11 +1161,14 @@ export default function MaterialRequest() {
                         // Only offer UOMs relevant to the item's own default
                         // unit (same measurement category, e.g. Weight units
                         // for a Weight item) — a water/liquid item no longer
-                        // gets offered something like "Running Meter".
-                        // Units with no category (Bags, Box, Set, ...) fall
-                        // back to the full list, same as before this feature.
+                        // gets offered something like "Running Meter", and a
+                        // packaging item (Box) only sees other packaging
+                        // units (Pieces, Bags, ...) instead of the full list.
                         const relevant = relevantUOMs(
-                          uoms as any[],
+                          (uoms as any[]).map((u) => ({
+                            ...u,
+                            category: u.UOMCategory ?? null,
+                          })),
                           defaultCategory,
                         ).filter((u: any) => u.UOMCode !== ci.DefaultUOM);
                         return (

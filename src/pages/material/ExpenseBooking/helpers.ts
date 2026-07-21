@@ -550,10 +550,17 @@ export function resolveGstRates(
   doc: SelectedDoc,
   fallbackCgst: number,
   fallbackSgst: number,
+  fallbackIgst = 0,
 ) {
-  if (doc.kind === "GRN") return { cgst: 0, sgst: 0 };
+  if (doc.kind === "GRN") return { cgst: 0, sgst: 0, igst: 0 };
 
   if (doc.kind === "PO" || doc.kind === "WORK_DONE" || doc.kind === "WO_PO") {
+    // Interstate items derive entirely to IGST — takes priority since a
+    // line item is either intrastate (CGST+SGST) or interstate (IGST),
+    // never both.
+    if (doc.derivedIgstRate != null && doc.derivedIgstRate > 0) {
+      return { cgst: 0, sgst: 0, igst: doc.derivedIgstRate };
+    }
     // Prefer rates derived from PO line items
     if (
       doc.derivedCgstRate != null &&
@@ -562,37 +569,51 @@ export function resolveGstRates(
       return {
         cgst: doc.derivedCgstRate ?? 0,
         sgst: doc.derivedSgstRate ?? 0,
+        igst: 0,
       };
     }
     // Fall back to top-level GST blob
     if (doc.gst?.applicable) {
       const { type, rate } = doc.gst;
-      if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
-      if (type === "igst") return { cgst: rate, sgst: 0 };
+      if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2, igst: 0 };
+      if (type === "igst") return { cgst: 0, sgst: 0, igst: rate };
     }
-    return { cgst: 0, sgst: 0 };
+    return { cgst: 0, sgst: 0, igst: 0 };
   }
 
-  return { cgst: fallbackCgst, sgst: fallbackSgst };
+  return { cgst: fallbackCgst, sgst: fallbackSgst, igst: fallbackIgst };
 }
 
-/** Derives pre-tax subtotal and weighted-average CGST/SGST rates from PO line items */
+/** Derives pre-tax subtotal and weighted-average CGST/SGST/IGST rates from PO line items */
 export function derivePOGst(poItems: any[]): {
   subtotal: number;
   cgstRate: number;
   sgstRate: number;
+  igstRate: number;
 } {
   if (!Array.isArray(poItems) || poItems.length === 0)
-    return { subtotal: 0, cgstRate: 0, sgstRate: 0 };
+    return { subtotal: 0, cgstRate: 0, sgstRate: 0, igstRate: 0 };
 
   let subtotal = 0;
   let totalCgstAmt = 0;
   let totalSgstAmt = 0;
+  let totalIgstAmt = 0;
 
   for (const item of poItems) {
     const qty = Number(item.quantity ?? item.Quantity ?? 0);
     const rate = Number(item.rate ?? item.Rate ?? 0);
     const base = Math.round(qty * rate * 100) / 100;
+
+    // Interstate items store their tax entirely under igstRate (with
+    // cgstRate/sgstRate left at 0) — trusting the stored cgst/sgst split
+    // blindly, as before, silently dropped this to 0% instead of falling
+    // back to the item's actual (IGST) rate.
+    const igst = Number(item.igstRate ?? item.IgstRate ?? 0);
+    if (igst > 0 || item.gstType === "igst") {
+      subtotal += base;
+      totalIgstAmt += Math.round(((base * igst) / 100) * 100) / 100;
+      continue;
+    }
 
     // per-item GST rate stored as total % (e.g. 28 means 14+14)
     const totalGstRate = Number(
@@ -613,8 +634,10 @@ export function derivePOGst(poItems: any[]): {
     subtotal > 0 ? Math.round((totalCgstAmt / subtotal) * 100 * 100) / 100 : 0;
   const sgstRate =
     subtotal > 0 ? Math.round((totalSgstAmt / subtotal) * 100 * 100) / 100 : 0;
+  const igstRate =
+    subtotal > 0 ? Math.round((totalIgstAmt / subtotal) * 100 * 100) / 100 : 0;
 
-  return { subtotal, cgstRate, sgstRate };
+  return { subtotal, cgstRate, sgstRate, igstRate };
 }
 
 export function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {

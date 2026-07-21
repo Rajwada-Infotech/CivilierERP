@@ -57,7 +57,12 @@ export function AmountGstSection({
   onChangeGstMode,
 }: AmountGstSectionProps) {
   const isDirect = !isGRN && !isPOorWO;
-  const effectiveIgstRate = isGRN ? 0 : gstMode === "igst" ? igstRate : 0;
+  // Direct/manual bookings gate IGST on the user's CGST+SGST / IGST toggle.
+  // Doc-linked bookings (PO/WO/GRN) have no such toggle — igstRate is
+  // already 0 unless the linked document's own items were interstate, so
+  // it can be shown as-is instead of being masked by a toggle that only
+  // exists for the direct-entry flow.
+  const effectiveIgstRate = isGRN ? 0 : isDirect ? (gstMode === "igst" ? igstRate : 0) : igstRate;
 
   return (
     <div className="space-y-4">
@@ -66,8 +71,18 @@ export function AmountGstSection({
       {isPOorWO && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
           <BadgePercent size={12} className="text-emerald-500 shrink-0" />
-          {(selectedDoc!.derivedCgstRate ?? 0) > 0 ||
-          (selectedDoc!.derivedSgstRate ?? 0) > 0 ? (
+          {(selectedDoc!.derivedIgstRate ?? 0) > 0 ? (
+            <span className="text-foreground">
+              GST auto-filled from linked{" "}
+              <span className="font-semibold">
+                {selectedDoc!.kind === "PO" ? "Purchase Order" : "Work Done"}
+              </span>
+              {" — "}
+              IGST {selectedDoc!.derivedIgstRate}% (interstate). Basic amount
+              is pre-tax (qty × rate).
+            </span>
+          ) : (selectedDoc!.derivedCgstRate ?? 0) > 0 ||
+            (selectedDoc!.derivedSgstRate ?? 0) > 0 ? (
             <span className="text-foreground">
               GST auto-filled from linked{" "}
               <span className="font-semibold">

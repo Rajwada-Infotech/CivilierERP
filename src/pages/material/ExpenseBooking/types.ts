@@ -355,6 +355,8 @@ export interface SelectedDoc {
   derivedCgstRate?: number;
   /** SGST rate derived from PO line items (weighted avg) */
   derivedSgstRate?: number;
+  /** IGST rate derived from PO line items (weighted avg) — interstate items */
+  derivedIgstRate?: number;
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
