@@ -649,6 +649,9 @@ export function DocSelectorPanel({
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
                       derivedIgstRate: dIgst,
+                      costCenterLabel: po.CostCenterId
+                        ? `${po.CostCenterCode ?? ""}${po.CostCenterCode ? " - " : ""}${po.CostCenterName ?? ""}`.trim()
+                        : null,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,
@@ -925,6 +928,9 @@ export function DocSelectorPanel({
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
                       derivedIgstRate: dIgst,
+                      costCenterLabel: po.CostCenterId
+                        ? `${po.CostCenterCode ?? ""}${po.CostCenterCode ? " - " : ""}${po.CostCenterName ?? ""}`.trim()
+                        : null,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,

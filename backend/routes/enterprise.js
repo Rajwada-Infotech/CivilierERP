@@ -408,6 +408,14 @@ router.get("/options", async (req, res) => {
       conditions.push("business_type = @businessType");
       request.input("businessType", sql.NVarChar(100), req.query.business_type);
     }
+    // Scope projects (business_type=P) to a single parent company — the
+    // frontend has always sent this (e.g. GRN.tsx's Company→Project
+    // cascade), but it was silently ignored here, so every project showed
+    // regardless of which company was selected.
+    if (req.query.enterprise_id) {
+      conditions.push("company_id = @companyId");
+      request.input("companyId", sql.Int, parseInt(req.query.enterprise_id, 10));
+    }
 
     // Always exclude soft-deleted rows from dropdown options
     conditions.push("(discontinue IS NULL OR discontinue = 0)");
