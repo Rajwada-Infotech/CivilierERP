@@ -52,6 +52,12 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
+import {
+  alternatesForItem,
+  getItemUomFactor,
+  convertItemQuantity,
+} from "@/lib/itemUomAlternates";
+import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -243,6 +249,12 @@ export default function MaterialRequest() {
       );
     },
     staleTime: 5 * 60_000,
+  });
+
+  const { data: itemUomAlternates = [] } = useQuery({
+    queryKey: ["item-uom-alternates"],
+    queryFn: getAllItemUomAlternates,
+    staleTime: 60_000,
   });
 
   // ── MR doc types (for the plain Request No select) ──────────────────────────
@@ -1171,6 +1183,26 @@ export default function MaterialRequest() {
                           })),
                           defaultCategory,
                         ).filter((u: any) => u.UOMCode !== ci.DefaultUOM);
+
+                        // Item-tagged alternates (e.g. Cement in CFT) have no
+                        // fixed physical category, so they're never in the
+                        // category-based `relevant` list above — merge them
+                        // in separately, deduped against it.
+                        const itemAlternates = ci.ItemId
+                          ? alternatesForItem(itemUomAlternates, ci.ItemId)
+                          : [];
+                        const extraAlternates = itemAlternates
+                          .filter(
+                            (a) =>
+                              a.uomCode !== ci.DefaultUOM &&
+                              !relevant.some((u: any) => u.UOMCode === a.uomCode),
+                          )
+                          .map((a) => ({
+                            UOMCode: a.uomCode,
+                            UOMName: a.uomName || a.uomCode,
+                            Symbol: a.symbol,
+                          }));
+
                         return (
                           <select
                             value={ci.UOMCode}
@@ -1178,22 +1210,55 @@ export default function MaterialRequest() {
                               const nextCode = e.target.value;
                               const nextUom = uomMap[nextCode];
                               const currentUom = uomMap[ci.UOMCode];
-                              // Same-category switch (e.g. tonne -> kg): convert
-                              // the already-entered quantity so it still means
-                              // the same physical amount in the new unit.
-                              const nextQty =
+
+                              // Item-specific conversion (e.g. Cement Bag <->
+                              // CFT) takes priority over the category-based
+                              // one — it's the more precise, item-authored
+                              // figure when both are available.
+                              const itemFromFactor = ci.ItemId
+                                ? getItemUomFactor(
+                                    itemUomAlternates,
+                                    ci.ItemId,
+                                    ci.UOMCode,
+                                    ci.DefaultUOM,
+                                  )
+                                : null;
+                              const itemToFactor = ci.ItemId
+                                ? getItemUomFactor(
+                                    itemUomAlternates,
+                                    ci.ItemId,
+                                    nextCode,
+                                    ci.DefaultUOM,
+                                  )
+                                : null;
+
+                              let nextQty = ci.Quantity;
+                              if (itemFromFactor != null && itemToFactor != null) {
+                                nextQty = String(
+                                  convertItemQuantity(
+                                    parseFloat(ci.Quantity) || 0,
+                                    itemFromFactor,
+                                    itemToFactor,
+                                  ),
+                                );
+                              } else if (
                                 currentUom?.UOMCategory &&
                                 nextUom?.UOMCategory === currentUom.UOMCategory &&
                                 currentUom.BaseFactor &&
                                 nextUom.BaseFactor
-                                  ? String(
-                                      convertQuantity(
-                                        parseFloat(ci.Quantity) || 0,
-                                        Number(currentUom.BaseFactor),
-                                        Number(nextUom.BaseFactor),
-                                      ),
-                                    )
-                                  : ci.Quantity;
+                              ) {
+                                // Same-category switch (e.g. tonne -> kg): convert
+                                // the already-entered quantity so it still means
+                                // the same physical amount in the new unit.
+                                nextQty = String(
+                                  convertQuantity(
+                                    parseFloat(ci.Quantity) || 0,
+                                    Number(currentUom.BaseFactor),
+                                    Number(nextUom.BaseFactor),
+                                  ),
+                                );
+                              }
+
                               setCart((prev) =>
                                 prev.map((c) =>
                                   c._key === ci._key
@@ -1222,6 +1287,16 @@ export default function MaterialRequest() {
                                 {u.Symbol ? ` (${u.Symbol})` : ""}
                               </option>
                             ))}
+                            {extraAlternates.length > 0 && (
+                              <optgroup label="Tagged for this item">
+                                {extraAlternates.map((u) => (
+                                  <option key={u.UOMCode} value={u.UOMCode}>
+                                    {u.UOMName}
+                                    {u.Symbol ? ` (${u.Symbol})` : ""}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         );
                       })()}
@@ -1254,6 +1329,61 @@ export default function MaterialRequest() {
                         placeholder="0.00"
                       />
                     </div>
+                    {/* Live equivalents in this item's other tagged UOMs */}
+                    {ci.ItemId &&
+                      ci.UOMCode &&
+                      parseFloat(ci.Quantity) > 0 &&
+                      (() => {
+                        const itemAlternates = alternatesForItem(
+                          itemUomAlternates,
+                          ci.ItemId,
+                        );
+                        const fromFactor = getItemUomFactor(
+                          itemUomAlternates,
+                          ci.ItemId,
+                          ci.UOMCode,
+                          ci.DefaultUOM,
+                        );
+                        if (fromFactor == null || itemAlternates.length === 0)
+                          return null;
+                        const others: { label: string; qty: number }[] = [];
+                        if (ci.DefaultUOM && ci.DefaultUOM !== ci.UOMCode) {
+                          others.push({
+                            label:
+                              uomMap[ci.DefaultUOM]?.Symbol ||
+                              uomMap[ci.DefaultUOM]?.UOMName ||
+                              ci.DefaultUOM,
+                            qty: convertItemQuantity(
+                              parseFloat(ci.Quantity) || 0,
+                              fromFactor,
+                              1,
+                            ),
+                          });
+                        }
+                        for (const a of itemAlternates) {
+                          if (a.uomCode === ci.UOMCode) continue;
+                          others.push({
+                            label: a.symbol || a.uomName || a.uomCode,
+                            qty: convertItemQuantity(
+                              parseFloat(ci.Quantity) || 0,
+                              fromFactor,
+                              a.conversionFactor,
+                            ),
+                          });
+                        }
+                        if (others.length === 0) return null;
+                        return (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            ≈{" "}
+                            {others
+                              .map(
+                                (o) =>
+                                  `${o.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${o.label}`,
+                              )
+                              .join(" · ")}
+                          </p>
+                        );
+                      })()}
                   </div>
 
                   {/* Remove */}

@@ -58,7 +58,9 @@ import {
   Loader2,
   Package,
   MessageCircle,
+  Printer,
 } from "lucide-react";
+import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -695,16 +697,25 @@ export default function VehicleInOut() {
     retry: false,
   });
 
-  // Selectable POs — status-filtered only, not supplier-filtered, since PO
-  // is now picked first and drives the supplier (not the other way round).
+  // Selectable POs — status-filtered, and narrowed to the header's own
+  // Company/Project once those are picked (a PO for a different project has
+  // no business showing up here). PO still drives supplier/company/project
+  // auto-fill on select, same as before — this only narrows the list shown.
   const filteredPOs = useMemo(() => {
-    return (allPOs as any[]).filter(
-      (po: any) =>
-        po.Status === "Approved" ||
-        po.Status === "Pending" ||
-        po.Status === "Received",
-    );
-  }, [allPOs]);
+    return (allPOs as any[]).filter((po: any) => {
+      if (
+        po.Status !== "Approved" &&
+        po.Status !== "Pending" &&
+        po.Status !== "Received"
+      )
+        return false;
+      if (form.companyId && Number(po.CompanyId) !== Number(form.companyId))
+        return false;
+      if (form.projectId && Number(po.ProjectId) !== Number(form.projectId))
+        return false;
+      return true;
+    });
+  }, [allPOs, form.companyId, form.projectId]);
 
   // Live PO line items + how much is already received across other lots
   // (excludes this record's own rows when editing, via editingId) — the
@@ -1011,6 +1022,109 @@ export default function VehicleInOut() {
     }
   };
 
+  // ── Print (from the preview modal) ───────────────────────────────────────────
+  const handlePrintVehicleRec = (rec: any) => {
+    const itemRows = Array.isArray(rec.Items)
+      ? rec.Items
+          .map(
+            (it: any, i: number) => safeHtml`
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
+        <td style="padding:8px 10px;font-weight:500;">${it.ItemName ?? "—"}</td>
+        <td style="padding:8px 10px;text-align:center;">${it.ReceivedQty ?? it.Quantity ?? "—"}</td>
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${it.UomName ?? "—"}</td>
+      </tr>`,
+          )
+          .join("")
+      : "";
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Vehicle In/Out — ${escapeHtml(rec.DocNo || "—")}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
+    <div style="font-size:20px;font-weight:800;color:#4f46e5;">${escapeHtml(rec.CompanyName || "CivilierERP")}</div>
+    <div style="text-align:right;">
+      <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">VEHICLE IN/OUT</div>
+      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${escapeHtml(rec.DocNo || "—")}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${rec.DocDate ? new Date(rec.DocDate).toLocaleDateString("en-IN") : "—"}</strong></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company / Project</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.CompanyName || "—")}</div>
+      <div style="font-size:11px;color:#374151;">${escapeHtml(rec.ProjectName || "—")}</div>
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier / PO</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.SupplierName || "—")}</div>
+      <div style="font-size:11px;color:#374151;">${escapeHtml(rec.PONumber || "—")}</div>
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Vehicle</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.VehicleNo || "—")}</div>
+      <div style="font-size:11px;color:#374151;">Challan: ${escapeHtml(rec.ChallanNo || "—")}</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Entry Time</div>
+      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—"}</div>
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Exit Time</div>
+      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—"}</div>
+    </div>
+  </div>
+
+  ${
+    itemRows
+      ? `<table><thead><tr>
+      <th style="width:32px;text-align:center;">#</th>
+      <th style="text-align:left;">Item</th>
+      <th style="text-align:center;">Qty</th>
+      <th style="text-align:center;">UOM</th>
+    </tr></thead><tbody>${itemRows}</tbody></table>`
+      : ""
+  }
+
+  ${rec.Remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${escapeHtml(rec.Remarks)}</div></div>` : ""}
+
+  <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+    <span>Generated by CivilierERP</span>
+    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=960,height=720");
+    if (!win) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Pop-up blocked — please allow pop-ups for this site.");
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
+  };
+
   // ── Camera capture ───────────────────────────────────────────────────────────
   const capturePhoto = useCallback(async () => {
     const dataUrl = webcamRef.current?.getScreenshot();
@@ -1203,14 +1317,25 @@ export default function VehicleInOut() {
                     <div className="relative">
                       <select
                         value={form.companyId ?? ""}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const nextCompanyId = e.target.value
+                            ? Number(e.target.value)
+                            : null;
+                          // A PO picked under the old company/project no
+                          // longer applies once either filter changes — clear
+                          // it (and the supplier it auto-filled) instead of
+                          // leaving a stale selection the new filter can't see.
                           pf({
-                            companyId: e.target.value
-                              ? Number(e.target.value)
-                              : null,
+                            companyId: nextCompanyId,
                             projectId: null,
-                          })
-                        }
+                            poId: null,
+                            poNumber: "",
+                            supplierId: null,
+                            supplierName: "",
+                            contactPerson: "",
+                          });
+                          setReceivedQtyByItem({});
+                        }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">Select Company…</option>
@@ -1243,13 +1368,23 @@ export default function VehicleInOut() {
                     <div className="relative">
                       <select
                         value={form.projectId ?? ""}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const nextProjectId = e.target.value
+                            ? Number(e.target.value)
+                            : null;
+                          // Same reasoning as the Company select — a PO for
+                          // the previous project shouldn't linger once the
+                          // project filter changes.
                           pf({
-                            projectId: e.target.value
-                              ? Number(e.target.value)
-                              : null,
-                          })
-                        }
+                            projectId: nextProjectId,
+                            poId: null,
+                            poNumber: "",
+                            supplierId: null,
+                            supplierName: "",
+                            contactPerson: "",
+                          });
+                          setReceivedQtyByItem({});
+                        }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">Select Project…</option>
@@ -2233,8 +2368,14 @@ export default function VehicleInOut() {
                   </div>
                 )}
 
-                {/* Edit button */}
-                <div className="flex justify-end pt-2 border-t border-border">
+                {/* Print / Edit buttons */}
+                <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                  <button
+                    onClick={() => handlePrintVehicleRec(viewingRec)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  >
+                    <Printer size={13} /> Print
+                  </button>
                   {rights.canEdit && (
                     <button
                       onClick={() => {

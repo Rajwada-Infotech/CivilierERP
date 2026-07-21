@@ -1827,11 +1827,23 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const provisionalId = findId((l)=>l.LHeadName.toLowerCase().includes("provisional")&&l.LHeadName.toLowerCase().includes("credit"));
     if (!purchaseId || !pgrnId || !provisionalId) return res.status(422).json({ error: "One or more required system ledgers (Purchase, PGRN, Provisional Credit) are not configured." });
 
-    // JV lines: Debit Purchase (base) + Debit Provisional Credit (tax) = Credit PGRN (total incl GST)
+    // JV lines: base amount and tax are posted as two separate self-balancing
+    // pairs rather than one lump PGRN credit —
+    //   1. Purchase A/c Dr (base)         = Provision for Pending GRN A/c Cr (base)
+    //   2. Provisional Credit Available Dr (tax) = Purchase A/c Cr (tax)
+    // The second pair is a same-account repetition of the Purchase ledger
+    // (once as the base-amount debit, once as the tax-amount credit) rather
+    // than crediting PGRN with the GST-inclusive total, so PGRN only ever
+    // reflects the base receivable and the ITC leg nets against Purchase.
     const lines = [
       { LHeadId: purchaseId,    DebitAmount: totalBase,    CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)` },
-      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalInclGST, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
-      ...(totalGST > 0 ? [{ LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` }] : []),
+      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
+      ...(totalGST > 0
+        ? [
+            { LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` },
+            { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: totalGST, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)` },
+          ]
+        : []),
     ];
 
     // Create JV

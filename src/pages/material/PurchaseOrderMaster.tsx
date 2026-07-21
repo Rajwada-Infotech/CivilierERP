@@ -101,6 +101,13 @@ import {
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { relevantUOMs, convertRate } from "@/lib/uomConversion";
+import {
+  alternatesForItem,
+  getItemUomFactor,
+  convertItemRate,
+  convertItemQuantity,
+} from "@/lib/itemUomAlternates";
+import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 
@@ -349,6 +356,49 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
+// Items are tagged with CGST, SGST, and IGST rates all at once in Item
+// Master — which one actually applies depends on whether the supplier and
+// ordering company share a GST state. Shared by every line-item source
+// (manual item pick, MR prefill, Quotation prefill) so a PO's GST split
+// isn't at the mercy of whichever fields happen to be populated on the
+// item master row — most items only ever have M_IGST filled in, which
+// used to mean every prefilled line showed IGST regardless of whether the
+// order was actually intrastate.
+function resolveLineGstSplit(
+  cgst: number,
+  sgst: number,
+  igst: number,
+  resolvedTotal: number,
+  isIntraState: boolean,
+): { cgstRate: number; sgstRate: number; igstRate: number; gstRate: number } {
+  let cgstRate = 0;
+  let sgstRate = 0;
+  let igstRate = 0;
+  if (isIntraState) {
+    if (cgst > 0 || sgst > 0) {
+      cgstRate = cgst;
+      sgstRate = sgst;
+    } else if (igst > 0) {
+      // Only an IGST rate is on file — split it evenly for an intrastate order.
+      cgstRate = igst / 2;
+      sgstRate = igst / 2;
+    } else if (resolvedTotal > 0) {
+      cgstRate = resolvedTotal / 2;
+      sgstRate = resolvedTotal / 2;
+    }
+  } else {
+    if (igst > 0) {
+      igstRate = igst;
+    } else if (cgst > 0 || sgst > 0) {
+      // Only a CGST/SGST split is on file — combine it for an interstate order.
+      igstRate = cgst + sgst;
+    } else if (resolvedTotal > 0) {
+      igstRate = resolvedTotal;
+    }
+  }
+  return { cgstRate, sgstRate, igstRate, gstRate: cgstRate + sgstRate + igstRate };
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 type ViewMode = "list" | "create" | "edit" | "view";
@@ -577,6 +627,11 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: uomsRaw = [] } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUOMs,
+  });
+  const { data: itemUomAlternates = [] } = useQuery({
+    queryKey: ["item-uom-alternates"],
+    queryFn: getAllItemUomAlternates,
+    staleTime: 60_000,
   });
   const { data: itemsRaw = [] } = useQuery({
     queryKey: ["item-master"],
@@ -978,7 +1033,8 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
       const qty = Number(it.Quantity ?? 1);
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
@@ -1002,9 +1058,9 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
@@ -1060,7 +1116,8 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
       const qty = Number(it.Quantity ?? 1);
       const rate = Number(it.Rate ?? 0);
       const taxAmount = (qty * rate * gstRate) / 100;
@@ -1083,9 +1140,9 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
@@ -1275,7 +1332,8 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
       const qty = Number(it.Quantity ?? 1);
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
@@ -1296,9 +1354,9 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
@@ -1488,37 +1546,13 @@ const PurchaseOrderMaster: React.FC = () => {
     // CGST+SGST; different state → IGST. This is why the identical item can
     // price out differently on two POs raised against two different-state
     // suppliers.
-    const mc = Number(item.cgst ?? 0);
-    const ms = Number(item.sgst ?? 0);
-    const mi = Number(item.igst ?? 0);
-    const resolvedTotal = item.resolvedGstRate ?? 0;
-
-    let cgstRate = 0;
-    let sgstRate = 0;
-    let igstRate = 0;
-    if (isIntraState) {
-      if (mc > 0 || ms > 0) {
-        cgstRate = mc;
-        sgstRate = ms;
-      } else if (mi > 0) {
-        // Only an IGST rate is on file — split it evenly for an intrastate order.
-        cgstRate = mi / 2;
-        sgstRate = mi / 2;
-      } else if (resolvedTotal > 0) {
-        cgstRate = resolvedTotal / 2;
-        sgstRate = resolvedTotal / 2;
-      }
-    } else {
-      if (mi > 0) {
-        igstRate = mi;
-      } else if (mc > 0 || ms > 0) {
-        // Only a CGST/SGST split is on file — combine it for an interstate order.
-        igstRate = mc + ms;
-      } else if (resolvedTotal > 0) {
-        igstRate = resolvedTotal;
-      }
-    }
-    const gstRate = cgstRate + sgstRate + igstRate;
+    const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(
+      Number(item.cgst ?? 0),
+      Number(item.sgst ?? 0),
+      Number(item.igst ?? 0),
+      item.resolvedGstRate ?? 0,
+      isIntraState,
+    );
 
     updateLine(idx, {
       itemId,
@@ -1845,6 +1879,30 @@ const PurchaseOrderMaster: React.FC = () => {
           Number(li.Rate ?? li.rate ?? 0),
       0,
     );
+    // Per-line CGST/SGST/IGST breakdown — previously this print only ever
+    // showed a Subtotal → Grand Total jump with no tax line at all, even
+    // though the item table's own GST% column proved tax was applied.
+    let totalCgstVal = 0;
+    let totalSgstVal = 0;
+    let totalIgstVal = 0;
+    for (const li of lineItemsArr) {
+      const base =
+        Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
+      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
+      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
+      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
+    }
+    const taxRowsPreview = [
+      totalCgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">CGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalCgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalSgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">SGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalSgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalIgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">IGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalIgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+    ].join("");
 
     const tcHtml = payTermsEsc
       ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTermsEsc}</div></div>`
@@ -1917,6 +1975,7 @@ const PurchaseOrderMaster: React.FC = () => {
 <div style="display:flex;justify-content:flex-end;margin-top:16px;">
   <table style="width:260px;border-collapse:collapse;"><tbody>
     <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotalVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+    ${taxRowsPreview}
     <tr style="border-top:2px solid #4f46e5;"><td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td><td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
   </tbody></table>
 </div>
@@ -4252,18 +4311,71 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                               : "0"}
                           </span>
                         ) : (
-                          <input
-                            type="number"
-                            min={0}
-                            step="any"
-                            value={li.quantity}
-                            onChange={(e) =>
-                              updateLine(idx, {
-                                quantity: parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            className={`${cellInput} text-right`}
-                          />
+                          <>
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={li.quantity}
+                              onChange={(e) =>
+                                updateLine(idx, {
+                                  quantity: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                              className={`${cellInput} text-right`}
+                            />
+                            {/* Live equivalents in this item's other tagged UOMs */}
+                            {li.quantity > 0 &&
+                              (() => {
+                                const lineItem = items.find((i) => i.id === li.itemId);
+                                if (!lineItem) return null;
+                                const itemAlternates = alternatesForItem(
+                                  itemUomAlternates,
+                                  lineItem.id,
+                                );
+                                if (itemAlternates.length === 0) return null;
+                                const currentCode =
+                                  uoms.find((u) => u.id === li.uomId)?.code ??
+                                  lineItem.uom;
+                                const fromFactor = getItemUomFactor(
+                                  itemUomAlternates,
+                                  lineItem.id,
+                                  currentCode,
+                                  lineItem.uom,
+                                );
+                                if (fromFactor == null) return null;
+                                const others: { label: string; qty: number }[] = [];
+                                if (lineItem.uom && lineItem.uom !== currentCode) {
+                                  others.push({
+                                    label: lineItem.uom,
+                                    qty: convertItemQuantity(li.quantity, fromFactor, 1),
+                                  });
+                                }
+                                for (const a of itemAlternates) {
+                                  if (a.uomCode === currentCode) continue;
+                                  others.push({
+                                    label: a.symbol || a.uomName || a.uomCode,
+                                    qty: convertItemQuantity(
+                                      li.quantity,
+                                      fromFactor,
+                                      a.conversionFactor,
+                                    ),
+                                  });
+                                }
+                                if (others.length === 0) return null;
+                                return (
+                                  <p className="text-[10px] text-muted-foreground text-right mt-1">
+                                    ≈{" "}
+                                    {others
+                                      .map(
+                                        (o) =>
+                                          `${o.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${o.label}`,
+                                      )
+                                      .join(" · ")}
+                                  </p>
+                                );
+                              })()}
+                          </>
                         )}
                       </td>
 
@@ -4295,6 +4407,21 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           // (Bags, Box, Set, ...) fall back to the full list,
                           // same as before this feature existed.
                           const options = relevantUOMs(uoms, currentUom?.category);
+
+                          // Item-tagged alternates (e.g. Cement in CFT) have no
+                          // fixed physical category, so they're never in the
+                          // category-based `options` above — merge them in.
+                          const lineItem = items.find((i) => i.id === li.itemId);
+                          const itemAlternates = lineItem
+                            ? alternatesForItem(itemUomAlternates, lineItem.id)
+                            : [];
+                          const extraOptions = itemAlternates
+                            .map((a) => uoms.find((u) => u.code === a.uomCode))
+                            .filter(
+                              (u): u is (typeof uoms)[number] =>
+                                !!u && !options.some((o) => o.id === u.id) && u.id !== currentUom?.id,
+                            );
+
                           return (
                           <div className="relative">
                             <select
@@ -4304,18 +4431,48 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   (u) => u.id === Number(e.target.value),
                                 );
                                 if (!uom) return;
-                                // Same-category switch (e.g. tonne -> kg):
-                                // re-price the rate so the line's total value
-                                // doesn't silently change under the user —
-                                // a supplier quote of ₹100/tonne becomes
-                                // ₹0.1/kg, not ₹100/kg.
-                                const nextRate =
+
+                                // Item-specific conversion (e.g. Cement Bag <->
+                                // CFT) takes priority over the category-based
+                                // one — it's the more precise, item-authored
+                                // figure when both are available.
+                                const itemFromFactor = lineItem
+                                  ? getItemUomFactor(
+                                      itemUomAlternates,
+                                      lineItem.id,
+                                      currentUom?.code ?? "",
+                                      lineItem.uom,
+                                    )
+                                  : null;
+                                const itemToFactor = lineItem
+                                  ? getItemUomFactor(
+                                      itemUomAlternates,
+                                      lineItem.id,
+                                      uom.code,
+                                      lineItem.uom,
+                                    )
+                                  : null;
+
+                                let nextRate = li.rate;
+                                if (itemFromFactor != null && itemToFactor != null) {
+                                  nextRate = convertItemRate(
+                                    li.rate,
+                                    itemFromFactor,
+                                    itemToFactor,
+                                  );
+                                } else if (
                                   currentUom?.category &&
                                   uom.category === currentUom.category &&
                                   currentUom.baseFactor &&
                                   uom.baseFactor
-                                    ? convertRate(li.rate, currentUom.baseFactor, uom.baseFactor)
-                                    : li.rate;
+                                ) {
+                                  // Same-category switch (e.g. tonne -> kg):
+                                  // re-price the rate so the line's total value
+                                  // doesn't silently change under the user —
+                                  // a supplier quote of ₹100/tonne becomes
+                                  // ₹0.1/kg, not ₹100/kg.
+                                  nextRate = convertRate(li.rate, currentUom.baseFactor, uom.baseFactor);
+                                }
                                 updateLine(idx, {
                                   uomId: uom.id,
                                   unit: uom.name,
@@ -4330,6 +4487,15 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   {u.name}
                                 </option>
                               ))}
+                              {extraOptions.length > 0 && (
+                                <optgroup label="Tagged for this item">
+                                  {extraOptions.map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
                             </select>
                             <ChevronDown
                               size={11}

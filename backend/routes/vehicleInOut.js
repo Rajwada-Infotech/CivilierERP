@@ -272,6 +272,22 @@ router.get("/next-number", async (req, res) => {
   }
 });
 
+// ── GET /po-ids-with-vio — distinct PO ids that have at least one Vehicle
+// In/Out record logged against them. Used by GRN.tsx to only offer POs in
+// its picker that have actually had a vehicle bring goods in, rather than
+// every Approved PO regardless of whether anything's arrived yet.
+router.get("/po-ids-with-vio", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT DISTINCT POID FROM dbo.VehicleInOut WHERE POID IS NOT NULL
+    `);
+    res.json(result.recordset.map((r) => r.POID));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — paginated list ────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
