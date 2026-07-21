@@ -8,6 +8,7 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { ItemPicker } from "./ItemPicker";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { AlertTriangle } from "lucide-react";
@@ -677,6 +678,7 @@ const PurchaseOrderMaster: React.FC = () => {
         description: i.M_Description ?? "",
         hsn: i.M_HSN ?? "",
         uom: i.M_UOM ?? "",
+        itemType: i.M_Type ?? "",
         cgst: Number(i.M_CGST ?? 0),
         sgst: Number(i.M_SGST ?? 0),
         igst: Number(i.M_IGST ?? 0),
@@ -3371,21 +3373,19 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !sourceWD &&
             !sourceWO &&
             !isReadOnly && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+              <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+                <h3
+                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2"
+                  title="Filter by company and project, then select an approved Material Request to auto-fill items and details."
+                >
                   <ClipboardList
                     size={11}
                     className="text-emerald-600 dark:text-emerald-400"
                   />
                   Load from Material Request
                 </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Filter by company and project, then select an approved
-                  Material Request to auto-fill items and details.
-                </p>
 
-                {/* MR Filters: Company + Project */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="relative">
                     <select
                       value={mrFilterCompanyId}
@@ -3396,7 +3396,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       }}
                       className={`${inputCls} pr-8 appearance-none`}
                     >
-                      <option value="">— Filter by Company —</option>
+                      <option value="">Company —</option>
                       {companies.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
@@ -3418,7 +3418,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       disabled={filteredMRProjects.length === 0}
                       className={`${inputCls} pr-8 appearance-none`}
                     >
-                      <option value="">— Filter by Project —</option>
+                      <option value="">Project —</option>
                       {filteredMRProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -3430,11 +3430,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
                   </div>
-                </div>
-
-                {/* MR Dropdown */}
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 relative">
+                  <div className="relative">
                     <select
                       value={mrDropdownValue}
                       onChange={(e) =>
@@ -3445,10 +3441,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     >
                       <option value="">
                         {approvedMRsLoading
-                          ? "Loading approved MRs…"
+                          ? "Loading MRs…"
                           : approvedMRs.length === 0
-                            ? "No approved Material Requests"
-                            : "— Select a Material Request —"}
+                            ? "No approved MRs"
+                            : "Material Request —"}
                       </option>
                       {approvedMRs.map((mr) => (
                         <option key={mr.MRId} value={String(mr.MRId)}>
@@ -3458,24 +3454,25 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         </option>
                       ))}
                     </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    {mrDropdownError && (
-                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                        <AlertCircle size={11} />
-                        {mrDropdownError}
-                      </p>
+                    {mrDropdownLoading ? (
+                      <RefreshCw
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin"
+                      />
+                    ) : (
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
                     )}
                   </div>
-                  {mrDropdownLoading && (
-                    <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground shrink-0">
-                      <RefreshCw size={13} className="animate-spin" />
-                      Loading…
-                    </div>
-                  )}
                 </div>
+                {mrDropdownError && (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={11} />
+                    {mrDropdownError}
+                  </p>
+                )}
               </div>
             )}
 
@@ -3484,52 +3481,48 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !sourceWD &&
             !sourceWO &&
             !isReadOnly && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+              <div className="rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-sm flex flex-wrap items-center gap-2">
+                <span
+                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 shrink-0"
+                  title="Enter a paid Sale Invoice doc number to link this PO to a Sale Invoice. The backend will validate that the invoice is fully paid before saving."
+                >
                   <Receipt size={11} className="text-blue-500" />
-                  Link to Sale Invoice (optional)
-                </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Enter a paid Sale Invoice doc number to link this PO to a Sale
-                  Invoice. The backend will validate that the invoice is fully
-                  paid before saving.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="number"
-                    value={saleInvoiceInput}
-                    onChange={(e) => setSaleInvoiceInput(e.target.value)}
-                    placeholder="Sale Invoice ID (numeric)"
-                    className={`${inputCls} flex-1`}
-                    disabled={!!sourceSaleInvoice}
-                    min={1}
-                  />
-                  {!sourceSaleInvoice ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const id = parseInt(saleInvoiceInput.trim(), 10);
-                        if (!id || id <= 0) return;
-                        setSourceSaleInvoice({ id, docNo: `SI-${id}` });
-                      }}
-                      disabled={!saleInvoiceInput.trim()}
-                      className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-                    >
-                      Link
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSourceSaleInvoice(null);
-                        setSaleInvoiceInput("");
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
+                  Link Sale Invoice
+                </span>
+                <input
+                  type="number"
+                  value={saleInvoiceInput}
+                  onChange={(e) => setSaleInvoiceInput(e.target.value)}
+                  placeholder="Sale Invoice ID (optional)"
+                  className={`${inputCls} flex-1 min-w-[140px] !py-1.5`}
+                  disabled={!!sourceSaleInvoice}
+                  min={1}
+                />
+                {!sourceSaleInvoice ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = parseInt(saleInvoiceInput.trim(), 10);
+                      if (!id || id <= 0) return;
+                      setSourceSaleInvoice({ id, docNo: `SI-${id}` });
+                    }}
+                    disabled={!saleInvoiceInput.trim()}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    Link
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSourceSaleInvoice(null);
+                      setSaleInvoiceInput("");
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             )}
 
@@ -4220,26 +4213,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {li.itemName || "—"}
                           </span>
                         ) : (
-                          <div className="relative">
-                            <select
-                              value={li.itemId}
-                              onChange={(e) =>
-                                handleItemSelect(idx, e.target.value)
-                              }
-                              className={cellSelect}
-                            >
-                              <option value="">— Select Item —</option>
-                              {items.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.name}
-                                </option>
-                              ))}
-                            </select>
-                            <ChevronDown
-                              size={11}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                            />
-                          </div>
+                          <ItemPicker
+                            items={items}
+                            value={li.itemId}
+                            onChange={(id) => handleItemSelect(idx, id)}
+                          />
                         )}
                       </td>
 
