@@ -158,6 +158,7 @@ const Payment: React.FC = () => {
   const [pmtPostingData, setPmtPostingData] = useState<any | null>(null);
   const [pmtPostingLoading, setPmtPostingLoading] = useState(false);
   const [pmtPosting, setPmtPosting] = useState(false);
+  const [pmtPostingError, setPmtPostingError] = useState<string | null>(null);
   const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
@@ -242,6 +243,39 @@ const Payment: React.FC = () => {
       .catch(() => setPmtPostingData(null))
       .finally(() => setPmtPostingLoading(false));
   }, [detailTab, viewingRec?.id, viewingRec?.expenseRef]);
+
+  // Auto-post as soon as posting data has loaded — no manual "Post to GL"
+  // click. Entries post one at a time (posting the next only after the
+  // current one resolves, via re-running whenever pmtPostingData changes)
+  // rather than all at once, since each hits the same doc-number lock.
+  useEffect(() => {
+    if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
+    const entries: any[] = pmtPostingData?.entries ?? [];
+    const next = entries.find((e) => !e.isPosted && !e.isBounced);
+    if (!next) return;
+    const url =
+      next.type === "bounce_charge"
+        ? `/api/new-payment/${next.pmtId}/post-bounce-charge-to-gl`
+        : `/api/new-payment/${next.pmtId}/post-to-gl`;
+    setPmtPosting(true);
+    setPmtPostingError(null);
+    fetchWithAuth(url, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setPmtPostingData((prev: any) => ({
+          ...prev,
+          entries: prev.entries.map((e: any) =>
+            e.pmtId === next.pmtId && e.type === next.type
+              ? { ...e, isPosted: true, jvNo: body.jvNo }
+              : e,
+          ),
+        }));
+      })
+      .catch((err: any) => setPmtPostingError(err.message ?? "Posting failed"))
+      .finally(() => setPmtPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, pmtPostingLoading, pmtPostingData, pmtPosting]);
 
   // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
   // /payments?view=<PPaymentID>, so this payment's receipt should open
@@ -4708,39 +4742,10 @@ const Payment: React.FC = () => {
                                     ✓ {entry.jvNo}
                                   </span>
                                 ) : (
-                                  <button
-                                    onClick={async () => {
-                                      const url = isBounce
-                                        ? `/api/new-payment/${entry.pmtId}/post-bounce-charge-to-gl`
-                                        : `/api/new-payment/${entry.pmtId}/post-to-gl`;
-                                      setPmtPosting(true);
-                                      try {
-                                        const r = await fetchWithAuth(url, { method: "POST" });
-                                        const body = await r.json();
-                                        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                                        setPmtPostingData((prev: any) => ({
-                                          ...prev,
-                                          entries: prev.entries.map((e: ChainEntry) =>
-                                            e.pmtId === entry.pmtId && e.type === entry.type
-                                              ? { ...e, isPosted: true, jvNo: body.jvNo }
-                                              : e
-                                          ),
-                                        }));
-                                      } catch (err: any) {
-                                        alert(err.message ?? "Posting failed");
-                                      } finally {
-                                        setPmtPosting(false);
-                                      }
-                                    }}
-                                    disabled={pmtPosting}
-                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-50 transition-colors whitespace-nowrap ${
-                                      isBounce
-                                        ? "bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 border border-rose-500/30"
-                                        : "bg-primary text-primary-foreground hover:bg-primary/90"
-                                    }`}
-                                  >
-                                    <BookOpen size={10} /> Post to GL
-                                  </button>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                    <span className="w-2.5 h-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                    Posting…
+                                  </span>
                                 )}
                               </div>
 
@@ -4780,6 +4785,14 @@ const Payment: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {pmtPostingError && (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 mt-2">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Auto-posting failed: {pmtPostingError}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

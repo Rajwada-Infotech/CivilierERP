@@ -435,6 +435,19 @@ export function dbToRecord(row: any): ExpenseRecord {
         | "WORK_DONE"
         | null) ?? null,
     eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
+    // Multi-GRN combined invoices (see backend/services/invoiceLinking.js)
+    // store every merged GRN's id here — eSourceId above is only the
+    // primary/first one. The preview modal needs the full set to fetch and
+    // sum GST breakdown across all of them, not just the primary GRN.
+    linkedGrnIds: (() => {
+      if (!row.ELinkedGrnIds) return null;
+      try {
+        const ids = JSON.parse(row.ELinkedGrnIds);
+        return Array.isArray(ids) ? ids.map((id: any) => Number(id)) : null;
+      } catch {
+        return null;
+      }
+    })(),
     sourceDocNo: row.sourceDocNo ?? null,
     vendorInvoiceNo: row.EVendorInvoiceNo ?? "",
     vendorInvoiceDate: row.EVendorInvoiceDate

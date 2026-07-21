@@ -760,6 +760,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
           eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
+          eb.ELinkedGrnIds,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
           eb.EBillingTermId, eb.EBillingTermName,
           eb.ETCId, eb.ETCName, eb.ETCText,

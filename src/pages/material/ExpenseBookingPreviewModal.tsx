@@ -85,7 +85,7 @@ export function ExpenseBookingPreviewModal({
   const [invPostingData, setInvPostingData] = useState<any | null>(null);
   const [invPostingLoading, setInvPostingLoading] = useState(false);
   const [invPosting, setInvPosting] = useState(false);
-
+  const [invPostingError, setInvPostingError] = useState<string | null>(null);
 
   // Fetch invoice posting data when posting tab opens
   useEffect(() => {
@@ -98,6 +98,38 @@ export function ExpenseBookingPreviewModal({
       .catch(() => setInvPostingData(null))
       .finally(() => setInvPostingLoading(false));
   }, [previewTab, previewRecord?.id]);
+
+  // Auto-post as soon as the posting tab's data has loaded and it isn't
+  // posted yet — no manual "Post to GL" click; the journal entry is created
+  // the moment the user looks at the posting tab.
+  useEffect(() => {
+    if (
+      previewTab !== "posting" ||
+      invPostingLoading ||
+      !invPostingData ||
+      invPostingData.isPosted ||
+      invPosting ||
+      !previewRecord?.id
+    )
+      return;
+    const recordId = previewRecord.id;
+    setInvPosting(true);
+    setInvPostingError(null);
+    fetchWithAuth(`/api/expense-booking/${recordId}/post-to-gl`, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setInvPostingData((prev: any) => ({
+          ...prev,
+          isPosted: true,
+          jvNo: body.jvNo,
+          jvId: body.jvId,
+        }));
+      })
+      .catch((err: any) => setInvPostingError(err.message ?? "Posting failed"))
+      .finally(() => setInvPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewTab, invPostingLoading, invPostingData, previewRecord?.id]);
 
   useEffect(() => {
     setGrnBreakdown(null);
@@ -145,9 +177,61 @@ export function ExpenseBookingPreviewModal({
       }
     };
 
-    const { eSourceType, eSourceId } = previewRecord;
+    /**
+     * Multi-GRN combined invoices (see backend/services/invoiceLinking.js)
+     * merge several GRNs raised against the same PO into one booking —
+     * eSourceId is only the primary/first of them. Fetching just that one
+     * GRN's breakdown (the old behavior) silently understated the total by
+     * however much the other linked GRNs contributed. Fetch every linked
+     * GRN's breakdown in parallel and sum them instead.
+     */
+    const loadMergedGrnBreakdown = async (grnIds: number[]) => {
+      const results = await Promise.all(
+        grnIds.map(async (id) => {
+          try {
+            const r = await fetchWithAuth(`/api/grns/${id}/gst-breakdown`);
+            return r.ok ? await r.json() : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const valid = results.filter(
+        (d): d is NonNullable<typeof d> => !!d?.totals,
+      );
+      if (valid.length === 0) return;
+      const merged = valid.reduce(
+        (acc, d) => ({
+          items: [...acc.items, ...(d.items ?? [])],
+          totals: {
+            totalBase: acc.totals.totalBase + (d.totals.totalBase ?? 0),
+            totalCGST: acc.totals.totalCGST + (d.totals.totalCGST ?? 0),
+            totalSGST: acc.totals.totalSGST + (d.totals.totalSGST ?? 0),
+            totalGST: acc.totals.totalGST + (d.totals.totalGST ?? 0),
+            totalInclGST:
+              acc.totals.totalInclGST + (d.totals.totalInclGST ?? 0),
+          },
+        }),
+        {
+          items: [] as any[],
+          totals: {
+            totalBase: 0,
+            totalCGST: 0,
+            totalSGST: 0,
+            totalGST: 0,
+            totalInclGST: 0,
+          },
+        },
+      );
+      if (merged.totals.totalInclGST > 0) setGrnBreakdown(merged);
+    };
 
-    if (eSourceType === "GRN" && eSourceId) {
+    const { eSourceType, eSourceId, linkedGrnIds } = previewRecord;
+    const isMultiGRN = !!(linkedGrnIds && linkedGrnIds.length > 1);
+
+    if (eSourceType === "GRN" && isMultiGRN) {
+      loadMergedGrnBreakdown(linkedGrnIds!);
+    } else if (eSourceType === "GRN" && eSourceId) {
       // Direct GRN link — load its breakdown immediately.
       loadGrnBreakdown(eSourceId);
     } else if ((eSourceType === "PO" || eSourceType === "WO_PO") && eSourceId) {
@@ -176,7 +260,12 @@ export function ExpenseBookingPreviewModal({
       .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) => setMasterBillingTerms(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, [previewRecord?.id]);
+    // linkedGrnIds is included below on top of id — the preview opens with
+    // a list-derived record first (optimistic), then a fresher /:id fetch
+    // lands moments later with the same id but a possibly-corrected
+    // linkedGrnIds. Without this, that correction would silently never
+    // re-trigger the fetch above.
+  }, [previewRecord?.id, previewRecord?.linkedGrnIds?.join(",")]);
 
   // ── All hooks MUST be declared before any conditional return ──────────────
   // Normalise billingTerms — prefer saved EBillingTermsData; if empty but
@@ -459,35 +548,22 @@ export function ExpenseBookingPreviewModal({
                     <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
                       <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
                       <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                        Already posted to General Ledger as <span className="font-semibold">{invPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                        Posted to General Ledger as <span className="font-semibold">{invPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                      </p>
+                    </div>
+                  ) : invPostingError ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Auto-posting failed: {invPostingError}
                       </p>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                      <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                       <p className="text-xs text-muted-foreground">
-                        Posting will create a balanced journal entry and update the Trial Balance immediately.
+                        Posting to General Ledger…
                       </p>
-                      <button
-                        disabled={invPosting}
-                        onClick={async () => {
-                          if (!previewRecord?.id) return;
-                          setInvPosting(true);
-                          try {
-                            const r = await fetchWithAuth(`/api/expense-booking/${previewRecord.id}/post-to-gl`, { method: "POST" });
-                            const body = await r.json();
-                            if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                            setInvPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
-                          } catch (err: any) {
-                            alert(err.message ?? "Posting failed");
-                          } finally {
-                            setInvPosting(false);
-                          }
-                        }}
-                        className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                      >
-                        <Wallet size={11} />
-                        {invPosting ? "Posting…" : "Post to GL"}
-                      </button>
                     </div>
                   )}
                 </>
