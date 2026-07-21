@@ -1848,7 +1848,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     // Create JV
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, grn.CompanyId, grn.ProjectId).catch(() => ({ finalDocNo: null }));
+    // lockNextDocNumber takes a single options object, not positional args —
+    // calling it positionally (as this used to) silently failed every time
+    // (caught below), leaving VoucherNo as the JV-<id> fallback instead of a
+    // real locked doc number, and the frontend showing "Posted as ." (blank).
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
     const insertHdr = await pool.request()
       .input("JVNo", sql.NVarChar(100), finalDocNo || null)
       .input("JVDate", sql.Date, new Date())

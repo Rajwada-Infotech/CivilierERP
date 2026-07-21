@@ -1559,6 +1559,7 @@ router.post("/:id/post-bounce-charge-to-gl", async (req, res) => {
   if (!pmtId) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const userEmail = req.user?.email || req.user?.upn || "system";
     const { postVoucher } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
@@ -1593,15 +1594,33 @@ router.post("/:id/post-bounce-charge-to-gl", async (req, res) => {
 
     const narration = `Bounce charge: ${pmt.DocNo}`;
     const legs = [
-      { lheadId: bankChargesId, debit: bounceCharge, credit: 0, narration },
-      { lheadId: bankId,        debit: 0, credit: bounceCharge, narration },
+      { lHeadId: bankChargesId, debit: bounceCharge, credit: 0, narration },
+      { lHeadId: bankId,        debit: 0, credit: bounceCharge, narration },
     ];
 
+    // lockNextDocNumber takes a single options object, not positional args —
+    // calling it positionally (as this used to) silently failed every time.
     const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
 
-    await postVoucher(pool, { sourceType: "BounceChargePosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+    await postVoucher(pool, {
+      voucherNo: finalDocNo || `JV-BNC${pmtId}`,
+      voucherDate: pmt.BounceDate || new Date(),
+      sourceType: "BounceChargePosting",
+      sourceId: pmtId,
+      companyId: pmt.CompanyId ?? null,
+      projectId: pmt.ProjectId ?? null,
+      createdBy: userEmail,
+      legs,
+    });
 
     res.json({ jvNo: finalDocNo, message: "Bounce charge posted." });
   } catch (err) {
@@ -1620,7 +1639,7 @@ router.get("/:id/posting", async (req, res) => {
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
       FROM dbo.NewPayment np
@@ -1654,12 +1673,15 @@ router.get("/:id/posting", async (req, res) => {
       }
     }
 
-    // System ledgers: Supplier/Creditor
-    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
-    const leds = ledRes.recordset;
-    const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
+    // Supplier/Creditor — this payment's own resolved counter-account
+    // (Contract → linked ExpenseBooking's supplier → PPartyId), not a
+    // system-generated placeholder (there isn't one; every vendor has
+    // their own ledger). The row label stays generic; only the LHeadId
+    // determines which specific account the posting actually lands in.
+    const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+    const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
     const accounts = {
-      supplier: find((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor")),
+      supplier: resolvedSupplierId ? { id: resolvedSupplierId, label: "Supplier / Creditor A/c", code: null } : null,
       bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
     };
 
@@ -1691,11 +1713,12 @@ router.post("/:id/post-to-gl", async (req, res) => {
   if (!pmtId) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
-    const { postVoucher } = require("../services/generalLedger");
+    const userEmail = req.user?.email || req.user?.upn || "system";
+    const { postVoucher, resolvePaymentSupplierHeadId } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
@@ -1712,26 +1735,45 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
 
-    const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
-    const leds = ledRes.recordset;
-    const findId = (fn) => leds.find(fn)?.LHeadId;
-    const supplierId = findId((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    // The payment's own resolved counter-account (Contract → linked
+    // ExpenseBooking's supplier → PPartyId) — not a system-generated
+    // "supplier"/"creditor" placeholder, which doesn't exist.
+    const supplierId = await resolvePaymentSupplierHeadId(pool, pmt);
     const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
 
-    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
     if (!bankId) return res.status(422).json({ error: "No bank account linked to this payment." });
 
     const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
     const legs = [
-      { lheadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
-      { lheadId: bankId,     debit: 0, credit: amount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+      { lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
+      { lHeadId: bankId,     debit: 0, credit: amount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
     ];
 
+    // lockNextDocNumber takes a single options object, not positional args —
+    // calling it positionally (as this used to) silently failed every time,
+    // leaving VoucherNo as undefined and the frontend showing "Posted as ."
     const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, pmt.CompanyId, pmt.ProjectId).catch(() => ({ finalDocNo: null }));
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
 
-    await postVoucher(pool, { sourceType: "PaymentPosting", sourceId: pmtId, voucherNo: finalDocNo, legs });
+    await postVoucher(pool, {
+      voucherNo: finalDocNo || `JV-PMT${pmtId}`,
+      voucherDate: new Date(),
+      sourceType: "PaymentPosting",
+      sourceId: pmtId,
+      companyId: pmt.CompanyId ?? null,
+      projectId: pmt.ProjectId ?? null,
+      createdBy: userEmail,
+      legs,
+    });
 
     res.json({ jvNo: finalDocNo, message: "Posted successfully." });
   } catch (err) {
