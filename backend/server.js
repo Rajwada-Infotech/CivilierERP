@@ -186,6 +186,7 @@ const ALL_ROUTES = [
   { path: "/api/work-orders", file: "./routes/workOrder" },
   { path: "/api/user-profile", file: "./routes/userProfile" },
   { path: "/api/uom-master", file: "./routes/uomMaster" },
+  { path: "/api/item-uom-alternates", file: "./routes/itemUomAlternates" },
   { path: "/api/debit-note", file: "./routes/debitNote" },
   { path: "/api/tc-master", file: "./routes/tcMaster" },
   { path: "/api/transactions", file: "./routes/transactions" },
