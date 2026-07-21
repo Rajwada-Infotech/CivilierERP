@@ -17,6 +17,8 @@ import {
   Upload,
   RotateCcw,
   Save,
+  Plus,
+  Ruler,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -28,6 +30,10 @@ import {
   deleteItem,
   type DbItem,
 } from "@/api/itemMasterApi";
+import {
+  getItemUomAlternates,
+  saveItemUomAlternates,
+} from "@/api/itemUomAlternatesApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
@@ -40,6 +46,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlternateUomTagger,
+  type AlternateUomRow,
+} from "./ItemUomAlternatesEditor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface HsnCode {
@@ -404,6 +414,14 @@ const ItemMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [viewRow, setViewRow] = useState<Item | null>(null);
 
+  // Alternate UOMs — entered inline on the form itself (create or edit) via
+  // the "+" beside the UOM select, not gated behind a saved itemId. Kept
+  // outside the Item/EMPTY_FORM shape since it isn't a Item_Master_Group
+  // column — it's persisted separately via saveItemUomAlternates() below.
+  const [alternateUoms, setAlternateUoms] = useState<AlternateUomRow[]>([]);
+  const [showAlternateUoms, setShowAlternateUoms] = useState(false);
+  const [loadingAlternateUoms, setLoadingAlternateUoms] = useState(false);
+
   // CSV import
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -444,22 +462,56 @@ const ItemMaster: React.FC = () => {
     return Object.keys(errs).length === 0;
   };
 
+  // Alternate UOMs are entered on the form (create or edit) before an
+  // itemId necessarily exists yet, so validate + persist them separately
+  // from the item's own fields, after the item id is known.
+  const validateAlternateUoms = () => {
+    const invalid = alternateUoms.find(
+      (r) => !r.uomCode || !(parseFloat(r.conversionFactor) > 0),
+    );
+    if (invalid) {
+      toast.error("Every alternate UOM needs a positive conversion factor.");
+      return false;
+    }
+    const codes = new Set(alternateUoms.map((r) => r.uomCode));
+    if (codes.size !== alternateUoms.length) {
+      toast.error("Each alternate UOM can only be tagged once.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
     if (!validate()) return;
+    if (!validateAlternateUoms()) return;
     setSaving(true);
     try {
       const groupName =
         itemGroups.find((g) => g.id === form.belongsTo)?.description || "";
+      const itemId = editingId
+        ? editingId
+        : (await addItem(itemToPayload(form, groupName))).M_Id;
       if (editingId) {
         await updateItem(editingId, itemToPayload(form, groupName));
-        toast.success("Item updated successfully ✓");
-        setEditingId(null);
-      } else {
-        await addItem(itemToPayload(form, groupName));
-        toast.success("Item saved successfully ✓");
       }
+      if (itemId) {
+        await saveItemUomAlternates(
+          itemId,
+          alternateUoms.map((r) => ({
+            UOMCode: r.uomCode,
+            ConversionFactor: parseFloat(r.conversionFactor),
+          })),
+        );
+      }
+      toast.success(
+        editingId ? "Item updated successfully ✓" : "Item saved successfully ✓",
+      );
+      setEditingId(null);
       await queryClient.invalidateQueries({ queryKey: ["item-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["item-uom-alternates"] });
       setFormState(EMPTY_FORM);
+      setAlternateUoms([]);
+      setShowAlternateUoms(false);
       setErrors({});
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -468,19 +520,39 @@ const ItemMaster: React.FC = () => {
     }
   };
 
-  const handleEdit = (id: string) => {
+  const handleEdit = async (id: string) => {
     const row = data.find((r) => r._id === id);
     if (!row) return;
     const { _id, ...rest } = row;
     setFormState(rest);
     setEditingId(id);
+    setAlternateUoms([]);
+    setShowAlternateUoms(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    setLoadingAlternateUoms(true);
+    try {
+      const existing = await getItemUomAlternates(id);
+      setAlternateUoms(
+        existing.map((a) => ({
+          uomCode: a.uomCode,
+          conversionFactor: String(a.conversionFactor),
+        })),
+      );
+      if (existing.length > 0) setShowAlternateUoms(true);
+    } catch {
+      // Non-fatal — the item itself still loaded fine, alternates just
+      // won't pre-populate; the user can re-add them if needed.
+    } finally {
+      setLoadingAlternateUoms(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (editingId === id) {
       setEditingId(null);
       setFormState(EMPTY_FORM);
+      setAlternateUoms([]);
+      setShowAlternateUoms(false);
     }
     try {
       await deleteItem(id);
@@ -495,6 +567,8 @@ const ItemMaster: React.FC = () => {
   const handleReset = () => {
     setFormState(EMPTY_FORM);
     setEditingId(null);
+    setAlternateUoms([]);
+    setShowAlternateUoms(false);
     setErrors({});
   };
 
@@ -1005,19 +1079,79 @@ const ItemMaster: React.FC = () => {
             </Field>
             {/* UOM */}
             <Field label="Unit of Measure (UOM)">
-              <select
-                value={form.uomCode}
-                onChange={(e) => set("uomCode", e.target.value)}
-                className={inputCls()}
-              >
-                <option value="">Select UOM...</option>
-                {uomOptions.map((u) => (
-                  <option key={u.value} value={u.value}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={form.uomCode}
+                  onChange={(e) => set("uomCode", e.target.value)}
+                  className={inputCls() + " flex-1"}
+                >
+                  <option value="">Select UOM...</option>
+                  {uomOptions.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowAlternateUoms((v) => !v)}
+                  disabled={!form.uomCode}
+                  title={
+                    form.uomCode
+                      ? "Tag alternate UOMs for this item"
+                      : "Select this item's own UOM first"
+                  }
+                  className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    showAlternateUoms
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {alternateUoms.length > 0 && !showAlternateUoms ? (
+                    <span className="text-[10px] font-bold">
+                      {alternateUoms.length}
+                    </span>
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                </button>
+              </div>
             </Field>
+
+            {/* Alternate UOMs — inline, tagged before the item is even
+                saved. Spans the full row so it isn't cramped next to the
+                other 3-column fields. */}
+            {showAlternateUoms && form.uomCode && (
+              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-border bg-muted/20 p-4">
+                <p className="text-xs font-heading font-semibold text-foreground flex items-center gap-1.5 mb-1">
+                  <Ruler size={13} className="text-primary" />
+                  Alternate UOMs
+                </p>
+                <p className="text-[11px] text-muted-foreground mb-3">
+                  Tag other units this item can also be requested/ordered in,
+                  with how many{" "}
+                  <span className="font-mono">
+                    {uomOptions.find((u) => u.value === form.uomCode)?.label ||
+                      form.uomCode}
+                  </span>{" "}
+                  (this item's own UOM) one unit of the alternate equals —
+                  e.g. Cement base Bag, tag CFT with factor 0.3 for 1 CFT =
+                  0.3 Bag.
+                </p>
+                {loadingAlternateUoms ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                    <Loader2 size={13} className="animate-spin" /> Loading…
+                  </div>
+                ) : (
+                  <AlternateUomTagger
+                    rows={alternateUoms}
+                    onChange={setAlternateUoms}
+                    baseUomCode={form.uomCode}
+                    uomOptions={uomOptions}
+                  />
+                )}
+              </div>
+            )}
             {/* Type of Item */}
             <Field label="Type of Item" required error={errors.itemType}>
               <select
