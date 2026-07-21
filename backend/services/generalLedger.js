@@ -425,35 +425,24 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
  * name match on EName. If there's no expense ref to resolve from, the
  * posting is skipped rather than guessing the wrong counter-account.
  */
-async function postPaymentApproval(pool, paymentId, userEmail) {
-  if (await hasPosting(pool, "NewPayment", paymentId))
-    return { posted: true, reason: "already posted (idempotent)" };
-
-  const result = await pool
-    .request()
-    .input("PPaymentID", sql.Int, paymentId)
-    .query(`
-      SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId
-      FROM dbo.NewPayment
-      WHERE PPaymentID = @PPaymentID
-    `);
-  const payment = result.recordset[0];
-  if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
-  if (!payment.PBankID)
-    return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
-
-  const amount = Number(payment.PAmount) || 0;
-  if (amount <= 0)
-    return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
-
+// Resolves the counter-account (supplier/contractor AccountHeadMaster row)
+// a payment should post against. Shared by postPaymentApproval below and by
+// newPayment.js's own posting endpoints, which previously searched for a
+// system-generated GL head literally named "supplier"/"creditor" — no such
+// account exists (every vendor has their own ledger), so that always failed
+// with "Supplier/Creditor system ledger not configured."
+//
+// Precedence:
+//   1. Contract-linked payment (advance against a Contract, no real invoice
+//      yet) — resolve straight from the Contract's own party tag. Takes
+//      priority because for this case PExpenseRef (if set at all) holds the
+//      Contract's own DocNo, not a real ExpenseBooking reference.
+//   2. PExpenseRef → the linked ExpenseBooking's own resolved supplier
+//      (GRN's SupplierID, or a name-matched head for other source types).
+//   3. PPartyId — the direct party picked on the payment form, last resort.
+async function resolvePaymentSupplierHeadId(pool, payment) {
   let supplierHeadId = null;
 
-  // Contract-linked payment (advance against a Contract, no real invoice
-  // yet) — resolve the supplier/contractor straight from the Contract's own
-  // party tag. Takes priority over the PExpenseRef branch below because for
-  // this case PExpenseRef (if set at all) holds the Contract's own DocNo,
-  // not a real ExpenseBooking reference, and would never resolve there.
   if (payment.ContractId) {
     const contractResult = await pool
       .request()
@@ -494,6 +483,33 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (!supplierHeadId && payment.PPartyId) {
     supplierHeadId = payment.PPartyId;
   }
+
+  return supplierHeadId;
+}
+
+async function postPaymentApproval(pool, paymentId, userEmail) {
+  if (await hasPosting(pool, "NewPayment", paymentId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const result = await pool
+    .request()
+    .input("PPaymentID", sql.Int, paymentId)
+    .query(`
+      SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
+             PCompany, PProject, ContractId, PPartyId
+      FROM dbo.NewPayment
+      WHERE PPaymentID = @PPaymentID
+    `);
+  const payment = result.recordset[0];
+  if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
+  if (!payment.PBankID)
+    return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
+
+  const amount = Number(payment.PAmount) || 0;
+  if (amount <= 0)
+    return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
+
+  const supplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
 
   if (!supplierHeadId)
     return {
@@ -664,6 +680,7 @@ module.exports = {
   postGRNApproval,
   postExpenseBookingApproval,
   postPaymentApproval,
+  resolvePaymentSupplierHeadId,
   postReceivedPaymentApproval,
   postJournalVoucherApproval,
 };

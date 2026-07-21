@@ -85,7 +85,7 @@ export function ExpenseBookingPreviewModal({
   const [invPostingData, setInvPostingData] = useState<any | null>(null);
   const [invPostingLoading, setInvPostingLoading] = useState(false);
   const [invPosting, setInvPosting] = useState(false);
-
+  const [invPostingError, setInvPostingError] = useState<string | null>(null);
 
   // Fetch invoice posting data when posting tab opens
   useEffect(() => {
@@ -98,6 +98,38 @@ export function ExpenseBookingPreviewModal({
       .catch(() => setInvPostingData(null))
       .finally(() => setInvPostingLoading(false));
   }, [previewTab, previewRecord?.id]);
+
+  // Auto-post as soon as the posting tab's data has loaded and it isn't
+  // posted yet — no manual "Post to GL" click; the journal entry is created
+  // the moment the user looks at the posting tab.
+  useEffect(() => {
+    if (
+      previewTab !== "posting" ||
+      invPostingLoading ||
+      !invPostingData ||
+      invPostingData.isPosted ||
+      invPosting ||
+      !previewRecord?.id
+    )
+      return;
+    const recordId = previewRecord.id;
+    setInvPosting(true);
+    setInvPostingError(null);
+    fetchWithAuth(`/api/expense-booking/${recordId}/post-to-gl`, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setInvPostingData((prev: any) => ({
+          ...prev,
+          isPosted: true,
+          jvNo: body.jvNo,
+          jvId: body.jvId,
+        }));
+      })
+      .catch((err: any) => setInvPostingError(err.message ?? "Posting failed"))
+      .finally(() => setInvPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewTab, invPostingLoading, invPostingData, previewRecord?.id]);
 
   useEffect(() => {
     setGrnBreakdown(null);
@@ -145,9 +177,61 @@ export function ExpenseBookingPreviewModal({
       }
     };
 
-    const { eSourceType, eSourceId } = previewRecord;
+    /**
+     * Multi-GRN combined invoices (see backend/services/invoiceLinking.js)
+     * merge several GRNs raised against the same PO into one booking —
+     * eSourceId is only the primary/first of them. Fetching just that one
+     * GRN's breakdown (the old behavior) silently understated the total by
+     * however much the other linked GRNs contributed. Fetch every linked
+     * GRN's breakdown in parallel and sum them instead.
+     */
+    const loadMergedGrnBreakdown = async (grnIds: number[]) => {
+      const results = await Promise.all(
+        grnIds.map(async (id) => {
+          try {
+            const r = await fetchWithAuth(`/api/grns/${id}/gst-breakdown`);
+            return r.ok ? await r.json() : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const valid = results.filter(
+        (d): d is NonNullable<typeof d> => !!d?.totals,
+      );
+      if (valid.length === 0) return;
+      const merged = valid.reduce(
+        (acc, d) => ({
+          items: [...acc.items, ...(d.items ?? [])],
+          totals: {
+            totalBase: acc.totals.totalBase + (d.totals.totalBase ?? 0),
+            totalCGST: acc.totals.totalCGST + (d.totals.totalCGST ?? 0),
+            totalSGST: acc.totals.totalSGST + (d.totals.totalSGST ?? 0),
+            totalGST: acc.totals.totalGST + (d.totals.totalGST ?? 0),
+            totalInclGST:
+              acc.totals.totalInclGST + (d.totals.totalInclGST ?? 0),
+          },
+        }),
+        {
+          items: [] as any[],
+          totals: {
+            totalBase: 0,
+            totalCGST: 0,
+            totalSGST: 0,
+            totalGST: 0,
+            totalInclGST: 0,
+          },
+        },
+      );
+      if (merged.totals.totalInclGST > 0) setGrnBreakdown(merged);
+    };
 
-    if (eSourceType === "GRN" && eSourceId) {
+    const { eSourceType, eSourceId, linkedGrnIds } = previewRecord;
+    const isMultiGRN = !!(linkedGrnIds && linkedGrnIds.length > 1);
+
+    if (eSourceType === "GRN" && isMultiGRN) {
+      loadMergedGrnBreakdown(linkedGrnIds!);
+    } else if (eSourceType === "GRN" && eSourceId) {
       // Direct GRN link — load its breakdown immediately.
       loadGrnBreakdown(eSourceId);
     } else if ((eSourceType === "PO" || eSourceType === "WO_PO") && eSourceId) {
@@ -176,7 +260,12 @@ export function ExpenseBookingPreviewModal({
       .then((r) => (r.ok ? r.json().catch(() => ({})) : []))
       .then((data) => setMasterBillingTerms(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, [previewRecord?.id]);
+    // linkedGrnIds is included below on top of id — the preview opens with
+    // a list-derived record first (optimistic), then a fresher /:id fetch
+    // lands moments later with the same id but a possibly-corrected
+    // linkedGrnIds. Without this, that correction would silently never
+    // re-trigger the fetch above.
+  }, [previewRecord?.id, previewRecord?.linkedGrnIds?.join(",")]);
 
   // ── All hooks MUST be declared before any conditional return ──────────────
   // Normalise billingTerms — prefer saved EBillingTermsData; if empty but
@@ -407,45 +496,80 @@ export function ExpenseBookingPreviewModal({
                 Could not load posting data.
               </div>
             ) : (() => {
-              const { isGrnLinked, totalAmount, accounts } = invPostingData;
+              const { isGrnLinked, baseAmount, taxAmount, totalAmount, accounts, grnBreakdown } = invPostingData;
+              const isMultiGrn = isGrnLinked && Array.isArray(grnBreakdown) && grnBreakdown.length > 1;
               const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const fmtGrnDate = (d: string | null) =>
+                d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
               type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
-              const rows: PostRow[] = isGrnLinked
-                ? [
-                    { key: "pgrn",     label: accounts?.pgrn?.label     ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null,     side: "debit",  amount: totalAmount },
-                    { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
-                  ]
+              type PostGroup = { groupKey: string; docNo: string | null; date: string | null; rows: PostRow[] };
+              // GRN-linked: base clears the GRN provision; tax (if any) is
+              // recognized as confirmed ITC (GST Credit Available) — mirrors
+              // backend/routes/expenseBooking.js's post-to-gl line construction.
+              // A combined invoice groups the legs by GRN (one group per
+              // GRN, each dated with that GRN's own entry date) instead of
+              // lumping every GRN's contribution into one row per account.
+              const grnRows = (g: any): PostRow[] => [
+                { key: "pgrn",     label: accounts?.pgrn?.label     ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null,     side: "debit",  amount: g.baseAmount },
+                ...(g.taxAmount > 0
+                  ? [{ key: "gstCredit", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: g.taxAmount }]
+                  : []),
+                { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: g.totalAmount },
+              ];
+              const groups: PostGroup[] = isGrnLinked
+                ? isMultiGrn
+                  ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
+                  : [{ groupKey: "single", docNo: null, date: null, rows: grnRows({ baseAmount, taxAmount, totalAmount }) }]
                 : [
-                    { key: "purchase", label: accounts?.purchase?.label  ?? "Purchase A/c",                  code: accounts?.purchase?.code ?? null,  side: "debit",  amount: totalAmount },
-                    { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
+                    {
+                      groupKey: "direct",
+                      docNo: null,
+                      date: null,
+                      rows: [
+                        { key: "purchase", label: accounts?.purchase?.label  ?? "Purchase A/c",                  code: accounts?.purchase?.code ?? null,  side: "debit",  amount: totalAmount },
+                        { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
+                      ],
+                    },
                   ];
               return (
                 <>
                   {isGrnLinked && (
                     <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
+                      {isMultiGrn && " Combines multiple GRNs — grouped below by GRN with its own entry date."}
                     </div>
                   )}
+
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                       <span>Account</span>
                       <span className="text-right">Debit (₹)</span>
                       <span className="text-right">Credit (₹)</span>
                     </div>
-                    {rows.map((row) => (
-                      <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
-                            {row.label}{row.code ? ` (${row.code})` : ""}
-                          </span>
-                        </div>
-                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                          {row.side === "debit" ? fmtAmt(row.amount) : ""}
-                        </span>
-                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                          {row.side === "credit" ? fmtAmt(row.amount) : ""}
-                        </span>
+                    {groups.map((group) => (
+                      <div key={group.groupKey}>
+                        {isMultiGrn && (
+                          <div className="flex items-center gap-2 px-2 sm:px-4 py-1.5 bg-muted/20 border-b border-border/50">
+                            <span className="text-[10px] font-mono font-semibold text-primary">{group.docNo}</span>
+                            <span className="text-[10px] text-muted-foreground">{fmtGrnDate(group.date)}</span>
+                          </div>
+                        )}
+                        {group.rows.map((row) => (
+                          <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                              <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                                {row.label}{row.code ? ` (${row.code})` : ""}
+                              </span>
+                            </div>
+                            <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                              {row.side === "debit" ? fmtAmt(row.amount) : ""}
+                            </span>
+                            <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                              {row.side === "credit" ? fmtAmt(row.amount) : ""}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     ))}
                     <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
@@ -459,35 +583,22 @@ export function ExpenseBookingPreviewModal({
                     <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
                       <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
                       <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                        Already posted to General Ledger as <span className="font-semibold">{invPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                        Posted to General Ledger as <span className="font-semibold">{invPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                      </p>
+                    </div>
+                  ) : invPostingError ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Auto-posting failed: {invPostingError}
                       </p>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                      <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                       <p className="text-xs text-muted-foreground">
-                        Posting will create a balanced journal entry and update the Trial Balance immediately.
+                        Posting to General Ledger…
                       </p>
-                      <button
-                        disabled={invPosting}
-                        onClick={async () => {
-                          if (!previewRecord?.id) return;
-                          setInvPosting(true);
-                          try {
-                            const r = await fetchWithAuth(`/api/expense-booking/${previewRecord.id}/post-to-gl`, { method: "POST" });
-                            const body = await r.json();
-                            if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                            setInvPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
-                          } catch (err: any) {
-                            alert(err.message ?? "Posting failed");
-                          } finally {
-                            setInvPosting(false);
-                          }
-                        }}
-                        className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                      >
-                        <Wallet size={11} />
-                        {invPosting ? "Posting…" : "Post to GL"}
-                      </button>
                     </div>
                   )}
                 </>
