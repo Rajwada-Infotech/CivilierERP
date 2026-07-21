@@ -550,14 +550,14 @@ const RecordPreviewModal: React.FC<{
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center gap-3">
+          <div className="flex items-start sm:items-center gap-3 flex-wrap pr-6">
             <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
               <Icon size={16} />
             </div>
             <div className="min-w-0 flex-1">
-              <DialogTitle className="text-sm font-semibold truncate">
+              <DialogTitle className="text-sm font-semibold break-words">
                 {item.ModuleLabel}
               </DialogTitle>
               <p className="text-[11px] text-muted-foreground font-mono truncate">
@@ -578,7 +578,7 @@ const RecordPreviewModal: React.FC<{
         )}
 
         {/* Summary grid — always available from the inbox item itself */}
-        <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-muted/20 p-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-xl border border-border bg-muted/20 p-3">
           {[
             ["Date", fmtDate(item.RecordDate)],
             ["Party", party],
@@ -587,11 +587,11 @@ const RecordPreviewModal: React.FC<{
             ["Approved By", item.ApprovedBy || "—"],
             ["Rejected By", item.RejectedBy || "—"],
           ].map(([label, value]) => (
-            <div key={label}>
+            <div key={label} className="min-w-0">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70">
                 {label}
               </p>
-              <p className="text-xs text-foreground truncate">{value}</p>
+              <p className="text-xs text-foreground break-words">{value}</p>
             </div>
           ))}
         </div>
@@ -623,13 +623,13 @@ const RecordPreviewModal: React.FC<{
                 : "No additional fields."}
             </p>
           ) : (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border p-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-xl border border-border p-3">
               {extraFields.map(([k, v]) => (
                 <div key={k} className="min-w-0">
                   <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 truncate">
                     {labelizeKey(k)}
                   </p>
-                  <p className="text-xs text-foreground truncate">{formatPreviewValue(v)}</p>
+                  <p className="text-xs text-foreground break-words">{formatPreviewValue(v)}</p>
                 </div>
               ))}
             </div>
@@ -642,10 +642,10 @@ const RecordPreviewModal: React.FC<{
               onClose();
               navigate(cfg.navPath);
             }}
-            className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors text-center"
           >
-            <ArrowUpRight size={13} />
-            Open in {item.ModuleLabel}
+            <ArrowUpRight size={13} className="shrink-0" />
+            <span className="break-words">Open in {item.ModuleLabel}</span>
           </button>
         )}
       </DialogContent>
