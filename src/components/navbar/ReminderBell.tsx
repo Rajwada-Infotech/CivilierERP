@@ -240,13 +240,13 @@ export const ReminderBell = () => {
               >
                 {[
                   "all",
-                  "purchase_order",
-                  "work_order",
-                  "grn",
-                  "tds",
-                  "emi_installment",
                   "material_request",
+                  "purchase_order",
+                  "grn",
+                  "work_order",
                   "pdc",
+                  "emi_installment",
+                  "tds",
                 ].map((t) => {
                   const active = filter === t;
                   const meta = t !== "all" ? TYPE_META[t] : null;
