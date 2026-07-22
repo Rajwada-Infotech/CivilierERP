@@ -144,7 +144,7 @@ const sectionCls  = "bg-card border border-border rounded-xl p-5 space-y-4";
 function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0">
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
         <Icon size={14} />
       </span>
       <p className="text-sm font-semibold text-foreground">{children}</p>
@@ -202,7 +202,7 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
 
   return (
     <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
-      <div className="bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 p-4 text-white">
+      <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 p-4 text-white">
         <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0">
@@ -228,14 +228,14 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
 
       <div className="px-4 pb-4">
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-          <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
         </div>
         <p className="text-[11px] text-muted-foreground mt-1.5">{pct}% filled</p>
       </div>
 
       {saving && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-card/95 backdrop-blur-sm">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/15 text-violet-600 dark:text-violet-400 animate-pulse">
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
             <FileText size={20} />
           </span>
           <p className="text-xs font-medium text-muted-foreground">Creating record…</p>
@@ -569,7 +569,7 @@ export default function FixedAssetRecord() {
             </button>
             {rights.canEdit && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg transition">
+                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
                 <Pencil size={14} /> Edit
               </button>
             )}
@@ -578,7 +578,7 @@ export default function FixedAssetRecord() {
       >
         <div className="space-y-5 max-w-6xl">
           {/* hero header */}
-          <div className="relative overflow-hidden bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 rounded-2xl p-5 text-white">
+          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 rounded-2xl p-5 text-white">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 shrink-0">
@@ -732,7 +732,7 @@ export default function FixedAssetRecord() {
               <ArrowLeft size={14} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50">
               <Check size={14} /> {saving ? "Saving…" : "Save Asset"}
             </button>
           </div>
@@ -970,7 +970,7 @@ export default function FixedAssetRecord() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg transition">
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
             <Plus size={16} /> New Asset
           </button>
         )
@@ -980,7 +980,7 @@ export default function FixedAssetRecord() {
           styled the same as PO/GRN's Card-based summary sections ── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4 mb-5">
         <Card className="border-border shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 px-5 py-4 text-white">
+          <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 px-5 py-4 text-white">
             <p className="text-[10px] uppercase tracking-widest text-white/70">
               Total Book Value
             </p>
@@ -1003,7 +1003,7 @@ export default function FixedAssetRecord() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <TrendingUp size={14} className="text-violet-600 dark:text-violet-400" />
+              <TrendingUp size={14} className="text-emerald-600 dark:text-emerald-400" />
               Book Value by Category
             </CardTitle>
           </CardHeader>
@@ -1055,40 +1055,63 @@ export default function FixedAssetRecord() {
       </div>
 
       {/* ── filters ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-5 bg-muted/30 border border-border rounded-xl p-3">
-        <div className="relative flex-1 min-w-[160px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, code, serial…"
-            className={`${inputCls} pl-8 bg-background`} />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-              <X size={13} />
-            </button>
-          )}
-        </div>
-        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className={`${filterCls} w-full sm:w-36 bg-background`}>
-          <option value="">All Categories</option>
-          {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={`${filterCls} w-full sm:w-32 bg-background`}>
-          <option value="">All Status</option>
-          {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={`${filterCls} w-full sm:w-28 bg-background`}>
-          <option value="">All Years</option>
-          {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
-        </select>
-        {(filterCategory || filterStatus || filterFinYear || search) && (
-          <button
-            onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
-            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
-          >
-            Clear
-          </button>
-        )}
-        <span className="w-full sm:w-auto sm:ml-auto text-xs text-muted-foreground shrink-0">{filtered.length} of {portfolioStats.count} assets</span>
-      </div>
+      <Card className="border-border shadow-sm mb-5">
+        <CardContent className="p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="lg:col-span-2">
+              <label className={labelCls}>Search</label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name, code, serial…"
+                  className={`${inputCls} pl-8`} />
+                {search && (
+                  <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Category</label>
+              <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className={inputCls}>
+                <option value="">All Categories</option>
+                {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Status</label>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={inputCls}>
+                <option value="">All Status</option>
+                {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="w-full sm:w-48">
+              <label className={labelCls}>Financial Year</label>
+              <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={inputCls}>
+                <option value="">All Years</option>
+                {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3 sm:ml-auto">
+              {(filterCategory || filterStatus || filterFinYear || search) && (
+                <button
+                  onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
+                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
+                >
+                  Clear filters
+                </button>
+              )}
+              <span className="text-xs text-muted-foreground shrink-0">
+                {filtered.length} of {portfolioStats.count} assets
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── register — same Card wrapper GRN.tsx uses for its register ── */}
       <Card className="border-border shadow-sm">

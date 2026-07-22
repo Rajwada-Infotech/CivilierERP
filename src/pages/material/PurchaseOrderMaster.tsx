@@ -3463,7 +3463,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           </div>
         </Card>
 
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
           {/* ── MR Doc Number Lookup (only shown in create mode, before any source is set) ── */}
           {viewMode === "create" &&
@@ -4233,7 +4233,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           )}
 
           {/* ── Line Items Card ───────────────────────────────────────────────── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm min-w-0">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                 <Boxes
@@ -4367,15 +4367,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   quantity: parseFloat(e.target.value) || 0,
                                 })
                               }
+                              title={
+                                li.mrPendingQty != null
+                                  ? `Pending on MR: ${li.mrPendingQty}`
+                                  : undefined
+                              }
                               className={`${cellInput} text-right ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
                             />
-                            {li.mrPendingQty != null && (
-                              <p
-                                className={`mt-0.5 text-[10px] ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
-                              >
-                                Pending on MR: {li.mrPendingQty}
-                              </p>
-                            )}
                             {/* Live equivalents in this item's other tagged UOMs */}
                             {li.quantity > 0 &&
                               (() => {
