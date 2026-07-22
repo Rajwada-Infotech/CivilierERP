@@ -136,7 +136,7 @@ export const MaterialShell: React.FC<MaterialShellProps> = ({
       </motion.div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      <div className="relative z-10 space-y-5">{children}</div>
+      <div className="relative z-10 space-y-5 min-w-0">{children}</div>
     </div>
   );
 };
