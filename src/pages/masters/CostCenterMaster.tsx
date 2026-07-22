@@ -7,7 +7,6 @@ import {
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import { GLAccountMultiSelect } from "@/components/finance/GLAccountMultiSelect";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Target, Loader2 } from "lucide-react";
@@ -25,9 +24,6 @@ const mapRow = (row: CostCenterRow): Record<string, unknown> => ({
   Name: row.Name,
   Description: row.Description ?? "",
   IsActive: Boolean(row.IsActive),
-  GLAccountIds: row.GLAccountIds ? row.GLAccountIds.split(",") : [],
-  GLAccountNames: row.GLAccountNames ?? "",
-  GLAccountCount: row.GLAccountCount ?? 0,
 });
 
 const CostCenterMaster: React.FC = () => {
@@ -55,23 +51,12 @@ const CostCenterMaster: React.FC = () => {
       type: "textarea",
       fullWidth: true,
     },
-    {
-      name: "GLAccountIds",
-      label: "GL Accounts",
-      type: "custom",
-      fullWidth: true,
-      defaultValue: [],
-      render: ({ value, onChange }) => (
-        <GLAccountMultiSelect value={value} onChange={onChange} />
-      ),
-    },
     { name: "IsActive", label: "Status", type: "toggle", defaultValue: true },
   ];
 
   const columns: ColumnDef[] = [
     { key: "Code", label: "Code" },
     { key: "Name", label: "Name" },
-    { key: "GLAccountNames", label: "GL Accounts" },
     { key: "Description", label: "Description", hideOnMobile: true },
     { key: "IsActive", label: "Status" },
   ];
@@ -82,22 +67,6 @@ const CostCenterMaster: React.FC = () => {
         {String(value ?? "")}
       </span>
     ),
-    GLAccountNames: (value: unknown, row: Record<string, unknown>) => {
-      const count = Number(row.GLAccountCount ?? 0);
-      if (!count)
-        return <span className="text-xs text-muted-foreground/60">—</span>;
-      return (
-        <span
-          className="text-xs text-muted-foreground truncate max-w-[220px] block"
-          title={String(value ?? "")}
-        >
-          {String(value ?? "")}{" "}
-          <span className="text-primary font-medium">
-            ({count})
-          </span>
-        </span>
-      );
-    },
     Description: (value: unknown) => (
       <span className="text-xs text-muted-foreground truncate max-w-[200px] block">
         {value ? String(value) : "—"}
@@ -131,7 +100,6 @@ const CostCenterMaster: React.FC = () => {
           Description: String(record.Description ?? ""),
           IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
           ProjectId: null,
-          GLAccountIds: (record.GLAccountIds as string[]) ?? [],
         });
         toast.success("Cost center added!");
         await refetch();
@@ -143,7 +111,6 @@ const CostCenterMaster: React.FC = () => {
           Description: String(record.Description ?? ""),
           IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
           ProjectId: null,
-          GLAccountIds: (record.GLAccountIds as string[]) ?? [],
         });
         toast.success("Cost center updated!");
         await refetch();
@@ -162,7 +129,7 @@ const CostCenterMaster: React.FC = () => {
       <Breadcrumbs items={["Finance", "Setup", "Cost Center"]} />
       <FinanceShell
         title="Cost Center"
-        subtitle="Group GL accounts by cost center for expense tracking"
+        subtitle="Tag POs to a cost center — the Trial Balance reflects their transactions per center"
         icon={Target}
       >
         {loading ? (
@@ -189,7 +156,6 @@ const CostCenterMaster: React.FC = () => {
                     columns: [
                       { header: "Code", accessor: "Code" },
                       { header: "Name", accessor: "Name" },
-                      { header: "GL Accounts", accessor: "GLAccountNames" },
                       { header: "Description", accessor: "Description" },
                       {
                         header: "Status",

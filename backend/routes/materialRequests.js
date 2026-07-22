@@ -30,6 +30,11 @@ const {
 } = require("../utils/docNumberLock");
 const { transition } = require("../services/approvalService");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const {
+  getMRItemFulfillment,
+  recomputeMRFulfillment,
+  summarize,
+} = require("../services/materialRequestFulfillment");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -341,7 +346,10 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    const conditions = ["mr.Status = 'Approved'", "mr.DocNo IS NOT NULL"];
+    const conditions = [
+      "mr.Status IN ('Approved', 'Partially Fulfilled')",
+      "mr.DocNo IS NOT NULL",
+    ];
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -416,9 +424,9 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Material Request not found" });
 
     const mr = header.recordset[0];
-    if (mr.Status !== "Approved")
+    if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
       return res.status(400).json({
-        error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
+        error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate a Normal PO.`,
       });
 
     const items = await pool.request().input("id", sql.Int, mrId).query(`
@@ -439,6 +447,19 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
         WHERE mri.MRId = @id
       `);
 
+    const fulfillment = await getMRItemFulfillment(pool, mrId);
+    const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+    const itemsWithPending = items.recordset
+      .map((it) => {
+        const f = pendingByItem.get(it.MRItemId);
+        return {
+          ...it,
+          OrderedQty: f?.OrderedQty ?? 0,
+          PendingQty: f ? f.PendingQty : it.Quantity,
+        };
+      })
+      .filter((it) => it.PendingQty > 0);
+
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -448,8 +469,149 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       ProjectName: mr.ProjectName,
       FinYearId: mr.FinYearId,
       Remarks: mr.Remarks,
-      items: items.recordset,
+      items: itemsWithPending,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /pending-summary ──────────────────────────────────────────────────────
+// Bulk per-MR requested/ordered/pending totals for every MR that's reached
+// the fulfillment lifecycle (Approved/Partially Fulfilled/Completed) — powers
+// the pill in the MR list without an N+1 fetch per row.
+// Must be registered before "/:id" — otherwise Express matches "/:id" first
+// with id="pending-summary" and this never gets hit.
+router.get("/pending-summary", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        mri.MRId,
+        SUM(mri.Quantity) AS TotalRequested,
+        SUM(ISNULL((
+          SELECT SUM(poi.Quantity)
+          FROM dbo.PurchaseOrderItems poi
+          JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+          WHERE poi.MRItemId = mri.MRItemId
+            AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+        ), 0)) AS TotalOrdered
+      FROM dbo.MaterialRequestItems mri
+      JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
+      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
+      GROUP BY mri.MRId
+    `);
+    res.json(
+      result.recordset.map((r) => {
+        const requested = Number(r.TotalRequested) || 0;
+        const ordered = Math.min(Number(r.TotalOrdered) || 0, requested);
+        return {
+          MRId: r.MRId,
+          totalRequested: requested,
+          totalOrdered: ordered,
+          totalPending: Math.max(0, requested - ordered),
+        };
+      }),
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /pending-report ───────────────────────────────────────────────────────
+// One row per outstanding MR line item — powers the "Pending MR Report".
+// Only MRs still in the fulfillment lifecycle with something left to order
+// (Approved / Partially Fulfilled, PendingQty > 0) are included; Draft,
+// Pending-approval, Rejected, and fully Completed MRs never appear.
+// Must be registered before "/:id" — same route-ordering requirement as
+// the other literal-path GETs above.
+router.get("/pending-report", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const conditions = [
+      "mr.Status IN ('Approved', 'Partially Fulfilled')",
+    ];
+
+    if (req.query.companyId) {
+      conditions.push("mr.CompanyId = @companyId");
+      request.input("companyId", sql.Int, parseInt(req.query.companyId, 10));
+    }
+    if (req.query.projectId) {
+      conditions.push("mr.ProjectId = @projectId");
+      request.input("projectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+    if (req.query.requestor) {
+      conditions.push("mr.CreatedBy LIKE @requestor");
+      request.input("requestor", sql.NVarChar(200), `%${req.query.requestor}%`);
+    }
+    if (req.query.docNo) {
+      conditions.push("mr.DocNo LIKE @docNo");
+      request.input("docNo", sql.NVarChar(100), `%${req.query.docNo}%`);
+    }
+    if (req.query.dateFrom) {
+      conditions.push("mr.RequestDate >= @dateFrom");
+      request.input("dateFrom", sql.Date, req.query.dateFrom);
+    }
+    if (req.query.dateTo) {
+      conditions.push("mr.RequestDate <= @dateTo");
+      request.input("dateTo", sql.Date, req.query.dateTo);
+    }
+
+    const result = await request.query(`
+      SELECT
+        mr.MRId, mr.DocNo, mr.RequestDate, mr.Status, mr.CreatedBy,
+        ec.name AS CompanyName, ep.name AS ProjectName,
+        mri.MRItemId, mri.ItemName, mri.UOMCode, mri.Quantity AS RequestedQty,
+        ISNULL((
+          SELECT SUM(poi.Quantity)
+          FROM dbo.PurchaseOrderItems poi
+          JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+          WHERE poi.MRItemId = mri.MRItemId
+            AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+        ), 0) AS OrderedQty,
+        (
+          SELECT STRING_AGG(po2.DocNo, ', ')
+          FROM dbo.PurchaseOrders po2
+          WHERE po2.SourceMRId = mr.MRId
+            AND ISNULL(po2.Status, '') NOT IN ('Deleted', 'Rejected')
+        ) AS LinkedPOs
+      FROM dbo.MaterialRequests mr
+      JOIN dbo.MaterialRequestItems mri ON mri.MRId = mr.MRId
+      LEFT JOIN dbo.enterprise ec ON ec.id = mr.CompanyId
+      LEFT JOIN dbo.enterprise ep ON ep.id = mr.ProjectId
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY mr.MRId DESC, mri.MRItemId ASC
+    `);
+
+    const rows = result.recordset
+      .map((r) => {
+        const requested = Number(r.RequestedQty) || 0;
+        const ordered = Math.min(Number(r.OrderedQty) || 0, requested);
+        return {
+          MRId: r.MRId,
+          DocNo: r.DocNo,
+          RequestDate: r.RequestDate,
+          Status: r.Status,
+          Requestor: r.CreatedBy,
+          CompanyName: r.CompanyName,
+          ProjectName: r.ProjectName,
+          ItemName: r.ItemName,
+          UOMCode: r.UOMCode,
+          RequestedQty: requested,
+          FulfilledQty: ordered,
+          PendingQty: Math.max(0, requested - ordered),
+          LinkedPOs: r.LinkedPOs || "",
+        };
+      })
+      .filter((r) => r.PendingQty > 0);
+
+    if (req.query.status) {
+      const statusFilter = String(req.query.status).toLowerCase();
+      res.json(rows.filter((r) => r.Status.toLowerCase() === statusFilter));
+      return;
+    }
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -845,9 +1007,9 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Material Request not found" });
 
     const mr = header.recordset[0];
-    if (mr.Status !== "Approved")
+    if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
       return res.status(400).json({
-        error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
+        error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate a Normal PO.`,
       });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
@@ -868,6 +1030,19 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
         WHERE mri.MRId = @id
       `);
 
+    const fulfillment = await getMRItemFulfillment(pool, id);
+    const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+    const itemsWithPending = items.recordset
+      .map((it) => {
+        const f = pendingByItem.get(it.MRItemId);
+        return {
+          ...it,
+          OrderedQty: f?.OrderedQty ?? 0,
+          PendingQty: f ? f.PendingQty : it.Quantity,
+        };
+      })
+      .filter((it) => it.PendingQty > 0);
+
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -878,8 +1053,72 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       FinYearId: mr.FinYearId,
       FinYearName: mr.FinYearName,
       Remarks: mr.Remarks,
-      items: items.recordset,
+      items: itemsWithPending,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/pending-summary ──────────────────────────────────────────────────
+// Per-item requested/ordered/pending quantities for a single MR — powers the
+// "Pending - N Qty" pill and the item-level fulfillment breakdown on the MR
+// detail page. Read-only — doesn't touch Status.
+router.get("/:id/pending-summary", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const items = await getMRItemFulfillment(pool, id);
+    const totals = summarize(items);
+    res.json({ MRId: id, items, ...totals });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/linked-pos ────────────────────────────────────────────────────────
+// Every Purchase Order raised against this MR, newest first, each annotated
+// with the MR's overall remaining balance immediately AFTER that PO was
+// created — same "audit trail" pattern as GRN ↔ Vehicle In/Out.
+router.get("/:id/linked-pos", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const totalReqRes = await pool.request().input("MRId", sql.Int, id).query(
+      "SELECT ISNULL(SUM(Quantity), 0) AS TotalRequested FROM dbo.MaterialRequestItems WHERE MRId = @MRId",
+    );
+    const totalRequested = Number(totalReqRes.recordset[0]?.TotalRequested) || 0;
+
+    const poRes = await pool.request().input("MRId", sql.Int, id).query(`
+      SELECT
+        po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
+        ISNULL(SUM(poi.Quantity), 0) AS OrderedQty
+      FROM dbo.PurchaseOrders po
+      LEFT JOIN dbo.PurchaseOrderItems poi
+        ON poi.PurchaseOrderID = po.PurchaseOrderID AND poi.MRItemId IS NOT NULL
+      WHERE po.SourceMRId = @MRId
+      GROUP BY po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status
+      ORDER BY po.PurchaseOrderID ASC
+    `);
+
+    let cumulativeOrdered = 0;
+    const ascending = poRes.recordset.map((r) => {
+      const isVoid = ["Deleted", "Rejected"].includes(r.Status);
+      if (!isVoid) cumulativeOrdered += Number(r.OrderedQty) || 0;
+      return {
+        purchaseOrderId: r.PurchaseOrderID,
+        poNumber: r.DocNo || r.PurchaseOrderNo,
+        date: r.PODate,
+        status: r.Status,
+        orderedQty: Number(r.OrderedQty) || 0,
+        remainingQtyAfter: Math.max(0, totalRequested - cumulativeOrdered),
+      };
+    });
+
+    res.json(ascending.reverse());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

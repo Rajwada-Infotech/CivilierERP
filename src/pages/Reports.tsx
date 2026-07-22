@@ -579,6 +579,54 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "pending-mr-report",
+    label: "Pending MR Report",
+    description: "Material Requests not yet fully converted into Purchase Orders",
+    icon: ClipboardList,
+    color: "#f97316",
+    apiPath: "/api/material-requests/pending-report",
+    // materialRequests.js's /pending-report accepts companyId/projectId —
+    // project has no standard FilterState slot in this generic engine, so
+    // only Company + Date range are exposed here; Requestor/Status/Dock
+    // Number filtering exists server-side (?requestor=&status=&docNo=) for
+    // future UI, and can be applied today via a direct API call/URL.
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "MR Dock Number", accessor: "DocNo" },
+      {
+        header: "Request Date",
+        accessor: (r) => (r.RequestDate ? String(r.RequestDate).slice(0, 10) : "—"),
+      },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Requestor", accessor: (r) => (r.Requestor ?? "—") as string },
+      { header: "Item Name", accessor: "ItemName" },
+      {
+        header: "Requested Quantity",
+        accessor: (r) => String(r.RequestedQty ?? 0),
+      },
+      {
+        header: "Fulfilled Quantity",
+        accessor: (r) => String(r.FulfilledQty ?? 0),
+      },
+      {
+        header: "Pending Quantity",
+        accessor: (r) => String(r.PendingQty ?? 0),
+      },
+      { header: "Status", accessor: "Status" },
+      {
+        header: "Linked Purchase Orders",
+        accessor: (r) => (r.LinkedPOs ? String(r.LinkedPOs) : "—"),
+      },
+    ],
+  },
+  {
     id: "issue-register",
     label: "Issue Register",
     description: "Material issues to sites and projects",
@@ -1519,6 +1567,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     reportIds: [
       "po-register",
       "grn-register",
+      "pending-mr-report",
       "issue-register",
       "stock-summary",
       "inter-company-transfer-report",

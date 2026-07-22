@@ -1,7 +1,7 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -40,6 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useAuth } from "@/contexts/AuthContext";
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 import {
   fetchNextDocNumber,
   fetchDocTypes,
@@ -172,10 +174,91 @@ const fmtDate = (d?: string | null) =>
       })
     : "—";
 
+// ─── Linked Purchase Orders ─────────────────────────────────────────────────────
+// Every PO raised against this MR, newest first, with a running "what's left"
+// balance — same audit-trail pattern as GRN ↔ Vehicle In/Out. Clicking a row
+// opens that PO directly in preview mode (?view=<id>, matches the deep-link
+// convention PurchaseOrderMaster.tsx already supports).
+
+const LinkedPurchaseOrders: React.FC<{
+  mrId: number;
+  navigate: ReturnType<typeof useNavigate>;
+}> = ({ mrId, navigate }) => {
+  const { data: linkedPOs = [], isLoading } = useQuery({
+    queryKey: ["mr-linked-pos", mrId],
+    queryFn: () => mrApi.getMRLinkedPOs(mrId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="h-16 rounded-xl border border-dashed border-border animate-pulse" />
+    );
+  }
+  if (linkedPOs.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
+        <ShoppingCart size={13} className="text-muted-foreground" />
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Linked Purchase Orders
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-muted/20 text-[9px] uppercase tracking-widest text-muted-foreground">
+              <th className="px-3 py-2 text-left">PO Number</th>
+              <th className="px-3 py-2 text-left">Date</th>
+              <th className="px-3 py-2 text-right">Ordered Qty</th>
+              <th className="px-3 py-2 text-left">Status</th>
+              <th className="px-3 py-2 text-right">Remaining Qty</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {linkedPOs.map((po) => (
+              <tr
+                key={po.purchaseOrderId}
+                className="hover:bg-muted/20 cursor-pointer transition-colors"
+                onClick={() =>
+                  navigate(`/material/purchase-order?view=${po.purchaseOrderId}`)
+                }
+              >
+                <td className="px-3 py-2 font-mono font-semibold text-primary">
+                  {po.poNumber}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {fmtDate(po.date)}
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {po.orderedQty}
+                </td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={po.status} />
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {po.remainingQtyAfter > 0 ? (
+                    <span className="text-amber-500">{po.remainingQtyAfter}</span>
+                  ) : (
+                    <span className="text-emerald-500">0</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
   const rights = usePageRights("material-request");
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const isAdmin = !!currentUser && isPrivilegedRole(currentUser.role);
   const queryClient = useQueryClient();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -294,6 +377,20 @@ export default function MaterialRequest() {
     queryFn: () =>
       mrApi.getMaterialRequests({ page, limit, search, status: statusFilter }),
   });
+
+  // Bulk pending-qty totals for every MR that's reached the fulfillment
+  // lifecycle (Approved/Partially Fulfilled/Completed) — powers the
+  // "Pending - N Qty" / "Completed" pill without an N+1 fetch per row.
+  const { data: pendingSummaryList = [] } = useQuery({
+    queryKey: ["mr-pending-summary"],
+    queryFn: mrApi.getBulkMRPendingSummary,
+    staleTime: 30_000,
+  });
+  const pendingSummaryByMRId = useMemo(() => {
+    const m = new Map<number, mrApi.MRPendingSummaryTotals>();
+    for (const row of pendingSummaryList) m.set(row.MRId, row);
+    return m;
+  }, [pendingSummaryList]);
 
   // ── Auto-select active fin year ──────────────────────────────────────────────
 
@@ -641,14 +738,27 @@ export default function MaterialRequest() {
       header: "Status",
       size: 180,
       meta: { className: "hidden lg:table-cell" },
-      cell: ({ row }) => (
-        <div className="whitespace-nowrap">
-          <ApprovalStatusChain
-            table="MaterialRequests"
-            recordId={row.original.MRId}
-          />
-        </div>
-      ),
+      cell: ({ row }) => {
+        const pending = pendingSummaryByMRId.get(row.original.MRId);
+        return (
+          <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
+            <ApprovalStatusChain
+              table="MaterialRequests"
+              recordId={row.original.MRId}
+            />
+            {pending &&
+              (pending.totalPending > 0 ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  Pending &middot; {pending.totalPending} Qty
+                </span>
+              ) : pending.totalOrdered > 0 ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  Completed
+                </span>
+              ) : null)}
+          </div>
+        );
+      },
     },
     {
       id: "actions",
@@ -669,13 +779,17 @@ export default function MaterialRequest() {
               <Eye size={15} />
             </button>
 
-            {/* Update — Draft only */}
-            {rights.canEdit && status === "Draft" && (
+            {/* Update — Draft only, or any status for admins */}
+            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || isAdmin) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
                 className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-                title="Edit this request"
+                title={
+                  status === "Draft"
+                    ? "Edit this request"
+                    : "Edit (admin override)"
+                }
               >
                 <Edit3 size={15} />
               </button>
@@ -1525,6 +1639,19 @@ export default function MaterialRequest() {
                 {viewingRecord.DocNo || `MR-${viewingRecord.MRId}`}
               </h2>
               <StatusBadge status={viewingRecord.Status || "Draft"} />
+              {(() => {
+                const pending = pendingSummaryByMRId.get(viewingRecord.MRId);
+                if (!pending) return null;
+                return pending.totalPending > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Pending &middot; {pending.totalPending} Qty
+                  </span>
+                ) : pending.totalOrdered > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Completed
+                  </span>
+                ) : null;
+              })()}
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.Normal}`}>
                 {priority}
               </span>
@@ -1570,7 +1697,7 @@ export default function MaterialRequest() {
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-            {rights.canEdit && viewingRecord.Status === "Draft" && (
+            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
@@ -1689,6 +1816,9 @@ export default function MaterialRequest() {
               </table>
             </div>
           </div>
+
+          {/* ── Linked Purchase Orders ── */}
+          <LinkedPurchaseOrders mrId={viewingRecord.MRId} navigate={navigate} />
 
           {/* ── Document chain ── */}
           <DocumentChainPanel docType="mr" id={viewingRecord.MRId} />
