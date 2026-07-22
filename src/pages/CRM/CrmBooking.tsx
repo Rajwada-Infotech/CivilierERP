@@ -74,13 +74,6 @@ async function fetchBookings(applicationId?: string): Promise<any[]> {
     return res.json();
   } catch { return []; }
 }
-async function fetchApps(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(APP_API);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
     const res = await fetchWithAuth(`${SA_LEADS_API}/users`);
