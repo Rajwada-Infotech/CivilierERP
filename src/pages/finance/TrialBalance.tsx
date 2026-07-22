@@ -83,6 +83,7 @@ interface TBTransaction {
   sourceId: number | null;
   invoiceNo: string | null;
   payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
+  costCenter: { id: number; code: string | null; name: string | null } | null;
 }
 
 interface TBTransactionsResponse {
@@ -414,6 +415,7 @@ function TBRow({
                       <th className="px-3 py-2">Source / Entry</th>
                       <th className="px-3 py-2">Invoice No.</th>
                       <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Cost Centre</th>
                       <th className="px-3 py-2 text-right">Debit</th>
                       <th className="px-3 py-2 text-right">Credit</th>
                       <th className="px-3 py-2">Remarks</th>
@@ -459,6 +461,11 @@ function TBRow({
                           </td>
                           <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
                           <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                            {t.costCenter
+                              ? `${t.costCenter.code ?? ""}${t.costCenter.code ? " - " : ""}${t.costCenter.name ?? ""}`
+                              : "—"}
+                          </td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">{t.debit ? fmt(t.debit) : "—"}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">{t.credit ? fmt(t.credit) : "—"}</td>
                           <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[11px]">{t.narration || "—"}</td>
