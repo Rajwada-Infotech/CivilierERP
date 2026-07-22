@@ -484,6 +484,13 @@ const crmSetupItems: SetupItem[] = [
     color: "text-cyan-500",
     pageKey: "crm-loan-details",
   },
+  {
+    icon: Landmark,
+    label: "Project Bank Mapping",
+    path: "/crm/setup/project-banks",
+    color: "text-indigo-500",
+    pageKey: "crm-project-banks",
+  },
 ];
 
 const adminSetupItems: SetupItem[] = [
