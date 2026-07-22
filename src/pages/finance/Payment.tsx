@@ -2266,11 +2266,32 @@ const Payment: React.FC = () => {
                 const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
                 if (!opt || opt.type === "emi") return null;
                 // opt.amount is the stored ENetAmount (GST + billing terms
-                // already applied server-side). The GRN item-level breakdown
-                // total is GST-inclusive but never includes billing terms —
-                // preferring it here understated/overstated the invoice
-                // total for every billing-terms-adjusted booking.
-                const netAmt = opt.amount ?? 0;
+                // already applied server-side) — normally correct, but a
+                // handful of GRN-linked bookings have it stuck at the base
+                // (pre-GST) amount from before ENetAmount was computed
+                // correctly at save time. When there are no active billing
+                // terms on this invoice, the live GST-inclusive GRN total is
+                // exactly what ENetAmount should equal, so prefer it when it
+                // disagrees — self-heals the stale-data case without
+                // touching billing-terms-adjusted invoices, where opt.amount
+                // legitimately differs from the raw GST-inclusive total.
+                let hasActiveBillingTerms = false;
+                try {
+                  const bt = form.billingTermsData
+                    ? JSON.parse(form.billingTermsData)
+                    : [];
+                  hasActiveBillingTerms =
+                    Array.isArray(bt) && bt.some((t: any) => t?.applicable);
+                } catch {
+                  /* malformed/legacy data — treat as no active terms */
+                }
+                const grnInclTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+                const netAmt =
+                  !hasActiveBillingTerms &&
+                  grnInclTotal > 0 &&
+                  Math.abs(grnInclTotal - (opt.amount ?? 0)) > 0.01
+                    ? grnInclTotal
+                    : (opt.amount ?? 0);
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
                 // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
                 const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;

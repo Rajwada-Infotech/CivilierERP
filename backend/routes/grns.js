@@ -690,13 +690,16 @@ router.get("/:id", async (req, res) => {
           p.TotalAmount    AS POTotalAmount,
           p.SubtotalAmount AS POSubtotalAmount,
           td.Prefix AS DocTypePrefix,
-          td.Description AS DocTypeDescription
+          td.Description AS DocTypeDescription,
+          vio.DocNo AS VehicleInOutDocNo,
+          vio.VehicleNo AS VehicleInOutVehicleNo
         FROM GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
         LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+        LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
         WHERE grn.GRNID = @GRNID
       `);
 
@@ -1814,7 +1817,6 @@ router.post("/:id/post-to-gl", async (req, res) => {
     }
     totalBase = Math.round(totalBase*100)/100;
     totalGST = Math.round(totalGST*100)/100;
-    const totalInclGST = Math.round((totalBase+totalGST)*100)/100;
 
     if (totalBase <= 0) return res.status(400).json({ error: "GRN has no receivable amount to post." });
 

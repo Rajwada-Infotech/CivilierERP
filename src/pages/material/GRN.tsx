@@ -2527,14 +2527,17 @@ export default function GRN() {
                                     *
                                   </span>
                                 </label>
-                                {field === "receivedQty" &&
-                                formData.grnSourceMode === "vehicleInOut" ? (
+                                {formData.grnSourceMode === "vehicleInOut" ? (
                                   <div
                                     className={`${inp} text-right text-xs flex items-center justify-end gap-1 bg-muted/30`}
                                     title="Locked to the quantity recorded on the selected Vehicle In/Out"
                                   >
                                     <Lock size={10} className="text-muted-foreground shrink-0" />
-                                    {item.receivedQty}
+                                    {field === "receivedQty"
+                                      ? item.receivedQty
+                                      : field === "rate"
+                                        ? item.rate
+                                        : item.quantity}
                                   </div>
                                 ) : (
                                   <input
@@ -2718,38 +2721,58 @@ export default function GRN() {
                               {item.uom || "—"}
                             </td>
                             <td className="px-1.5 py-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={item.rate}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    idx,
-                                    "rate",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className={`${inp} text-right text-xs py-1.5`}
-                                placeholder="0.00"
-                              />
+                              {formData.grnSourceMode === "vehicleInOut" ? (
+                                <span
+                                  className="flex items-center justify-end gap-1 text-xs font-medium text-foreground pr-2 py-1.5"
+                                  title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                >
+                                  <Lock size={10} className="text-muted-foreground shrink-0" />
+                                  {item.rate}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.rate}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      idx,
+                                      "rate",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  className={`${inp} text-right text-xs py-1.5`}
+                                  placeholder="0.00"
+                                />
+                              )}
                             </td>
                             <td className="px-1.5 py-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={item.quantity}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    idx,
-                                    "quantity",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className={`${inp} text-right text-xs py-1.5`}
-                                placeholder="0"
-                              />
+                              {formData.grnSourceMode === "vehicleInOut" ? (
+                                <span
+                                  className="flex items-center justify-end gap-1 text-xs font-medium text-foreground pr-2 py-1.5"
+                                  title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                >
+                                  <Lock size={10} className="text-muted-foreground shrink-0" />
+                                  {item.quantity}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      idx,
+                                      "quantity",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  className={`${inp} text-right text-xs py-1.5`}
+                                  placeholder="0"
+                                />
+                              )}
                             </td>
                             <td className="px-2 py-2 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               {item.totalAmount > 0
@@ -3202,6 +3225,18 @@ export default function GRN() {
                               },
                             ]
                           : []),
+                        ...(viewingGrn.VehicleInOutDocNo
+                          ? [
+                              {
+                                label: "Vehicle In/Out",
+                                value: viewingGrn.VehicleInOutVehicleNo
+                                  ? `${viewingGrn.VehicleInOutDocNo} — ${viewingGrn.VehicleInOutVehicleNo}`
+                                  : viewingGrn.VehicleInOutDocNo,
+                                mono: true,
+                                color: "text-sky-600 dark:text-sky-400",
+                              },
+                            ]
+                          : []),
                       ].map(({ label, value, mono, color }: any) => (
                         <div
                           key={label}
@@ -3597,7 +3632,7 @@ export default function GRN() {
                         Could not load posting data.
                       </div>
                     ) : (() => {
-                      const { baseAmount, taxAmount, totalAmount, costCentre, accounts } = grnPostingData;
+                      const { baseAmount, taxAmount, costCentre, accounts } = grnPostingData;
                       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
                       // Base and tax post as two separate self-balancing

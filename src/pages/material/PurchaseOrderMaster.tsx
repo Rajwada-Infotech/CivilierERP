@@ -183,6 +183,8 @@ interface POLineItem {
   taxAmount: number; // qty * rate * gstRate / 100
   amount: number; // qty * rate + taxAmount (inclusive of GST)
   uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
+  mrItemId?: number | null; // source MaterialRequestItems row, when this line came from an MR
+  mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item
 }
 
 interface POForm {
@@ -337,6 +339,11 @@ const getStatusConfig = (status: string) => {
     return {
       icon: <AlertCircle size={12} />,
       cls: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+    };
+  if (s === "short closed")
+    return {
+      icon: <XCircle size={12} />,
+      cls: "bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700",
     };
   return {
     icon: <FileText size={12} />,
@@ -609,7 +616,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["purchase-orders", page, limit, poTypeFilter],
     queryFn: () =>
-      getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
+      getPurchaseOrders({
+        page,
+        limit,
+        poType: poTypeFilter || undefined,
+        includeShortClosed: true,
+      }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -1035,7 +1047,11 @@ const PurchaseOrderMaster: React.FC = () => {
       const igst = Number(it.M_IGST ?? 0);
       const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
         resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
-      const qty = Number(it.Quantity ?? 1);
+      // Default to what's actually still pending on this MR item, not the
+      // original full requested qty — a second/third PO off the same MR
+      // should only ever offer the remaining balance.
+      const pendingQty = Number(it.PendingQty ?? it.Quantity ?? 1);
+      const qty = pendingQty;
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
 
@@ -1064,6 +1080,8 @@ const PurchaseOrderMaster: React.FC = () => {
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        mrItemId: it.MRItemId ?? null,
+        mrPendingQty: pendingQty,
       };
     });
 
@@ -1334,7 +1352,8 @@ const PurchaseOrderMaster: React.FC = () => {
       const igst = Number(it.M_IGST ?? 0);
       const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
         resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
-      const qty = Number(it.Quantity ?? 1);
+      const pendingQty = Number(it.PendingQty ?? it.Quantity ?? 1);
+      const qty = pendingQty;
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
       const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
@@ -1360,6 +1379,8 @@ const PurchaseOrderMaster: React.FC = () => {
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        mrItemId: it.MRItemId ?? null,
+        mrPendingQty: pendingQty,
       };
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
@@ -1582,10 +1603,27 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.supplierId) e.supplierId = true;
     if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
+    if (!form.costCenterId) e.costCenterId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
-    return Object.keys(e).length === 0;
+    if (Object.keys(e).length > 0) return false;
+
+    // MR-sourced lines can't exceed what's still pending on that MR item —
+    // a repeat PO off the same MR must stay within the remaining balance.
+    const overCap = lineItems.find(
+      (li) =>
+        li.mrItemId != null &&
+        li.mrPendingQty != null &&
+        li.quantity - li.mrPendingQty > 0.0001,
+    );
+    if (overCap) {
+      toast.error(
+        `"${overCap.itemName}" exceeds the pending Material Request quantity (max ${overCap.mrPendingQty}).`,
+      );
+      return false;
+    }
+    return true;
   };
 
   const toPayload = () => {
@@ -1621,6 +1659,7 @@ const PurchaseOrderMaster: React.FC = () => {
         igstRate: li.igstRate,
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
+        mrItemId: li.mrItemId ?? null,
       })),
       PaymentTerms:
         selectedTCs.length > 0
@@ -2810,7 +2849,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   >
                     <Printer size={13} /><span className="hidden sm:inline">Print</span>
                   </button>
-                  {rights.canEdit && (
+                  {rights.canEdit && viewingPO.Status !== "Short Closed" && (
                     <button
                       onClick={() => {
                         const item = listData.find(
@@ -3407,7 +3446,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       <Printer size={14} /> Print
                     </button>
                   )}
-                  {rights.canEdit && (
+                  {rights.canEdit && form.status !== "Short Closed" && (
                     <button
                       onClick={() => {
                         const item = listData.find((r) => r._id === editingId);
@@ -3967,12 +4006,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
 
               {/* Cost Center */}
               <div>
-                <FieldLabel>Cost Center</FieldLabel>
+                <FieldLabel required>Cost Center</FieldLabel>
                 <select
                   value={form.costCenterId}
                   onChange={(e) => setField("costCenterId", e.target.value)}
                   disabled={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} ${errors.costCenterId ? "border-red-400" : ""}`}
                 >
                   <option value="">— Select Cost Center —</option>
                   {costCenters.map((cc) => (
@@ -3981,6 +4020,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     </option>
                   ))}
                 </select>
+                {errors.costCenterId && (
+                  <p className="text-xs text-destructive mt-1">
+                    Cost Center is required
+                  </p>
+                )}
               </div>
 
             </div>
@@ -4315,6 +4359,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             <input
                               type="number"
                               min={0}
+                              max={li.mrPendingQty ?? undefined}
                               step="any"
                               value={li.quantity}
                               onChange={(e) =>
@@ -4322,8 +4367,15 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   quantity: parseFloat(e.target.value) || 0,
                                 })
                               }
-                              className={`${cellInput} text-right`}
+                              className={`${cellInput} text-right ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
                             />
+                            {li.mrPendingQty != null && (
+                              <p
+                                className={`mt-0.5 text-[10px] ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
+                              >
+                                Pending on MR: {li.mrPendingQty}
+                              </p>
+                            )}
                             {/* Live equivalents in this item's other tagged UOMs */}
                             {li.quantity > 0 &&
                               (() => {

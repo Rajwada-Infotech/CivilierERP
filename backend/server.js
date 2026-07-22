@@ -206,6 +206,7 @@ const ALL_ROUTES = [
   { path: "/api/material-issues", file: "./routes/materialIssues" },
   { path: "/api/material-issue-returns", file: "./routes/issueReturn" },
   { path: "/api/material-requests", file: "./routes/materialRequests" },
+  { path: "/api/short-close", file: "./routes/shortClose" },
   { path: "/api/quotations", file: "./routes/quotations" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },
