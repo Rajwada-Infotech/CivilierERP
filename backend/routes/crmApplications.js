@@ -396,33 +396,19 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
             // caller of it goes through, so it can't be missed by a future
             // second caller the way a route-local backfill here would be.
 
-            // createCrmBookingRecord always inserts Status='Pending' — correct
-            // for its OTHER caller (crmBookings.js's manual POST /, the
-            // documented fallback for when auto-booking fails, which has no
-            // upstream approval of its own and genuinely needs its own gate).
-            // A booking created HERE is different in kind, not just timing: it
-            // is a direct, same-request consequence of the Application
-            // approval that just happened, by the SAME actor, under the SAME
-            // role check — crm-bookings approve is gated to the identical
-            // CRM_APPROVER_ROLES (admin/super_admin/marketing_head) as
-            // crm-applications approve (see approvalService.js
-            // MODULE_APPROVER_ROLE_OVERRIDES), so this grants no authority the
-            // caller doesn't already hold. This is NOT the class of bug fixed
-            // in the SA promote-to-booking bypass (saHandoff.js) — that let a
-            // non-admin salesperson (only "sa-leads" edit rights) create and
-            // implicitly approve a booking with zero admin review. Here an
-            // admin has already reviewed and approved the Application; going
-            // through the real, audited approvalTransition (not a raw UPDATE)
-            // just reflects that same decision onto its direct byproduct,
-            // instead of leaving the booking stuck "Pending" its own
-            // rubber-stamp and silently blocking every downstream stage that
-            // gates on Booking.Status='Approved' (agreement prep, sales deed,
-            // etc.) until someone notices a second approval is waiting.
-            try {
-              await approvalTransition("crm-bookings", created.id, "Approved", userEmail, req.user?.role);
-            } catch (bookingApproveErr) {
-              console.error("[crm-applications] auto-booking approval failed:", bookingApproveErr.message);
-            }
+            // createCrmBookingRecord always inserts Status='Pending' — and it
+            // STAYS Pending here. Auto-approving it the moment it's created
+            // used to happen in this same block, on the reasoning that
+            // Application-approval and Booking-approval were gated to the
+            // same admin roles anyway — but that predates the Booking review
+            // checklist (UnitReviewConfirmed/PlanReviewConfirmed), the staff
+            // "Book / Send for Approval" action, and ReadyForApprovalAt now
+            // gating the Admin Approval Inbox (see crmBookings.js). Silently
+            // auto-approving here bypassed all of that: no unit/plan review,
+            // no booking-amount payment, straight to Approved with nothing
+            // ever surfaced in the inbox. A Booking's own approval must go
+            // through that real workflow, not be a byproduct of Application
+            // approval.
 
             // If this Application originated from a Sales Automation lead
             // (promoteLeadToFollowup in saHandoff.js stamps LeadId at
