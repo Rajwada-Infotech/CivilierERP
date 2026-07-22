@@ -8,16 +8,61 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
+// GET / — the Applicant Ledger's customer list: every customer with a
+// rolled-up application/booking count and financial position, searchable by
+// name/mobile/customer no. Same TotalOutstanding formula as crmCustomers.js's
+// detail view (Waived milestones don't count as still-owed; a Cancelled/
+// Rejected booking's balance isn't real collectible debt) so the two pages
+// never disagree on what a customer actually owes.
+router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { search } = req.query;
+    const req0 = pool.request();
+    let where = "WHERE c.IsActive = 1";
+    if (search) {
+      req0.input("srch", sql.NVarChar(200), `%${search}%`);
+      where += " AND (c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)";
+    }
+    const result = await req0.query(`
+      SELECT
+        c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
+        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AS ApplicationCount,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS ActiveBookingCount,
+        (SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
+          FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS TotalPaid,
+        (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('Paid', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
+          FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS TotalOutstanding
+      FROM dbo.CrmCustomer c
+      ${where}
+      ORDER BY c.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-customer-360] GET / error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:mobile — full customer journey across Lead → Application → Booking →
-// Agreement → Payments → Handover → Service Tickets, merged into one timeline.
-// Restricted to admin-tier roles per the "leads visible only to marketing head
-// and super admin" access rule.
+// Agreement → Payments → Handover → Service Tickets, merged into one
+// centralized ledger: invoices, payment receipts, on-account deposits, and
+// broker settlements per booking, plus a customer-level financial summary.
+// Restricted to admin-tier roles per the "leads visible only to marketing
+// head and super admin" access rule.
 router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const mobile = req.params.mobile.trim();
 
-    const [leads, apps, bookings, calls, tickets] = await Promise.all([
+    const [customer, leads, apps, bookings, calls, tickets] = await Promise.all([
+      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+        SELECT TOP 1 Id, CustomerNo, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode
+        FROM dbo.CrmCustomer WHERE Mobile = @mob OR AltMobile = @mob
+      `),
       pool.request().input("mob", sql.NVarChar(20), mobile).query(`
         SELECT Id, LeadUid, Status, Classification, SourceType, PlatformId,
                CreatedAt, AssignedSalespersonId
@@ -86,11 +131,79 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
       return res.status(404).json({ error: "No customer found with this mobile number" });
     }
 
+    const bookingRows = bookings.recordset;
+    const bookingIds = bookingRows.map((b) => b.Id);
+
+    let receiptsByBooking = {}, invoicesByBooking = {}, onAccountByBooking = {}, brokerageByBooking = {};
+    if (bookingIds.length) {
+      const idList = bookingIds.join(",");
+      const [receiptsRes, invoicesRes, onAccountRes, brokerageRes] = await Promise.all([
+        // Receipts are keyed off Milestone, not Booking directly — join through
+        // CrmPaymentMilestone the same way the milestone-payment flow itself does.
+        pool.request().query(`
+          SELECT r.Id, r.ReceiptNo, r.MilestoneId, r.Amount, r.ReceivedDate, r.PaymentMode,
+                 r.DepositBankName, m.MilestoneName, m.BookingId
+          FROM dbo.CrmPaymentReceipt r
+          JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
+          WHERE m.BookingId IN (${idList})
+          ORDER BY r.ReceivedDate DESC
+        `),
+        pool.request().query(`
+          SELECT Id, InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description
+          FROM dbo.CrmInvoice WHERE BookingId IN (${idList})
+          ORDER BY InvoiceDate DESC
+        `),
+        pool.request().query(`
+          SELECT Id, ReceiptNo, BookingId, Amount, AppliedAmount, ReceivedDate, PaymentMode
+          FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${idList})
+          ORDER BY ReceivedDate DESC
+        `),
+        // Broker name/firm come off the booking itself (BrokerName/BrokerFirm
+        // captured at brokerage-creation time), same denormalized fields
+        // crmBrokerage.js's own list view reads — no separate broker master
+        // join needed here.
+        pool.request().query(`
+          SELECT br.Id, br.BookingId, br.BrokerName, br.BrokerFirm, br.RateType, br.RateValue,
+                 br.ComputedAmount, br.Status, br.TrancheLabel,
+                 (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) AS TotalPaid
+          FROM dbo.CrmBrokerageMaster br
+          WHERE br.BookingId IN (${idList})
+        `),
+      ]);
+      for (const r of receiptsRes.recordset) (receiptsByBooking[r.BookingId] ??= []).push(r);
+      for (const inv of invoicesRes.recordset) (invoicesByBooking[inv.BookingId] ??= []).push(inv);
+      for (const oa of onAccountRes.recordset) (onAccountByBooking[oa.BookingId] ??= []).push(oa);
+      for (const br of brokerageRes.recordset) (brokerageByBooking[br.BookingId] ??= []).push(br);
+    }
+
+    const enrichedBookings = bookingRows.map((b) => ({
+      ...b,
+      receipts: receiptsByBooking[b.Id] || [],
+      invoices: invoicesByBooking[b.Id] || [],
+      onAccount: onAccountByBooking[b.Id] || [],
+      brokerage: brokerageByBooking[b.Id] || [],
+    }));
+
+    // Customer-level summary rolls up every non-Cancelled/Rejected booking's
+    // figures — same exclusion rule as the per-booking TotalOutstanding above,
+    // so the top-of-page tiles and the drill-down numbers always agree.
+    const liveBookings = enrichedBookings.filter((b) => !["Cancelled", "Rejected"].includes(b.Status));
+    const summary = {
+      totalInvoiced: liveBookings.reduce((s, b) => s + b.invoices.reduce((si, i) => si + Number(i.Amount || 0), 0), 0),
+      totalPaid: liveBookings.reduce((s, b) => s + Number(b.TotalPaid || 0), 0),
+      totalOutstanding: liveBookings.reduce((s, b) => s + Number(b.TotalOutstanding || 0), 0),
+      totalOnAccountBalance: liveBookings.reduce((s, b) => s + b.onAccount.reduce((si, oa) => si + (Number(oa.Amount || 0) - Number(oa.AppliedAmount || 0)), 0), 0),
+      totalBrokeragePaid: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Number(br.TotalPaid || 0), 0), 0),
+      totalBrokerageDue: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Math.max(0, Number(br.ComputedAmount || 0) - Number(br.TotalPaid || 0)), 0), 0),
+    };
+
     res.json({
       mobile,
+      customer: customer.recordset[0] || null,
+      summary,
       leads: leads.recordset,
       applications: apps.recordset,
-      bookings: bookings.recordset,
+      bookings: enrichedBookings,
       calls: calls.recordset,
       serviceTickets: tickets.recordset,
     });

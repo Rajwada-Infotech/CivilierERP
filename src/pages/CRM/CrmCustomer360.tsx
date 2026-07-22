@@ -73,35 +73,27 @@ const CrmCustomer360: React.FC = () => {
           ) : list.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground text-sm">No customers found</div>
           ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-muted/30 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                <div className="col-span-3">Customer</div>
-                <div className="col-span-2">Contact</div>
-                <div className="col-span-2">Location</div>
-                <div className="col-span-1 text-center">Apps</div>
-                <div className="col-span-1 text-center">Bookings</div>
-                <div className="col-span-1 text-right">Paid</div>
-                <div className="col-span-1 text-right">Outstanding</div>
-                <div className="col-span-1"></div>
-              </div>
-              <div className="divide-y divide-border">
-                {list.map((c: any) => (
-                  <button key={c.Id} onClick={() => openCustomer(c.Mobile)}
-                    className="w-full text-left grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-muted/20 transition-colors">
-                    <div className="col-span-3 min-w-0">
-                      <div className="text-sm font-medium truncate">{c.CustomerName}</div>
-                      <div className="font-mono text-[11px] text-muted-foreground">{c.CustomerNo}</div>
-                    </div>
-                    <div className="col-span-2 text-xs text-muted-foreground truncate">{c.Mobile}</div>
-                    <div className="col-span-2 text-xs text-muted-foreground truncate">{[c.City, c.State].filter(Boolean).join(", ") || "—"}</div>
-                    <div className="col-span-1 text-center text-sm">{c.ApplicationCount ?? 0}</div>
-                    <div className="col-span-1 text-center text-sm">{c.ActiveBookingCount ?? 0}</div>
-                    <div className="col-span-1 text-right text-xs font-medium text-green-600">{fmt(c.TotalPaid)}</div>
-                    <div className="col-span-1 text-right text-xs font-medium text-orange-600">{fmt(c.TotalOutstanding)}</div>
-                    <div className="col-span-1 flex justify-end"><ChevronRight size={14} className="text-muted-foreground" /></div>
-                  </button>
-                ))}
-              </div>
+            <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
+              {list.map((c: any) => (
+                <button key={c.Id} onClick={() => openCustomer(c.Mobile)}
+                  className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/20 transition-colors">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
+                    {(c.CustomerName || "?").trim().charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{c.CustomerName}</div>
+                    <div className="text-xs text-muted-foreground">{c.Mobile}</div>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full border border-border bg-muted/30 text-muted-foreground shrink-0">
+                    {c.ApplicationCount ?? 0} app{(c.ApplicationCount ?? 0) === 1 ? "" : "s"} · {c.ActiveBookingCount ?? 0} booking{(c.ActiveBookingCount ?? 0) === 1 ? "" : "s"}
+                  </span>
+                  <div className="text-right shrink-0 w-28">
+                    <div className="text-xs text-muted-foreground">Outstanding</div>
+                    <div className="text-sm font-semibold text-orange-600">{fmt(c.TotalOutstanding)}</div>
+                  </div>
+                  <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+                </button>
+              ))}
             </div>
           )}
         </>
