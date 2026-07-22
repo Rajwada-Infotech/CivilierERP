@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -7,6 +7,7 @@ import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
   ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
+  CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -14,6 +15,15 @@ const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const PLAN_API = "/api/crm/payment-plans";
 const AMEND_API = "/api/crm/booking-amendments";
+const BANK_DETAIL_API = "/api/crm/customer-bank-details";
+const PROJECT_BANK_API = "/api/crm/project-banks";
+const BANK_MASTER_API = "/api/bank-master";
+
+const EMPTY_BANK = {
+  BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
+  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
+  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
+};
 
 // Same approver set as CRM_APPROVER_ROLES on the backend (services/
 // approvalService.js) — kept in sync manually since it's a small, stable
@@ -21,7 +31,7 @@ const AMEND_API = "/api/crm/booking-amendments";
 // frontend-side permission preview.
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
-const TABS = ["Main", "Details", "Attachments", "Invoice"] as const;
+const TABS = ["Booking", "Payment Plan", "Parking & Extra Work", "Bank Details", "Attachments", "Payment", "Invoice"] as const;
 type Tab = typeof TABS[number];
 
 const fmt = (n: number | null | undefined) =>
@@ -31,10 +41,11 @@ async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   return r.ok ? r.json() : null;
 }
-async function fetchScopedPlans(companyId?: number, projectId?: number): Promise<any[]> {
+async function fetchScopedPlans(companyId?: number, projectId?: number, unitId?: number): Promise<any[]> {
   const params = new URLSearchParams();
   if (companyId) params.set("companyId", String(companyId));
   if (projectId) params.set("projectId", String(projectId));
+  if (unitId) params.set("unitId", String(unitId));
   const r = await fetchWithAuth(`${PLAN_API}?${params}`);
   return r.ok ? r.json() : [];
 }
@@ -50,23 +61,23 @@ async function fetchOnAccount(id: number): Promise<any | null> {
   const r = await fetchWithAuth(`${PAY_API}/booking/${id}/on-account`);
   return r.ok ? r.json() : null;
 }
+// Deposit bank, scoped to the booking's project — empty means "nothing
+// linked", so callers fall back to the full bank list themselves.
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
+  return r.ok ? r.json() : [];
+}
+async function fetchAllBanks(): Promise<any[]> {
+  const r = await fetchWithAuth(BANK_MASTER_API);
+  return r.ok ? r.json() : [];
+}
 async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`);
   return r.ok ? r.json() : [];
 }
 async function fetchExtraCharges(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`);
-  return r.ok ? r.json() : [];
-}
-async function fetchParkingRates(): Promise<any[]> {
-  const r = await fetchWithAuth("/api/parking-master");
-  return r.ok ? r.json() : [];
-}
-async function fetchAvailableParkingSlots(projectId?: number, blockId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
-  const params = new URLSearchParams({ projectId: String(projectId) });
-  if (blockId) params.set("blockId", String(blockId));
-  const r = await fetchWithAuth(`/api/parking-matrix?${params}`);
   return r.ok ? r.json() : [];
 }
 async function fetchExtraChargeTypes(): Promise<any[]> {
@@ -88,13 +99,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // control here must check this explicitly rather than assume anyone who
   // can view the page can also edit it.
   const canEdit = canDoAction("crm-bookings", "edit");
-  const [tab, setTab] = useState<Tab>("Main");
+  const [tab, setTab] = useState<Tab>("Booking");
   const [paymentPlanId, setPaymentPlanId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "" });
-  const [parkingForm, setParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+  const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
   const [chargesSaving, setChargesSaving] = useState(false);
   const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
@@ -102,6 +113,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [extraReason, setExtraReason] = useState("");
   const [parkingReason, setParkingReason] = useState("");
   const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [bookingAmountInput, setBookingAmountInput] = useState<string | null>(null);
+  const [bookingAmountSaving, setBookingAmountSaving] = useState(false);
+  const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
+  const [paySaving, setPaySaving] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["crm-booking-detail", bookingId],
@@ -118,19 +133,40 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const paymentSummary = data?.paymentSummary || {};
 
   const { data: plans = [] } = useQuery({
-    queryKey: ["crm-payment-plans-scoped", booking?.CompanyId, booking?.ProjectId],
-    queryFn: () => fetchScopedPlans(booking?.CompanyId, booking?.ProjectId),
+    queryKey: ["crm-payment-plans-scoped", booking?.CompanyId, booking?.ProjectId, booking?.UnitId],
+    queryFn: () => fetchScopedPlans(booking?.CompanyId, booking?.ProjectId, booking?.UnitId),
     enabled: !!booking,
   });
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-project-banks-for", booking?.ProjectId],
+    queryFn: () => fetchProjectBanks(booking?.ProjectId),
+    enabled: tab === "Payment" && !!booking?.ProjectId,
+  });
+  const { data: allBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"],
+    queryFn: fetchAllBanks,
+    enabled: tab === "Payment",
+    staleTime: 5 * 60_000,
+  });
+  // Project-scoped list if the project has any banks linked, otherwise the
+  // full company bank list as a fallback — same rule everywhere this pattern
+  // is used (On-Account dialog, Milestone payments page).
+  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  useEffect(() => {
+    if (tab === "Payment" && projectBanks.length === 1 && !payForm.DepositBankId) {
+      setPayForm((f) => ({ ...f, DepositBankId: String(projectBanks[0].BId) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, projectBanks]);
   const { data: invoices = [] } = useQuery({
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
-    enabled: tab === "Invoice" || tab === "Details",
+    enabled: tab === "Invoice" || tab === "Payment",
   });
   const { data: onAccount } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
-    enabled: tab === "Details",
+    enabled: tab === "Payment",
   });
   const { data: attachments = [] } = useQuery({
     queryKey: ["crm-booking-attachments", bookingId],
@@ -140,46 +176,73 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: parking = [] } = useQuery({
     queryKey: ["crm-parking", bookingId],
     queryFn: () => fetchParkingAllotments(bookingId),
-    enabled: tab === "Details",
+    enabled: tab === "Parking & Extra Work",
   });
   const { data: extras = [] } = useQuery({
     queryKey: ["crm-extra-charges", bookingId],
     queryFn: () => fetchExtraCharges(bookingId),
-    enabled: tab === "Details",
-  });
-  const { data: parkingRates = [] } = useQuery({
-    queryKey: ["parking-master-all"],
-    queryFn: fetchParkingRates,
-    enabled: tab === "Details",
-    staleTime: 5 * 60_000,
-  });
-  const { data: parkingSlots = [] } = useQuery({
-    queryKey: ["parking-matrix-for-booking", booking?.ProjectId, booking?.BlockId],
-    queryFn: () => fetchAvailableParkingSlots(booking?.ProjectId, booking?.BlockId),
-    enabled: tab === "Details" && !!booking?.ProjectId,
-    staleTime: 30_000,
+    enabled: tab === "Parking & Extra Work",
   });
   const { data: chargeTypes = [] } = useQuery({
     queryKey: ["extra-charge-master-all"],
     queryFn: fetchExtraChargeTypes,
-    enabled: tab === "Details",
+    enabled: tab === "Parking & Extra Work",
     staleTime: 5 * 60_000,
   });
   const { data: pendingAmendments = [] } = useQuery({
     queryKey: ["crm-booking-amendments", bookingId],
     queryFn: () => fetchPendingAmendments(bookingId),
-    enabled: tab === "Details",
+    enabled: tab === "Parking & Extra Work",
     staleTime: 15_000,
   });
   const [reviewingAmendmentId, setReviewingAmendmentId] = useState<number | null>(null);
 
-  const applicableParkingRates = (parkingRates as any[]).filter(
-    (r: any) => r.IsActive && r.ProjectId === booking?.ProjectId && (!r.BlockId || r.BlockId === booking?.BlockId)
-  );
-  const selectedParkingRate = applicableParkingRates.find((r: any) => String(r.Id) === parkingForm.ParkingMasterId);
-  const availableParkingSlots = (parkingSlots as any[]).filter(
-    (s: any) => s.Status === "Available" && (!selectedParkingRate || s.ParkingType === selectedParkingRate.ParkingType)
-  );
+  // Bank/KYC/Nominee — same shape and API as CrmApplication.tsx's own bank
+  // form (both read/write the one CrmCustomerBankDetail row keyed by
+  // ApplicationId), so edits made from either place stay in sync.
+  const [bank, setBank] = useState({ ...EMPTY_BANK });
+  const [bankLoaded, setBankLoaded] = useState(false);
+  const [bankSaving, setBankSaving] = useState(false);
+  useEffect(() => {
+    if (tab !== "Bank Details" || !booking?.ApplicationId) return;
+    let cancelled = false;
+    setBankLoaded(false);
+    fetchWithAuth(`${BANK_DETAIL_API}/application/${booking.ApplicationId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        setBank({
+          BankName: d?.BankName || "", BranchName: d?.BranchName || "", AccountNo: d?.AccountNo || "",
+          IfscCode: d?.IfscCode || "", AccountHolderName: d?.AccountHolderName || "",
+          NomineeName: d?.NomineeName || "", NomineeRelation: d?.NomineeRelation || "",
+          NomineeDob: d?.NomineeDob ? String(d.NomineeDob).slice(0, 10) : "",
+          NomineeContact: d?.NomineeContact || "", NomineeAddress: d?.NomineeAddress || "",
+          PanNo: d?.PanNo || "", AadhaarNo: d?.AadhaarNo || "",
+          Occupation: d?.Occupation || "", AnnualIncome: d?.AnnualIncome != null ? String(d.AnnualIncome) : "",
+        });
+      })
+      .finally(() => { if (!cancelled) setBankLoaded(true); });
+    return () => { cancelled = true; };
+  }, [tab, booking?.ApplicationId]);
+
+  const handleSaveBank = async () => {
+    if (!booking?.ApplicationId) return;
+    setBankSaving(true);
+    try {
+      const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${booking.ApplicationId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bank),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Save failed");
+      toast.success("Bank/KYC details saved");
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBankSaving(false);
+    }
+  };
 
   const invalidateCharges = () => {
     qc.invalidateQueries({ queryKey: ["crm-parking", bookingId] });
@@ -220,50 +283,26 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  // New parking allotments are only ever created from the Application
+  // wizard (ParkingSelectionStep in CrmApplication.tsx) — this page is
+  // edit-quantity/release only, since new allotments here used to bypass
+  // the Application's own selection flow entirely.
   const handleAddParking = async () => {
+    if (!editingParkingId) return;
     if (legalWorkStarted && !parkingReason.trim()) { toast.error("A reason is required — legal documents are already under verification for this booking"); return; }
-    if (editingParkingId) {
-      setChargesSaving(true);
-      try {
-        const res = await fetchWithAuth(`/api/crm/parking/${editingParkingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ Quantity: parseInt(parkingForm.Quantity) || 1, Reason: legalWorkStarted ? parkingReason.trim() : undefined }),
-        });
-        const resData = await res.json();
-        if (!res.ok) throw new Error(resData.error);
-        toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
-        setEditingParkingId(null);
-        setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
-        setParkingReason("");
-        invalidateCharges();
-      } catch (e: any) {
-        toast.error(e.message);
-      } finally {
-        setChargesSaving(false);
-      }
-      return;
-    }
-    if (!parkingForm.ParkingMasterId) { toast.error("Select a parking rate"); return; }
     setChargesSaving(true);
     try {
-      const res = await fetchWithAuth(`/api/crm/parking/${bookingId}`, {
-        method: "POST",
+      const res = await fetchWithAuth(`/api/crm/parking/${editingParkingId}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ParkingMasterId: parkingForm.ParkingMasterId,
-          ParkingSlotId: parkingForm.ParkingSlotId ? parseInt(parkingForm.ParkingSlotId) : null,
-          ParkingSlotNo: parkingForm.ParkingSlotId ? undefined : (parkingForm.ParkingSlotNo || null),
-          Quantity: parseInt(parkingForm.Quantity) || 1,
-          Reason: legalWorkStarted ? parkingReason.trim() : undefined,
-        }),
+        body: JSON.stringify({ Quantity: parseInt(parkingForm.Quantity) || 1, Reason: legalWorkStarted ? parkingReason.trim() : undefined }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
-      toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking allotted — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
-      setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+      toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
+      setEditingParkingId(null);
+      setParkingForm({ Quantity: "1" });
       setParkingReason("");
-      qc.invalidateQueries({ queryKey: ["parking-matrix-for-booking", booking?.ProjectId, booking?.BlockId] });
       invalidateCharges();
     } catch (e: any) {
       toast.error(e.message);
@@ -274,11 +313,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   const startEditParking = (p: any) => {
     setEditingParkingId(p.Id);
-    setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: String(p.Quantity) });
+    setParkingForm({ Quantity: String(p.Quantity) });
   };
   const cancelEditParking = () => {
     setEditingParkingId(null);
-    setParkingForm({ ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1" });
+    setParkingForm({ Quantity: "1" });
     setParkingReason("");
   };
 
@@ -405,7 +444,139 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     return rows;
   }, [invoices, invoiceSort]);
 
+  const [confirmingChecklist, setConfirmingChecklist] = useState<"unit" | "plan" | null>(null);
+  const handleConfirmChecklistItem = async (item: "unit" | "plan") => {
+    setConfirmingChecklist(item);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/confirm-${item}`, { method: "PUT" });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Confirm failed");
+      toast.success(item === "unit" ? "Unit, Rate & Total Value confirmed" : "Payment Plan & Booking Amount confirmed");
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setConfirmingChecklist(null);
+    }
+  };
+
+  // Un-confirm a checklist item — for when a conflict or mistake is spotted
+  // after the fact, so staff can re-check rather than being stuck with a
+  // Confirm-only, one-way checklist. Also drops the booking out of the Admin
+  // Approval Inbox (server clears ReadyForApprovalAt) until re-confirmed and
+  // re-submitted via the "Book" action.
+  const handleRevertChecklistItem = async (item: "unit" | "plan") => {
+    if (!window.confirm(`Revert this confirmation? The booking will need to be re-checked and re-submitted for approval.`)) return;
+    setConfirmingChecklist(item);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/revert-${item}`, { method: "PUT" });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Revert failed");
+      toast.success("Confirmation reverted — re-check and re-confirm when ready");
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setConfirmingChecklist(null);
+    }
+  };
+
   const effectivePlanId = paymentPlanId ?? (booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "");
+  const activeTabIndex = Math.max(0, TABS.indexOf(tab));
+  const firstMilestone = (data?.milestones || []).find((m: any) => Number(m.MilestoneNo) === 1) || (data?.milestones || [])[0];
+  const bookingAmountDue = Number(firstMilestone?.AmountDue || booking?.BookingAmount || 0);
+  const bookingAmountPaid = Number(firstMilestone?.AmountPaid || booking?.BookingAmountPaid || 0);
+  const bookingAmountBalance = Math.max(0, bookingAmountDue - bookingAmountPaid);
+  const bookingAmountPaidInFull = bookingAmountDue > 0 && bookingAmountBalance < 1;
+  const mandatoryReady = !!booking?.UnitReviewConfirmed && !!booking?.PlanReviewConfirmed && bookingAmountPaidInFull;
+
+  const goStep = (dir: 1 | -1) => {
+    const next = TABS[activeTabIndex + dir];
+    if (next) setTab(next);
+  };
+
+  const [bookingRequesting, setBookingRequesting] = useState(false);
+  const handleFinalBook = async () => {
+    if (!mandatoryReady) {
+      toast.error("Complete unit review, payment plan review, and booking amount payment before booking approval.");
+      setTab("Payment");
+      return;
+    }
+    if (booking.Status === "Approved") {
+      toast.success("Booking is already approved");
+      return;
+    }
+    setBookingRequesting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/ready-for-approval`, { method: "PUT" });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
+      toast.success(`Booking confirmed — invoice generated, ${resData.notified || 0} admin(s) notified for final approval`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBookingRequesting(false);
+    }
+  };
+
+  // Booking Amount is set here, at the Booking stage — never at Application
+  // time. Changing it (first time or a correction) re-aligns Milestone #1
+  // via the same resync-schedule the server already exposes for exactly
+  // this purpose, instead of duplicating that math client-side.
+  const handleSaveBookingAmount = async () => {
+    if (bookingAmountInput == null || bookingAmountInput === "") return;
+    setBookingAmountSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BookingAmount: parseFloat(bookingAmountInput) }),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Save failed");
+      const syncRes = await fetchWithAuth(`${API}/${bookingId}/resync-schedule`, { method: "POST" });
+      const syncData = await syncRes.json().catch(() => ({}));
+      if (!syncRes.ok) throw new Error(syncData.error || "Failed to align milestone schedule");
+      toast.success("Booking amount saved");
+      setBookingAmountInput(null);
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBookingAmountSaving(false);
+    }
+  };
+
+  const handleRecordPayment = async () => {
+    if (!firstMilestone?.Id) { toast.error("Set the Booking Amount first"); return; }
+    if (!payForm.Amount || parseFloat(payForm.Amount) <= 0) { toast.error("Enter a valid amount"); return; }
+    setPaySaving(true);
+    try {
+      const bankName = payForm.DepositBankId
+        ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
+        : undefined;
+      const res = await fetchWithAuth(`${PAY_API}/${firstMilestone.Id}/receipts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payForm, DepositBankName: bankName }),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Payment failed");
+      toast.success(`Payment recorded — ${resData.ReceiptNo || ""}`.trim());
+      setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setPaySaving(false);
+    }
+  };
 
   const handleSaveMain = async () => {
     const currentPlanId = booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "";
@@ -503,19 +674,63 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
         ) : (
           <>
-            <div className="flex items-center gap-1 border-b border-border">
-              {TABS.map((t) => (
-                <button key={t} onClick={() => setTab(t)}
-                  className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}>
-                  {t}
-                </button>
-              ))}
+            {/* 3-step required flow, always visible regardless of which tab
+                is open — the flat tab bar alone doesn't show that Booking,
+                Payment Plan, and Payment are the only 3 gating steps for
+                the Book action; everything else (Parking & Extra Work,
+                Bank Details, Attachments, Invoice) is supporting detail,
+                not part of the approval path. */}
+            {booking.Status !== "Approved" && (
+              <div className="flex items-center gap-1.5 px-1 py-2 text-xs">
+                {[
+                  { label: "1. Unit & Value", done: !!booking.UnitReviewConfirmed, t: "Booking" as Tab },
+                  { label: "2. Payment Plan", done: !!booking.PlanReviewConfirmed, t: "Payment Plan" as Tab },
+                  { label: "3. Booking Amount Paid", done: bookingAmountPaidInFull, t: "Payment" as Tab },
+                ].map((s, i) => (
+                  <React.Fragment key={s.label}>
+                    <button onClick={() => setTab(s.t)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium ${
+                        s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
+                      }`}>
+                      {s.done && <Check size={11} />} {s.label}
+                    </button>
+                    {i < 2 && <ArrowRight size={11} className="text-muted-foreground shrink-0" />}
+                  </React.Fragment>
+                ))}
+                <span className="ml-auto text-muted-foreground">
+                  {mandatoryReady ? "All 3 steps complete — ready to Book" : "Complete all 3 to unlock Book"}
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
+              {TABS.map((t) => {
+                const optional = !["Booking", "Payment Plan", "Payment"].includes(t);
+                return (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                      tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}>
+                    {t}{optional && <span className="text-[10px] text-muted-foreground/70 font-normal"> (optional)</span>}
+                  </button>
+                );
+              })}
             </div>
 
             {/* ── Tab 1: Main ── */}
-            {tab === "Main" && (
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className={`rounded-lg border px-3 py-2 ${booking.UnitReviewConfirmed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/20 text-muted-foreground"}`}>
+                <CheckCircle2 size={13} className="inline mr-1" /> Unit reviewed
+              </div>
+              <div className={`rounded-lg border px-3 py-2 ${booking.PlanReviewConfirmed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/20 text-muted-foreground"}`}>
+                <ClipboardCheck size={13} className="inline mr-1" /> Plan reviewed
+              </div>
+              <div className={`rounded-lg border px-3 py-2 ${bookingAmountPaidInFull ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                <CreditCard size={13} className="inline mr-1" /> {bookingAmountPaidInFull ? "Booking amount paid" : "Payment pending"}
+              </div>
+            </div>
+
+            {tab === "Booking" && (
               <div className="space-y-4 pt-2">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -534,30 +749,170 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <label className="text-xs text-muted-foreground block mb-1">Unit / Block</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{[booking.UnitNo, booking.BlockName].filter(Boolean).join(" / ") || "—"}</div>
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-xs text-muted-foreground block mb-1">Payment Plan</label>
-                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)} disabled={!canEdit}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
-                      <option value="">— No plan (7-stage default) —</option>
-                      {(plans as any[]).map((p: any) => (
-                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}{!p.CompanyId && !p.ProjectId ? " (Global)" : ""}</option>
-                      ))}
-                    </select>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Rate / sqft</label>
+                    <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{fmt(booking.RatePerSqFt)}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Total Value</label>
+                    <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30 font-semibold">{fmt(booking.GrandTotal ?? booking.TotalValue)}</div>
                   </div>
                 </div>
-                {canEdit && (
-                  <div className="flex justify-end">
-                    <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
-                      className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                      {saving ? "Saving..." : "Save Payment Plan"}
-                    </button>
+
+                {booking.Status !== "Approved" && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                    <p className="text-sm font-medium">Unit, Rate & Total Value are correct</p>
+                    {booking.UnitReviewConfirmed ? (
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Confirmed</span>
+                        {canEdit && (
+                          <button onClick={() => handleRevertChecklistItem("unit")} disabled={confirmingChecklist === "unit"}
+                            className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100 disabled:opacity-40">
+                            Revert
+                          </button>
+                        )}
+                      </div>
+                    ) : canEdit ? (
+                      <button onClick={() => handleConfirmChecklistItem("unit")} disabled={confirmingChecklist === "unit"}
+                        className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
+                        {confirmingChecklist === "unit" ? "Confirming..." : "Confirm"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not confirmed</span>
+                    )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* ── Tab 2: Details ── */}
-            {tab === "Details" && (
+            {tab === "Payment Plan" && (
+              <div className="space-y-4 pt-2">
+                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Payment Plan</label>
+                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)} disabled={!canEdit || booking.Status === "Approved"}
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
+                      <option value="">No plan - 7-stage default</option>
+                      {(plans as any[]).map((p: any) => (
+                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}{!p.CompanyId && !p.ProjectId ? " (Global)" : ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {canEdit && booking.Status !== "Approved" && (
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <p className="text-xs text-muted-foreground">The booking amount itself is set on the Payment tab. After real payments exist, server validation blocks unsafe schedule changes.</p>
+                      <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
+                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                        {saving ? "Saving..." : "Save Plan"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {booking.Status !== "Approved" && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                    <p className="text-sm font-medium">Payment Plan is correct</p>
+                    {booking.PlanReviewConfirmed ? (
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Confirmed</span>
+                        {canEdit && (
+                          <button onClick={() => handleRevertChecklistItem("plan")} disabled={confirmingChecklist === "plan"}
+                            className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100 disabled:opacity-40">
+                            Revert
+                          </button>
+                        )}
+                      </div>
+                    ) : canEdit ? (
+                      <button onClick={() => handleConfirmChecklistItem("plan")} disabled={confirmingChecklist === "plan"}
+                        className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
+                        {confirmingChecklist === "plan" ? "Confirming..." : "Confirm"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not confirmed</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Payment — second-to-last step. Set the real Booking
+                Amount, record the actual payment against it, then Book.
+                This is the ONLY place money changes hands on a booking. ── */}
+            {tab === "Payment" && (
+              <div className="space-y-3 pt-2">
+                <div className="rounded-xl border border-border p-3.5 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-primary" /> Booking Amount</h3>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Pending</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
+                  </div>
+                  {bookingAmountDue <= 0 && (
+                    <p className="text-[11px] text-muted-foreground">No default amount is shown here — set the actual Booking Amount below; the rest of the payment schedule is calculated from it.</p>
+                  )}
+                  {canEdit && booking.Status !== "Approved" && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input type="number" placeholder="Set/correct booking amount (₹)"
+                        value={bookingAmountInput ?? (booking.BookingAmount != null ? String(booking.BookingAmount) : "")}
+                        onChange={(e) => setBookingAmountInput(e.target.value)}
+                        className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      <button onClick={handleSaveBookingAmount} disabled={bookingAmountSaving || bookingAmountInput == null}
+                        className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40 shrink-0">
+                        {bookingAmountSaving ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
+                  <div className="rounded-xl border border-border p-3.5 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Record Payment</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" placeholder={`Amount (balance ${fmt(bookingAmountBalance)})`} value={payForm.Amount}
+                        onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
+                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                        {["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"].map((m) => <option key={m}>{m}</option>)}
+                      </select>
+                      <input type="date" value={payForm.ReceivedDate} onChange={(e) => setPayForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      {payForm.PaymentMode === "Cheque" ? (
+                        <input placeholder="Cheque No" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      ) : payForm.PaymentMode !== "Cash" ? (
+                        <input placeholder="Transaction Ref / UTR" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      ) : null}
+                      <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background col-span-2">
+                        <option value="">Deposited To (Company Bank) — optional</option>
+                        {(bankOptions as any[]).map((b: any) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button onClick={handleRecordPayment} disabled={paySaving}
+                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        {paySaving ? "Recording..." : "Record Payment"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className={`rounded-xl border p-3.5 ${mandatoryReady ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                  <p className="text-sm font-semibold">{mandatoryReady ? "Ready to book" : "On hold / payment pending"}</p>
+                  <p className="text-xs mt-1">
+                    {!booking.UnitReviewConfirmed && "Confirm Unit, Rate & Total Value on the Booking tab. "}
+                    {!booking.PlanReviewConfirmed && "Confirm the Payment Plan on the Payment Plan tab. "}
+                    {!bookingAmountPaidInFull && "Booking amount is not yet fully paid. "}
+                    {mandatoryReady && "All requirements are complete — click Book below to confirm this booking. An invoice generates automatically and admins are notified for final approval."}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {tab === "Bank Details" && (
               <div className="space-y-4 pt-2">
                 {customer && (
                   <div className="rounded-xl border border-border p-3.5">
@@ -593,6 +948,51 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   )}
                 </div>
 
+                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} /> Bank / KYC / Nominee Details</h3>
+                    {canEdit && (
+                      <button onClick={handleSaveBank} disabled={bankSaving || !bankLoaded}
+                        className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40">
+                        {bankSaving ? "Saving..." : "Save"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
+                      ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
+                      ["Occupation", "Occupation"], ["AnnualIncome", "Annual Income"],
+                    ].map(([key, label]) => (
+                      <div key={key}>
+                        <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                        <input value={(bank as any)[key]} disabled={!canEdit}
+                          onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t border-border/60">
+                    <p className="text-xs font-medium text-foreground mb-2">Nominee</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["NomineeName", "Name"], ["NomineeRelation", "Relation"], ["NomineeContact", "Contact"], ["NomineeAddress", "Address"],
+                      ].map(([key, label]) => (
+                        <div key={key}>
+                          <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                          <input value={(bank as any)[key]} disabled={!canEdit}
+                            onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "Parking & Extra Work" && (
+              <div className="space-y-4 pt-2">
                 <div className="rounded-xl border border-border p-3.5">
                   <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Building2 size={13} /> Booking</h3>
                   <div className="grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
@@ -691,47 +1091,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </div>
                     </div>
                   )}
-                  {canEdit && editingParkingId == null && (
-                    <>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        <select value={parkingForm.ParkingMasterId}
-                          onChange={(e) => setParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
-                          className="col-span-2 text-xs border border-border rounded px-2 py-1.5 bg-background">
-                          <option value="">Select parking rate</option>
-                          {applicableParkingRates.map((r: any) => (
-                            <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} (+{r.GstRate}% GST)</option>
-                          ))}
-                        </select>
-                        {availableParkingSlots.length > 0 ? (
-                          <select value={parkingForm.ParkingSlotId} onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
-                            <option value="">Slot (optional)</option>
-                            {availableParkingSlots.map((s: any) => (
-                              <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input placeholder="Slot No." value={parkingForm.ParkingSlotNo}
-                            onChange={(e) => setParkingForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                        )}
-                        <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
-                          onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                          className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                      </div>
-                      {legalWorkStarted && (
-                        <input placeholder="Reason for this change (required)" value={parkingReason}
-                          onChange={(e) => setParkingReason(e.target.value)}
-                          className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
-                      )}
-                      <button onClick={handleAddParking} disabled={chargesSaving}
-                        className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40">
-                        {legalWorkStarted ? "Request Amendment" : "+ Allot Parking"}
-                      </button>
-                      {applicableParkingRates.length === 0 && (
-                        <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Setup → Parking Master.</p>
-                      )}
-                    </>
+                  {canEdit && (parking as any[]).length === 0 && editingParkingId == null && (
+                    <p className="text-xs text-muted-foreground">No parking allotted yet — new parking is sold from the Application (Parking Selection step), not here. This tab is for editing quantity or releasing an existing allotment.</p>
                   )}
 
                   <div className="pt-2 border-t border-border/60 space-y-2">
@@ -939,8 +1300,29 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </>
         )}
 
-        <div className="flex justify-end pt-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+        <div className="flex items-center justify-between gap-2 pt-3 border-t border-border">
+          <div className="flex items-center gap-2">
+            <button onClick={() => goStep(-1)} disabled={activeTabIndex === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+              <ArrowLeft size={14} /> Previous
+            </button>
+            {activeTabIndex < TABS.length - 1 && (
+              <button onClick={() => goStep(1)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                Next <ArrowRight size={14} />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {tab === "Payment" && booking?.Status !== "Approved" && (
+              <button onClick={handleFinalBook} disabled={!mandatoryReady || bookingRequesting}
+                title={!mandatoryReady ? "Complete review and booking amount payment first" : "Notify admins this booking is ready for approval"}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {bookingRequesting ? "Sending..." : booking?.ReadyForApprovalAt ? "Re-notify Admin" : mandatoryReady ? "Book / Send for Approval" : "Book Blocked"}
+              </button>
+            )}
+            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+          </div>
         </div>
       </DialogContent>
 

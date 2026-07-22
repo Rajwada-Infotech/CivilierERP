@@ -380,7 +380,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
         ORDER BY m.MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectName, b.BookingAmount,
+        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectId, b.ProjectName, b.BookingAmount,
                b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                a.ApplicantName, a.Mobile
         FROM dbo.CrmBooking b
@@ -627,11 +627,13 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
       .input("tref", sql.NVarChar(200), b.TransactionRef || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",   sql.Int,           actorId(req))
+      .input("bkid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
+      .input("bkname", sql.NVarChar(200), b.DepositBankName || null)
       .query(`
         INSERT INTO dbo.CrmOnAccountPayment
-          (ReceiptNo, BookingId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt)
+          (ReceiptNo, BookingId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME())
+        VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME(), @bkid, @bkname)
       `);
     const onAccountId = result.recordset[0].Id;
 

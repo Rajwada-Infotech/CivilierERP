@@ -13,6 +13,7 @@ const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
 const BANK_MASTER_API = "/api/bank-master";
 const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
+const PROJECT_BANK_API = "/api/crm/project-banks";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 
@@ -54,6 +55,15 @@ async function fetchOnAccount(bookingId: string): Promise<any> {
 async function fetchCompanyBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Deposit bank, scoped to the booking's project — empty means "nothing
+// linked", so the caller falls back to the full bank list itself.
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  try {
+    const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 async function fetchCustomerBank(bookingId: string): Promise<any> {
   if (!bookingId) return null;
   try {
@@ -74,7 +84,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const [addDialog, setAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
   const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
   const [applyingId, setApplyingId] = useState<number | null>(null);
 
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -102,6 +112,15 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
+
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-project-banks-for", booking?.ProjectId],
+    queryFn: () => fetchProjectBanks(booking?.ProjectId),
+    enabled: !!booking?.ProjectId,
+  });
+  // Project-scoped list if the project has any banks linked, otherwise the
+  // full company bank list as a fallback.
+  const bankOptions = projectBanks.length > 0 ? projectBanks : companyBanks;
   // Bookings created before the payment-logic fix have Milestone #1 sized
   // off the payment plan's fixed % instead of the real BookingAmount — flag
   // that mismatch here so staff can one-click resync the schedule.
@@ -120,7 +139,11 @@ const CrmPaymentMilestones: React.FC = () => {
       PaymentMode: m.PaymentMode || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
-      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId) : "",
+      // Auto-select if the milestone doesn't already have one recorded and
+      // this project has exactly one bank linked (Setup > Project Bank
+      // Mapping) — otherwise leave it for staff to pick from the dropdown.
+      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId)
+        : projectBanks.length === 1 ? String(projectBanks[0].BId) : "",
     });
   };
 
@@ -163,7 +186,7 @@ const CrmPaymentMilestones: React.FC = () => {
           Remarks:       payForm.Remarks       || undefined,
           DepositBankId: payForm.DepositBankId || undefined,
           DepositBankName: payForm.DepositBankId
-            ? (companyBanks as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
+            ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
             : undefined,
         }),
       });
@@ -239,6 +262,9 @@ const CrmPaymentMilestones: React.FC = () => {
     if (!selectedBookingId || !onAccountForm.Amount) return;
     setSaving(true);
     try {
+      const bankName = onAccountForm.DepositBankId
+        ? (bankOptions as any[]).find((b: any) => String(b.BId) === onAccountForm.DepositBankId)?.BName
+        : undefined;
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}/on-account`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -248,13 +274,15 @@ const CrmPaymentMilestones: React.FC = () => {
           PaymentMode: onAccountForm.PaymentMode || null,
           TransactionRef: onAccountForm.TransactionRef || null,
           Notes: onAccountForm.Notes || null,
+          DepositBankId: onAccountForm.DepositBankId || undefined,
+          DepositBankName: bankName,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
       setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -401,7 +429,10 @@ const CrmPaymentMilestones: React.FC = () => {
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
               <Plus size={14} /> Add Milestone
             </button>
-            <button onClick={() => setOnAccountDialog(true)}
+            <button onClick={() => {
+              setOnAccountForm((f) => ({ ...f, DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
+              setOnAccountDialog(true);
+            }}
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
               <Wallet size={14} /> Deposit On Account
             </button>
@@ -583,12 +614,14 @@ const CrmPaymentMilestones: React.FC = () => {
                 </select>
               </div>
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Deposited To (Company Bank)</label>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}
+                </label>
                 <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                   <option value="">Select company bank</option>
-                  {(companyBanks as any[]).map((b: any) => (
-                    <option key={b.BId} value={String(b.BId)}>{b.BName} — {b.BAccountNumber}</option>
+                  {(bankOptions as any[]).map((b: any) => (
+                    <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
                   ))}
                 </select>
               </div>
@@ -706,6 +739,18 @@ const CrmPaymentMilestones: React.FC = () => {
               <input type="text" value={onAccountForm.TransactionRef}
                 onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}
+              </label>
+              <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">Select company bank</option>
+                {(bankOptions as any[]).map((b: any) => (
+                  <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Notes</label>
