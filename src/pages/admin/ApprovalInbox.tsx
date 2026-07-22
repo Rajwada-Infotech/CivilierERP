@@ -284,6 +284,32 @@ const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
+// Modules whose page already supports a "?view=<RecordId>" deep link that
+// auto-opens that exact record's own preview/view modal on load (see the
+// `searchParams.get("view")` effect in each page). Modules not listed here
+// have no such modal yet, so we fall back to a bare navigate.
+const VIEW_PARAM_MODULES = new Set([
+  "purchase-orders",
+  "goods-receipt",
+  "expense-booking",
+  "payments",
+  "vehicle-in-out",
+  "material-requests",
+]);
+
+// Builds the URL to open a given inbox item directly in its module's own
+// preview mode, instead of dumping the user on a blank list page to hunt
+// for the record themselves.
+function openInModulePath(item: InboxItem, navPath: string): string {
+  if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
+    return `${navPath}?id=${item.RecordId}`;
+  }
+  if (VIEW_PARAM_MODULES.has(item.Module)) {
+    return `${navPath}?view=${item.RecordId}`;
+  }
+  return navPath;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fetchInbox = async (): Promise<InboxItem[]> => {
@@ -640,7 +666,7 @@ const RecordPreviewModal: React.FC<{
           <button
             onClick={() => {
               onClose();
-              navigate(cfg.navPath);
+              navigate(openInModulePath(item, cfg.navPath));
             }}
             className="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors text-center"
           >
@@ -699,13 +725,9 @@ const InboxRow: React.FC<{
       />
       {cfg?.navPath && (
         <button
-          onClick={() => navigate(
-            item.Module === "crm-agreements" || item.Module === "crm-agreement-date"
-              ? `${cfg.navPath}?id=${item.RecordId}`
-              : cfg.navPath
-          )}
+          onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-          title={`Go to ${item.ModuleLabel}`}
+          title={`Open ${item.ModuleLabel} in preview`}
         >
           <ArrowUpRight size={14} />
         </button>
