@@ -1306,22 +1306,91 @@ const AttachmentsStep: React.FC<{
     }
   };
 
-  const handleAddParking = async (rate: any, slot: any) => {
+  // Slots grouped by ParkingType so e.g. two Basement slots (B-01, B-02)
+  // render as one "Basement" group with two selectable rows, instead of two
+  // separate top-level buttons that look like duplicate/confusing entries.
+  const slotGroups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const s of availableSlots) {
+      if (!map.has(s.ParkingType)) map.set(s.ParkingType, []);
+      map.get(s.ParkingType)!.push(s);
+    }
+    return Array.from(map.entries());
+  }, [availableSlots]);
+
+  // Rate types with no specific slot inventory (e.g. "Open" parking sold by
+  // count, not by a fixed slot) — these get a quantity input instead of a
+  // slot picker, since one click could never mean "buy 3".
+  const ratesWithoutSlots = useMemo(() => {
+    const typesWithSlots = new Set(availableSlots.map((s: any) => s.ParkingType));
+    return (applicableRates as any[]).filter((r: any) => !typesWithSlots.has(r.ParkingType));
+  }, [applicableRates, availableSlots]);
+
+  const [selectedSlotIds, setSelectedSlotIds] = useState<Set<number>>(new Set());
+  const [qtyByRateId, setQtyByRateId] = useState<Record<number, string>>({});
+  const [addingParking, setAddingParking] = useState(false);
+
+  const toggleSlot = (id: number) => {
+    setSelectedSlotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleAddSelectedSlots = async () => {
+    if (!selectedSlotIds.size) return;
+    setAddingParking(true);
+    try {
+      let addedTotal = 0;
+      for (const slotId of selectedSlotIds) {
+        const slot = availableSlots.find((s: any) => s.Id === slotId);
+        const rate = applicableRates.find((r: any) => r.ParkingType === slot.ParkingType) || applicableRates[0];
+        if (!rate) continue;
+        const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ApplicationId: applicationId, ParkingMasterId: rate.Id,
+            ParkingSlotId: slot.Id, Quantity: 1,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Failed to add ${slot.ParkingType} ${slot.SlotNo}`);
+        addedTotal += Number(data.TotalAmount) || 0;
+      }
+      toast.success(`${selectedSlotIds.size} parking slot(s) added — ₹${addedTotal.toLocaleString("en-IN")}`);
+      setSelectedSlotIds(new Set());
+      refetchParking();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAddingParking(false);
+    }
+  };
+
+  const handleAddByQuantity = async (rate: any) => {
+    const qty = parseInt(qtyByRateId[rate.Id] || "1");
+    if (!Number.isFinite(qty) || qty < 1) { toast.error("Enter a valid quantity"); return; }
+    setAddingParking(true);
     try {
       const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ApplicationId: applicationId, ParkingMasterId: rate.Id,
-          ParkingSlotId: slot?.Id || null, Quantity: 1,
+          ParkingSlotId: null, Quantity: qty,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to add parking");
-      toast.success(`Parking added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      toast.success(`${rate.ParkingType} x${qty} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      setQtyByRateId((f) => ({ ...f, [rate.Id]: "1" }));
       refetchParking();
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setAddingParking(false);
     }
   };
 
@@ -1355,43 +1424,76 @@ const AttachmentsStep: React.FC<{
         </div>
       </div>
 
-      {/* Parking selection — single / multiple / no parking */}
+      {/* Already-added allotments */}
       <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Parking Selection</label>
-        {(allotments as any[]).length > 0 && (
+        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
+        {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
               <div key={a.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span>{a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : ""} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}</span>
+                <span>{a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}</span>
                 <button onClick={() => handleRemoveParking(a.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
               </div>
             ))}
           </div>
-        )}
-        {!projectId ? (
-          <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
-        ) : availableSlots.length === 0 && applicableRates.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
         ) : (
-          <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
-            {availableSlots.length > 0 ? availableSlots.map((s: any) => {
-              const rate = applicableRates.find((r: any) => r.ParkingType === s.ParkingType) || applicableRates[0];
-              return (
-                <button key={s.Id} disabled={!rate} onClick={() => handleAddParking(rate, s)}
-                  className="text-left text-xs border border-border rounded-md px-2 py-1.5 hover:border-primary hover:bg-primary/5 disabled:opacity-40">
-                  {s.ParkingType} — {s.SlotNo} {rate ? `(₹${Number(rate.Charge).toLocaleString("en-IN")})` : ""}
-                </button>
-              );
-            }) : applicableRates.map((r: any) => (
-              <button key={r.Id} onClick={() => handleAddParking(r, null)}
-                className="text-left text-xs border border-border rounded-md px-2 py-1.5 hover:border-primary hover:bg-primary/5">
-                {r.ParkingType} (₹{Number(r.Charge).toLocaleString("en-IN")})
-              </button>
-            ))}
-          </div>
+          <p className="text-xs text-muted-foreground">No parking selected yet — optional.</p>
         )}
-        <p className="text-[11px] text-muted-foreground">Select one, several, or leave empty for no parking.</p>
       </div>
+
+      {/* Add parking */}
+      {!projectId ? (
+        <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
+      ) : slotGroups.length === 0 && ratesWithoutSlots.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
+      ) : (
+        <div className="space-y-3">
+          {slotGroups.map(([type, slots]) => {
+            const rate = applicableRates.find((r: any) => r.ParkingType === type);
+            return (
+              <div key={type} className="rounded-lg border border-border p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground">
+                    {type} {rate ? `— ₹${Number(rate.Charge).toLocaleString("en-IN")} each` : ""}
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">{slots.length} available</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 max-h-32 overflow-y-auto">
+                  {slots.map((s: any) => (
+                    <label key={s.Id} className="flex items-center gap-1.5 text-xs border border-border rounded-md px-2 py-1.5 cursor-pointer hover:border-primary hover:bg-primary/5 has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+                      <input type="checkbox" checked={selectedSlotIds.has(s.Id)} onChange={() => toggleSlot(s.Id)} />
+                      Slot {s.SlotNo}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {selectedSlotIds.size > 0 && (
+            <button onClick={handleAddSelectedSlots} disabled={addingParking}
+              className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              {addingParking ? "Adding..." : `Add ${selectedSlotIds.size} Selected Slot(s)`}
+            </button>
+          )}
+          {ratesWithoutSlots.map((r: any) => (
+            <div key={r.Id} className="rounded-lg border border-border p-3 flex items-center justify-between gap-2">
+              <div className="text-xs">
+                <p className="font-semibold text-foreground">{r.ParkingType}</p>
+                <p className="text-muted-foreground">₹{Number(r.Charge).toLocaleString("en-IN")} each — no fixed slot</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input type="number" min="1" value={qtyByRateId[r.Id] ?? "1"}
+                  onChange={(e) => setQtyByRateId((f) => ({ ...f, [r.Id]: e.target.value }))}
+                  className="w-16 text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                <button onClick={() => handleAddByQuantity(r)} disabled={addingParking}
+                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+                  Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Document upload */}
       <div className="rounded-lg border border-border p-3 space-y-2">
