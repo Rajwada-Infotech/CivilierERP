@@ -41,6 +41,9 @@ router.get("/", async (req, res) => {
     const projectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
+    const costCenterId = req.query.costCenterId
+      ? parseInt(req.query.costCenterId, 10)
+      : null;
 
     // ── 1. Account groups ────────────────────────────────────────────────────
     // Some existing rows have a stray leading "?" (a corrupted/garbled
@@ -86,7 +89,8 @@ router.get("/", async (req, res) => {
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
-      .input("projectId", sql.Int, projectId).query(`
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
         SELECT
           ahm.LHeadId    AS id,
           ahm.LHeadName  AS name,
@@ -101,6 +105,7 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+              AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0)
           -- Banks: add manually-entered opening cash balance on the debit (asset) side
           + CASE WHEN ahm.LHeadType = 'B' THEN ISNULL(ahm.BankOpeningBalance, 0) ELSE 0 END
@@ -114,6 +119,7 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+              AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0)
           -- Supplier/Contractor on-account advances (dbo.OnAccountLedger,
           -- cached on AccountHeadMaster.OnAccountBalance) never post a
@@ -136,6 +142,7 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+              AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS txn_debit,
 
           ISNULL((
@@ -146,6 +153,7 @@ router.get("/", async (req, res) => {
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+              AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS txn_credit
 
         FROM dbo.AccountHeadMaster ahm
@@ -339,6 +347,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
     const projectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
+    const costCenterId = req.query.costCenterId
+      ? parseInt(req.query.costCenterId, 10)
+      : null;
 
     const headRes = await pool
       .request()
@@ -356,7 +367,8 @@ router.get("/:lheadId/transactions", async (req, res) => {
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
-      .input("projectId", sql.Int, projectId).query(`
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
         SELECT
           gle.EntryId,
           gle.VoucherNo,
@@ -366,6 +378,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
           gle.Narration,
           gle.SourceType,
           gle.SourceId,
+          gle.CostCenterId,
+          cc.Code AS CostCenterCode,
+          cc.Name AS CostCenterName,
 
           -- NewPayment
           np.PPaymentID,
@@ -418,6 +433,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
         FROM dbo.GeneralLedgerEntry gle
 
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
         LEFT JOIN dbo.NewPayment np
           ON gle.SourceType = 'NewPayment' AND np.PPaymentID = gle.SourceId
         LEFT JOIN dbo.ReceivedPayment rp
@@ -446,6 +462,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
         ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
       `);
 
@@ -615,6 +632,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
         invoiceNo,
         sourceRef,
         status: "posted",
+        costCenter: r.CostCenterId
+          ? { id: r.CostCenterId, code: r.CostCenterCode, name: r.CostCenterName }
+          : null,
         payment: r.PPaymentID
           ? { id: r.PPaymentID, docNo: r.NPDocNo, mode: r.NPMode, status: r.NPStatus }
           : null,
@@ -634,6 +654,132 @@ router.get("/:lheadId/transactions", async (req, res) => {
     res.json({ entity: head, from, to, transactions });
   } catch (err) {
     console.error("[trial-balance] transactions error:", err.message, err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/trial-balance/cost-centre/:costCenterId/transactions?from=&to=&companyId=&projectId=
+ *
+ * Individual GL entries tagged to one Cost Centre, across every account —
+ * i.e. the actual PO/GRN/Invoice postings that carry this cost centre,
+ * shown as their own debit/credit rows rather than netted into an account
+ * group total. This is a different view from the main account tree: that
+ * one answers "what does this account's balance look like", this one
+ * answers "what did this cost centre actually cost, and against what".
+ */
+router.get("/cost-centre/:costCenterId/transactions", async (req, res) => {
+  const costCenterId = parseInt(req.params.costCenterId, 10);
+  if (!Number.isFinite(costCenterId)) {
+    return res.status(400).json({ error: "Invalid cost centre id" });
+  }
+
+  try {
+    const pool = getPool();
+
+    const now = new Date();
+    const fyYear =
+      now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const from = req.query.from || `${fyYear}-04-01`;
+    const to = req.query.to || `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId, 10)
+      : null;
+    const projectId = req.query.projectId
+      ? parseInt(req.query.projectId, 10)
+      : null;
+
+    const ccRes = await pool
+      .request()
+      .input("Id", sql.Int, costCenterId)
+      .query(
+        `SELECT CostCenterId AS id, Code AS code, Name AS name FROM dbo.CostCenter WHERE CostCenterId = @Id`,
+      );
+    if (!ccRes.recordset.length) {
+      return res.status(404).json({ error: "Cost centre not found" });
+    }
+
+    const entriesRes = await pool
+      .request()
+      .input("CostCenterId", sql.Int, costCenterId)
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId).query(`
+        SELECT
+          gle.EntryId,
+          gle.VoucherNo,
+          CONVERT(varchar(10), gle.VoucherDate, 23) AS VoucherDate,
+          gle.DebitAmount,
+          gle.CreditAmount,
+          gle.Narration,
+          gle.SourceType,
+          gle.SourceId,
+          ahm.LHeadId,
+          ahm.LHeadName,
+          ahm.LHeadType,
+
+          -- GRN-linked postings — the PO this GRN was raised against
+          grn.GRNID,
+          ISNULL(grn.DocNo, grn.GRNNo) AS GRNDocNo,
+          po1.PurchaseOrderNo AS GRNPoNo,
+
+          -- Invoice-linked postings — resolve the PO via the invoice's own
+          -- GRN/PO source (mirrors the account-level drill-down above)
+          eb.Eid AS EBId,
+          eb.EDocNo AS EBDocNo,
+          eb.ESourceType AS EBSourceType,
+          eb.ESourceId AS EBSourceId,
+          ebGrn.DocNo AS EBGrnDocNo,
+          po2.PurchaseOrderNo AS EBPoNo
+
+        FROM dbo.GeneralLedgerEntry gle
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON gle.SourceType IN ('GRN', 'GRNPosting') AND grn.GRNID = gle.SourceId
+        LEFT JOIN dbo.PurchaseOrders po1 ON po1.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.ExpenseBooking eb
+          ON gle.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND eb.Eid = gle.SourceId
+        LEFT JOIN dbo.GoodsReceiptNotes ebGrn
+          ON eb.ESourceType = 'GRN' AND ebGrn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.PurchaseOrders po2
+          ON (eb.ESourceType = 'PO' AND po2.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT))
+          OR (eb.ESourceType = 'GRN' AND po2.PurchaseOrderID = ebGrn.POID)
+
+        WHERE gle.CostCenterId = @CostCenterId
+          AND gle.IsReversed = 0
+          AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+        ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
+      `);
+
+    const transactions = entriesRes.recordset.map((r) => {
+      const poNo = r.GRNPoNo || r.EBPoNo || null;
+      const docNo = r.GRNDocNo || r.EBDocNo || r.VoucherNo;
+      return {
+        entryId: r.EntryId,
+        voucherNo: r.VoucherNo,
+        date: r.VoucherDate,
+        debit: Number(r.DebitAmount) || 0,
+        credit: Number(r.CreditAmount) || 0,
+        narration: r.Narration,
+        sourceType: r.SourceType,
+        sourceId: r.SourceId,
+        account: { id: r.LHeadId, name: r.LHeadName, type: r.LHeadType },
+        docNo,
+        poNo,
+      };
+    });
+
+    const totals = transactions.reduce(
+      (acc, t) => ({ debit: acc.debit + t.debit, credit: acc.credit + t.credit }),
+      { debit: 0, credit: 0 },
+    );
+
+    res.json({ costCenter: ccRes.recordset[0], from, to, transactions, totals });
+  } catch (err) {
+    console.error("[trial-balance] cost-centre transactions error:", err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 });

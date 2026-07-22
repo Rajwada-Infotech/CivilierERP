@@ -215,6 +215,22 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
 
     if (!(await requireAssignedOrApprover(req, res, pool, { applicationId: aid }))) return;
 
+    // Once the Application's Booking exists, this row is shared with — and
+    // frozen the same way as — the Booking-keyed endpoint below (both write
+    // the same CrmCustomerBankDetail row once BookingId gets backfilled in
+    // createCrmBookingRecord). Without this check, a Cancelled/Rejected
+    // booking's KYC data could still be silently edited through this older
+    // Application-side form even though the Booking-side "Bank Details" tab
+    // correctly refuses — the exact kind of two-endpoints-disagree sync
+    // conflict this route pair is prone to.
+    const linkedBooking = await pool.request().input("aid", sql.Int, aid)
+      .query("SELECT Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
+    const linkedBookingId = linkedBooking.recordset[0]?.Id || null;
+    if (linkedBookingId) {
+      const activeErr = await requireActiveBooking(pool, linkedBookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+    }
+
     const existing = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
 
     const fields = {
@@ -275,6 +291,14 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
              PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
           VALUES (@aid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
         `);
+    }
+
+    // Same auto-flow the Booking-keyed PUT above fires — without this, a
+    // customer whose KYC was last edited through this Application-side form
+    // (post-linkage) would have complete data on file but the Agreement
+    // would never auto-create, looking exactly like the data "didn't save".
+    if (linkedBookingId) {
+      await maybeAutoCreateAgreement(pool, linkedBookingId, actor);
     }
 
     res.json({ success: true });

@@ -82,6 +82,7 @@ async function postVoucher(pool, {
   sourceId,
   companyId = null,
   projectId = null,
+  costCenterId = null,
   createdBy = null,
 }) {
   if (!legs || legs.length < 2) {
@@ -119,13 +120,14 @@ async function postVoucher(pool, {
         .input("SourceId", sql.Int, sourceId)
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectId", sql.Int, projectId)
+        .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
         .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
           INSERT INTO dbo.GeneralLedgerEntry
             (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
+             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy)
           VALUES
             (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy)
         `);
     }
     await tx.commit();

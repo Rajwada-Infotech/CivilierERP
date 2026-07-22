@@ -1607,7 +1607,10 @@ const PurchaseOrderMaster: React.FC = () => {
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
-    if (Object.keys(e).length > 0) return false;
+    if (Object.keys(e).length > 0) {
+      toast.error("Please fill in all required fields.");
+      return false;
+    }
 
     // MR-sourced lines can't exceed what's still pending on that MR item —
     // a repeat PO off the same MR must stay within the remaining balance.
@@ -1701,10 +1704,10 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!validate()) {
-      toast.error("Please fill in all required fields.");
-      return;
-    }
+    // validate() already shows its own specific toast for whichever check
+    // failed (missing fields vs. over the MR-pending cap) — don't stack a
+    // second, generic one on top.
+    if (!validate()) return;
     setSaving(true);
     try {
       if (viewMode === "create") {
@@ -4302,7 +4305,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   {lineItems.map((li, idx) => (
                     <tr
                       key={li.id}
-                      className="group hover:bg-muted/10 transition-colors"
+                      className="group hover:bg-muted/10 transition-colors align-top"
                     >
                       {/* Row number */}
                       <td className="px-3 py-2 text-center text-xs text-muted-foreground font-mono">
@@ -4355,7 +4358,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                               : "0"}
                           </span>
                         ) : (
-                          <>
+                          <div>
                             <input
                               type="number"
                               min={0}
@@ -4372,8 +4375,15 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   ? `Pending on MR: ${li.mrPendingQty}`
                                   : undefined
                               }
-                              className={`${cellInput} text-right ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
+                              className={`${cellInput} text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
                             />
+                            {li.mrPendingQty != null && (
+                              <p
+                                className={`mt-1 pb-0.5 text-[10px] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
+                              >
+                                {Math.max(0, li.mrPendingQty - li.quantity)} remaining MR
+                              </p>
+                            )}
                             {/* Live equivalents in this item's other tagged UOMs */}
                             {li.quantity > 0 &&
                               (() => {
@@ -4425,7 +4435,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   </p>
                                 );
                               })()}
-                          </>
+                          </div>
                         )}
                       </td>
 
@@ -5006,11 +5016,18 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           {/* Bottom action bar */}
           {!isReadOnly &&
             (() => {
+              const poOverMrCap = lineItems.some(
+                (li) =>
+                  li.mrItemId != null &&
+                  li.mrPendingQty != null &&
+                  li.quantity - li.mrPendingQty > 0.0001,
+              );
               const poCanSave = !!(
                 form.supplierId &&
                 form.companyId &&
                 form.projectId &&
-                lineItems.some((li) => li.itemName || li.rate > 0)
+                lineItems.some((li) => li.itemName || li.rate > 0) &&
+                !poOverMrCap
               );
               const poIsDirty = !!(
                 form.supplierId ||
@@ -5030,6 +5047,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     ) : poCanSave ? (
                       <span className="text-emerald-500 font-medium">
                         Ready to save
+                      </span>
+                    ) : poOverMrCap ? (
+                      <span className="text-red-500 font-medium">
+                        A line exceeds the remaining Material Request quantity
                       </span>
                     ) : (
                       "Fill in the required fields to save"
