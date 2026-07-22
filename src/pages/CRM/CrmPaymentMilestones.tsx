@@ -13,6 +13,7 @@ const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
 const BANK_MASTER_API = "/api/bank-master";
 const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
+const PROJECT_BANK_API = "/api/crm/project-banks";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 
@@ -54,6 +55,10 @@ async function fetchOnAccount(bookingId: string): Promise<any> {
 async function fetchCompanyBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchProjectBanks(projectId?: number): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchCustomerBank(bookingId: string): Promise<any> {
   if (!bookingId) return null;
   try {
@@ -90,7 +95,20 @@ const CrmPaymentMilestones: React.FC = () => {
     enabled: !!selectedBookingId,
     staleTime: 15_000,
   });
-  const { data: companyBanks = [] } = useQuery({ queryKey: ["bank-master-dropdown"], queryFn: fetchCompanyBanks, staleTime: 5 * 60_000 });
+  const bookingProjectId = milestoneData?.booking?.ProjectId;
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-project-banks-for", bookingProjectId],
+    queryFn: () => fetchProjectBanks(bookingProjectId),
+    enabled: !!bookingProjectId,
+  });
+  const { data: allBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"], queryFn: fetchCompanyBanks, staleTime: 5 * 60_000,
+    enabled: !bookingProjectId || projectBanks.length === 0,
+  });
+  // Project-scoped banks win when the project has any linked; otherwise
+  // fall back to the full bank list, same auto-select/dropdown/fallback
+  // pattern used on the Booking Detail Payment tab.
+  const companyBanks = projectBanks.length > 0 ? projectBanks : allBanks;
   const { data: customerBank } = useQuery({
     queryKey: ["crm-customer-bank", selectedBookingId],
     queryFn: () => fetchCustomerBank(selectedBookingId),
@@ -120,7 +138,9 @@ const CrmPaymentMilestones: React.FC = () => {
       PaymentMode: m.PaymentMode || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
-      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId) : "",
+      // Auto-select when the project has exactly one linked bank; otherwise
+      // fall back to whatever this milestone already has on file.
+      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId) : (projectBanks.length === 1 ? String((projectBanks[0] as any).BId) : ""),
     });
   };
 

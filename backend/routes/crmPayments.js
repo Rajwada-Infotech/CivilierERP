@@ -380,7 +380,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
         ORDER BY m.MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectName, b.BookingAmount,
+        SELECT b.BookingNo, b.TotalValue, b.UnitNo, b.ProjectId, b.ProjectName, b.BookingAmount,
                b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                a.ApplicantName, a.Mobile
         FROM dbo.CrmBooking b
