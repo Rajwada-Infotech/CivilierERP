@@ -9,10 +9,14 @@ import {
   AlertDialogAction,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+// Mirrors COUNTDOWN_SECONDS in useIdleLogout.ts — only used here to size the
+// countdown ring's fill, not to drive the timer itself.
+const COUNTDOWN_TOTAL = 60;
+const RING_RADIUS = 20;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
  * Global inactivity watcher. Mounted once inside AppLayout, so it's alive on
@@ -46,6 +50,9 @@ export function IdleLogoutWatcher() {
 
   if (!currentUser) return null;
 
+  const progress = secondsLeft != null ? secondsLeft / COUNTDOWN_TOTAL : 1;
+  const ringOffset = RING_CIRCUMFERENCE * (1 - progress);
+
   return (
     <>
       {overlay}
@@ -60,26 +67,69 @@ export function IdleLogoutWatcher() {
           if (!open) resetTimer();
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <div className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-amber-500" />
-              <AlertDialogTitle>Are you still there?</AlertDialogTitle>
+        <AlertDialogContent className="max-w-sm gap-0 overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-b from-card to-amber-500/[0.04] p-0 shadow-2xl">
+          <div className="flex items-start gap-4 p-5 pb-4">
+            {/* Countdown ring — depletes in sync with the number below,
+                giving an at-a-glance read on urgency without reading text. */}
+            <div className="relative shrink-0">
+              <svg viewBox="0 0 48 48" className="h-12 w-12 -rotate-90">
+                <circle
+                  cx="24"
+                  cy="24"
+                  r={RING_RADIUS}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  className="text-amber-500/15"
+                />
+                <circle
+                  cx="24"
+                  cy="24"
+                  r={RING_RADIUS}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray={RING_CIRCUMFERENCE}
+                  strokeDashoffset={ringOffset}
+                  className="text-amber-500 transition-[stroke-dashoffset] duration-1000 ease-linear"
+                />
+              </svg>
+              <Clock className="absolute inset-0 m-auto h-5 w-5 text-amber-500" />
             </div>
-            <AlertDialogDescription>
-              You've been inactive for a while. For your security, you'll be
-              signed out in{" "}
-              <span className="font-semibold text-foreground">
-                {secondsLeft}
-              </span>{" "}
-              second{secondsLeft === 1 ? "" : "s"} unless you stay active.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={resetTimer}>
+
+            <div className="min-w-0 pt-0.5">
+              <AlertDialogTitle className="text-base font-semibold text-foreground">
+                Are you still there?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                You've been inactive for a while. For your security, you'll
+                be signed out in{" "}
+                <span className="font-semibold tabular-nums text-amber-500">
+                  {secondsLeft}s
+                </span>{" "}
+                unless you stay active.
+              </AlertDialogDescription>
+            </div>
+          </div>
+
+          {/* Depleting bar — same countdown, restated as a full-width cue
+              that's still visible even if the ring goes unnoticed. */}
+          <div className="h-1 w-full bg-amber-500/10">
+            <div
+              className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
+              style={{ width: `${progress * 100}%` }}
+            />
+          </div>
+
+          <div className="p-4">
+            <AlertDialogAction
+              onClick={resetTimer}
+              className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 font-semibold text-white hover:from-indigo-600 hover:to-violet-600"
+            >
               Stay signed in
             </AlertDialogAction>
-          </AlertDialogFooter>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </>
