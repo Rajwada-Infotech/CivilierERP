@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Grid3x3, Layers, Clock, User, FileText } from "lucide-react";
 
@@ -33,6 +34,7 @@ interface MatrixUnit {
   Status: "Available" | "Booked" | "OnHold" | "Blocked";
   BookingId: number | null;
   BookingNo: string | null;
+  BookingStatus: string | null;
   BookingDate: string | null;
   ApplicationId: number | null;
   ApplicationNo: string | null;
@@ -78,7 +80,7 @@ const NONE = "__none__";
 // that would sit at "3 days" for most of its life and jump straight to "0".
 function timeLeft(until: string): string {
   const ms = new Date(until).getTime() - Date.now();
-  if (ms <= 0) return "Expired";
+  if (ms <= 0) return "Overdue";
   const totalMin = Math.floor(ms / 60000);
   const d = Math.floor(totalMin / 1440);
   const h = Math.floor((totalMin % 1440) / 60);
@@ -86,6 +88,9 @@ function timeLeft(until: string): string {
   if (d > 0) return `${d}d ${h}h left`;
   if (h > 0) return `${h}h ${m}m left`;
   return `${m}m left`;
+}
+function isOverdue(until: string | null): boolean {
+  return !!until && new Date(until).getTime() - Date.now() <= 0;
 }
 
 // Available unit -> ask who it's being held for and for how long. Booking
@@ -166,15 +171,29 @@ function PlaceHoldDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => v
   );
 }
 
-// Shared detail dialog for tapping any non-Available tile — OnHold shows the
-// live countdown + a Release action, Booked shows the booking record + a
-// link into it. Both show who's holding/booked it and which salesperson
-// (AssignedTo) owns that Application, so a tap always answers "who, what,
-// and via which record" instead of just the bare status label.
+// Shared detail dialog for tapping any non-Available tile. Booked shows the
+// booking record + a link into it. OnHold covers two distinct situations
+// that both render as the same tile color: a pure Application-stage hold
+// (no Booking yet — Release Hold is the only action), or a real Booking that
+// exists but whose booking-amount milestone isn't Paid yet (Extend Hold /
+// Cancel Booking, since the customer already committed and there's a real
+// record to manage, not just a reservation to drop). Both show who's
+// holding/booked it and which salesperson (AssignedTo) owns that
+// Application, so a tap always answers "who, what, and via which record"
+// instead of just the bare status label.
 function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => void }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [extendDays, setExtendDays] = useState("3");
+  const [showExtend, setShowExtend] = useState(false);
   const isHold = unit.Status === "OnHold";
+  const hasUnpaidBooking = isHold && !!unit.BookingId;
+  const overdue = isHold && isOverdue(unit.HoldUntil);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["unit-matrix"] });
 
   const handleRelease = async () => {
     setReleasing(true);
@@ -182,7 +201,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
       const res = await fetchWithAuth(`${HOLDS_API}/${unit.HoldId}/release`, { method: "PUT" });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success(`Hold released — ${unit.UnitName} is Available again`);
-      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      invalidate();
       onClose();
     } catch (e: any) {
       toast.error(e.message);
@@ -191,17 +210,64 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
     }
   };
 
-  const appNo = isHold ? unit.HoldApplicationNo : unit.ApplicationNo;
-  const applicantName = isHold ? unit.HoldApplicantName : unit.ApplicantName;
-  const mobile = isHold ? unit.HoldMobile : unit.Mobile;
-  const assignedName = isHold ? unit.HoldAssignedToName : unit.AssignedToName;
-  const assignedEmail = isHold ? unit.HoldAssignedToEmail : unit.AssignedToEmail;
+  const handleExtend = async () => {
+    const days = parseInt(extendDays);
+    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
+    setExtending(true);
+    try {
+      const res = await fetchWithAuth(`${HOLDS_API}/${unit.HoldId}/extend`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ AdditionalDays: days }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success(`Hold extended by ${days} day(s)`);
+      invalidate();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setExtending(false);
+    }
+  };
+
+  // Only reachable while the Booking is still Pending (its own approval step
+  // hasn't happened yet) — matches PUT /:id/reject's own transition rule.
+  // An Approved-but-unpaid booking needs the fuller cancellation flow on the
+  // Bookings page, not a shortcut from here.
+  const handleCancelBooking = async () => {
+    if (!unit.BookingId) return;
+    setCancelling(true);
+    try {
+      const res = await fetchWithAuth(`/api/crm/bookings/${unit.BookingId}/reject`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Remarks: "Cancelled from Unit Matrix — booking amount was never paid" }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success(`Booking cancelled — ${unit.UnitName} is free again`);
+      invalidate();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const appNo = (isHold && unit.HoldApplicationNo) || unit.ApplicationNo;
+  const applicantName = (isHold && unit.HoldApplicantName) || unit.ApplicantName;
+  const mobile = (isHold && unit.HoldMobile) || unit.Mobile;
+  const assignedName = (isHold && unit.HoldAssignedToName) || unit.AssignedToName;
+  const assignedEmail = (isHold && unit.HoldAssignedToEmail) || unit.AssignedToEmail;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Unit {unit.UnitName} — {isHold ? "On Hold" : "Booked"}</DialogTitle>
+          <DialogTitle className="font-heading">
+            Unit {unit.UnitName} — {isHold ? (hasUnpaidBooking ? "Booked, Payment Pending" : "On Hold") : "Booked"}
+          </DialogTitle>
         </DialogHeader>
         <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
           <div className="flex justify-between items-center">
@@ -214,24 +280,69 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
             <span className="text-muted-foreground flex items-center gap-1"><User size={12} /> Salesperson</span>
             <span className="font-medium text-right">{assignedName || "—"}{assignedEmail ? <span className="block text-[11px] text-muted-foreground font-normal">{assignedEmail}</span> : null}</span>
           </div>
+          {hasUnpaidBooking && (
+            <div className="flex justify-between"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{unit.BookingNo || "—"}</span></div>
+          )}
           {isHold ? (
-            <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Expires in</span><span className="font-medium text-amber-600">{unit.HoldUntil ? timeLeft(unit.HoldUntil) : "—"}</span></div>
+            <div className="flex justify-between items-center pt-1 border-t border-border/60">
+              <span className="text-muted-foreground">{overdue ? "Hold" : "Expires in"}</span>
+              <span className={`font-medium ${overdue ? "text-rose-600" : "text-amber-600"}`}>{unit.HoldUntil ? timeLeft(unit.HoldUntil) : "—"}</span>
+            </div>
           ) : (
             <>
               <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{unit.BookingNo || "—"}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Booked on</span><span className="font-medium">{unit.BookingDate ? String(unit.BookingDate).slice(0, 10) : "—"}</span></div>
             </>
           )}
+          {hasUnpaidBooking && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+              Booking amount not yet paid — this tile flips to Booked automatically once it's received.
+            </p>
+          )}
         </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+
+        {showExtend && (
+          <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground block mb-1">Extend by (days)</label>
+              <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <button onClick={handleExtend} disabled={extending}
+              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {extending ? "Extending..." : "Confirm"}
+            </button>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-3 border-t border-border flex-wrap">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          {isHold ? (
+          {hasUnpaidBooking ? (
+            <>
+              {unit.BookingStatus === "Pending" && (
+                <button onClick={handleCancelBooking} disabled={cancelling}
+                  className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg font-medium hover:bg-rose-50 disabled:opacity-40">
+                  {cancelling ? "Cancelling..." : "Cancel Booking"}
+                </button>
+              )}
+              {unit.HoldId && (
+                <button onClick={() => setShowExtend((s) => !s)}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
+                  Extend Hold
+                </button>
+              )}
+              <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                Open Booking
+              </button>
+            </>
+          ) : isHold ? (
             <button onClick={handleRelease} disabled={releasing}
               className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
               {releasing ? "Releasing..." : "Release Hold"}
             </button>
           ) : (
-            <button onClick={() => window.open(`/crm/bookings?applicationId=${unit.ApplicationId}`, "_blank")}
+            <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
               Open Booking
             </button>
@@ -243,6 +354,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 }
 
 export function UnitMatrixPage() {
+  const navigate = useNavigate();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);
@@ -300,7 +412,26 @@ export function UnitMatrixPage() {
           { label: "Unit Matrix", path: "/crm/unit-matrix" },
         ]}
       />
-      <FollowupShell title="Unit Matrix" icon={Grid3x3}>
+      <FollowupShell
+        title="Unit Matrix"
+        icon={Grid3x3}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/crm/setup/unit-master")}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            >
+              <Layers size={14} /> Unit Master
+            </button>
+            <button
+              onClick={() => navigate("/crm/setup/block-master")}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            >
+              <Layers size={14} /> Block Master
+            </button>
+          </div>
+        }
+      >
         {/* Filters */}
         <div className="flex gap-3 flex-wrap items-end">
           <div className="min-w-56 space-y-1.5">
@@ -398,9 +529,11 @@ export function UnitMatrixPage() {
                           <div className="flex items-center justify-between gap-2 mb-1.5">
                             <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
                             <span
-                              className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}
+                              className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                                u.Status === "OnHold" && isOverdue(u.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[u.Status]
+                              }`}
                             >
-                              {u.Status === "OnHold" ? "Hold" : u.Status}
+                              {u.Status === "OnHold" ? (isOverdue(u.HoldUntil) ? "Overdue" : "Hold") : u.Status}
                             </span>
                           </div>
                           <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
@@ -408,7 +541,7 @@ export function UnitMatrixPage() {
                               : u.Status === "OnHold" ? (
                                 <>
                                   <Clock size={11} className="shrink-0" />
-                                  {u.HoldApplicantName} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
+                                  {(u.HoldApplicantName || u.ApplicantName)} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
                                 </>
                               ) : "—"}
                           </div>
