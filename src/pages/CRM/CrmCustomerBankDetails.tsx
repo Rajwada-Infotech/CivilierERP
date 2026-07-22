@@ -318,16 +318,20 @@ const CrmCustomerBankDetails: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [search, setSearch] = useState("");
   const [activeRow, setActiveRow] = useState<any | null>(null);
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
   const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list"], queryFn: fetchList, staleTime: 30_000 });
 
   // Deep-link support: /crm/customer-bank-details?bookingId=X opens the
   // dialog for that booking directly (e.g. from the Bookings list action).
+  // deepLinkOpened is a one-shot guard — without it, closing the dialog
+  // (setActiveRow(null)) re-ran this effect, saw bookingId was still in the
+  // URL, and immediately reopened it, making Close look completely broken.
   React.useEffect(() => {
-    if (!bkgFilter || activeRow) return;
+    if (!bkgFilter || deepLinkOpened) return;
     const row = (list as any[]).find((r) => String(r.BookingId) === bkgFilter);
-    if (row) setActiveRow(row);
-  }, [bkgFilter, list, activeRow]);
+    if (row) { setActiveRow(row); setDeepLinkOpened(true); }
+  }, [bkgFilter, list, deepLinkOpened]);
 
   const counts = useMemo(() => {
     const rows = list as any[];
