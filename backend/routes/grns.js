@@ -1776,7 +1776,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // Fetch posting preview (reuse endpoint logic via internal call)
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
-             po.CompanyId, po.ProjectId
+             po.CompanyId, po.ProjectId, po.CostCenterId
       FROM dbo.GoodsReceiptNotes g
       LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
       WHERE g.GRNID = @GRNID
@@ -1895,6 +1895,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       sourceId: grnId,
       companyId: grn.CompanyId ?? null,
       projectId: grn.ProjectId ?? null,
+      costCenterId: grn.CostCenterId ?? null,
       createdBy: userEmail,
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });

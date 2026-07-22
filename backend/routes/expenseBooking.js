@@ -3626,6 +3626,25 @@ router.post("/:id/post-to-gl", async (req, res) => {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
     }
 
+    // Cost Centre for the posted GL legs — ExpenseBooking only stores a text
+    // label (ECostCenter), not an FK, so resolve the actual id from the
+    // source PO: via the linked GRN's own parent PO, or directly if this
+    // invoice was booked straight off a PO.
+    let costCenterId = null;
+    if (eb.ESourceType === "GRN" && eb.ESourceId) {
+      const ccRes = await pool.request().input("GrnId", sql.Int, parseInt(eb.ESourceId, 10)).query(`
+        SELECT po.CostCenterId FROM dbo.GoodsReceiptNotes grn
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        WHERE grn.GRNID = @GrnId
+      `);
+      costCenterId = ccRes.recordset[0]?.CostCenterId ?? null;
+    } else if (eb.ESourceType === "PO" && eb.ESourceId) {
+      const ccRes = await pool.request().input("PoId", sql.Int, parseInt(eb.ESourceId, 10)).query(
+        `SELECT CostCenterId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PoId`,
+      );
+      costCenterId = ccRes.recordset[0]?.CostCenterId ?? null;
+    }
+
     if (totalAmount <= 0) return res.status(400).json({ error: "No amount to post." });
 
     const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
@@ -3710,6 +3729,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       sourceId: ebId,
       companyId: eb.CompanyId ?? null,
       projectId: eb.ProjectId ?? null,
+      costCenterId,
       createdBy: userEmail,
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });

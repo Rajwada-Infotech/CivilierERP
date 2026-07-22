@@ -366,6 +366,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
           gle.Narration,
           gle.SourceType,
           gle.SourceId,
+          gle.CostCenterId,
+          cc.Code AS CostCenterCode,
+          cc.Name AS CostCenterName,
 
           -- NewPayment
           np.PPaymentID,
@@ -418,6 +421,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
         FROM dbo.GeneralLedgerEntry gle
 
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
         LEFT JOIN dbo.NewPayment np
           ON gle.SourceType = 'NewPayment' AND np.PPaymentID = gle.SourceId
         LEFT JOIN dbo.ReceivedPayment rp
@@ -615,6 +619,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
         invoiceNo,
         sourceRef,
         status: "posted",
+        costCenter: r.CostCenterId
+          ? { id: r.CostCenterId, code: r.CostCenterCode, name: r.CostCenterName }
+          : null,
         payment: r.PPaymentID
           ? { id: r.PPaymentID, docNo: r.NPDocNo, mode: r.NPMode, status: r.NPStatus }
           : null,
