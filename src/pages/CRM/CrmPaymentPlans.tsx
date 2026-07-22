@@ -30,7 +30,7 @@ async function fetchBlocks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BLOCK_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchUnits(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+  try { const r = await fetchWithAuth(UNIT_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -60,7 +60,7 @@ const CrmPaymentPlans: React.FC = () => {
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
   const { data: blocks = [] } = useQuery({ queryKey: ["block-master"], queryFn: fetchBlocks, staleTime: 5 * 60_000 });
-  const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  const { data: units = [] } = useQuery({ queryKey: ["unit-master-all"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
 
   const projectsForCompany = useMemo(() => {
@@ -243,9 +243,6 @@ const CrmPaymentPlans: React.FC = () => {
                   {(unitsForBlock as any[]).map((u: any) => <option key={u.Id} value={String(u.Id)}>{u.UnitName}</option>)}
                 </select>
               </div>
-              {unitId && (
-                <p className="text-[11px] text-muted-foreground">Scoped to one specific unit — narrower than Block, only that unit's booking will offer this plan.</p>
-              )}
             </div>
 
             <div>
