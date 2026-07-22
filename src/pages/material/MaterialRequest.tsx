@@ -560,7 +560,7 @@ export default function MaterialRequest() {
       accessorKey: "Priority",
       header: "Priority",
       size: 90,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => {
         const v = (getValue() as string) || "Normal";
         return (
@@ -576,20 +576,20 @@ export default function MaterialRequest() {
       id: "CompanyName",
       accessorKey: "CompanyName",
       header: "Company",
-      size: 160,
-      meta: { className: "hidden sm:table-cell" },
+      size: 200,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
-        <span className="text-sm truncate">{String(getValue() || "—")}</span>
+        <span className="block text-sm truncate" title={String(getValue() || "")}>{String(getValue() || "—")}</span>
       ),
     },
     {
       id: "ProjectName",
       accessorKey: "ProjectName",
       header: "Project",
-      size: 160,
-      meta: { className: "hidden sm:table-cell" },
+      size: 180,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground truncate">{String(getValue() || "—")}</span>
+        <span className="block text-sm text-muted-foreground truncate" title={String(getValue() || "")}>{String(getValue() || "—")}</span>
       ),
     },
     {
@@ -597,7 +597,7 @@ export default function MaterialRequest() {
       accessorKey: "ItemCount",
       header: "Items",
       size: 140,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm whitespace-nowrap">
           <span className="font-semibold">{row.original.ItemCount || 0}</span>
@@ -610,7 +610,7 @@ export default function MaterialRequest() {
       accessorKey: "RequestDate",
       header: "Requested",
       size: 110,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm text-muted-foreground">
           {fmtDate(getValue() as string)}
@@ -622,7 +622,7 @@ export default function MaterialRequest() {
       accessorKey: "RequiredByDate",
       header: "Required By",
       size: 110,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
         const isUrgent = v && new Date(v) < new Date();
@@ -640,7 +640,7 @@ export default function MaterialRequest() {
       accessorKey: "Status",
       header: "Status",
       size: 180,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
         <div className="whitespace-nowrap">
           <ApprovalStatusChain
@@ -845,18 +845,18 @@ export default function MaterialRequest() {
 
         <CardContent className="p-5 space-y-4">
           {/* Doc number / Type of Doc */}
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
             <FileText size={13} className="text-muted-foreground shrink-0" />
             <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
               Request No:
             </span>
             {editingId ? (
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm break-all">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
-              <div className="flex-1 flex items-center gap-3 min-w-0">
-                <div className="relative">
+              <div className="flex-1 flex flex-wrap items-center gap-3 min-w-0">
+                <div className="relative flex-1 min-w-[200px]">
                   <select
                     value={header.docTypeId ? String(header.docTypeId) : ""}
                     onChange={async (e) => {
@@ -1072,15 +1072,15 @@ export default function MaterialRequest() {
 
       {/* Items card */}
       <Card className="border-border shadow-sm">
-        <CardHeader className="px-6 py-4 border-b border-border flex flex-row items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+        <CardHeader className="px-4 sm:px-6 py-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
               <ShoppingCart
                 size={15}
                 className="text-emerald-600 dark:text-emerald-400"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <CardTitle className="text-sm font-semibold">
                 Requested Items
               </CardTitle>
@@ -1099,7 +1099,7 @@ export default function MaterialRequest() {
             variant="outline"
             size="sm"
             onClick={addCartRow}
-            className="gap-1.5 h-8 text-xs"
+            className="gap-1.5 h-8 text-xs self-start sm:self-auto"
           >
             <Plus size={13} /> Add Item
           </Button>
@@ -1419,7 +1419,7 @@ export default function MaterialRequest() {
 
           {/* Cart summary */}
           {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
               <div className="flex items-center gap-3 text-muted-foreground">
                 <Package size={14} />
                 <span>
