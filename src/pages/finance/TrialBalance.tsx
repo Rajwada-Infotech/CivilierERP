@@ -34,6 +34,7 @@ import {
   Loader2,
   Receipt,
   X,
+  Target,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -91,6 +92,31 @@ interface TBTransactionsResponse {
   from: string;
   to: string;
   transactions: TBTransaction[];
+}
+
+// One row per GL posting tagged to a Cost Centre — an individual PO/GRN/
+// Invoice entry with its own debit/credit, not netted into an account
+// group total (see /cost-centre/:id/transactions).
+interface CCTransaction {
+  entryId: number;
+  voucherNo: string | null;
+  date: string | null;
+  debit: number;
+  credit: number;
+  narration: string | null;
+  sourceType: string | null;
+  sourceId: number | null;
+  account: { id: number; name: string | null; type: string | null };
+  docNo: string | null;
+  poNo: string | null;
+}
+
+interface CCTransactionsResponse {
+  costCenter: { id: number; code: string | null; name: string | null };
+  from: string;
+  to: string;
+  transactions: CCTransaction[];
+  totals: { debit: number; credit: number };
 }
 
 interface Option {
@@ -484,6 +510,115 @@ function TBRow({
   );
 }
 
+// ─── CostCentrePanel ──────────────────────────────────────────────────────────
+// Individual PO/GRN/Invoice postings tagged to a Cost Centre, each with its
+// own debit/credit — distinct from the account-group tree above (which nets
+// everything into one balance per account). This answers "what did this
+// cost centre actually cost, and against which PO", not "what's this
+// account's balance".
+function CostCentrePanel({
+  data,
+  loading,
+}: {
+  data: CCTransactionsResponse | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="py-16 text-center text-muted-foreground text-sm">
+        <Loader2 className="h-5 w-5 animate-spin inline mb-2" />
+        <p>Loading cost centre transactions…</p>
+      </div>
+    );
+  }
+  if (!data || data.transactions.length === 0) {
+    return (
+      <div className="py-16 text-center text-muted-foreground text-sm px-4">
+        No postings found for this cost centre in the selected period.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-border border-b border-border">
+        <div className="px-5 py-4">
+          <p className="text-sm font-bold font-heading leading-none">
+            {data.costCenter.code} - {data.costCenter.name}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+            Cost Centre
+          </p>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm font-bold font-heading leading-none text-rose-400">
+            {fmt(data.totals.debit)}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+            Total Debit
+          </p>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm font-bold font-heading leading-none text-emerald-400">
+            {fmt(data.totals.credit)}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+            Total Credit
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[760px]">
+          <thead>
+            <tr className="border-b border-border bg-muted/30 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+              <th className="px-4 py-2">Voucher No.</th>
+              <th className="px-3 py-2">Date</th>
+              <th className="px-3 py-2">Account</th>
+              <th className="px-3 py-2">PO / Doc</th>
+              <th className="px-3 py-2 text-right">Debit</th>
+              <th className="px-3 py-2 text-right">Credit</th>
+              <th className="px-3 py-2">Narration</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/40">
+            {data.transactions.map((t) => (
+              <tr key={t.entryId} className="hover:bg-muted/10">
+                <td className="px-4 py-2 font-mono text-xs">{t.voucherNo || "—"}</td>
+                <td className="px-3 py-2 text-xs whitespace-nowrap">
+                  {t.date ? fmtDate(t.date) : "—"}
+                </td>
+                <td className="px-3 py-2 text-xs">{t.account.name || "—"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {t.poNo ? (
+                    <span className="font-mono text-primary">{t.poNo}</span>
+                  ) : (
+                    "—"
+                  )}
+                  {t.docNo && t.docNo !== t.poNo && (
+                    <span className="block text-[10px] text-muted-foreground font-mono">
+                      {t.docNo}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-xs text-rose-400">
+                  {t.debit ? fmt(t.debit) : "—"}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-xs text-emerald-400">
+                  {t.credit ? fmt(t.credit) : "—"}
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[200px]">
+                  {t.narration || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── FilterSelect ─────────────────────────────────────────────────────────────
 
 function FilterSelect({
@@ -622,9 +757,11 @@ export default function TrialBalance() {
   const [projects, setProjects] = useState<Option[]>([]);
   const [allCompanies, setAllCompanies] = useState<Option[]>([]);
   const [allProjects, setAllProjects] = useState<Option[]>([]);
+  const [costCenters, setCostCenters] = useState<Option[]>([]);
   const [selEnterprise, setSelEnterprise] = useState<Option | null>(null);
   const [selCompany, setSelCompany] = useState<Option | null>(null);
   const [selProject, setSelProject] = useState<Option | null>(null);
+  const [selCostCenter, setSelCostCenter] = useState<Option | null>(null);
 
   // ── data ──────────────────────────────────────────────────────────────────
   const [rows, setRows] = useState<TBNode[]>([]);
@@ -646,6 +783,12 @@ export default function TrialBalance() {
   // ── Level 3: payment detail dialog ───────────────────────────────────────
   const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
   const [payDetailLoading, setPayDetailLoading] = useState(false);
+
+  // ── Cost Centre view — replaces the account tree when a cost centre is
+  // selected, showing individual PO/GRN/Invoice postings instead of an
+  // account-group rollup ────────────────────────────────────────────────────
+  const [ccData, setCcData] = useState<CCTransactionsResponse | null>(null);
+  const [ccLoading, setCcLoading] = useState(false);
 
   // ── load fin years ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -682,10 +825,11 @@ export default function TrialBalance() {
   useEffect(() => {
     async function load() {
       try {
-        const [eRes, cRes, pRes] = await Promise.all([
+        const [eRes, cRes, pRes, ccRes] = await Promise.all([
           fetchWithAuth("/api/enterprises/options?business_type=E"),
           fetchWithAuth("/api/enterprises/options?business_type=C"),
           fetchWithAuth("/api/enterprises/options?business_type=P"),
+          fetchWithAuth("/api/cost-center/options"),
         ]);
         if (eRes.ok) setEnterprises(await eRes.json());
         if (cRes.ok) {
@@ -697,6 +841,15 @@ export default function TrialBalance() {
           const d = await pRes.json();
           setAllProjects(d);
           setProjects(d);
+        }
+        if (ccRes.ok) {
+          const d = await ccRes.json();
+          setCostCenters(
+            (Array.isArray(d) ? d : []).map((c: any) => ({
+              id: c.id,
+              label: c.code ? `${c.code} - ${c.label}` : c.label,
+            })),
+          );
         }
       } catch {
         /* silent */
@@ -787,6 +940,7 @@ export default function TrialBalance() {
         if (selEnterprise?.id) url += `&enterpriseId=${selEnterprise.id}`;
         if (selCompany?.id) url += `&companyId=${selCompany.id}`;
         if (selProject?.id) url += `&projectId=${selProject.id}`;
+        if (selCostCenter?.id) url += `&costCenterId=${selCostCenter.id}`;
         const res = await fetchWithAuth(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         setDrillData(await res.json());
@@ -797,7 +951,7 @@ export default function TrialBalance() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filterMode, from, to, asOn, selCompany, selProject],
+    [filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
   );
 
   // Level 3 — open detail dialog for a transaction row.
@@ -860,6 +1014,7 @@ export default function TrialBalance() {
       if (selEnterprise?.id) url += `&enterpriseId=${selEnterprise.id}`;
       if (selCompany?.id) url += `&companyId=${selCompany.id}`;
       if (selProject?.id) url += `&projectId=${selProject.id}`;
+      if (selCostCenter?.id) url += `&costCenterId=${selCostCenter.id}`;
       const res = await fetchWithAuth(url, { signal: abortRef.current.signal });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
@@ -881,12 +1036,42 @@ export default function TrialBalance() {
     const { f, t, ao } = getEffectiveParams();
     fetchDataInner(f, t, ao);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterMode, from, to, asOn, selCompany, selProject]);
+  }, [filterMode, from, to, asOn, selCompany, selProject, selCostCenter]);
 
   // Auto-fetch whenever filter params change
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Cost Centre view — fetch the individual-postings list whenever a cost
+  // centre is selected (or the period/company/project it's scoped to
+  // changes); cleared the moment the cost centre filter is cleared.
+  useEffect(() => {
+    if (!selCostCenter?.id) {
+      setCcData(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setCcLoading(true);
+      try {
+        const { f, t, ao } = getEffectiveParams();
+        const effectiveTo = ao || t;
+        let url = `/api/trial-balance/cost-centre/${selCostCenter.id}/transactions?from=${f}&to=${effectiveTo}`;
+        if (selCompany?.id) url += `&companyId=${selCompany.id}`;
+        if (selProject?.id) url += `&projectId=${selProject.id}`;
+        const res = await fetchWithAuth(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!cancelled) setCcData(await res.json());
+      } catch {
+        if (!cancelled) setCcData(null);
+      } finally {
+        if (!cancelled) setCcLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selCostCenter, filterMode, from, to, asOn, selCompany, selProject]);
 
   // ── expand / collapse ─────────────────────────────────────────────────────
   const toggle = (id: number) =>
@@ -1041,8 +1226,8 @@ export default function TrialBalance() {
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
           <div className="flex flex-col gap-3 px-4 py-3.5 border-b border-border bg-muted/20">
 
-            {/* Row 1 — Enterprise + Company (2-col on mobile, 3-col on sm+) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+            {/* Row 1 — Enterprise / Company / Project / Cost Centre */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               <FilterSelect
                 label="Enterprise"
                 icon={Building}
@@ -1059,16 +1244,22 @@ export default function TrialBalance() {
                 options={companies}
                 placeholder="All companies"
               />
-              <div className="col-span-2 sm:col-span-1">
-                <FilterSelect
-                  label="Project"
-                  icon={FolderKanban}
-                  value={selProject?.id ?? null}
-                  onChange={(id, opt) => setSelProject(opt)}
-                  options={projects}
-                  placeholder="All projects"
-                />
-              </div>
+              <FilterSelect
+                label="Project"
+                icon={FolderKanban}
+                value={selProject?.id ?? null}
+                onChange={(id, opt) => setSelProject(opt)}
+                options={projects}
+                placeholder="All projects"
+              />
+              <FilterSelect
+                label="Cost Centre"
+                icon={Target}
+                value={selCostCenter?.id ?? null}
+                onChange={(id, opt) => setSelCostCenter(opt)}
+                options={costCenters}
+                placeholder="All cost centres"
+              />
             </div>
 
             {/* Row 2 — Period mode tabs + picker */}
@@ -1149,7 +1340,7 @@ export default function TrialBalance() {
             </div>
 
             {/* Viewing chips */}
-            {(selEnterprise || selCompany || selProject || periodLabel()) && (
+            {(selEnterprise || selCompany || selProject || selCostCenter || periodLabel()) && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] text-muted-foreground">Viewing:</span>
                 {selEnterprise && (
@@ -1165,6 +1356,11 @@ export default function TrialBalance() {
                 {selProject && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
                     <FolderKanban size={9} /> {selProject.label}
+                  </span>
+                )}
+                {selCostCenter && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                    <Target size={9} /> {selCostCenter.label}
                   </span>
                 )}
                 {periodLabel() && (
@@ -1183,6 +1379,10 @@ export default function TrialBalance() {
             </div>
           )}
 
+          {selCostCenter ? (
+            <CostCentrePanel data={ccData} loading={ccLoading} />
+          ) : (
+          <>
           {/* Stats */}
           {summary && !loading && (
             <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border border-b border-border">
@@ -1477,6 +1677,8 @@ export default function TrialBalance() {
               )}
             </table>
           </div>
+          </>
+          )}
         </div>
       </FinanceShell>
 
