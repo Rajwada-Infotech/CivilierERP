@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Car, Clock, User, FileText } from "lucide-react";
 
@@ -78,7 +79,7 @@ const NONE = "__none__";
 // Hour/minute-precision countdown — mirrors CrmUnitMatrix.tsx's timeLeft().
 function timeLeft(until: string): string {
   const ms = new Date(until).getTime() - Date.now();
-  if (ms <= 0) return "Expired";
+  if (ms <= 0) return "Overdue";
   const totalMin = Math.floor(ms / 60000);
   const d = Math.floor(totalMin / 1440);
   const h = Math.floor((totalMin % 1440) / 60);
@@ -86,6 +87,9 @@ function timeLeft(until: string): string {
   if (d > 0) return `${d}d ${h}h left`;
   if (h > 0) return `${h}h ${m}m left`;
   return `${m}m left`;
+}
+function isOverdue(until: string | null): boolean {
+  return !!until && new Date(until).getTime() - Date.now() <= 0;
 }
 
 // Available slot -> choose whether to sell it now or just hold it for a
@@ -291,11 +295,25 @@ function PlaceHoldDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => v
 // Shared detail dialog for tapping any non-Available tile — mirrors
 // CrmUnitMatrix.tsx's TileInfoDialog. Parking allotments can be standalone
 // (sold independent of a unit booking, BookingId NULL) so the Booked path
-// only offers an "Open Booking" link when one actually exists.
+// only offers an "Open Booking" link when one actually exists. OnHold now
+// also covers "an Allotment exists but its own linked milestone isn't Paid
+// yet" — Extend Hold is offered there; releasing/cancelling an unpaid
+// allotment itself already has a proper flow on the booking's own Charges
+// dialog (crmParking.js applyReleaseParking, gated by the same legal-work/
+// amendment-queue rules as any other post-booking edit), so this dialog
+// doesn't shortcut around that — it links out instead.
 function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [extendDays, setExtendDays] = useState("3");
+  const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
+  const hasUnpaidAllotment = isHold && !!slot.AllotmentId;
+  const overdue = isHold && isOverdue(slot.HoldUntil);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
 
   const handleRelease = async () => {
     setReleasing(true);
@@ -303,7 +321,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
       const res = await fetchWithAuth(`${HOLDS_API}/${slot.HoldId}/release`, { method: "PUT" });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success(`Hold released — slot ${slot.SlotNo} is Available again`);
-      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+      invalidate();
       onClose();
     } catch (e: any) {
       toast.error(e.message);
@@ -312,17 +330,40 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
     }
   };
 
-  const appNo = isHold ? slot.HoldApplicationNo : slot.ApplicationNo;
-  const applicantName = isHold ? slot.HoldApplicantName : slot.ApplicantName;
-  const mobile = isHold ? slot.HoldMobile : slot.Mobile;
-  const assignedName = isHold ? slot.HoldAssignedToName : slot.AssignedToName;
-  const assignedEmail = isHold ? slot.HoldAssignedToEmail : slot.AssignedToEmail;
+  const handleExtend = async () => {
+    const days = parseInt(extendDays);
+    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
+    setExtending(true);
+    try {
+      const res = await fetchWithAuth(`${HOLDS_API}/${slot.HoldId}/extend`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ AdditionalDays: days }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success(`Hold extended by ${days} day(s)`);
+      invalidate();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setExtending(false);
+    }
+  };
+
+  const appNo = (isHold && slot.HoldApplicationNo) || slot.ApplicationNo;
+  const applicantName = (isHold && slot.HoldApplicantName) || slot.ApplicantName;
+  const mobile = (isHold && slot.HoldMobile) || slot.Mobile;
+  const assignedName = (isHold && slot.HoldAssignedToName) || slot.AssignedToName;
+  const assignedEmail = (isHold && slot.HoldAssignedToEmail) || slot.AssignedToEmail;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-heading">Slot {slot.SlotNo} — {isHold ? "On Hold" : "Booked"}</DialogTitle>
+          <DialogTitle className="font-heading">
+            Slot {slot.SlotNo} — {isHold ? (hasUnpaidAllotment ? "Booked, Payment Pending" : "On Hold") : "Booked"}
+          </DialogTitle>
         </DialogHeader>
         <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
           <div className="flex justify-between items-center">
@@ -335,29 +376,68 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
             <span className="text-muted-foreground flex items-center gap-1"><User size={12} /> Salesperson</span>
             <span className="font-medium text-right">{assignedName || "—"}{assignedEmail ? <span className="block text-[11px] text-muted-foreground font-normal">{assignedEmail}</span> : null}</span>
           </div>
+          {hasUnpaidAllotment && (
+            <div className="flex justify-between"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{slot.BookingNo || "Standalone parking sale"}</span></div>
+          )}
           {isHold ? (
-            <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Expires in</span><span className="font-medium text-amber-600">{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span></div>
+            <div className="flex justify-between items-center pt-1 border-t border-border/60">
+              <span className="text-muted-foreground">{overdue ? "Hold" : "Expires in"}</span>
+              <span className={`font-medium ${overdue ? "text-rose-600" : "text-amber-600"}`}>{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span>
+            </div>
           ) : (
             <>
               <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{slot.BookingNo || "Standalone parking sale"}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Sold on</span><span className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</span></div>
             </>
           )}
+          {hasUnpaidAllotment && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+              Parking charge not yet paid — this tile flips to Booked automatically once it's received.
+            </p>
+          )}
         </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+
+        {showExtend && (
+          <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground block mb-1">Extend by (days)</label>
+              <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <button onClick={handleExtend} disabled={extending}
+              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {extending ? "Extending..." : "Confirm"}
+            </button>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-3 border-t border-border flex-wrap">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          {isHold ? (
+          {hasUnpaidAllotment ? (
+            <>
+              {slot.HoldId && (
+                <button onClick={() => setShowExtend((s) => !s)}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
+                  Extend Hold
+                </button>
+              )}
+              <button onClick={() => navigate(slot.BookingId ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                {slot.BookingId ? "Open Booking" : "Open Application"}
+              </button>
+            </>
+          ) : isHold ? (
             <button onClick={handleRelease} disabled={releasing}
               className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
               {releasing ? "Releasing..." : "Release Hold"}
             </button>
           ) : slot.BookingId ? (
-            <button onClick={() => window.open(`/crm/bookings?applicationId=${slot.ApplicationId}`, "_blank")}
+            <button onClick={() => navigate(`/crm/bookings?applicationId=${slot.ApplicationId}`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
               Open Booking
             </button>
           ) : (
-            <button onClick={() => window.open(`/crm/applications`, "_blank")}
+            <button onClick={() => navigate(`/crm/applications`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
               Open Application
             </button>
@@ -369,6 +449,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 }
 
 export function ParkingMatrixPage() {
+  const navigate = useNavigate();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [choiceSlot, setChoiceSlot] = useState<MatrixSlot | null>(null);
@@ -418,7 +499,26 @@ export function ParkingMatrixPage() {
           { label: "Parking Matrix", path: "/crm/parking-matrix" },
         ]}
       />
-      <FollowupShell title="Parking Matrix" icon={Car}>
+      <FollowupShell
+        title="Parking Matrix"
+        icon={Car}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/crm/setup/parking-master")}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            >
+              <Car size={14} /> Parking Rate Master
+            </button>
+            <button
+              onClick={() => navigate("/crm/setup/parking-slot-master")}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            >
+              <Car size={14} /> Parking Slot Master
+            </button>
+          </div>
+        }
+      >
         <div className="flex gap-3 flex-wrap items-end">
           <div className="min-w-56 space-y-1.5">
             <label className="text-xs text-muted-foreground">Project</label>
@@ -488,8 +588,10 @@ export function ParkingMatrixPage() {
                   >
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="font-bold text-sm text-foreground truncate">#{s.SlotNo}</span>
-                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[s.Status]}`}>
-                        {s.Status === "OnHold" ? "Hold" : s.Status}
+                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                        s.Status === "OnHold" && isOverdue(s.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[s.Status]
+                      }`}>
+                        {s.Status === "OnHold" ? (isOverdue(s.HoldUntil) ? "Overdue" : "Hold") : s.Status}
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
@@ -497,7 +599,7 @@ export function ParkingMatrixPage() {
                         : s.Status === "OnHold" ? (
                           <>
                             <Clock size={11} className="shrink-0" />
-                            {s.HoldApplicantName} · {s.HoldUntil ? timeLeft(s.HoldUntil) : ""}
+                            {(s.HoldApplicantName || s.ApplicantName)} · {s.HoldUntil ? timeLeft(s.HoldUntil) : ""}
                           </>
                         ) : "—"}
                     </div>

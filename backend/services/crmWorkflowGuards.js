@@ -727,11 +727,53 @@ async function maybeUnlockBrokerageTranche(pool, bookingId) {
   `);
 }
 
+// Fires when staff click "Book / Send for Approval" (PUT
+// /:id/ready-for-approval in crmBookings.js) — the moment a booking clears
+// its own checklist and is submitted for admin approval, generate the
+// Booking-stage invoice automatically instead of leaving staff to remember
+// a separate manual step. Idempotent on InvoiceType = 'Booking' so re-
+// notifying admins (a booking bounced back and resubmitted) never creates a
+// second invoice.
+async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
+  if (existing.recordset.length) return null;
+
+  const booking = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT BookingNo, AssignedTo, BookingAmount FROM dbo.CrmBooking WHERE Id = @bid");
+  const bookingRow = booking.recordset[0];
+  if (!bookingRow || !bookingRow.BookingAmount) return null;
+
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+  const result = await pool.request()
+    .input("no",   sql.NVarChar(30),  invoiceNo)
+    .input("bid",  sql.Int,           bookingId)
+    .input("amt",  sql.Decimal(18,2), bookingRow.BookingAmount)
+    .input("desc", sql.NVarChar(500), "Auto-generated — booking submitted for approval")
+    .input("cb",   sql.Int,           actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@no, @bid, 'Booking', @amt, @desc, @cb, SYSDATETIME())
+    `);
+  const invoiceId = result.recordset[0].Id;
+
+  if (bookingRow.AssignedTo) {
+    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
+      "Booking Invoice Generated",
+      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo}.`,
+      invoiceId, "crm_invoice");
+  }
+
+  return { id: invoiceId, InvoiceNo: invoiceNo };
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateSalesDeed,
   maybeAutoGenerateInvoice,
+  maybeAutoGenerateBookingInvoice,
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageTranche,

@@ -272,8 +272,17 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
       dueDate = runningDue;
     }
     const isFirst = m.no === 1;
-    const amt = isFirst && bookingAmt > 0 ? bookingAmt : Math.round(totalValue * m.pct) / 100;
-    const pct = isFirst && bookingAmt > 0 ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct;
+    // Nothing is due by default. Until a real Booking Amount is entered
+    // (bookingAmt > 0), every milestone — including #1 — is inserted at 0,
+    // not the plan's fixed percentage of TotalValue; staff would otherwise
+    // see a scary pre-filled "Due" figure the customer never agreed to.
+    // Once the Booking Amount is actually set (via the Payment tab's
+    // resync-schedule call), Milestone #1 takes that real amount and every
+    // other milestone gets redistributed across what's left, preserving the
+    // plan's relative weighting (recalculateRemainingMilestones falls back to
+    // the plan's own %s whenever a milestone's stored Percent is 0/unset).
+    const amt = bookingAmt > 0 ? (isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100) : 0;
+    const pct = bookingAmt > 0 ? (isFirst ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct) : 0;
 
     const ins = await pool.request()
       .input("bid",  sql.Int,           bookingId)
@@ -298,14 +307,15 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
 }
 
-// A payment plan scoped to a specific Company/Project/Block must actually
-// match the booking it's being attached to — otherwise the scoping built
-// into the Payment Plan Master (see migration 182) is purely cosmetic, only
-// ever enforced by which options happen to be in a dropdown. NULL scope
-// columns on the plan mean "applies everywhere" and always pass.
-async function validatePaymentPlanScope(pool, planId, { companyId, projectId, blockId }) {
+// A payment plan scoped to a specific Company/Project/Block/Unit must
+// actually match the booking it's being attached to — otherwise the scoping
+// built into the Payment Plan Master (see migration 182, extended with
+// UnitId for per-unit plans) is purely cosmetic, only ever enforced by which
+// options happen to be in a dropdown. NULL scope columns on the plan mean
+// "applies everywhere" and always pass.
+async function validatePaymentPlanScope(pool, planId, { companyId, projectId, blockId, unitId }) {
   const plan = await pool.request().input("pid", sql.Int, planId)
-    .query("SELECT PlanName, CompanyId, ProjectId, BlockId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+    .query("SELECT PlanName, CompanyId, ProjectId, BlockId, UnitId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
   if (!plan.recordset.length) throw new CrmCreationError("Selected payment plan does not exist");
   const p = plan.recordset[0];
   if (p.CompanyId && companyId && p.CompanyId !== companyId) {
@@ -316,6 +326,9 @@ async function validatePaymentPlanScope(pool, planId, { companyId, projectId, bl
   }
   if (p.BlockId && blockId && p.BlockId !== blockId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
+  }
+  if (p.UnitId && unitId && p.UnitId !== unitId) {
+    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different unit`);
   }
 }
 
@@ -388,6 +401,16 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
   if (!b.UnitId) throw new CrmCreationError("UnitId is required — a unit must be selected from Unit Master");
 
+  // One Application, one Booking — enforced here (not just at the
+  // Application-approval call site) so the manual/fallback creation path
+  // can never create a second Booking against an Application that already
+  // has an active one, no matter which caller reaches this function.
+  const existingForApp = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("SELECT Id, BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
+  if (existingForApp.recordset.length) {
+    throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
+  }
+
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
@@ -409,6 +432,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   if (b.PaymentPlanId) {
     await validatePaymentPlanScope(pool, parseInt(b.PaymentPlanId), {
       companyId: unitRow.CompanyId || null, projectId: unitRow.ProjectId || null, blockId: unitRow.BlockId || null,
+      unitId: unitRow.Id || null,
     });
   }
 

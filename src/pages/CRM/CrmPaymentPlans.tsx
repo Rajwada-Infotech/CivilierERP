@@ -29,6 +29,9 @@ async function fetchProjects(): Promise<any[]> {
 async function fetchBlocks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BLOCK_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchUnits(): Promise<any[]> {
+  try { const r = await fetchWithAuth(UNIT_API); return r.ok ? r.json() : []; } catch { return []; }
+}
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -46,6 +49,7 @@ const CrmPaymentPlans: React.FC = () => {
   const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
   const [saving, setSaving] = useState(false);
   // Opens locked whenever editing an existing plan — "New Plan" opens unlocked.
@@ -56,6 +60,7 @@ const CrmPaymentPlans: React.FC = () => {
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
   const { data: blocks = [] } = useQuery({ queryKey: ["block-master"], queryFn: fetchBlocks, staleTime: 5 * 60_000 });
+  const { data: units = [] } = useQuery({ queryKey: ["unit-master-all"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
 
   const projectsForCompany = useMemo(() => {
@@ -66,12 +71,18 @@ const CrmPaymentPlans: React.FC = () => {
     if (!projectId) return blocks as any[];
     return (blocks as any[]).filter((b: any) => String(b.ProjectId) === projectId);
   }, [blocks, projectId]);
+  const unitsForBlock = useMemo(() => {
+    let list = units as any[];
+    if (projectId) list = list.filter((u: any) => String(u.ProjectId) === projectId);
+    if (blockId) list = list.filter((u: any) => String(u.BlockId) === blockId);
+    return list;
+  }, [units, projectId, blockId]);
 
   const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
   const resetForm = () => {
     setEditingId(null);
-    setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId("");
+    setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId(""); setUnitId("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
     setLocked(false);
   };
@@ -87,6 +98,7 @@ const CrmPaymentPlans: React.FC = () => {
     setCompanyId(plan.CompanyId ? String(plan.CompanyId) : "");
     setProjectId(plan.ProjectId ? String(plan.ProjectId) : "");
     setBlockId(plan.BlockId ? String(plan.BlockId) : "");
+    setUnitId(plan.UnitId ? String(plan.UnitId) : "");
     setItems(
       (planItems as any[]).length
         ? planItems.map((i: any) => ({
@@ -109,7 +121,7 @@ const CrmPaymentPlans: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlanName: planName, Description: description, Items: items,
-          CompanyId: companyId || null, ProjectId: projectId || null, BlockId: blockId || null,
+          CompanyId: companyId || null, ProjectId: projectId || null, BlockId: blockId || null, UnitId: unitId || null,
         }),
       });
       const data = await res.json();
@@ -164,11 +176,11 @@ const CrmPaymentPlans: React.FC = () => {
             </div>
             <p className="text-xs text-muted-foreground mb-2">{p.Description || "—"}</p>
             <div className="flex items-center gap-1.5 text-xs mb-2">
-              {!p.CompanyId && !p.ProjectId && !p.BlockId ? (
+              {!p.CompanyId && !p.ProjectId && !p.BlockId && !p.UnitId ? (
                 <span className="px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-600 flex items-center gap-1"><Layers size={10} /> Global default</span>
               ) : (
                 <span className="px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-600 flex items-center gap-1">
-                  <Building2 size={10} /> {[p.CompanyName, p.ProjectName, p.BlockName].filter(Boolean).join(" · ")}
+                  <Building2 size={10} /> {[p.CompanyName, p.ProjectName, p.BlockName, p.UnitName].filter(Boolean).join(" · ")}
                 </span>
               )}
             </div>
@@ -209,21 +221,26 @@ const CrmPaymentPlans: React.FC = () => {
 
             <div className="rounded-lg border border-border p-3 space-y-2">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} /> Scope (leave blank for a global default plan)</label>
-              <div className="grid grid-cols-3 gap-2">
-                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); setBlockId(""); }}
+              <div className="grid grid-cols-2 gap-2">
+                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); setBlockId(""); setUnitId(""); }}
                   className={inputCls}>
                   <option value="">Any company</option>
                   {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
                 </select>
-                <select value={projectId} disabled={locked} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }}
+                <select value={projectId} disabled={locked} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); setUnitId(""); }}
                   className={inputCls}>
                   <option value="">Any project</option>
                   {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
                 </select>
-                <select value={blockId} disabled={locked} onChange={(e) => setBlockId(e.target.value)}
+                <select value={blockId} disabled={locked} onChange={(e) => { setBlockId(e.target.value); setUnitId(""); }}
                   className={inputCls}>
                   <option value="">Any block</option>
                   {(blocksForProject as any[]).map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
+                </select>
+                <select value={unitId} disabled={locked} onChange={(e) => setUnitId(e.target.value)}
+                  className={inputCls}>
+                  <option value="">Any unit</option>
+                  {(unitsForBlock as any[]).map((u: any) => <option key={u.Id} value={String(u.Id)}>{u.UnitName}</option>)}
                 </select>
               </div>
             </div>

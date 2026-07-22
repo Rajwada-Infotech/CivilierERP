@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Search, ChevronRight, MoreHorizontal, CheckCircle2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -21,11 +20,8 @@ const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
-const PLAN_API = "/api/crm/payment-plans";
 
 const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
-const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
-const TOKEN_TYPES = ["Percentage", "Amount"];
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -34,18 +30,8 @@ const statusColor: Record<string, string> = {
   Cancelled: "text-muted-foreground bg-muted/50 border-border",
 };
 
-const EMPTY_FORM = {
-  ApplicationId: "", UnitId: "", ProjectName: "", UnitNo: "", BlockName: "",
-  UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
-  TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
-  BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
-};
-
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPaymentPlans(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PLAN_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 // This management page still needs to see and filter to Cancelled/Rejected
@@ -99,10 +85,9 @@ function getNextStep(b: any): NextStep {
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
   const { canDoAction } = useAuth();
-  // Bookings are now created automatically on Application approval — manual
-  // creation here is a fallback for when that fails, restricted to the same
-  // per-user "crm-bookings" edit grant as every other mutating action on
-  // this review page (see CrmBookingDetail.tsx).
+  // Bookings only ever auto-create on Application approval — there is no
+  // manual/direct creation path. canEdit still gates the other mutating
+  // actions on this review page (see CrmBookingDetail.tsx).
   const canEdit = canDoAction("crm-bookings", "edit");
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -110,54 +95,29 @@ const CrmBooking: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
-  const [saving, setSaving] = useState(false);
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
   const { data: bookings = [], isLoading } = useQuery({
     queryKey: ["crm-bookings", appFilter],
     queryFn: () => fetchBookings(appFilter || undefined),
     staleTime: 60_000,
   });
-  const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
+
+  // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
+  // elsewhere in the app) opens that booking's detail modal directly in
+  // this same tab/page instead of leaving staff to find and click the one
+  // filtered row themselves. deepLinkOpened is a one-shot guard — without
+  // it, closing the modal would immediately reopen it, since the URL still
+  // carries applicationId (same class of bug already fixed on the Bank &
+  // Nominee page's own deep link).
+  React.useEffect(() => {
+    if (!appFilter || deepLinkOpened) return;
+    const row = (bookings as any[]).find((b: any) => String(b.ApplicationId) === appFilter);
+    if (row) { setViewingBookingId(row.Id); setDeepLinkOpened(true); }
+  }, [appFilter, bookings, deepLinkOpened]);
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
-  const { data: plans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
-
-  const availableUnits = useMemo(() => {
-    const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled" && b.Status !== "Rejected").map((b: any) => b.UnitId));
-    return (units as any[]).filter((u: any) => u.IsActive && (!bookedIds.has(u.Id) || String(u.Id) === form.UnitId));
-  }, [units, bookings, form.UnitId]);
-
-  const handleUnitSelect = (unitId: string) => {
-    const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
-    const area = u?.AreaSqFt != null ? String(u.AreaSqFt) : "";
-    const rate = parseFloat(form.RatePerSqFt);
-    const areaNum = parseFloat(area);
-    setForm((f) => ({
-      ...f,
-      UnitId: unitId,
-      UnitNo: u?.UnitName || f.UnitNo,
-      ProjectName: u?.ProjectName || f.ProjectName,
-      BlockName: u?.BlockName || f.BlockName,
-      UnitType: u?.UnitType || "",
-      AreaSqFt: area,
-      TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
-    }));
-  };
-
-  // Area is auto-fetched from the selected unit (Unit Master) — only Rate
-  // is entered here, and it recalculates TotalValue against that fixed area.
-  const handleRateChange = (val: string) => {
-    const rate = parseFloat(val);
-    const area = parseFloat(form.AreaSqFt);
-    setForm((f) => ({
-      ...f,
-      RatePerSqFt: val,
-      TotalValue: !isNaN(area) && !isNaN(rate) ? String(Math.round(area * rate)) : f.TotalValue,
-    }));
-  };
 
   const filtered = useMemo(() => {
     return (bookings as any[]).filter((b: any) => {
@@ -167,42 +127,6 @@ const CrmBooking: React.FC = () => {
       return s && st;
     });
   }, [bookings, search, statusFilter]);
-
-  const handleSave = async () => {
-    if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
-    if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          ApplicationId: parseInt(form.ApplicationId),
-          UnitId:        parseInt(form.UnitId),
-          AreaSqFt:      form.AreaSqFt    || null,
-          RatePerSqFt:   form.RatePerSqFt || null,
-          TotalValue:    form.TotalValue   || null,
-          TokenValue:    form.TokenValue   || null,
-          PaymentPlanId: form.PaymentPlanId || null,
-          AssignedTo:    form.AssignedTo   || null,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create booking");
-      toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
-      if (data.tokenWarning) {
-        toast.warning(data.tokenWarning, { duration: 8000 });
-      }
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM, ApplicationId: appFilter });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   // Unit change is a rare, authorized-only action (admin/super_admin/
   // marketing_head, enforced server-side) — a lightweight prompt flow
@@ -295,7 +219,16 @@ const CrmBooking: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
             />
-            {b.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {b.Status === "Pending" && (
+              b.UnitReviewConfirmed && b.PlanReviewConfirmed ? (
+                <span className="text-xs text-muted-foreground">Pending admin approval</span>
+              ) : (
+                <button onClick={() => setViewingBookingId(b.Id)}
+                  className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
+                  Review Checklist Incomplete <ChevronRight size={12} />
+                </button>
+              )
+            )}
             {step ? (
               <button onClick={() => navigate(step.path)}
                 className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
@@ -337,15 +270,7 @@ const CrmBooking: React.FC = () => {
   return (
     <SalesAutoShell
       title="CRM — Applications and Bookings"
-      subtitle="Review-only — bookings auto-create on Application approval; edit rights are granted per user"
-      action={
-        canEdit ? (
-          <button onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
-            <Plus size={14} /> New Booking
-          </button>
-        ) : undefined
-      }
+      subtitle="Bookings auto-create on Application approval but stay Pending until staff confirm the review checklist and an admin approves"
     >
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48">
@@ -369,141 +294,6 @@ const CrmBooking: React.FC = () => {
         emptyMessage="No bookings found"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-
-      {/* New Booking Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading">New Booking</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Application *</label>
-              <select value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select application</option>
-                {(apps as any[]).map((a: any) => (
-                  <option key={a.Id} value={String(a.Id)}>
-                    {a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Unit * (from Unit Master — mandatory)</label>
-                <select value={form.UnitId} onChange={(e) => handleUnitSelect(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select unit</option>
-                  {(availableUnits as any[]).map((u: any) => (
-                    <option key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Project (from selected unit)</label>
-                <input type="text" value={form.ProjectName} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Block/Tower (from selected unit)</label>
-                <input type="text" value={form.BlockName} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Type of Unit (from selected unit)</label>
-                <input type="text" value={form.UnitType} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking Date</label>
-                <input type="date" value={form.BookingDate}
-                  onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking Token Type</label>
-                <select value={form.TokenType} onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  {TOKEN_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Token {form.TokenType === "Percentage" ? "(%)" : "Amount (₹)"}
-                </label>
-                <input type="number" value={form.TokenValue} onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Payment Plan (optional — default 7-stage split used if none selected)</label>
-                <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Default split</option>
-                  {(plans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
-                    <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select</option>
-                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Area (sq ft) — from Unit Master</label>
-                <input type="text" value={form.AreaSqFt} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Rate per sq ft (₹)</label>
-                <input type="number" value={form.RatePerSqFt} onChange={(e) => handleRateChange(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Total Value (₹) — auto-calculated</label>
-                <input type="number" value={form.TotalValue} onChange={(e) => setForm((f) => ({ ...f, TotalValue: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background font-semibold" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Assigned To</label>
-                <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Unassigned —</option>
-                  {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                </select>
-              </div>
-            </div>
-            {form.TotalValue && (
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
-                Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
-              </div>
-            )}
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
-              Cancel
-            </button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
-              {saving ? "Creating..." : "Create Booking"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {viewingBookingId && (
         <CrmBookingDetail bookingId={viewingBookingId} onClose={() => setViewingBookingId(null)} />

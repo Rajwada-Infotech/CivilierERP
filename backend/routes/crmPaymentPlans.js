@@ -11,32 +11,35 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 
 const PLAN_SELECT = `
   SELECT p.Id, p.PlanName, p.Description, p.IsActive, p.CreatedAt,
-         p.CompanyId, p.ProjectId, p.BlockId,
-         comp.name AS CompanyName, proj.name AS ProjectName, blk.BlockName,
+         p.CompanyId, p.ProjectId, p.BlockId, p.UnitId,
+         comp.name AS CompanyName, proj.name AS ProjectName, blk.BlockName, um.UnitName,
          (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
          (SELECT SUM([Percent]) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS TotalPercent
   FROM dbo.CrmPaymentPlanTemplate p
   LEFT JOIN dbo.enterprise comp ON comp.id = p.CompanyId AND comp.business_type = 'C'
   LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
+  LEFT JOIN dbo.UnitMaster um ON um.Id = p.UnitId
 `;
 
 // GET / — every plan (management page), or the plans applicable to a given
-// Company/Project/Block scope when those query params are supplied (used
-// by the Booking page's plan picker). A plan matches a scope filter if its
-// own scope column is either NULL (a wildcard/default plan available
+// Company/Project/Block/Unit scope when those query params are supplied
+// (used by the Booking page's plan picker). A plan matches a scope filter if
+// its own scope column is either NULL (a wildcard/default plan available
 // everywhere) or an exact match — so a Project-specific plan only shows for
-// that project, while a global plan always shows alongside it.
+// that project, a Unit-specific plan only for that exact unit, while a
+// global plan always shows alongside them.
 router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { companyId, projectId, blockId } = req.query;
+    const { companyId, projectId, blockId, unitId } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (companyId) { req0.input("cid", sql.Int, parseInt(companyId)); conds.push("(p.CompanyId IS NULL OR p.CompanyId = @cid)"); }
     if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("(p.ProjectId IS NULL OR p.ProjectId = @pid)"); }
     if (blockId)   { req0.input("bid", sql.Int, parseInt(blockId));   conds.push("(p.BlockId IS NULL OR p.BlockId = @bid)"); }
-    if (companyId || projectId || blockId) conds.push("p.IsActive = 1");
+    if (unitId)    { req0.input("uid", sql.Int, parseInt(unitId));    conds.push("(p.UnitId IS NULL OR p.UnitId = @uid)"); }
+    if (companyId || projectId || blockId || unitId) conds.push("p.IsActive = 1");
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
     res.json(result.recordset);
@@ -84,11 +87,12 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
       .input("cid",  sql.Int,           b.CompanyId ? parseInt(b.CompanyId) : null)
       .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
       .input("bid",  sql.Int,           b.BlockId   ? parseInt(b.BlockId)   : null)
+      .input("uid",  sql.Int,           b.UnitId    ? parseInt(b.UnitId)    : null)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, CompanyId, ProjectId, BlockId, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, CompanyId, ProjectId, BlockId, UnitId, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@name, @desc, @cid, @pid, @bid, 1, @cb, SYSDATETIME())
+        VALUES (@name, @desc, @cid, @pid, @bid, @uid, 1, @cb, SYSDATETIME())
       `);
     const planId = planResult.recordset[0].Id;
 
@@ -147,10 +151,11 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       .input("cid",  sql.Int,  b.CompanyId ? parseInt(b.CompanyId) : null)
       .input("pid",  sql.Int,  b.ProjectId ? parseInt(b.ProjectId) : null)
       .input("bid",  sql.Int,  b.BlockId   ? parseInt(b.BlockId)   : null)
+      .input("uid",  sql.Int,  b.UnitId    ? parseInt(b.UnitId)    : null)
       .query(`
         UPDATE dbo.CrmPaymentPlanTemplate SET
           Description = @desc, IsActive = @active,
-          CompanyId = @cid, ProjectId = @pid, BlockId = @bid
+          CompanyId = @cid, ProjectId = @pid, BlockId = @bid, UnitId = @uid
         WHERE Id = @id
       `);
 

@@ -313,67 +313,10 @@ const materialSetupItems = [
 
 const followupSetupItems = [
   {
-    icon: Users,
-    label: "Customers",
-    path: "/followup/setup/customer-master",
-    color: "text-violet-500",
-  },
-  {
-    icon: Ruler,
-    label: "Unit",
-    path: "/followup/setup/unit-master",
-    color: "text-orange-500",
-  },
-  {
-    icon: Layers,
-    label: "Block",
-    path: "/followup/setup/block-master",
-    color: "text-cyan-500",
-  },
-  {
-    icon: DoorOpen,
-    label: "Room",
-    path: "/followup/setup/room-master",
-    color: "text-teal-500",
-  },
-  {
     icon: ClipboardList,
     label: "Payment Plan",
     path: "/followup/setup/payment-plan-master",
     color: "text-emerald-500",
-  },
-  {
-    icon: Car,
-    label: "Parking Rates",
-    path: "/followup/setup/parking-master",
-    color: "text-blue-500",
-    pageKey: "followup-parking-master",
-  },
-  {
-    icon: Hash,
-    label: "Parking Slots",
-    path: "/followup/setup/parking-slot-master",
-    color: "text-sky-500",
-    pageKey: "followup-parking-slot-master",
-  },
-  {
-    icon: PlusCircle,
-    label: "Extra Charges",
-    path: "/followup/setup/extra-charge-master",
-    color: "text-pink-500",
-    pageKey: "followup-extra-charge-master",
-  },
-  {
-    icon: Activity,
-    label: "Pending Tasks",
-    path: "/followup/setup/pending-tasks",
-    color: "text-purple-500",
-  },
-  {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/followup/follow-ups/reminders",
-    color: "text-indigo-500",
   },
 ];
 
@@ -432,11 +375,39 @@ const salesAutomationSetupItems = [
 
 const crmSetupItems = [
   {
+    icon: Users,
+    label: "Customer Master",
+    path: "/crm/setup/customer-master",
+    color: "text-violet-500",
+    pageKey: "crm-customer-master",
+  },
+  {
+    icon: Ruler,
+    label: "Unit Master",
+    path: "/crm/setup/unit-master",
+    color: "text-orange-500",
+    pageKey: "crm-unit-master",
+  },
+  {
+    icon: Layers,
+    label: "Block Master",
+    path: "/crm/setup/block-master",
+    color: "text-cyan-500",
+    pageKey: "crm-block-master",
+  },
+  {
+    icon: DoorOpen,
+    label: "Room Master",
+    path: "/crm/setup/room-master",
+    color: "text-teal-500",
+    pageKey: "crm-room-master",
+  },
+  {
     icon: HardHat,
     label: "Broker Master",
     path: "/masters/brokers",
     color: "text-amber-500",
-    pageKey: "broker-master",
+    pageKey: "crm-broker-master",
   },
   {
     icon: ClipboardList,
@@ -444,6 +415,13 @@ const crmSetupItems = [
     path: "/crm/payment-plans",
     color: "text-emerald-500",
     pageKey: "crm-payment-plans",
+  },
+  {
+    icon: Landmark,
+    label: "Project Bank Mapping",
+    path: "/crm/setup/project-banks",
+    color: "text-amber-600",
+    pageKey: "crm-project-banks",
   },
   {
     icon: ClipboardList,
@@ -458,6 +436,41 @@ const crmSetupItems = [
     path: "/crm/loan-details",
     color: "text-cyan-500",
     pageKey: "crm-loan-details",
+  },
+  {
+    icon: Car,
+    label: "Parking Rate Master",
+    path: "/crm/setup/parking-master",
+    color: "text-blue-500",
+    pageKey: "crm-parking-master",
+  },
+  {
+    icon: Hash,
+    label: "Parking Slot Master",
+    path: "/crm/setup/parking-slot-master",
+    color: "text-sky-500",
+    pageKey: "crm-parking-slot-master",
+  },
+  {
+    icon: PlusCircle,
+    label: "Extra Charge Master",
+    path: "/crm/setup/extra-charge-master",
+    color: "text-pink-500",
+    pageKey: "crm-extra-charge-master",
+  },
+  {
+    icon: Activity,
+    label: "Pending Tasks",
+    path: "/crm/setup/pending-tasks",
+    color: "text-purple-500",
+    pageKey: "crm-pending-tasks",
+  },
+  {
+    icon: Calendar,
+    label: "Reminders",
+    path: "/crm/setup/reminders",
+    color: "text-indigo-500",
+    pageKey: "crm-reminders",
   },
 ];
 
