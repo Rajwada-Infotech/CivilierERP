@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -17,7 +18,6 @@ const CUSTOMER_API = "/api/crm/customers";
 const COMPANY_API = "/api/business/dropdown";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
-const PAYMENT_PLAN_API = "/api/crm/payment-plans";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const DOC_API = "/api/crm/booking-documents";
 const PARKING_API = "/api/crm/parking";
@@ -27,7 +27,6 @@ const PARKING_SLOT_API = "/api/parking-slot-master";
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
-const PAYMENT_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
 
 const statusColor: Record<string, string> = {
@@ -42,7 +41,6 @@ const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
   ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "",
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
-  PaymentPlanId: "", TokenType: "Percentage", TokenValue: "", BookingAmount: "", PaymentMode: "",
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
@@ -54,7 +52,6 @@ const EMPTY_BANK = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
   NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
-  ChequeNo: "", ChequeDate: "", TransactionRef: "", Notes: "",
 };
 
 // The management page needs every stage (Converted/In Process/Not
@@ -131,6 +128,7 @@ const labelCls = "text-xs text-muted-foreground block mb-1";
 
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -139,6 +137,7 @@ const CrmApplication: React.FC = () => {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [loadingApplication, setLoadingApplication] = useState(false);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationNo, setApplicationNo] = useState<string | null>(null);
   // Locked once a source chain is auto-fetched from the customer's linked
@@ -150,6 +149,35 @@ const CrmApplication: React.FC = () => {
   const [invoiceRow, setInvoiceRow] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
   const [invoiceSaving, setInvoiceSaving] = useState(false);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const saveBankDetailsRef = useRef<null | (() => Promise<void>)>(null);
+
+  // Every real payment now invoices itself automatically (see crmPayments.js
+  // createReceiptForMilestone) — this manual dialog is only a fallback for a
+  // genuine edge case (an ad-hoc charge with no milestone behind it). Even
+  // then it shouldn't open blank: pre-fill Amount from the booking's actual
+  // outstanding balance and Date to today, so staff are correcting a real
+  // number instead of typing one from scratch.
+  useEffect(() => {
+    if (!invoiceRow?.BookingId) return;
+    let cancelled = false;
+    setInvoiceLoading(true);
+    fetchWithAuth(`/api/crm/bookings/${invoiceRow.BookingId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (cancelled || !d) return;
+        const milestones: any[] = d.milestones || [];
+        const outstanding = milestones.reduce((s, m) => s + Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
+        setInvoiceForm({
+          Amount: outstanding > 0 ? String(outstanding) : "",
+          InvoiceType: "Booking",
+          InvoiceDate: new Date().toISOString().slice(0, 10),
+          Description: "",
+        });
+      })
+      .finally(() => { if (!cancelled) setInvoiceLoading(false); });
+    return () => { cancelled = true; };
+  }, [invoiceRow?.BookingId]);
 
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
@@ -203,6 +231,19 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
+
+  // Resume is only meaningful for a genuinely incomplete application — and
+  // Status='Draft' is now that exact, authoritative signal (Step 1 of the
+  // wizard creates the record as Draft; it only flips to Pending once Step 4
+  // actually submits it — see crmEntityCreation.js / crmApplications.js
+  // PUT /:id/submit). This used to be guessed from which form fields
+  // happened to be empty, which was fragile in both directions: a fully
+  // submitted Pending application with a blank (optional) Notes field would
+  // incorrectly show Resume, while other field combinations could just as
+  // easily fail to show it on a genuinely incomplete one. Status is the
+  // real answer; stop guessing.
+  const isResumeEditable = (app: any) => !!app && app.Status === "Draft";
+
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
   // Selecting a broker (auto-fetched from the customer, or picked manually)
@@ -213,22 +254,6 @@ const CrmApplication: React.FC = () => {
     (brokers as any[]).find((b: any) => String(b.LHeadId) === form.BrokerId) || null,
     [brokers, form.BrokerId]
   );
-
-  // Payment plans scoped to the chosen Company/Project/Block — same scoped
-  // lookup CrmBookingDetail.tsx already uses.
-  const { data: paymentPlans = [] } = useQuery({
-    queryKey: ["crm-payment-plans-scoped", form.CompanyId, form.ProjectId, form.BlockId],
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (form.CompanyId) params.set("companyId", form.CompanyId);
-      if (form.ProjectId) params.set("projectId", form.ProjectId);
-      if (form.BlockId) params.set("blockId", form.BlockId);
-      const r = await fetchWithAuth(`${PAYMENT_PLAN_API}?${params}`);
-      return r.ok ? r.json() : [];
-    },
-    enabled: step >= 2,
-    staleTime: 60_000,
-  });
 
   // Campaigns narrow to the selected platform; ads narrow to the selected campaign —
   // the same cascading source chain SaLead already enforces server-side.
@@ -332,6 +357,51 @@ const CrmApplication: React.FC = () => {
     sourceUnlockedForCustomerRef.current = null;
   };
 
+  const loadApplicationIntoWizard = async (id: number) => {
+    setLoadingApplication(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${id}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load application");
+      }
+      const body = await res.json();
+      const app = body.application;
+      if (!app) throw new Error("Application record missing from response");
+
+      setApplicationId(app.Id);
+      setApplicationNo(app.ApplicationNo || null);
+      setForm((f) => ({
+        ...f,
+        CustomerId: app.CustomerId ? String(app.CustomerId) : "",
+        CompanyId: app.CompanyId ? String(app.CompanyId) : "",
+        ProjectId: app.ProjectId ? String(app.ProjectId) : "",
+        PreferredUnitId: app.PreferredUnitId ? String(app.PreferredUnitId) : "",
+        RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
+        DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        Source: app.Source || "",
+        PlatformId: app.PlatformId ? String(app.PlatformId) : "",
+        CampaignId: app.CampaignId ? String(app.CampaignId) : "",
+        AdId: app.AdId ? String(app.AdId) : "",
+        ChannelPartnerId: app.ChannelPartnerId ? String(app.ChannelPartnerId) : "",
+        ViaBroker: !!app.BrokerId,
+        BrokerId: app.BrokerId ? String(app.BrokerId) : "",
+        BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
+        BrokerageSplitEnabled: !!app.BrokerageSplitEnabled,
+        Notes: app.Notes || "",
+      }));
+      setSourceLocked(!!app.Source && !!app.PlatformId);
+
+      const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
+      setStep(hasProject ? 2 : 1);
+      setDialogOpen(true);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoadingApplication(false);
+    }
+  };
+
   // Step 1 -> creates the real Application record (a document-upload/bank-
   // detail/parking capture can't happen against a record that doesn't
   // exist yet) — every step after this edits/attaches to that same id.
@@ -385,17 +455,11 @@ const CrmApplication: React.FC = () => {
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
   };
 
-  const handlePaymentNext = async () => {
+  const handleBankDetailsNext = async () => {
     setSaving(true);
     try {
-      await saveApplicationFields({
-        PaymentPlanId: form.PaymentPlanId || null,
-        TokenType: form.TokenType || null,
-        TokenValue: form.TokenValue || null,
-        BookingAmount: form.BookingAmount || null,
-        PaymentMode: form.PaymentMode || null,
-      });
-      setStep(3);
+      await saveBankDetailsRef.current?.();
+      setStep(4);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -485,7 +549,7 @@ const CrmApplication: React.FC = () => {
     { id: "actions", header: "", size: 180, enableSorting: false,
       cell: (i) => (
         <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={() => window.open(`/crm/bookings?applicationId=${i.row.original.Id}`, "_blank")}
+          <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
           </button>
@@ -528,13 +592,23 @@ const CrmApplication: React.FC = () => {
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "CreatedAt", header: "Date", size: 100,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</span> },
-    { id: "actions", header: "", size: 160, enableSorting: false,
+    { id: "actions", header: "", size: 210, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
+        const canResume = activeStage === "InProcess" && isResumeEditable(a);
         return (
           <div className="flex items-center gap-2 flex-wrap">
             {activeStage === "InProcess" ? (
               <>
+                {canResume ? (
+                  <button
+                    onClick={() => loadApplicationIntoWizard(a.Id)}
+                    disabled={loadingApplication}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Resume
+                  </button>
+                ) : null}
                 {/* submitOnly: Approve/Reject only ever happen from the Admin
                     Approval Inbox (admin/super_admin/dba), never self-service here.
                     Approval now also auto-creates the Booking — see crmApplications.js. */}
@@ -632,7 +706,9 @@ const CrmApplication: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      {/* New Application Dialog — 4-step wizard */}
+      {/* New Application Dialog — 5-step wizard: what the customer is
+          applying for (unit/parking/KYC/docs). No money changes hands or
+          gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -642,8 +718,8 @@ const CrmApplication: React.FC = () => {
           </DialogHeader>
 
           {/* Step indicator */}
-          <div className="flex items-center gap-1.5 text-xs">
-            {["Project/Unit", "Payment Details", "Attachments", "Notes"].map((label, i) => (
+          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+            {["Project/Unit", "Parking", "Bank/KYC", "Attachments", "Notes"].map((label, i) => (
               <React.Fragment key={label}>
                 {i > 0 && <div className="flex-1 h-px bg-border" />}
                 <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium ${
@@ -903,16 +979,7 @@ const CrmApplication: React.FC = () => {
           )}
 
           {step === 2 && applicationId && (
-            <PaymentDetailsStep
-              form={form} setForm={setForm}
-              paymentPlans={paymentPlans}
-              applicationId={applicationId}
-              computedTotal={computedTotal}
-            />
-          )}
-
-          {step === 3 && applicationId && (
-            <AttachmentsStep
+            <ParkingSelectionStep
               applicationId={applicationId}
               projectId={form.ProjectId}
               blockId={form.BlockId}
@@ -922,7 +989,18 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 4 && (
+          {step === 3 && applicationId && (
+            <BankDetailsStep
+              applicationId={applicationId}
+              onRegisterSave={(fn) => { saveBankDetailsRef.current = fn; }}
+            />
+          )}
+
+          {step === 4 && applicationId && (
+            <AttachmentsStep applicationId={applicationId} />
+          )}
+
+          {step === 5 && (
             <div className="space-y-4">
               <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-3 text-xs">
                 <div>
@@ -941,8 +1019,8 @@ const CrmApplication: React.FC = () => {
               </div>
               <p className="text-xs text-muted-foreground">
                 This application is <span className="font-medium text-foreground">Pending</span> admin approval.
-                Only an admin/super admin can approve or reject it. Approval automatically creates the Booking —
-                the Bookings page becomes a review/edit-restricted view of it from that point on.
+                Only an admin/super admin can approve or reject it. Approval creates the Booking as Pending — the
+                payment plan, booking amount and payment itself are all handled on the Booking page from there.
               </p>
             </div>
           )}
@@ -966,18 +1044,24 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 2 && (
-                <button onClick={handlePaymentNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
-                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
-                </button>
-              )}
-              {step === 3 && (
-                <button onClick={() => setStep(4)}
+                <button onClick={() => setStep(3)}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
                   Next <ChevronRight size={14} />
                 </button>
               )}
+              {step === 3 && (
+                <button onClick={handleBankDetailsNext} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
+                </button>
+              )}
               {step === 4 && (
+                <button onClick={() => setStep(5)}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  Next <ChevronRight size={14} />
+                </button>
+              )}
+              {step === 5 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
                   {saving ? "Saving..." : "Save & Close"}
@@ -994,6 +1078,9 @@ const CrmApplication: React.FC = () => {
           <DialogHeader><DialogTitle className="font-heading">Generate Booking Invoice</DialogTitle></DialogHeader>
           {invoiceRow && (
             <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
+                Every real payment already generates its own invoice automatically — use this only for a genuine ad-hoc charge that isn't tied to a milestone. Amount below is pre-filled from the booking's actual outstanding balance.
+              </p>
               <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
                 <div className="flex justify-between items-center px-3 py-2">
                   <span className="text-xs text-muted-foreground">Booking</span>
@@ -1007,8 +1094,10 @@ const CrmApplication: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Amount *</label>
-                  <input type="number" value={invoiceForm.Amount} onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  <input type="number" value={invoiceForm.Amount} disabled={invoiceLoading}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50"
+                    placeholder={invoiceLoading ? "Loading outstanding balance..." : ""} />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Invoice Type</label>
@@ -1046,31 +1135,19 @@ const CrmApplication: React.FC = () => {
   );
 };
 
-// ── Step 2: Payment details — plan selection + bank/KYC/cheque form ───────────
-const PaymentDetailsStep: React.FC<{
-  form: any; setForm: (fn: (f: any) => any) => void;
-  paymentPlans: any[]; applicationId: number; computedTotal: number;
-}> = ({ form, setForm, paymentPlans, applicationId, computedTotal }) => {
+// ── Step 3: Bank / KYC / Nominee — identity & bank details only ───────────────
+const BankDetailsStep: React.FC<{
+  applicationId: number;
+  onRegisterSave?: (fn: null | (() => Promise<void>)) => void;
+}> = ({ applicationId, onRegisterSave }) => {
   const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [bankSaving, setBankSaving] = useState(false);
   const [bankLoaded, setBankLoaded] = useState(false);
 
-  // Selecting a plan used to just set an id with zero visibility into what
-  // it actually commits the customer to — fetch its real milestone
-  // breakdown the moment one's picked, so staff (and the customer, over
-  // their shoulder) can see the %/₹ split before finalizing the application.
-  const { data: planDetail } = useQuery({
-    queryKey: ["crm-payment-plan-detail", form.PaymentPlanId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${PAYMENT_PLAN_API}/${form.PaymentPlanId}`);
-      return r.ok ? r.json() : null;
-    },
-    enabled: !!form.PaymentPlanId,
-    staleTime: 60_000,
-  });
-
   useEffect(() => {
     let cancelled = false;
+    setBankLoaded(false);
+    setBank({ ...EMPTY_BANK });
     fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -1083,16 +1160,13 @@ const PaymentDetailsStep: React.FC<{
           NomineeContact: d.NomineeContact || "", NomineeAddress: d.NomineeAddress || "",
           PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
           Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
-          ChequeNo: d.ChequeNo || "", ChequeDate: d.ChequeDate ? String(d.ChequeDate).slice(0, 10) : "",
-          TransactionRef: d.TransactionRef || "",
-          Notes: d.Notes || "",
         });
       })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
   }, [applicationId]);
 
-  const saveBank = async () => {
+  const saveBank = useCallback(async (silent = false) => {
     setBankSaving(true);
     try {
       const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
@@ -1101,108 +1175,26 @@ const PaymentDetailsStep: React.FC<{
         body: JSON.stringify(bank),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Save failed");
-      toast.success("Payment/KYC details saved");
+      if (!silent) toast.success("Bank/KYC details saved");
     } catch (e: any) {
       toast.error(e.message);
+      throw e;
     } finally {
       setBankSaving(false);
     }
-  };
+  }, [applicationId, bank]);
+
+  useEffect(() => {
+    onRegisterSave?.(() => saveBank(true));
+    return () => onRegisterSave?.(null);
+  }, [onRegisterSave, saveBank]);
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground block">Payment Plan</label>
-        <select value={form.PaymentPlanId} onChange={(e) => setForm((f: any) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
-          <option value="">— Use default milestone schedule —</option>
-          {paymentPlans.map((p: any) => (
-            <option key={p.Id} value={String(p.Id)}>{p.PlanName} ({p.ItemCount} milestones)</option>
-          ))}
-        </select>
-
-        {/* Breakdown — % and ₹ together, computed against the unit's own
-            total. The ₹ figures are a preview only (final amounts are
-            re-derived from GrandTotal, including parking/extras, once the
-            Booking actually exists) but give staff/customer real visibility
-            before finalizing, instead of a bare plan-name dropdown. */}
-        {form.PaymentPlanId && planDetail?.items?.length > 0 && (
-          <div className="rounded-lg border border-border bg-muted/20 overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="text-left px-2 py-1.5 font-medium">Milestone</th>
-                  <th className="text-right px-2 py-1.5 font-medium">%</th>
-                  <th className="text-right px-2 py-1.5 font-medium">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {planDetail.items.map((item: any) => (
-                  <tr key={item.MilestoneNo} className="border-b border-border last:border-0">
-                    <td className="px-2 py-1.5">{item.MilestoneName}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{Number(item.Percent)}%</td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      {computedTotal ? `₹${Math.round(computedTotal * Number(item.Percent) / 100).toLocaleString("en-IN")}` : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className={labelCls}>Token Type</label>
-            <select value={form.TokenType} onChange={(e) => setForm((f: any) => ({ ...f, TokenType: e.target.value }))} className={inputCls}>
-              <option value="Percentage">Percentage</option>
-              <option value="Amount">Amount</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>Token Value</label>
-            <input type="number" value={form.TokenValue} onChange={(e) => setForm((f: any) => ({ ...f, TokenValue: e.target.value }))} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Payment Mode</label>
-            <select value={form.PaymentMode} onChange={(e) => setForm((f: any) => ({ ...f, PaymentMode: e.target.value }))} className={inputCls}>
-              <option value="">Select</option>
-              {PAYMENT_MODES.map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </div>
-        </div>
-
-        {/* Auto-opens the moment a non-cash mode is picked — cash needs no
-            instrument reference, everything else (cheque, card, NEFT/RTGS/UPI)
-            does, and Finance can't reconcile a receipt with none on file. */}
-        {form.PaymentMode && form.PaymentMode !== "Cash" && (
-          <div className="rounded-lg border border-border bg-muted/20 p-2.5 space-y-2">
-            <p className="text-xs font-medium text-foreground">{form.PaymentMode} Details</p>
-            {form.PaymentMode === "Cheque" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelCls}>Cheque No *</label>
-                  <input value={bank.ChequeNo} onChange={(e) => setBank((b) => ({ ...b, ChequeNo: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Cheque Date *</label>
-                  <input type="date" value={bank.ChequeDate} onChange={(e) => setBank((b) => ({ ...b, ChequeDate: e.target.value }))} className={inputCls} />
-                </div>
-              </div>
-            ) : (
-              <div>
-                <label className={labelCls}>Transaction Reference / UTR No *</label>
-                <input value={bank.TransactionRef} onChange={(e) => setBank((b) => ({ ...b, TransactionRef: e.target.value }))} className={inputCls} />
-              </div>
-            )}
-            <p className="text-[11px] text-muted-foreground">Saved with KYC/Bank details below, and synced to Finance as a receipt once the application is approved.</p>
-          </div>
-        )}
-      </div>
-
       <div className="rounded-lg border border-border p-3 space-y-3">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-foreground">KYC / Bank & Cheque Details</label>
-          <button onClick={saveBank} disabled={bankSaving || !bankLoaded}
+          <label className="text-xs font-semibold text-foreground">KYC / Bank Details</label>
+          <button onClick={() => saveBank()} disabled={bankSaving || !bankLoaded}
             className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40">
             {bankSaving ? "Saving..." : "Save"}
           </button>
@@ -1238,21 +1230,11 @@ const PaymentDetailsStep: React.FC<{
 };
 
 // ── Step 3: Attachments — document upload + parking multi-select ─────────────
-const AttachmentsStep: React.FC<{
+// ── Step 2: Parking Selection ──────────────────────────────────────────────────
+const ParkingSelectionStep: React.FC<{
   applicationId: number; projectId: string; blockId: string;
   parkingRates: any[]; parkingSlots: any[]; computedTotal: number;
 }> = ({ applicationId, projectId, blockId, parkingRates, parkingSlots, computedTotal }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [docType, setDocType] = useState("");
-  const [uploading, setUploading] = useState(false);
-
-  const { data: docData, refetch: refetchDocs } = useQuery({
-    queryKey: ["crm-app-documents", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${DOC_API}/application/${applicationId}`);
-      return r.ok ? r.json() : { documents: [] };
-    },
-  });
   const { data: allotments = [], refetch: refetchParking } = useQuery({
     queryKey: ["crm-app-parking", applicationId],
     queryFn: async () => {
@@ -1274,54 +1256,91 @@ const AttachmentsStep: React.FC<{
       String(s.ProjectId) === projectId && s.IsActive && (!blockId || !s.BlockId || String(s.BlockId) === blockId) && !takenSlotIds.has(s.Id));
   }, [parkingSlots, projectId, blockId, allotments]);
 
-  const handleUploadFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    if (!docType) { toast.error("Select a document type before uploading"); return; }
-    setUploading(true);
+  // Slots grouped by ParkingType so e.g. two Basement slots (B-01, B-02)
+  // render as one "Basement" group with two selectable rows, instead of two
+  // separate top-level buttons that look like duplicate/confusing entries.
+  const slotGroups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const s of availableSlots) {
+      if (!map.has(s.ParkingType)) map.set(s.ParkingType, []);
+      map.get(s.ParkingType)!.push(s);
+    }
+    return Array.from(map.entries());
+  }, [availableSlots]);
+
+  // Rate types with no specific slot inventory (e.g. "Open" parking sold by
+  // count, not by a fixed slot) — these get a quantity input instead of a
+  // slot picker, since one click could never mean "buy 3".
+  const ratesWithoutSlots = useMemo(() => {
+    const typesWithSlots = new Set(availableSlots.map((s: any) => s.ParkingType));
+    return (applicableRates as any[]).filter((r: any) => !typesWithSlots.has(r.ParkingType));
+  }, [applicableRates, availableSlots]);
+
+  const [selectedSlotIds, setSelectedSlotIds] = useState<Set<number>>(new Set());
+  const [qtyByRateId, setQtyByRateId] = useState<Record<number, string>>({});
+  const [adding, setAdding] = useState(false);
+
+  const toggleSlot = (id: number) => {
+    setSelectedSlotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleAddSelectedSlots = async () => {
+    if (!selectedSlotIds.size) return;
+    setAdding(true);
     try {
-      const formData = new FormData();
-      formData.append("DocumentType", docType);
-      Array.from(files).forEach((f) => formData.append("files", f));
-      const res = await fetchWithAuth(`${DOC_API}/application/${applicationId}/upload`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success(`${data.count} file(s) uploaded`);
-      setDocType("");
-      refetchDocs();
+      let addedTotal = 0;
+      for (const slotId of selectedSlotIds) {
+        const slot = availableSlots.find((s: any) => s.Id === slotId);
+        const rate = applicableRates.find((r: any) => r.ParkingType === slot.ParkingType) || applicableRates[0];
+        if (!rate) continue;
+        const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ApplicationId: applicationId, ParkingMasterId: rate.Id,
+            ParkingSlotId: slot.Id, Quantity: 1,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Failed to add ${slot.ParkingType} ${slot.SlotNo}`);
+        addedTotal += Number(data.TotalAmount) || 0;
+      }
+      toast.success(`${selectedSlotIds.size} parking slot(s) added — ₹${addedTotal.toLocaleString("en-IN")}`);
+      setSelectedSlotIds(new Set());
+      refetchParking();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setAdding(false);
     }
   };
 
-  const handleRemoveDoc = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`${DOC_API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      refetchDocs();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
-
-  const handleAddParking = async (rate: any, slot: any) => {
+  const handleAddByQuantity = async (rate: any) => {
+    const qty = parseInt(qtyByRateId[rate.Id] || "1");
+    if (!Number.isFinite(qty) || qty < 1) { toast.error("Enter a valid quantity"); return; }
+    setAdding(true);
     try {
       const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ApplicationId: applicationId, ParkingMasterId: rate.Id,
-          ParkingSlotId: slot?.Id || null, Quantity: 1,
+          ParkingSlotId: null, Quantity: qty,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to add parking");
-      toast.success(`Parking added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      toast.success(`${rate.ParkingType} x${qty} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      setQtyByRateId((f) => ({ ...f, [rate.Id]: "1" }));
       refetchParking();
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -1355,45 +1374,130 @@ const AttachmentsStep: React.FC<{
         </div>
       </div>
 
-      {/* Parking selection — single / multiple / no parking */}
+      {/* Already-added allotments */}
       <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Parking Selection</label>
-        {(allotments as any[]).length > 0 && (
+        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
+        {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
               <div key={a.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span>{a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : ""} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}</span>
+                <span>{a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}</span>
                 <button onClick={() => handleRemoveParking(a.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
               </div>
             ))}
           </div>
-        )}
-        {!projectId ? (
-          <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
-        ) : availableSlots.length === 0 && applicableRates.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
         ) : (
-          <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
-            {availableSlots.length > 0 ? availableSlots.map((s: any) => {
-              const rate = applicableRates.find((r: any) => r.ParkingType === s.ParkingType) || applicableRates[0];
-              return (
-                <button key={s.Id} disabled={!rate} onClick={() => handleAddParking(rate, s)}
-                  className="text-left text-xs border border-border rounded-md px-2 py-1.5 hover:border-primary hover:bg-primary/5 disabled:opacity-40">
-                  {s.ParkingType} — {s.SlotNo} {rate ? `(₹${Number(rate.Charge).toLocaleString("en-IN")})` : ""}
-                </button>
-              );
-            }) : applicableRates.map((r: any) => (
-              <button key={r.Id} onClick={() => handleAddParking(r, null)}
-                className="text-left text-xs border border-border rounded-md px-2 py-1.5 hover:border-primary hover:bg-primary/5">
-                {r.ParkingType} (₹{Number(r.Charge).toLocaleString("en-IN")})
-              </button>
-            ))}
-          </div>
+          <p className="text-xs text-muted-foreground">No parking selected yet — optional.</p>
         )}
-        <p className="text-[11px] text-muted-foreground">Select one, several, or leave empty for no parking.</p>
       </div>
 
-      {/* Document upload */}
+      {/* Add parking */}
+      {!projectId ? (
+        <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
+      ) : slotGroups.length === 0 && ratesWithoutSlots.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
+      ) : (
+        <div className="space-y-3">
+          {slotGroups.map(([type, slots]) => {
+            const rate = applicableRates.find((r: any) => r.ParkingType === type);
+            return (
+              <div key={type} className="rounded-lg border border-border p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground">
+                    {type} {rate ? `— ₹${Number(rate.Charge).toLocaleString("en-IN")} each` : ""}
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">{slots.length} available</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 max-h-32 overflow-y-auto">
+                  {slots.map((s: any) => (
+                    <label key={s.Id} className="flex items-center gap-1.5 text-xs border border-border rounded-md px-2 py-1.5 cursor-pointer hover:border-primary hover:bg-primary/5 has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+                      <input type="checkbox" checked={selectedSlotIds.has(s.Id)} onChange={() => toggleSlot(s.Id)} />
+                      Slot {s.SlotNo}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {selectedSlotIds.size > 0 && (
+            <button onClick={handleAddSelectedSlots} disabled={adding}
+              className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              {adding ? "Adding..." : `Add ${selectedSlotIds.size} Selected Slot(s)`}
+            </button>
+          )}
+          {ratesWithoutSlots.map((r: any) => (
+            <div key={r.Id} className="rounded-lg border border-border p-3 flex items-center justify-between gap-2">
+              <div className="text-xs">
+                <p className="font-semibold text-foreground">{r.ParkingType}</p>
+                <p className="text-muted-foreground">₹{Number(r.Charge).toLocaleString("en-IN")} each — no fixed slot</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input type="number" min="1" value={qtyByRateId[r.Id] ?? "1"}
+                  onChange={(e) => setQtyByRateId((f) => ({ ...f, [r.Id]: e.target.value }))}
+                  className="w-16 text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                <button onClick={() => handleAddByQuantity(r)} disabled={adding}
+                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+                  Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Step 4: Attachments — document upload only ─────────────────────────────────
+const AttachmentsStep: React.FC<{
+  applicationId: number;
+}> = ({ applicationId }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [docType, setDocType] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const { data: docData, refetch: refetchDocs } = useQuery({
+    queryKey: ["crm-app-documents", applicationId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${DOC_API}/application/${applicationId}`);
+      return r.ok ? r.json() : { documents: [] };
+    },
+  });
+
+  const handleUploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    if (!docType) { toast.error("Select a document type before uploading"); return; }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("DocumentType", docType);
+      Array.from(files).forEach((f) => formData.append("files", f));
+      const res = await fetchWithAuth(`${DOC_API}/application/${applicationId}/upload`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success(`${data.count} file(s) uploaded`);
+      setDocType("");
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveDoc = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`${DOC_API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      refetchDocs();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
       <div className="rounded-lg border border-border p-3 space-y-2">
         <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><FileText size={13} /> Documents</label>
         <div className="flex gap-2">

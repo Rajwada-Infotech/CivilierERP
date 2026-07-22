@@ -70,7 +70,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 
 const CrmBrokerMaster: React.FC = () => {
   const qc = useQueryClient();
-  const rights = usePageRights("broker-master");
+  const rights = usePageRights("crm-broker-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BrokerForm>(EMPTY_FORM);

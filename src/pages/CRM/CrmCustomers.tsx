@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil } from "lucide-react";
+import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil, BookUser } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -12,7 +13,7 @@ const SA_LEADS_API = "/api/sa/leads";
 
 const EMPTY_FORM = {
   LeadId: "", CustomerName: "", Mobile: "", AltMobile: "", Email: "",
-  PanNo: "", Address: "", City: "", State: "", Pincode: "", DateOfBirth: "",
+  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Address: "", City: "", State: "", Pincode: "", DateOfBirth: "",
   CoApplicantName: "", CoApplicantMobile: "", CoApplicantPanNo: "", CoApplicantRelation: "",
   Notes: "",
 };
@@ -37,7 +38,9 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
-    PanNo: customer.PanNo || "", Address: customer.Address || "",
+    PanNo: customer.PanNo || "", AadhaarNo: customer.AadhaarNo || "",
+    Occupation: customer.Occupation || "", AnnualIncome: customer.AnnualIncome != null ? String(customer.AnnualIncome) : "",
+    Address: customer.Address || "",
     City: customer.City || "", State: customer.State || "", Pincode: customer.Pincode || "",
     DateOfBirth: customer.DateOfBirth ? String(customer.DateOfBirth).slice(0, 10) : "",
     CoApplicantName: customer.CoApplicantName || "", CoApplicantMobile: customer.CoApplicantMobile || "",
@@ -109,7 +112,22 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
               { key: "AltMobile", label: "Alternate Mobile", type: "text" },
               { key: "Email", label: "Email", type: "email" },
               { key: "PanNo", label: "PAN Number *", type: "text" },
+              { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
               { key: "DateOfBirth", label: "Date of Birth", type: "date" },
+            ].map(({ key, label, type }) => (
+              <div key={key}>
+                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                <input type={type} value={(form as any)[key]} readOnly={locked}
+                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                  className={inputCls} />
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { key: "Occupation", label: "Occupation", type: "text" },
+              { key: "AnnualIncome", label: "Annual Income", type: "number" },
             ].map(({ key, label, type }) => (
               <div key={key}>
                 <label className="text-xs text-muted-foreground block mb-1">{label}</label>
@@ -208,6 +226,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 }
 
 const CrmCustomers: React.FC = () => {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -342,10 +361,17 @@ const CrmCustomers: React.FC = () => {
       title="CRM — Customers"
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
-          <Plus size={14} /> New Customer
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => navigate("/crm/setup/customer-master")}
+            title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors">
+            <BookUser size={14} /> Customer Ledger (Master)
+          </button>
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+            <Plus size={14} /> New Customer
+          </button>
+        </div>
       }
     >
       <div className="relative max-w-md">
@@ -391,7 +417,22 @@ const CrmCustomers: React.FC = () => {
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
                 { key: "PanNo", label: "PAN Number *", type: "text" },
+                { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
+              ].map(({ key, label, type }) => (
+                <div key={key}>
+                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <input type={type} value={(form as any)[key]}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: "Occupation", label: "Occupation", type: "text" },
+                { key: "AnnualIncome", label: "Annual Income", type: "number" },
               ].map(({ key, label, type }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-1">{label}</label>
