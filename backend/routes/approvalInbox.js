@@ -522,7 +522,7 @@ router.get("/", async (req, res) => {
           ISNULL(b.UpdatedAt, b.CreatedAt)      AS LastModified
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE b.Status = 'Pending' AND b.IsActive = 1
+        WHERE b.Status = 'Pending' AND b.IsActive = 1 AND b.ReadyForApprovalAt IS NOT NULL
       `);
     }
 
@@ -746,7 +746,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
-        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1) +
+        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
