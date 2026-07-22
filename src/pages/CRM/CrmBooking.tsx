@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API     = "/api/crm/bookings";
+const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
 
@@ -42,6 +43,13 @@ async function fetchBookings(applicationId?: string): Promise<any[]> {
     const params = new URLSearchParams({ includeCancelled: "1" });
     if (applicationId) params.set("applicationId", applicationId);
     const res = await fetchWithAuth(`${API}?${params}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+async function fetchApps(): Promise<any[]> {
+  try {
+    const res = await fetchWithAuth(APP_API);
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
@@ -108,7 +116,6 @@ const CrmBooking: React.FC = () => {
     const row = (bookings as any[]).find((b: any) => String(b.ApplicationId) === appFilter);
     if (row) { setViewingBookingId(row.Id); setDeepLinkOpened(true); }
   }, [appFilter, bookings, deepLinkOpened]);
-
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
 
