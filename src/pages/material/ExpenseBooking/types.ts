@@ -392,6 +392,11 @@ export interface GRNItem {
   Remarks?: string;
   GRNItems?: string | GRNItemLine[];
   ParentGST?: GSTConfig | string | null;
+  /** "InterCompanyTransfer" on the linked PO — distinguishes an inter-company
+   *  stock transfer GRN from a normal supplier-purchase GRN. */
+  POType?: string | null;
+  SourceTransferID?: number | null;
+  SourceTransferDocNo?: string | null;
 }
 
 export interface BillingTermOption {

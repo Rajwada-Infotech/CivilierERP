@@ -750,6 +750,19 @@ export default function MaterialExpenseBooking() {
       basicAmount: 0,
       supplier: "",
       supplierLHeadId: null,
+      // These are all set unconditionally from the selected doc in
+      // applyDoc (no "keep previous" fallback), so they're just as stale
+      // as bookingReference once the doc is cleared — bookingName was the
+      // visibly reported case, but cgst/sgst/igst and cost centre are the
+      // same bug: silently wrong GST/cost-centre data left over from the
+      // previous document if the user then saves as a manual entry.
+      bookingName: "",
+      cgstRate: 0,
+      sgstRate: 0,
+      igstRate: 0,
+      costCenter: "",
+      materialCategory: "",
+      workDoneRef: undefined,
     }));
   };
 
@@ -1214,9 +1227,21 @@ export default function MaterialExpenseBooking() {
                       </p>
                       <Select
                         value={form.companyId ? String(form.companyId) : ""}
-                        onValueChange={(val) =>
-                          set("companyId", val ? parseInt(val, 10) : null)
-                        }
+                        onValueChange={(val) => {
+                          const nextCompanyId = val ? parseInt(val, 10) : null;
+                          // A project belongs to one company — switching
+                          // company to a different one leaves the previous
+                          // project selection pointing at the wrong company.
+                          if (nextCompanyId !== form.companyId) {
+                            setForm((prev) => ({
+                              ...prev,
+                              companyId: nextCompanyId,
+                              projectSite: "",
+                            }));
+                          } else {
+                            set("companyId", nextCompanyId);
+                          }
+                        }}
                       >
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue
