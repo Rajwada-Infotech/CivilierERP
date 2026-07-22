@@ -12,7 +12,7 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -58,6 +58,9 @@ const BOOKING_SELECT = `
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
+    b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
+    b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
+    b.ReadyForApprovalAt,
     b.CreatedAt, b.UpdatedAt,
     a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email, a.LeadId,
     u.name  AS AssigneeName,
@@ -427,14 +430,194 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
   }
 });
 
+// Shared readiness gate: both the staff-facing "Book" action
+// (PUT /:id/ready-for-approval) and the admin-facing Approve action
+// (PUT /:id/approve) must agree on what "ready" means, so the two routes
+// can never drift — a booking that passes one but fails the other would be
+// a confusing, unexplainable state for whoever hits the mismatch.
+async function checkBookingApprovalReadiness(pool, id) {
+  const checklist = await pool.request().input("id", sql.Int, id).query(`
+    SELECT b.UnitReviewConfirmed, b.PlanReviewConfirmed,
+           ISNULL(fm.AmountDue, 0) AS FirstMilestoneDue, ISNULL(fm.AmountPaid, 0) AS FirstMilestonePaid
+    FROM dbo.CrmBooking b
+    OUTER APPLY (SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) fm
+    WHERE b.Id = @id
+  `);
+  if (!checklist.recordset.length) return { notFound: true, missing: [] };
+  const row = checklist.recordset[0];
+  const missing = [];
+  if (!row.UnitReviewConfirmed) missing.push("Unit, Rate & Total Value");
+  if (!row.PlanReviewConfirmed) missing.push("Payment Plan & Token/Booking Amount");
+  if (!(row.FirstMilestoneDue > 0) || row.FirstMilestonePaid < row.FirstMilestoneDue) missing.push("Booking Amount Payment");
+  return { notFound: false, missing };
+}
+
+// PUT /:id/confirm-unit — first Booking-checklist item: staff explicitly
+// confirms the unit, rate, and total/grand value carried over from the
+// Application are correct. Un-confirmable once already Approved (nothing to
+// re-check after the fact — a correction at that point is a real edit, not
+// a checklist tick).
+router.put("/:id/confirm-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — nothing to confirm" });
+
+    await pool.request().input("id", sql.Int, id).input("cb", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmBooking SET UnitReviewConfirmed = 1, UnitReviewConfirmedBy = @cb, UnitReviewConfirmedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] confirm-unit error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/revert-unit — undo a Unit checklist confirmation when something
+// was actually wrong (e.g. rate/value needs correcting) instead of forcing
+// staff to raise a separate change request for what a re-check would catch.
+// Also clears ReadyForApprovalAt so an already-"Book"-ed booking drops back
+// out of the Admin Approval Inbox until it's re-confirmed and re-submitted —
+// otherwise a reverted-but-still-pending booking could sit in the inbox
+// looking ready when it explicitly isn't anymore.
+router.put("/:id/revert-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — cannot revert a confirmed checklist item" });
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmBooking SET UnitReviewConfirmed = 0, UnitReviewConfirmedBy = NULL, UnitReviewConfirmedAt = NULL, ReadyForApprovalAt = NULL
+      WHERE Id = @id
+    `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] revert-unit error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/confirm-plan — second Booking-checklist item: staff explicitly
+// confirms the payment plan and the token/booking-amount figure are correct
+// — this is the number the whole milestone schedule is built from.
+router.put("/:id/confirm-plan", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — nothing to confirm" });
+
+    await pool.request().input("id", sql.Int, id).input("cb", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmBooking SET PlanReviewConfirmed = 1, PlanReviewConfirmedBy = @cb, PlanReviewConfirmedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] confirm-plan error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/revert-plan — undo a Payment Plan checklist confirmation, same
+// rationale and ReadyForApprovalAt-clearing behavior as revert-unit above.
+router.put("/:id/revert-plan", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — cannot revert a confirmed checklist item" });
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmBooking SET PlanReviewConfirmed = 0, PlanReviewConfirmedBy = NULL, PlanReviewConfirmedAt = NULL, ReadyForApprovalAt = NULL
+      WHERE Id = @id
+    `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] revert-plan error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/ready-for-approval — staff-facing "Book" action. Re-runs the
+// exact same readiness gate PUT /:id/approve enforces, so a booking can
+// never be marked "ready" and then be surprised by a rejection for the same
+// missing item. Stamps ReadyForApprovalAt (which the Admin Approval Inbox
+// now requires before it will even list a Pending booking — see
+// approvalInbox.js), auto-generates the Booking invoice, and notifies every
+// admin/super_admin/marketing_head that a booking is waiting on them.
+router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const readiness = await checkBookingApprovalReadiness(pool, id);
+    if (readiness.notFound) return res.status(404).json({ error: "Booking not found" });
+    if (readiness.missing.length) {
+      return res.status(400).json({ error: `Cannot submit for approval — confirm ${readiness.missing.join(" and ")} first` });
+    }
+
+    const actor = actorId(req);
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmBooking SET ReadyForApprovalAt = SYSDATETIME() WHERE Id = @id
+    `);
+
+    await maybeAutoGenerateBookingInvoice(pool, id, actor);
+
+    const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
+    const bookingNo = booking.recordset[0]?.BookingNo;
+    const admins = await pool.request().query(`
+      SELECT id FROM dbo.Users WHERE LOWER(role) IN ('admin', 'super_admin', 'marketing_head') AND discontinue = 0
+    `);
+    for (const a of admins.recordset) {
+      await emitNotification(pool, a.id, "crm_booking_ready_for_approval",
+        "Booking Ready for Approval",
+        `Booking ${bookingNo} has cleared its checklist and is ready for approval.`,
+        id, "crm_booking");
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] ready-for-approval error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
 // approvalTransition(). Approve/reject only ever happen from the Admin
-// Approval Inbox, not self-service on this page.
+// Approval Inbox, not self-service on this page. Also re-checks the exact
+// same readiness gate ready-for-approval already enforced — belt-and-
+// suspenders in case a booking is approved directly without ever going
+// through the staff "Book" step.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    const pool0 = getPool();
+    const readiness = await checkBookingApprovalReadiness(pool0, id);
+    if (readiness.notFound) return res.status(404).json({ error: "Booking not found" });
+    if (readiness.missing.length) {
+      return res.status(400).json({ error: `Cannot approve — confirm ${readiness.missing.join(" and ")} first` });
+    }
+
     const result = await approvalTransition("crm-bookings", id, "Approved", userEmail, req.user?.role);
 
     // Auto-flow: an approved booking's very next step is the welcome call —
