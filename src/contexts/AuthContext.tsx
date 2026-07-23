@@ -53,6 +53,7 @@ interface AuthContextType {
   canDoAction: (page: PageKey, action: PageAction) => boolean;
   updateCurrentUserName: (name: string) => void;
   updateCurrentUserAvatar: (avatarUrl: string | null) => void;
+  updateCurrentUserShowLoginReminders: (showLoginReminders: boolean) => void;
 }
 
 // ── CONTEXT ───────────────────────────────────────────────────────────────────
@@ -254,6 +255,10 @@ export const AuthProvider = ({
       };
 
       sessionStorage.removeItem("__auth_redirecting");
+      // One-shot flag consumed by LoginRemindersPopup — marks that this is a
+      // fresh login (not a page refresh within an existing session), so the
+      // reminders popup shows once per login rather than once per page load.
+      sessionStorage.setItem("__just_logged_in", "1");
       // JWT is stored in localStorage, so it is XSS-accessible. This is an
       // accepted SPA tradeoff here, mitigated by short token TTL, Redis
       // blacklist on logout, and brute-force lockout on auth routes. Revisit if
@@ -497,6 +502,15 @@ export const AuthProvider = ({
     });
   }, []);
 
+  const updateCurrentUserShowLoginReminders = useCallback((showLoginReminders: boolean) => {
+    setCurrentUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, showLoginReminders };
+      localStorage.setItem("user", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   // ── CONTEXT VALUE ──────────────────────────────────────────────────────────
   const value = useMemo(
     () => ({
@@ -513,6 +527,7 @@ export const AuthProvider = ({
       canDoAction,
       updateCurrentUserName,
       updateCurrentUserAvatar,
+      updateCurrentUserShowLoginReminders,
     }),
     [
       currentUser,
@@ -527,6 +542,7 @@ export const AuthProvider = ({
       canDoAction,
       updateCurrentUserName,
       updateCurrentUserAvatar,
+      updateCurrentUserShowLoginReminders,
     ],
   );
 
