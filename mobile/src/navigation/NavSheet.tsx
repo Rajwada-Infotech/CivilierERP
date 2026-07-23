@@ -68,6 +68,10 @@ export function NavSheet() {
 
   const goModule = (id: string, label: string) => {
     closeSheet();
+    if (id === "finance") {
+      if (navigationRef.isReady()) navigationRef.navigate("FinanceDashboard" as never);
+      return;
+    }
     Alert.alert(label, `The ${label} module isn't built on mobile yet — use the web app for now.`);
   };
 
