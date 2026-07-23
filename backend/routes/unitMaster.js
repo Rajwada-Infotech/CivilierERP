@@ -31,10 +31,13 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.AreaSqFt,
         u.IsActive,
         u.CreatedAt,
-        u.UpdatedAt
+        u.UpdatedAt,
+        u.DefaultPaymentPlanId,
+        pp.PlanName AS DefaultPaymentPlanName
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise  ep ON ep.id = u.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = u.BlockId
+      LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = u.DefaultPaymentPlanId
       ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName
     `);
@@ -89,7 +92,7 @@ router.get("/blocks", async (req, res) => {
 
 // POST — add unit
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId } = req.body;
   const createdBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
@@ -103,11 +106,12 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
       .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
+      .input("PlanId",    sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @CreatedBy, @CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @PlanId, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("unit-master");
     logAudit({ module: "UnitMaster", recordId: result.recordset[0].Id, recordNo: UnitName, action: "Created", changedBy: userName });
@@ -121,7 +125,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 // PUT — update unit
 router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId } = req.body;
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
@@ -136,6 +140,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
       .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
+      .input("PlanId",    sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.UnitMaster SET
@@ -146,6 +151,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UnitType  = @UnitType,
           AreaSqFt  = @Area,
           IsActive  = @IsActive,
+          DefaultPaymentPlanId = @PlanId,
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id

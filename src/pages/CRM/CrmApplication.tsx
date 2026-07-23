@@ -39,7 +39,7 @@ const statusColor: Record<string, string> = {
 
 const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
-  ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "",
+  ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "",
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
@@ -122,6 +122,9 @@ async function fetchParkingMaster(): Promise<any[]> {
 async function fetchParkingSlots(): Promise<any[]> {
   try { const r = await fetchWithAuth(PARKING_SLOT_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchPaymentPlans(): Promise<any[]> {
+  try { const r = await fetchWithAuth("/api/crm/payment-plans"); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 const labelCls = "text-xs text-muted-foreground block mb-1";
@@ -146,6 +149,11 @@ const CrmApplication: React.FC = () => {
   // original lead's source. Unlocked by default for customers with no
   // linked lead, since there is nothing to auto-fetch.
   const [sourceLocked, setSourceLocked] = useState(false);
+  // Locked once a Payment Plan is auto-fetched from the selected Unit's own
+  // default (Unit Master decides this up front) — "Change" lets staff pick
+  // a different plan for the (rarer) deal that genuinely needs one. No plan
+  // to lock if the unit has no default set.
+  const [planLocked, setPlanLocked] = useState(false);
   const [invoiceRow, setInvoiceRow] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
   const [invoiceSaving, setInvoiceSaving] = useState(false);
@@ -192,6 +200,7 @@ const CrmApplication: React.FC = () => {
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: parkingRates = [] } = useQuery({ queryKey: ["parking-master"], queryFn: fetchParkingMaster, staleTime: 5 * 60_000 });
   const { data: parkingSlots = [] } = useQuery({ queryKey: ["parking-slot-master"], queryFn: fetchParkingSlots, staleTime: 5 * 60_000 });
+  const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
 
   const selectedCustomer = useMemo(() =>
     (customers as any[]).find((c: any) => String(c.Id) === form.CustomerId) || null,
@@ -330,6 +339,26 @@ const CrmApplication: React.FC = () => {
     }
   }, [selectedUnit]);
 
+  // Which unit's Payment Plan the user has explicitly clicked "Change" on —
+  // mirrors sourceUnlockedForCustomerRef so a background units refetch
+  // (same data, new array identity) never silently re-locks and clobbers
+  // the override.
+  const planUnlockedForUnitRef = useRef<number | null>(null);
+
+  // The moment a unit with a Default Payment Plan is selected, auto-fetch
+  // it onto the application and lock it — the plan was already decided at
+  // Unit Master setup time, not something staff should re-pick per deal.
+  useEffect(() => {
+    const unitId = selectedUnit?.Id ?? null;
+    if (!unitId || !selectedUnit?.DefaultPaymentPlanId) { setPlanLocked(false); return; }
+    if (planUnlockedForUnitRef.current === unitId) return;
+    // Only fills if blank — never clobbers a value already loaded from a
+    // saved application (which may be a deliberate prior override).
+    setForm((f) => ({ ...f, PaymentPlanId: f.PaymentPlanId || String(selectedUnit.DefaultPaymentPlanId) }));
+    setPlanLocked(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUnit?.Id, selectedUnit?.DefaultPaymentPlanId]);
+
   const computedTotal = useMemo(() => {
     const area = Number(selectedUnit?.AreaSqFt) || 0;
     const rate = Number(form.RatePerSqFt) || 0;
@@ -353,6 +382,8 @@ const CrmApplication: React.FC = () => {
     // auto-fetch for a customer who never actually clicked "Change").
     setSourceLocked(false);
     sourceUnlockedForCustomerRef.current = null;
+    setPlanLocked(false);
+    planUnlockedForUnitRef.current = null;
   };
 
   const loadApplicationIntoWizard = async (id: number) => {
@@ -375,6 +406,7 @@ const CrmApplication: React.FC = () => {
         CompanyId: app.CompanyId ? String(app.CompanyId) : "",
         ProjectId: app.ProjectId ? String(app.ProjectId) : "",
         PreferredUnitId: app.PreferredUnitId ? String(app.PreferredUnitId) : "",
+        PaymentPlanId: app.PaymentPlanId ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
         Source: app.Source || "",
@@ -389,6 +421,8 @@ const CrmApplication: React.FC = () => {
         Notes: app.Notes || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
+      setPlanLocked(false);
+      planUnlockedForUnitRef.current = null;
 
       const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
       setStep(hasProject ? 2 : 1);
@@ -416,6 +450,7 @@ const CrmApplication: React.FC = () => {
           CompanyId: form.CompanyId || null,
           ProjectId: form.ProjectId || null,
           PreferredUnitId: form.PreferredUnitId || null,
+          PaymentPlanId: form.PaymentPlanId || null,
           RatePerSqFt: form.RatePerSqFt || null,
           DateOfApply: form.DateOfApply || null,
           Source: form.Source || null,
@@ -808,6 +843,40 @@ const CrmApplication: React.FC = () => {
                     </select>
                   </div>
                 </div>
+
+                {/* Payment Plan — decided once at Unit Master setup time for
+                    this exact unit, auto-fetched and locked the moment the
+                    unit above is selected. "Change" unlocks it for the
+                    (rarer) deal that genuinely needs a different plan. Not
+                    re-selectable on the Booking page — this is the one
+                    place it's chosen. */}
+                {form.PreferredUnitId && (
+                  <div className="pt-2">
+                    <label className={labelCls}>Payment Plan</label>
+                    {planLocked ? (
+                      <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5">
+                        <span className="text-sm text-foreground">
+                          {(paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId)?.PlanName || "—"}
+                          {" "}<span className="text-xs text-muted-foreground">(auto-fetched from unit)</span>
+                        </span>
+                        <button type="button" onClick={() => { planUnlockedForUnitRef.current = selectedUnit?.Id ?? null; setPlanLocked(false); }}
+                          className="text-xs text-primary hover:underline shrink-0">
+                          Change
+                        </button>
+                      </div>
+                    ) : (
+                      <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
+                        <option value="">— Use default milestone schedule —</option>
+                        {(paymentPlans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
+                          <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
+                        ))}
+                      </select>
+                    )}
+                    {!selectedUnit?.DefaultPaymentPlanId && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no default plan set in Unit Master — select one, or leave blank for the default 7-stage split.</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">

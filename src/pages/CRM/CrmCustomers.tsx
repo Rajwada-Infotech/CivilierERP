@@ -362,7 +362,7 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate("/crm/setup/customer-master")}
+          <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
             className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors">
             <BookUser size={14} /> Customer Ledger (Master)
