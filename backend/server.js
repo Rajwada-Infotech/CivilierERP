@@ -530,7 +530,7 @@ async function createApp() {
     app.use(
       "/api/dba",
       authMiddleware,
-      require("./middleware/role")("dba", "admin", "director"),
+      require("./middleware/role")("dba", "admin", "director", "super_admin"),
       require("./routes/dba"),
     );
     routeResults.loaded.push("dba");
