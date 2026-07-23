@@ -3,6 +3,8 @@ import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import NotificationsScreen from "@/screens/dashboard/NotificationsScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import FinanceDashboardScreen from "@/screens/finance/FinanceDashboardScreen";
+import InvoiceScreen from "@/screens/finance/InvoiceScreen";
+import InvoicePreviewScreen from "@/screens/finance/InvoicePreviewScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -10,6 +12,8 @@ export type MainStackParamList = {
   Notifications: undefined;
   Profile: undefined;
   FinanceDashboard: undefined;
+  Invoice: undefined;
+  InvoicePreview: { id: string };
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -24,6 +28,8 @@ export default function MainStack() {
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="FinanceDashboard" component={FinanceDashboardScreen} options={{ title: "Finance" }} />
+      <Stack.Screen name="Invoice" component={InvoiceScreen} options={{ title: "Invoice" }} />
+      <Stack.Screen name="InvoicePreview" component={InvoicePreviewScreen} options={{ title: "Invoice Preview" }} />
     </Stack.Navigator>
   );
 }
