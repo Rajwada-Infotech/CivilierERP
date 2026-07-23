@@ -9,7 +9,38 @@ const { getPool, sql } = require("../db");
 
 bumpCacheVersion("block-master").catch(() => {});
 
-// GET all blocks
+// Shared lock check — a Block cannot be deleted while any Unit under it is
+// Booked or OnHold, mirroring unitMaster.js's getUnitLockReason but rolled
+// up across every unit in the block. Editing a Block is still allowed even
+// when locked (ProjectId/BlockName changes are live-joined everywhere via
+// BlockId, so they apply project-wide immediately) — only DELETE is gated.
+// NOTE: only UnitMaster is wired in here. If/when a Parking Master (or any
+// other BlockId-referencing child table) exists, add the same LEFT JOIN
+// pattern below so it's covered by the same lock.
+async function getBlockLockReason(pool, blockId) {
+  const result = await pool
+    .request()
+    .input("BlockId", sql.Int, blockId)
+    .query(`
+      SELECT TOP 1
+        bk.BookingNo,
+        h.Id AS HoldId
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.CrmBooking bk
+        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+      LEFT JOIN dbo.CrmInventoryHold h
+        ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      WHERE u.BlockId = @BlockId AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
+    `);
+  if (!result.recordset.length) return null;
+  const row = result.recordset[0];
+  if (row.BookingNo) return `has a Unit with an active booking (${row.BookingNo})`;
+  return "has a Unit currently on hold";
+}
+
+// GET all blocks — includes per-row lock fields (same OUTER APPLY shape as
+// unitMaster.js's LockBookingNo/LockHoldId columns) so the grid can grey out
+// the Delete button without a second round trip.
 router.get("/", cache("block-master", 300), async (req, res) => {
   try {
     const pool = getPool();
@@ -21,10 +52,21 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.BlockName,
         b.IsActive,
         b.CreatedAt,
-        b.UpdatedAt
+        b.UpdatedAt,
+        lock.LockBookingNo,
+        lock.LockHoldId
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
+      OUTER APPLY (
+        SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
+        FROM dbo.UnitMaster u
+        LEFT JOIN dbo.CrmBooking bk
+          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+        LEFT JOIN dbo.CrmInventoryHold h
+          ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+        WHERE u.BlockId = b.Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
+      ) lock
       ORDER BY e.name, b.BlockName
     `);
     res.json(result.recordset);
@@ -62,6 +104,41 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Guard against duplicate blocks — same reasoning as unitMaster.js:
+    // without this, deleting a block and re-adding one with the same
+    // Project+BlockName creates a second row instead of reactivating the
+    // original, which is exactly how the duplicate A1 rows in the grid
+    // happened.
+    const dupe = await pool
+      .request()
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockName", sql.NVarChar(100), BlockName)
+      .query(`
+        SELECT Id, IsActive FROM dbo.BlockMaster
+        WHERE ProjectId = @ProjectId AND BlockName = @BlockName
+      `);
+
+    if (dupe.recordset.length) {
+      const existing = dupe.recordset[0];
+      if (existing.IsActive) {
+        return res.status(409).json({ error: `Block "${BlockName}" already exists in this Project.` });
+      }
+      await pool
+        .request()
+        .input("Id", sql.Int, existing.Id)
+        .input("UpdatedBy", sql.Int, createdBy)
+        .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
+          UPDATE dbo.BlockMaster SET
+            IsActive = 1,
+            UpdatedBy = @UpdatedBy,
+            UpdatedAt = @UpdatedAt
+          WHERE Id = @Id
+        `);
+      await bumpCacheVersion("block-master");
+      return res.json({ message: "Block reactivated successfully" });
+    }
+
     await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
@@ -87,6 +164,24 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Same duplicate guard as POST — prevent renaming a block into a
+    // collision with another existing row. Edit itself is never locked
+    // (unlike delete) — it's expected to propagate project-wide since
+    // every consumer live-joins on BlockId rather than snapshotting.
+    const dupe = await pool
+      .request()
+      .input("Id", sql.Int, parseInt(id))
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockName", sql.NVarChar(100), BlockName)
+      .query(`
+        SELECT Id FROM dbo.BlockMaster
+        WHERE ProjectId = @ProjectId AND BlockName = @BlockName AND Id <> @Id
+      `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({ error: `Block "${BlockName}" already exists in this Project.` });
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, parseInt(id))
@@ -111,7 +206,12 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-// DELETE — safe delete
+// DELETE — soft delete (IsActive = 0), matching the platform-wide convention
+// and unitMaster.js's own fix for this exact problem: there are no DB-level
+// FK constraints in this system, so a hard DELETE here would leave every
+// UnitMaster row with this BlockId pointing at nothing. Also refuses to
+// delete a Block that still has a Booked or OnHold Unit under it (see
+// getBlockLockReason above).
 router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -130,13 +230,20 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
 
     const { BlockName } = existing.recordset[0];
 
+    const lockReason = await getBlockLockReason(pool, id);
+    if (lockReason) {
+      return res.status(409).json({
+        error: `Block "${BlockName}" ${lockReason} and cannot be deleted. Cancel/release it first.`,
+      });
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
+      .query("UPDATE dbo.BlockMaster SET IsActive = 0 WHERE Id = @Id");
 
     await bumpCacheVersion("block-master");
-    res.json({ message: `Block "${BlockName}" deleted successfully` });
+    res.json({ message: `Block "${BlockName}" deactivated successfully` });
   } catch (err) {
     console.error("[block-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
@@ -144,7 +251,3 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
 });
 
 module.exports = router;
-
-
-
-

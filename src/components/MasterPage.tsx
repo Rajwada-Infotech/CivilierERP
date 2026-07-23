@@ -159,13 +159,22 @@ interface MasterPageProps {
   canDelete?: boolean;
   canExport?: boolean;
   /**
-   * Optional per-row lock check. Return a short reason string to disable
-   * that row's Edit and Delete buttons (shown as a tooltip on a lock icon
-   * in place of the normal action), or null/undefined to leave the row
-   * unlocked. Omit entirely for pages with no row-level locking — existing
-   * behavior is unchanged when this prop isn't passed.
+   * Optional per-row lock check. Return a short reason string to grey out
+   * and disable that row's Edit AND Delete buttons (shown as a tooltip),
+   * or null/undefined to leave the row unlocked. Omit entirely for pages
+   * with no row-level locking — existing behavior is unchanged when this
+   * prop isn't passed.
    */
   isRowLocked?: (row: RecordWithId) => string | null | undefined;
+  /**
+   * Optional per-row check that greys out and disables only the Delete
+   * button (Edit stays enabled) — for masters like Block Master where a
+   * record can still be renamed/reassigned while locked, but can't be
+   * removed while it has dependent child records (e.g. a Block with
+   * Booked/OnHold Units under it). Combines with isRowLocked if both are
+   * passed; has no effect on its own on the Edit button.
+   */
+  isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -210,6 +219,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   canDelete = true,
   canExport = true,
   isRowLocked,
+  isDeleteLocked,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -345,35 +355,48 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
-    try {
-      if (editingId !== null) {
-        const next = data.map((row) =>
-          row._id === editingId ? { ...finalData, _id: editingId } : row,
-        );
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        setData(next);
-        onDataChange?.(stripped);
+    if (editingId !== null) {
+      const next = data.map((row) =>
+        row._id === editingId ? { ...finalData, _id: editingId } : row,
+      );
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      try {
+        // Await the server first — committing `next` to local state before
+        // this resolved meant a rejected save (e.g. a 409 duplicate/lock)
+        // still left the edited row showing in the table with no visible
+        // failure, because nothing here checked for a rejection either way.
         await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
         });
+        setData(next);
+        onDataChange?.(stripped);
         setEditingId(null);
         toast.success("Record updated successfully ✓");
         setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
-      } else {
-        const newId = `record-${Date.now()}`;
-        const newRecord: RecordWithId = { ...finalData, _id: newId };
-        const next = [...data, newRecord];
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        setData(next);
-        onDataChange?.(stripped);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save. Please try again.",
+        );
+      }
+    } else {
+      const newId = `record-${Date.now()}`;
+      const newRecord: RecordWithId = { ...finalData, _id: newId };
+      const next = [...data, newRecord];
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      try {
+        // Same fix as the update branch above — a rejected add (e.g. the
+        // Block/Unit duplicate guard returning 409) must not land in local
+        // state or show a success toast just because nothing threw yet.
         const result = await onDataEvent?.({
           action: "add",
           record: finalData,
           records: stripped,
         });
+        setData(next);
+        onDataChange?.(stripped);
         toast.success("Record saved successfully ✓");
         setForm({
           ...getDefaults(fields),
@@ -382,12 +405,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             ? result
             : {}),
         });
-        return;
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save. Please try again.",
+        );
       }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to save. Please try again.",
-      );
     }
   };
 
@@ -780,6 +802,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 ) : (
                   sorted.map((row) => {
                     const lockReason = isRowLocked?.(row) || null;
+                    const deleteOnlyLockReason = isDeleteLocked?.(row) || null;
                     return (
                     <tr
                       key={row._id}
@@ -875,11 +898,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 )
                               )}
                               {canDelete && (
-                                lockReason ? (
+                                (lockReason || deleteOnlyLockReason) ? (
                                   <button
                                     disabled
                                     className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
-                                    title={lockReason}
+                                    title={lockReason || deleteOnlyLockReason || undefined}
                                   >
                                     <Trash2 size={13} />
                                   </button>
