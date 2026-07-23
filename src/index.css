@@ -366,6 +366,30 @@
     scrollbar-color: rgba(128, 128, 128, 0.25) transparent;
 }
 
+/* ── Thin scrollbar — reusable everywhere a container scrolls (tables, wide
+   forms, card grids) instead of the browser's thick default (the fat gray
+   bar with square end-arrows). Styles both width (vertical) and height
+   (horizontal) so one class covers either scroll direction. ─────────────── */
+.thin-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.25);
+    border-radius: 999px;
+    transition: background 0.2s;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(128, 128, 128, 0.5);
+}
+.thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.25) transparent;
+}
+
 /* ── Hidden scrollbar — scrolls normally, just no visible track/thumb ────── */
 .scrollbar-none {
     scrollbar-width: none;

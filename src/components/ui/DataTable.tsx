@@ -175,7 +175,7 @@ export function DataTable<TData extends RowData>({
       )}
 
       {/* ── Table ── */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto thin-scroll">
         {(() => {
           const allCols = table.getAllLeafColumns();
           const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 0), 0);

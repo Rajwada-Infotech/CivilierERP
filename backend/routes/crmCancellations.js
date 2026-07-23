@@ -15,6 +15,7 @@ const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
+const { findActiveHold, releaseHold } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -234,6 +235,20 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
 
     await releaseAllParkingForBooking(pool, bookingId);
+
+    // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
+    // a Booking is created from it — but if an Active hold on this same unit
+    // still lingers for any reason (e.g. legacy data from before that
+    // conversion existed), a Cancelled booking must not leave it standing:
+    // that would keep blocking every other genuinely current applicant for
+    // a unit that just became free again.
+    const unitRow = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @bid");
+    const unitId = unitRow.recordset[0]?.UnitId;
+    if (unitId) {
+      const stuckHold = await findActiveHold(pool, "Unit", unitId);
+      if (stuckHold) await releaseHold(pool, stuckHold.Id, actorId(req));
+    }
 
     const pendingAmendments = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
