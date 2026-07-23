@@ -40,7 +40,7 @@ type NavGroup = {
   kind: "group";
   label: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
-  children: Array<{ label: string; icon: React.ComponentType<{ size?: number; color?: string }> }>;
+  children: Array<{ label: string; icon: React.ComponentType<{ size?: number; color?: string }>; nav?: keyof MainStackParamList }>;
 };
 type NavTree = Array<NavLeaf | NavGroup>;
 
@@ -56,10 +56,10 @@ const FINANCE_NAV_TREE: NavTree = [
     icon: ArrowLeftRight,
     children: [
       { label: "Invoice", icon: Receipt },
-      { label: "Payment", icon: Wallet },
-      { label: "On A/C Adjustment", icon: ArrowRightLeft },
-      { label: "Received Payment", icon: ArrowDownToLine },
-      { label: "BRS", icon: BookOpen },
+      { label: "Payment", icon: Wallet, nav: "Payment" },
+      { label: "On A/C Adjustment", icon: ArrowRightLeft, nav: "OnAccountAdjustment" },
+      { label: "Received Payment", icon: ArrowDownToLine, nav: "ReceivedPayment" },
+      { label: "BRS", icon: BookOpen, nav: "Brs" },
     ],
   },
   { kind: "leaf", label: "Journal Voucher", icon: BookText },
@@ -352,16 +352,19 @@ export function NavSheet() {
                       </Pressable>
                       {isExpanded && (
                         <View style={{ marginLeft: 20, marginTop: 4, paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: `${accent}40` }}>
-                          {item.children.map((child) => (
-                            <Pressable
-                              key={child.label}
-                              onPress={() => Alert.alert(child.label, `The ${child.label} screen isn't built on mobile yet — use the web app for now.`)}
-                              className="flex-row items-center gap-2.5 px-3 py-2.5 rounded-lg"
-                            >
-                              <child.icon size={14} color={colors.mutedForeground} />
-                              <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>{child.label}</Text>
-                            </Pressable>
-                          ))}
+                          {item.children.map((child) => {
+                            const childActive = child.nav ? activeRoute === child.nav : false;
+                            return (
+                              <Pressable
+                                key={child.label}
+                                onPress={() => (child.nav ? go(child.nav) : Alert.alert(child.label, `The ${child.label} screen isn't built on mobile yet — use the web app for now.`))}
+                                className="flex-row items-center gap-2.5 px-3 py-2.5 rounded-lg"
+                              >
+                                <child.icon size={14} color={childActive ? accent : colors.mutedForeground} />
+                                <Text style={{ color: childActive ? accent : colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>{child.label}</Text>
+                              </Pressable>
+                            );
+                          })}
                         </View>
                       )}
                     </View>

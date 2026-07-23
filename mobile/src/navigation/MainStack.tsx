@@ -3,6 +3,10 @@ import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import NotificationsScreen from "@/screens/dashboard/NotificationsScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import FinanceDashboardScreen from "@/screens/finance/FinanceDashboardScreen";
+import PaymentListScreen from "@/screens/finance/PaymentListScreen";
+import OnAccountAdjustmentScreen from "@/screens/finance/OnAccountAdjustmentScreen";
+import ReceivedPaymentListScreen from "@/screens/finance/ReceivedPaymentListScreen";
+import BrsScreen from "@/screens/finance/BrsScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -10,6 +14,12 @@ export type MainStackParamList = {
   Notifications: undefined;
   Profile: undefined;
   FinanceDashboard: undefined;
+  // openForm: true jumps straight into the New Payment form on mount —
+  // used by FinanceDashboardScreen's "New Payment" quick action.
+  Payment: { openForm?: boolean } | undefined;
+  OnAccountAdjustment: undefined;
+  ReceivedPayment: { openForm?: boolean } | undefined;
+  Brs: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -24,6 +34,10 @@ export default function MainStack() {
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="FinanceDashboard" component={FinanceDashboardScreen} options={{ title: "Finance" }} />
+      <Stack.Screen name="Payment" component={PaymentListScreen} options={{ title: "Payments" }} />
+      <Stack.Screen name="OnAccountAdjustment" component={OnAccountAdjustmentScreen} options={{ title: "On A/C Adjustment" }} />
+      <Stack.Screen name="ReceivedPayment" component={ReceivedPaymentListScreen} options={{ title: "Received Payments" }} />
+      <Stack.Screen name="Brs" component={BrsScreen} options={{ title: "BRS" }} />
     </Stack.Navigator>
   );
 }

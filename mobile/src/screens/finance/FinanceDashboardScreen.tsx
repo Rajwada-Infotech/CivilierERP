@@ -9,6 +9,8 @@
 // Actions (2-col nav buttons). No chart library — web doesn't use one either.
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
   RefreshCw, CreditCard, Landmark, BookOpen, Receipt, BadgeDollarSign,
@@ -19,6 +21,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { SectionLabel } from "@/components/home/SectionLabel";
 import { FadeSlideIn } from "@/components/FadeSlideIn";
+import type { MainStackParamList } from "@/navigation/MainStack";
 
 const FINANCE = "#3b82f6";
 
@@ -156,7 +159,10 @@ function QuickAction({ label, icon: Icon, onPress }: { label: string; icon: Reac
 }
 
 export default function FinanceDashboardScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [refreshing, setRefreshing] = useState(false);
+  const goToPayments = (openForm?: boolean) => navigation.navigate("Payment", openForm ? { openForm: true } : undefined);
+  const goToReceived = (openForm?: boolean) => navigation.navigate("ReceivedPayment", openForm ? { openForm: true } : undefined);
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<FinanceDashboardData>({
     queryKey: ["finance-dashboard"],
@@ -219,8 +225,8 @@ export default function FinanceDashboardScreen() {
           <View className="mt-7">
             <SectionLabel>Today's Activity</SectionLabel>
             <View className="flex-row flex-wrap justify-between">
-              <StatTile label="Payments Made Today" value={data?.paymentsMade.todayCount ?? 0} icon={Receipt} accent="#f43f5e" onPress={() => notBuiltYet("Payments")} />
-              <StatTile label="Received Today" value={data?.receivedPayments.todayCount ?? 0} icon={BadgeDollarSign} accent="#10b981" onPress={() => notBuiltYet("Received Payments")} />
+              <StatTile label="Payments Made Today" value={data?.paymentsMade.todayCount ?? 0} icon={Receipt} accent="#f43f5e" onPress={() => goToPayments()} />
+              <StatTile label="Received Today" value={data?.receivedPayments.todayCount ?? 0} icon={BadgeDollarSign} accent="#10b981" onPress={() => goToReceived()} />
               <StatTile label="Cheque Lots" value={data?.cheques.totalCount ?? 0} icon={BookOpen} accent="#f59e0b" onPress={() => notBuiltYet("Cheques")} />
               <StatTile label="Active Cards" value={data?.cards.activeCount ?? 0} icon={CreditCard} accent="#8b5cf6" onPress={() => notBuiltYet("Cards")} />
             </View>
@@ -239,7 +245,7 @@ export default function FinanceDashboardScreen() {
           {/* Recent Activity */}
           <View className="mt-3">
             <SectionLabel>Recent Activity</SectionLabel>
-            <GlassPanel title="Recent Payments Made" onViewAll={() => notBuiltYet("Payments")}>
+            <GlassPanel title="Recent Payments Made" onViewAll={() => goToPayments()}>
               {(data?.recentPaymentsMade ?? []).length === 0 ? (
                 <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
                   No recent payments.
@@ -250,7 +256,7 @@ export default function FinanceDashboardScreen() {
                 ))
               )}
             </GlassPanel>
-            <GlassPanel title="Recent Received Payments" onViewAll={() => notBuiltYet("Received Payments")}>
+            <GlassPanel title="Recent Received Payments" onViewAll={() => goToReceived()}>
               {(data?.recentPaymentsReceived ?? []).length === 0 ? (
                 <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
                   No recent receipts.
@@ -278,8 +284,8 @@ export default function FinanceDashboardScreen() {
           <View className="mt-3 mb-2">
             <SectionLabel>Quick Actions</SectionLabel>
             <View className="flex-row flex-wrap justify-between">
-              <QuickAction label="New Payment" icon={Plus} onPress={() => notBuiltYet("New Payment")} />
-              <QuickAction label="New Received" icon={ArrowDownToLine} onPress={() => notBuiltYet("New Received")} />
+              <QuickAction label="New Payment" icon={Plus} onPress={() => goToPayments(true)} />
+              <QuickAction label="New Received" icon={ArrowDownToLine} onPress={() => goToReceived(true)} />
               <QuickAction label="Cheques" icon={BookOpen} onPress={() => notBuiltYet("Cheques")} />
               <QuickAction label="Cards" icon={CreditCard} onPress={() => notBuiltYet("Cards")} />
               <QuickAction label="Banks" icon={Wallet} onPress={() => notBuiltYet("Banks")} />
