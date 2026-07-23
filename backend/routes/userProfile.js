@@ -42,6 +42,7 @@ router.get("/:id/profile", async (req, res) => {
           u.email,
           u.RoleId,
           u.avatar_url,
+          ISNULL(u.ShowLoginReminders, 1) AS ShowLoginReminders,
           r.RName        AS roleName,
           u.created_datetime,
           u.discontinue
@@ -129,6 +130,28 @@ router.patch("/:id/profile", async (req, res) => {
     res.json({ message: "Profile updated" });
   } catch (err) {
     console.error("PATCH /user-profile/:id/profile error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH preferences (login reminders popup toggle) ─────────────────────────
+router.patch("/:id/preferences", async (req, res) => {
+  if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+  const { showLoginReminders } = req.body;
+  if (typeof showLoginReminders !== "boolean")
+    return res.status(400).json({ error: "showLoginReminders must be a boolean" });
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("id", sql.Int, req.params.id)
+      .input("val", sql.Bit, showLoginReminders ? 1 : 0)
+      .query("UPDATE dbo.users SET ShowLoginReminders = @val WHERE id = @id");
+    res.json({ message: "Preferences updated", showLoginReminders });
+  } catch (err) {
+    console.error("PATCH /user-profile/:id/preferences error:", err);
     res.status(500).json({ error: err.message });
   }
 });

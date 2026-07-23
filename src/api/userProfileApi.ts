@@ -17,6 +17,18 @@ export const updateUserProfile = async (id: number, data: { name: string }) => {
   return res.json().catch(() => ({}));
 };
 
+export const updateUserPreferences = async (
+  id: number,
+  data: { showLoginReminders: boolean },
+) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/preferences`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update preferences");
+  return res.json().catch(() => ({}));
+};
+
 export const changePassword = async (
   id: number,
   current_password: string,
