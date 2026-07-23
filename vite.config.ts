@@ -22,8 +22,12 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
         ws: true,
-        timeout: 0,
-        proxyTimeout: 0,
+        // Was 0 (infinite) — a backend restart mid-request left the proxy
+        // holding a dead socket that never errored out, so every request
+        // through it hung forever instead of failing fast. 30s is generous
+        // enough for slow reports/exports but still bounded.
+        timeout: 30_000,
+        proxyTimeout: 30_000,
         configure: (proxy) => {
           proxy.on("error", silentProxyError);
         },
