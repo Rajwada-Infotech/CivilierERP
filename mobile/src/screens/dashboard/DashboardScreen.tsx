@@ -275,7 +275,7 @@ export default function DashboardScreen() {
           {access.material && (
             <ModuleCard
               title="Material" icon={Package} accent={moduleAccents.material} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Material")}
+              onPress={() => navigation.navigate("MaterialDashboard")}
               stats={[
                 { label: "GRNs this month", value: mat?.grns?.thisMonth ?? 0, accent: moduleAccents.material },
                 { label: "Open POs", value: mat?.purchaseOrders?.open ?? 0, accent: "#f59e0b" },

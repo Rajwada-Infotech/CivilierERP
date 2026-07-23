@@ -1,12 +1,10 @@
 // RN port of src/pages/material/MaterialExpenseBooking.tsx's list view (the
-// "Booking Register") — the New/Edit Invoice form (document picker, GST
-// breakdown, EMI schedule, ~2000 lines) isn't ported yet, so "New Invoice"
-// and row actions fall back to the "not built on mobile yet" alert, same
-// convention as the rest of this app. This screen is read-only: stat cards
-// (ExpenseBookingStatCards), search + status filter chips
-// (BookingListToolbar), and a card per record (RecordCard) — same content,
-// collapsed to a single column the way the web page's own grid collapses
-// on a phone.
+// "Booking Register") — stat cards (ExpenseBookingStatCards), search +
+// status filter chips (BookingListToolbar), and a card per record
+// (RecordCard), collapsed to a single column the way the web page's own
+// grid collapses on a phone. "New Invoice" opens NewInvoiceScreen (PO /
+// Work Done / Other Expense sources — GRN and Edit aren't ported yet, so
+// row actions still fall back to the "not built on mobile yet" alert).
 import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -75,7 +73,7 @@ function StatTile({ label, value, icon: Icon, accent }: { label: string; value: 
   );
 }
 
-function RecordCard({ rec, onPreview }: { rec: InvoiceRecord; onPreview: () => void }) {
+function RecordCard({ rec, onPreview, onEdit }: { rec: InvoiceRecord; onPreview: () => void; onEdit: () => void }) {
   const net = rec.netAmount ?? rec.basicAmount * (1 + (rec.cgstRate + rec.sgstRate) / 100);
   return (
     <View className="rounded-xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
@@ -132,7 +130,7 @@ function RecordCard({ rec, onPreview }: { rec: InvoiceRecord; onPreview: () => v
           <Pressable onPress={onPreview} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
             <Eye size={13} color="#38bdf8" />
           </Pressable>
-          <Pressable onPress={() => notBuiltYet("Edit Invoice")} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
+          <Pressable onPress={onEdit} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
             <Pencil size={13} color={colors.mutedForeground} />
           </Pressable>
           <Pressable onPress={() => notBuiltYet("Delete Invoice")} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.destructive}30` }}>
@@ -199,7 +197,7 @@ export default function InvoiceScreen() {
       </View>
 
       <Pressable
-        onPress={() => notBuiltYet("New Invoice")}
+        onPress={() => navigation.navigate("NewInvoice")}
         className="flex-row items-center justify-center gap-1.5 rounded-xl mt-3 mb-1"
         style={{ backgroundColor: FINANCE, paddingVertical: 11 }}
       >
@@ -278,7 +276,12 @@ export default function InvoiceScreen() {
       ) : (
         <View className="mt-1">
           {filtered.map((rec) => (
-            <RecordCard key={rec.id} rec={rec} onPreview={() => navigation.navigate("InvoicePreview", { id: rec.id })} />
+            <RecordCard
+              key={rec.id}
+              rec={rec}
+              onPreview={() => navigation.navigate("InvoicePreview", { id: rec.id })}
+              onEdit={() => navigation.navigate("NewInvoice", { id: rec.id })}
+            />
           ))}
         </View>
       )}
