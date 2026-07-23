@@ -13,7 +13,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
-const PLAN_API = "/api/crm/payment-plans";
 const AMEND_API = "/api/crm/booking-amendments";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const PROJECT_BANK_API = "/api/crm/project-banks";
@@ -40,14 +39,6 @@ const fmt = (n: number | null | undefined) =>
 async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   return r.ok ? r.json() : null;
-}
-async function fetchScopedPlans(companyId?: number, projectId?: number, unitId?: number): Promise<any[]> {
-  const params = new URLSearchParams();
-  if (companyId) params.set("companyId", String(companyId));
-  if (projectId) params.set("projectId", String(projectId));
-  if (unitId) params.set("unitId", String(unitId));
-  const r = await fetchWithAuth(`${PLAN_API}?${params}`);
-  return r.ok ? r.json() : [];
 }
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
@@ -100,7 +91,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // can view the page can also edit it.
   const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Booking");
-  const [paymentPlanId, setPaymentPlanId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
@@ -132,11 +122,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const legalWorkStarted = !!(agreement && agreement.DocumentCount > 0);
   const paymentSummary = data?.paymentSummary || {};
 
-  const { data: plans = [] } = useQuery({
-    queryKey: ["crm-payment-plans-scoped", booking?.CompanyId, booking?.ProjectId, booking?.UnitId],
-    queryFn: () => fetchScopedPlans(booking?.CompanyId, booking?.ProjectId, booking?.UnitId),
-    enabled: !!booking,
-  });
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
     queryFn: () => fetchProjectBanks(booking?.ProjectId),
@@ -483,7 +468,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
-  const effectivePlanId = paymentPlanId ?? (booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "");
   const activeTabIndex = Math.max(0, TABS.indexOf(tab));
   const firstMilestone = (data?.milestones || []).find((m: any) => Number(m.MilestoneNo) === 1) || (data?.milestones || [])[0];
   const bookingAmountDue = Number(firstMilestone?.AmountDue || booking?.BookingAmount || 0);
@@ -575,34 +559,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.error(e.message);
     } finally {
       setPaySaving(false);
-    }
-  };
-
-  const handleSaveMain = async () => {
-    const currentPlanId = booking?.PaymentPlanId ? String(booking.PaymentPlanId) : "";
-    if (effectivePlanId !== currentPlanId) {
-      const ok = window.confirm(
-        "Changing the payment plan will regenerate this booking's entire payment milestone schedule from the new plan (it's blocked automatically if any payment has already been recorded). Continue?"
-      );
-      if (!ok) return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ PaymentPlanId: effectivePlanId || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(data.milestonesRegenerated ? "Payment plan updated — milestone schedule regenerated" : "Payment plan updated");
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -787,27 +743,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment Plan" && (
               <div className="space-y-4 pt-2">
-                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                <div className="rounded-xl border border-border p-3.5 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Payment Plan</label>
-                    <select value={effectivePlanId} onChange={(e) => setPaymentPlanId(e.target.value)} disabled={!canEdit || booking.Status === "Approved"}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60">
-                      <option value="">No plan - 7-stage default</option>
-                      {(plans as any[]).map((p: any) => (
-                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}{!p.CompanyId && !p.ProjectId ? " (Global)" : ""}</option>
-                      ))}
-                    </select>
+                  {/* Read-only — the plan is decided once, at Unit Master
+                      setup time, and auto-fetched onto the Application when
+                      the unit was selected (or overridden there, if the deal
+                      needed a different one). Not re-selectable here; this
+                      tab is for reviewing/confirming it, not choosing it. */}
+                  <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                    <span className="text-sm text-foreground">{booking.PaymentPlanName || "No plan set — 7-stage default schedule"}</span>
                   </div>
-                  {canEdit && booking.Status !== "Approved" && (
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <p className="text-xs text-muted-foreground">The booking amount itself is set on the Payment tab. After real payments exist, server validation blocks unsafe schedule changes.</p>
-                      <button onClick={handleSaveMain} disabled={saving || paymentPlanId === null}
-                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
-                        {saving ? "Saving..." : "Save Plan"}
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {booking.Status !== "Approved" && (

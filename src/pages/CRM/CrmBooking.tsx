@@ -21,7 +21,6 @@ const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
-const PLAN_API = "/api/crm/payment-plans";
 
 const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
@@ -49,9 +48,6 @@ const EMPTY_FORM = {
 
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPaymentPlans(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PLAN_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchApps(): Promise<any[]> {
   try {
@@ -143,7 +139,6 @@ const CrmBooking: React.FC = () => {
   const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
-  const { data: plans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
 
   const availableUnits = useMemo(() => {
     const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled" && b.Status !== "Rejected").map((b: any) => b.UnitId));
@@ -406,7 +401,10 @@ const CrmBooking: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Application *</label>
-              <select value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
+              <select value={form.ApplicationId} onChange={(e) => {
+                const app = (apps as any[]).find((a: any) => String(a.Id) === e.target.value);
+                setForm((f) => ({ ...f, ApplicationId: e.target.value, PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "" }));
+              }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select application</option>
                 {(apps as any[]).map((a: any) => (
@@ -466,14 +464,10 @@ const CrmBooking: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               </div>
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Payment Plan (optional — default 7-stage split used if none selected)</label>
-                <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Default split</option>
-                  {(plans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
-                    <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
-                  ))}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">Payment Plan (from the Application — not editable here)</label>
+                <input type="text" readOnly disabled
+                  value={(apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName || "Default 7-stage split"}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
