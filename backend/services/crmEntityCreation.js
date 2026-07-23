@@ -127,11 +127,25 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     companyId = companyId || proj.recordset[0].company_id || null;
   }
   let unitName = b.InterestedUnit || null;
+  let unitDefaultPaymentPlanId = null;
+  let unitBlockId = null;
   if (b.PreferredUnitId) {
     const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-      .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+      .query("SELECT UnitName, BlockId, DefaultPaymentPlanId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
-    unitName = unit.recordset[0].UnitName;
+    const unitRow = unit.recordset[0];
+    unitName = unitRow.UnitName;
+    unitBlockId = unitRow.BlockId || null;
+    unitDefaultPaymentPlanId = unitRow.DefaultPaymentPlanId || null;
+  }
+  const effectivePaymentPlanId = b.PaymentPlanId ? parseInt(b.PaymentPlanId) : unitDefaultPaymentPlanId;
+  if (effectivePaymentPlanId) {
+    await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
+      companyId: companyId || null,
+      projectId: b.ProjectId ? parseInt(b.ProjectId) : null,
+      blockId: unitBlockId,
+      unitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
+    });
   }
 
   const appNo = await getNextDocNumber(pool, "APP", "APP");
@@ -159,7 +173,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("cpid",   sql.Int, channelPartnerId)
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
-      .input("ppid", sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("ppid", sql.Int,           effectivePaymentPlanId || null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
@@ -318,16 +332,16 @@ async function validatePaymentPlanScope(pool, planId, { companyId, projectId, bl
     .query("SELECT PlanName, CompanyId, ProjectId, BlockId, UnitId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
   if (!plan.recordset.length) throw new CrmCreationError("Selected payment plan does not exist");
   const p = plan.recordset[0];
-  if (p.CompanyId && companyId && p.CompanyId !== companyId) {
+  if (p.CompanyId && p.CompanyId !== companyId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different company`);
   }
-  if (p.ProjectId && projectId && p.ProjectId !== projectId) {
+  if (p.ProjectId && p.ProjectId !== projectId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different project`);
   }
-  if (p.BlockId && blockId && p.BlockId !== blockId) {
+  if (p.BlockId && p.BlockId !== blockId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
   }
-  if (p.UnitId && unitId && p.UnitId !== unitId) {
+  if (p.UnitId && p.UnitId !== unitId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different unit`);
   }
 }
@@ -413,6 +427,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+           u.DefaultPaymentPlanId,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
            blk.BlockName
     FROM dbo.UnitMaster u
@@ -429,8 +444,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
-  if (b.PaymentPlanId) {
-    await validatePaymentPlanScope(pool, parseInt(b.PaymentPlanId), {
+  const effectivePaymentPlanId = b.PaymentPlanId ? parseInt(b.PaymentPlanId) : (unitRow.DefaultPaymentPlanId || null);
+
+  if (effectivePaymentPlanId) {
+    await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
       companyId: unitRow.CompanyId || null, projectId: unitRow.ProjectId || null, blockId: unitRow.BlockId || null,
       unitId: unitRow.Id || null,
     });
@@ -468,7 +485,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("bamt",  sql.Decimal(18,2), bookingAmount)
     .input("ttype", sql.NVarChar(20),  tokenType)
     .input("tval",  sql.Decimal(18,2), tokenValue)
-    .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+    .input("ppid",  sql.Int,           effectivePaymentPlanId)
     .input("bdate", sql.Date,          b.BookingDate || null)
     .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
     .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
@@ -515,7 +532,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
 
-  await generateMilestonesForBooking(pool, bookingId, total, b.PaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
+  await generateMilestonesForBooking(pool, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
 
   // The Application's Payment Details step already captured the token
   // amount as "paid" (PaymentMode + a cheque/transaction reference, see

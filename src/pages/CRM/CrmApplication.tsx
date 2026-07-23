@@ -240,6 +240,16 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
+  const applicablePaymentPlans = useMemo(() => {
+    return (paymentPlans as any[]).filter((p: any) => {
+      if (!p.IsActive) return false;
+      if (p.CompanyId && String(p.CompanyId) !== form.CompanyId) return false;
+      if (p.ProjectId && String(p.ProjectId) !== form.ProjectId) return false;
+      if (p.BlockId && String(p.BlockId) !== form.BlockId) return false;
+      if (p.UnitId && String(p.UnitId) !== form.PreferredUnitId) return false;
+      return true;
+    });
+  }, [paymentPlans, form.CompanyId, form.ProjectId, form.BlockId, form.PreferredUnitId]);
 
   // Resume is only meaningful for a genuinely incomplete application — and
   // Status='Draft' is now that exact, authoritative signal (Step 1 of the
@@ -350,14 +360,22 @@ const CrmApplication: React.FC = () => {
   // Unit Master setup time, not something staff should re-pick per deal.
   useEffect(() => {
     const unitId = selectedUnit?.Id ?? null;
-    if (!unitId || !selectedUnit?.DefaultPaymentPlanId) { setPlanLocked(false); return; }
+    if (applicationId) return;
+    if (!unitId) {
+      setPlanLocked(false);
+      setForm((f) => (f.PaymentPlanId ? { ...f, PaymentPlanId: "" } : f));
+      return;
+    }
+    if (!selectedUnit?.DefaultPaymentPlanId) {
+      setPlanLocked(false);
+      setForm((f) => (f.PaymentPlanId ? { ...f, PaymentPlanId: "" } : f));
+      return;
+    }
     if (planUnlockedForUnitRef.current === unitId) return;
-    // Only fills if blank — never clobbers a value already loaded from a
-    // saved application (which may be a deliberate prior override).
-    setForm((f) => ({ ...f, PaymentPlanId: f.PaymentPlanId || String(selectedUnit.DefaultPaymentPlanId) }));
+    setForm((f) => ({ ...f, PaymentPlanId: String(selectedUnit.DefaultPaymentPlanId) }));
     setPlanLocked(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUnit?.Id, selectedUnit?.DefaultPaymentPlanId]);
+  }, [applicationId, selectedUnit?.Id, selectedUnit?.DefaultPaymentPlanId]);
 
   const computedTotal = useMemo(() => {
     const area = Number(selectedUnit?.AreaSqFt) || 0;
@@ -405,6 +423,7 @@ const CrmApplication: React.FC = () => {
         CustomerId: app.CustomerId ? String(app.CustomerId) : "",
         CompanyId: app.CompanyId ? String(app.CompanyId) : "",
         ProjectId: app.ProjectId ? String(app.ProjectId) : "",
+        BlockId: app.BlockId ? String(app.BlockId) : "",
         PreferredUnitId: app.PreferredUnitId ? String(app.PreferredUnitId) : "",
         PaymentPlanId: app.PaymentPlanId ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
@@ -421,7 +440,7 @@ const CrmApplication: React.FC = () => {
         Notes: app.Notes || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
-      setPlanLocked(false);
+      setPlanLocked(!!app.PaymentPlanId);
       planUnlockedForUnitRef.current = null;
 
       const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
@@ -798,7 +817,11 @@ const CrmApplication: React.FC = () => {
                   <div>
                     <label className={labelCls}>Company *</label>
                     <select value={form.CompanyId} disabled={!!applicationId}
-                      onChange={(e) => setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "" }))}
+                      onChange={(e) => {
+                        planUnlockedForUnitRef.current = null;
+                        setPlanLocked(false);
+                        setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                      }}
                       className={inputCls}>
                       <option value="">Select company</option>
                       {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
@@ -807,7 +830,11 @@ const CrmApplication: React.FC = () => {
                   <div>
                     <label className={labelCls}>Project *</label>
                     <select value={form.ProjectId} disabled={!!applicationId}
-                      onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "" }))}
+                      onChange={(e) => {
+                        planUnlockedForUnitRef.current = null;
+                        setPlanLocked(false);
+                        setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                      }}
                       className={inputCls}>
                       <option value="">Select project</option>
                       {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
@@ -816,7 +843,11 @@ const CrmApplication: React.FC = () => {
                   <div>
                     <label className={labelCls}>Block / Tower</label>
                     <select value={form.BlockId} disabled={!!applicationId}
-                      onChange={(e) => setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "" }))}
+                      onChange={(e) => {
+                        planUnlockedForUnitRef.current = null;
+                        setPlanLocked(false);
+                        setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                      }}
                       className={inputCls}>
                       <option value="">Any block</option>
                       {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
@@ -825,7 +856,11 @@ const CrmApplication: React.FC = () => {
                   <div>
                     <label className={labelCls}>Floor</label>
                     <select value={form.FloorNo} disabled={!!applicationId}
-                      onChange={(e) => setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "" }))}
+                      onChange={(e) => {
+                        planUnlockedForUnitRef.current = null;
+                        setPlanLocked(false);
+                        setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
+                      }}
                       className={inputCls}>
                       <option value="">Any floor</option>
                       {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
@@ -834,7 +869,11 @@ const CrmApplication: React.FC = () => {
                   <div className="col-span-2">
                     <label className={labelCls}>Unit *</label>
                     <select value={form.PreferredUnitId} disabled={!!applicationId}
-                      onChange={(e) => setForm((f) => ({ ...f, PreferredUnitId: e.target.value }))}
+                      onChange={(e) => {
+                        planUnlockedForUnitRef.current = null;
+                        setPlanLocked(false);
+                        setForm((f) => ({ ...f, PreferredUnitId: e.target.value, PaymentPlanId: "" }));
+                      }}
                       className={inputCls}>
                       <option value="">Select unit</option>
                       {(unitsForFloor as any[]).map((u: any) => (
@@ -867,7 +906,7 @@ const CrmApplication: React.FC = () => {
                     ) : (
                       <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
                         <option value="">— Use default milestone schedule —</option>
-                        {(paymentPlans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
+                        {applicablePaymentPlans.map((p: any) => (
                           <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
                         ))}
                       </select>
