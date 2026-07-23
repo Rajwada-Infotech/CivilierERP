@@ -9,16 +9,17 @@ const { getPool, sql } = require("../db");
 
 bumpCacheVersion("block-master").catch(() => {});
 
-// Shared lock check — a Block cannot be deleted while any Unit under it is
-// Booked or OnHold, mirroring unitMaster.js's getUnitLockReason but rolled
-// up across every unit in the block. Editing a Block is still allowed even
-// when locked (ProjectId/BlockName changes are live-joined everywhere via
-// BlockId, so they apply project-wide immediately) — only DELETE is gated.
-// NOTE: only UnitMaster is wired in here. If/when a Parking Master (or any
-// other BlockId-referencing child table) exists, add the same LEFT JOIN
-// pattern below so it's covered by the same lock.
+// Shared lock check — a Block cannot be deleted while any Unit OR Parking
+// slot under it is Booked or OnHold. Mirrors unitMaster.js's
+// getUnitLockReason (rolled up across every unit in the block) and
+// parkingSlotMaster.js's getParkingSlotLockReason (rolled up across every
+// slot in the block) run as two separate checks, so each stays a simple,
+// obviously-correct query rather than one fragile combined join. Editing a
+// Block is still allowed even when locked (ProjectId/BlockName changes are
+// live-joined everywhere via BlockId, so they apply project-wide
+// immediately) — only DELETE is gated.
 async function getBlockLockReason(pool, blockId) {
-  const result = await pool
+  const unitResult = await pool
     .request()
     .input("BlockId", sql.Int, blockId)
     .query(`
@@ -32,10 +33,33 @@ async function getBlockLockReason(pool, blockId) {
         ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       WHERE u.BlockId = @BlockId AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
     `);
-  if (!result.recordset.length) return null;
-  const row = result.recordset[0];
-  if (row.BookingNo) return `has a Unit with an active booking (${row.BookingNo})`;
-  return "has a Unit currently on hold";
+  if (unitResult.recordset.length) {
+    const row = unitResult.recordset[0];
+    return row.BookingNo ? `has a Unit with an active booking (${row.BookingNo})` : "has a Unit currently on hold";
+  }
+
+  const parkingResult = await pool
+    .request()
+    .input("BlockId", sql.Int, blockId)
+    .query(`
+      SELECT TOP 1
+        pa.Id AS AllotmentId,
+        bk.BookingNo,
+        h.Id AS HoldId
+      FROM dbo.ParkingSlot s
+      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
+      LEFT JOIN dbo.CrmInventoryHold h
+        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      WHERE s.BlockId = @BlockId AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
+    `);
+  if (parkingResult.recordset.length) {
+    const row = parkingResult.recordset[0];
+    if (row.AllotmentId) return row.BookingNo ? `has a Parking slot with an active booking (${row.BookingNo})` : "has a Parking slot currently allotted";
+    return "has a Parking slot currently on hold";
+  }
+
+  return null;
 }
 
 // GET all blocks — includes per-row lock fields (same OUTER APPLY shape as
@@ -53,8 +77,8 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.IsActive,
         b.CreatedAt,
         b.UpdatedAt,
-        lock.LockBookingNo,
-        lock.LockHoldId
+        COALESCE(unitLock.LockBookingNo, parkLock.LockBookingNo) AS LockBookingNo,
+        COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
@@ -66,7 +90,16 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         LEFT JOIN dbo.CrmInventoryHold h
           ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE u.BlockId = b.Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
-      ) lock
+      ) unitLock
+      OUTER APPLY (
+        SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
+        FROM dbo.ParkingSlot s
+        LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+        LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
+        LEFT JOIN dbo.CrmInventoryHold h
+          ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+        WHERE s.BlockId = b.Id AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
+      ) parkLock
       ORDER BY e.name, b.BlockName
     `);
     res.json(result.recordset);
