@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -153,7 +154,7 @@ const columns = [
   { key: "unitType", label: "Type of Unit" },
   { key: "areaSqFt", label: "Area (sq ft)" },
   { key: "defaultPaymentPlanName", label: "Default Payment Plan" },
-  { key: "isActive", label: "Status" },
+  { key: "status", label: "Status" },
 ];
 
 const exportColumns: ExportColumn[] = [
@@ -164,7 +165,7 @@ const exportColumns: ExportColumn[] = [
   { header: "Type of Unit", accessor: "unitType" },
   { header: "Area (sq ft)", accessor: "areaSqFt" },
   { header: "Default Payment Plan", accessor: "defaultPaymentPlanName" },
-  { header: "Status", accessor: "isActive" },
+  { header: "Status", accessor: "status" },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -222,6 +223,19 @@ const UnitMaster: React.FC = () => {
       defaultPaymentPlanId: item.DefaultPaymentPlanId != null ? String(item.DefaultPaymentPlanId) : "",
       defaultPaymentPlanName: item.DefaultPaymentPlanName ?? "",
       isActive: Boolean(item.IsActive),
+      lockBookingNo: item.LockBookingNo ?? null,
+      lockHoldId: item.LockHoldId ?? null,
+      // Same precedence unitMatrix.js derives Status with server-side
+      // (Blocked > Booked > OnHold > Available), driven off the exact same
+      // LockBookingNo/LockHoldId this GET endpoint already returns — never
+      // a separate guess, so it can't drift from what the matrix shows.
+      status: !Boolean(item.IsActive)
+        ? "Blocked"
+        : item.LockBookingNo
+          ? "Booked"
+          : item.LockHoldId
+            ? "On Hold"
+            : "Available",
     }));
   }, [units]);
 
@@ -292,8 +306,21 @@ const UnitMaster: React.FC = () => {
         title="Unit"
         fields={fields}
         columns={columns}
+        columnRenderers={{
+          status: (value) => <StatusBadge status={value as string} />,
+        }}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        // A Booked or OnHold unit can't be edited or deleted from here —
+        // matches the server-side guard in unitMaster.js exactly, using the
+        // lock fields the GET endpoint now returns per row.
+        isRowLocked={(row) =>
+          row.lockBookingNo
+            ? `Booked (${row.lockBookingNo as string})`
+            : row.lockHoldId
+              ? "On Hold"
+              : null
+        }
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
         externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}`}
@@ -321,7 +348,7 @@ const UnitMaster: React.FC = () => {
             { key: "unitType", label: "Type of Unit" },
             { key: "areaSqFt", label: "Area (sq ft)" },
             { key: "defaultPaymentPlanName", label: "Default Payment Plan" },
-            { key: "isActive", label: "Status" },
+            { key: "status", label: "Status" },
           ],
         }}
         onPrint={(row) => {
@@ -338,7 +365,7 @@ const UnitMaster: React.FC = () => {
               <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
               <tr><td>Area (sq ft)</td><td>${row.areaSqFt || "—"}</td></tr>
               <tr><td>Default Payment Plan</td><td>${row.defaultPaymentPlanName || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+              <tr><td>Status</td><td>${row.status || "—"}</td></tr>
             </table></body></html>
           `);
           win.document.close();
