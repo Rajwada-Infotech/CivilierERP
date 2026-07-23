@@ -244,7 +244,7 @@ const CrmApplication: React.FC = () => {
     return (paymentPlans as any[]).filter((p: any) => {
       if (!p.IsActive) return false;
       if (p.CompanyId && String(p.CompanyId) !== form.CompanyId) return false;
-      if (p.ProjectId && String(p.ProjectId) !== form.ProjectId) return false;
+      if (p.Projects?.length && !p.Projects.some((x: any) => String(x.Id) === form.ProjectId)) return false;
       if (p.BlockId && String(p.BlockId) !== form.BlockId) return false;
       if (p.UnitId && String(p.UnitId) !== form.PreferredUnitId) return false;
       return true;

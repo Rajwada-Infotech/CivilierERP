@@ -326,16 +326,21 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
 // built into the Payment Plan Master (see migration 182, extended with
 // UnitId for per-unit plans) is purely cosmetic, only ever enforced by which
 // options happen to be in a dropdown. NULL scope columns on the plan mean
-// "applies everywhere" and always pass.
+// "applies everywhere" and always pass. Project scope is many-to-many
+// (dbo.CrmPaymentPlanProject, migration 248) — a plan with zero linked
+// projects applies everywhere, one with 1+ links must include the booking's
+// project.
 async function validatePaymentPlanScope(pool, planId, { companyId, projectId, blockId, unitId }) {
   const plan = await pool.request().input("pid", sql.Int, planId)
-    .query("SELECT PlanName, CompanyId, ProjectId, BlockId, UnitId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+    .query("SELECT PlanName, CompanyId, BlockId, UnitId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
   if (!plan.recordset.length) throw new CrmCreationError("Selected payment plan does not exist");
   const p = plan.recordset[0];
   if (p.CompanyId && p.CompanyId !== companyId) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different company`);
   }
-  if (p.ProjectId && p.ProjectId !== projectId) {
+  const links = await pool.request().input("pid", sql.Int, planId)
+    .query("SELECT ProjectId FROM dbo.CrmPaymentPlanProject WHERE PlanId = @pid AND IsActive = 1");
+  if (links.recordset.length && !links.recordset.some(r => r.ProjectId === projectId)) {
     throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different project`);
   }
   if (p.BlockId && p.BlockId !== blockId) {
