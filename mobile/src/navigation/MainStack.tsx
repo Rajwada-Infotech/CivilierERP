@@ -7,6 +7,8 @@ import PaymentListScreen from "@/screens/finance/PaymentListScreen";
 import OnAccountAdjustmentScreen from "@/screens/finance/OnAccountAdjustmentScreen";
 import ReceivedPaymentListScreen from "@/screens/finance/ReceivedPaymentListScreen";
 import BrsScreen from "@/screens/finance/BrsScreen";
+import InvoiceScreen from "@/screens/finance/InvoiceScreen";
+import InvoicePreviewScreen from "@/screens/finance/InvoicePreviewScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -20,6 +22,8 @@ export type MainStackParamList = {
   OnAccountAdjustment: undefined;
   ReceivedPayment: { openForm?: boolean } | undefined;
   Brs: undefined;
+  Invoice: undefined;
+  InvoicePreview: { id: string };
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -38,6 +42,8 @@ export default function MainStack() {
       <Stack.Screen name="OnAccountAdjustment" component={OnAccountAdjustmentScreen} options={{ title: "On A/C Adjustment" }} />
       <Stack.Screen name="ReceivedPayment" component={ReceivedPaymentListScreen} options={{ title: "Received Payments" }} />
       <Stack.Screen name="Brs" component={BrsScreen} options={{ title: "BRS" }} />
+      <Stack.Screen name="Invoice" component={InvoiceScreen} options={{ title: "Invoice" }} />
+      <Stack.Screen name="InvoicePreview" component={InvoicePreviewScreen} options={{ title: "Invoice Preview" }} />
     </Stack.Navigator>
   );
 }

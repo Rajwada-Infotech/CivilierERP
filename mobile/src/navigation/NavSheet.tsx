@@ -55,7 +55,7 @@ const FINANCE_NAV_TREE: NavTree = [
     label: "Transaction",
     icon: ArrowLeftRight,
     children: [
-      { label: "Invoice", icon: Receipt },
+      { label: "Invoice", icon: Receipt, nav: "Invoice" },
       { label: "Payment", icon: Wallet, nav: "Payment" },
       { label: "On A/C Adjustment", icon: ArrowRightLeft, nav: "OnAccountAdjustment" },
       { label: "Received Payment", icon: ArrowDownToLine, nav: "ReceivedPayment" },
