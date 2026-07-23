@@ -75,13 +75,14 @@ const fields: FieldDef[] = [
     name: "defaultPaymentPlanId",
     label: "Default Payment Plan",
     type: "select",
+    required: true,
     // Every place a unit gets selected (Application wizard, etc.) auto-fetches
     // and locks this plan — staff can still override per-deal, but the
     // starting point is decided once here rather than re-picked every time.
     // Scoped the same way the Payment Plan Master itself is: a plan with no
     // Project/Block set applies everywhere, otherwise it must match this
     // unit's own Project/Block.
-    optionsProvider: (_data, _currentId, form) => {
+    optionsProvider: (_data, currentId, form) => {
       const plans: any[] = (form?.__paymentPlans as any) ?? [];
       const projectId = form?.projectId as string | undefined;
       const blockId = form?.blockId as string | undefined;
@@ -89,7 +90,35 @@ const fields: FieldDef[] = [
         .filter((p) => p.IsActive)
         .filter((p) => !p.ProjectId || String(p.ProjectId) === projectId)
         .filter((p) => !p.BlockId || String(p.BlockId) === blockId)
+        .filter((p) => !p.UnitId || String(p.UnitId) === currentId)
         .map((p) => ({ value: String(p.Id), label: p.PlanName }));
+    },
+  },
+  {
+    // Not a real column — a plain explanatory line so an empty dropdown
+    // above doesn't read as broken. It usually just means no Payment Plan
+    // Master entry exists yet for this exact Project/Block combination
+    // (or Project/Block haven't been picked yet).
+    name: "__paymentPlanHint",
+    label: "",
+    type: "custom",
+    fullWidth: true,
+    render: ({ formData }) => {
+      const projectId = formData?.projectId as string | undefined;
+      const blockId = formData?.blockId as string | undefined;
+      if (!projectId || !blockId) {
+        return <p className="text-[11px] text-muted-foreground -mt-2">Select Project and Block above to see the payment plans that apply here.</p>;
+      }
+      const plans: any[] = (formData?.__paymentPlans as any) ?? [];
+      const hasMatch = plans.some((p) =>
+        p.IsActive && (!p.ProjectId || String(p.ProjectId) === projectId) && (!p.BlockId || String(p.BlockId) === blockId)
+      );
+      if (hasMatch) return null;
+      return (
+        <p className="text-[11px] text-amber-600 -mt-2">
+          No Payment Plan Master entry covers this Project/Block yet — create one there first (Company/Project/Block scoping, or leave those blank to apply everywhere) before this unit can be saved.
+        </p>
+      );
     },
   },
   {
@@ -267,10 +296,13 @@ const UnitMaster: React.FC = () => {
         onDataEvent={handleDataEvent}
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
-        externalFormPatchKey={allBlocks.length}
+        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}`}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "projectId") {
-            return { ...form, blockId: "" };
+            return { ...form, blockId: "", defaultPaymentPlanId: "" };
+          }
+          if (fieldName === "blockId") {
+            return { ...form, defaultPaymentPlanId: "" };
           }
           return form;
         }}

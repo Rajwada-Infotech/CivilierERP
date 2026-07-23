@@ -158,6 +158,7 @@ const CrmBooking: React.FC = () => {
       BlockName: u?.BlockName || f.BlockName,
       UnitType: u?.UnitType || "",
       AreaSqFt: area,
+      PaymentPlanId: u?.DefaultPaymentPlanId ? String(u.DefaultPaymentPlanId) : "",
       TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
     }));
   };
@@ -403,7 +404,24 @@ const CrmBooking: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">Application *</label>
               <select value={form.ApplicationId} onChange={(e) => {
                 const app = (apps as any[]).find((a: any) => String(a.Id) === e.target.value);
-                setForm((f) => ({ ...f, ApplicationId: e.target.value, PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "" }));
+                const appUnit = app?.PreferredUnitId
+                  ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
+                  : null;
+                const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
+                const rate = parseFloat(form.RatePerSqFt);
+                const areaNum = parseFloat(area);
+                setForm((f) => ({
+                  ...f,
+                  ApplicationId: e.target.value,
+                  UnitId: appUnit ? String(appUnit.Id) : "",
+                  UnitNo: appUnit?.UnitName || "",
+                  ProjectName: appUnit?.ProjectName || "",
+                  BlockName: appUnit?.BlockName || "",
+                  UnitType: appUnit?.UnitType || "",
+                  AreaSqFt: area,
+                  TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : "",
+                  PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : (appUnit?.DefaultPaymentPlanId ? String(appUnit.DefaultPaymentPlanId) : ""),
+                }));
               }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select application</option>
@@ -466,7 +484,9 @@ const CrmBooking: React.FC = () => {
               <div className="col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">Payment Plan (from the Application — not editable here)</label>
                 <input type="text" readOnly disabled
-                  value={(apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName || "Default 7-stage split"}
+                  value={(apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
+                    || (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.DefaultPaymentPlanName
+                    || "Default 7-stage split"}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
               <div>

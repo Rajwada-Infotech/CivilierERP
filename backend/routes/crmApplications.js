@@ -11,7 +11,7 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, validatePaymentPlanScope } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
@@ -39,7 +39,7 @@ const APP_SELECT = `
     plat.Name AS PlatformName, camp.Name AS CampaignName, ad.Name AS AdName,
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
-    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName,
+    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName, um.BlockId AS BlockId,
     -- Customer-master fields, auto-fetched here so the Application page
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
@@ -217,11 +217,31 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       companyId = companyId || proj.recordset[0].company_id || null;
     }
     let unitName = b.InterestedUnit || null;
+    let unitDefaultPaymentPlanId = null;
+    let unitBlockId = null;
     if (b.PreferredUnitId) {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+        .query("SELECT UnitName, BlockId, DefaultPaymentPlanId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-      unitName = unit.recordset[0].UnitName;
+      const unitRow = unit.recordset[0];
+      unitName = unitRow.UnitName;
+      unitBlockId = unitRow.BlockId || null;
+      unitDefaultPaymentPlanId = unitRow.DefaultPaymentPlanId || null;
+    }
+    const effectivePaymentPlanId = b.PaymentPlanId
+      ? parseInt(b.PaymentPlanId)
+      : (b.PreferredUnitId ? unitDefaultPaymentPlanId : null);
+    if (effectivePaymentPlanId) {
+      try {
+        await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
+          companyId,
+          projectId: b.ProjectId ? parseInt(b.ProjectId) : null,
+          blockId: unitBlockId,
+          unitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
+        });
+      } catch (scopeErr) {
+        return res.status(400).json({ error: scopeErr.message });
+      }
     }
 
     await pool.request()
@@ -244,7 +264,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("cpid",   sql.Int, b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null)
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
-      .input("ppid", sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("ppid", sql.Int,           effectivePaymentPlanId)
+      .input("pptouched", sql.Bit,      (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
@@ -266,7 +287,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           PlatformId = ISNULL(@platid, PlatformId), CampaignId = ISNULL(@campid, CampaignId),
           AdId = ISNULL(@adid, AdId), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
           RatePerSqFt = ISNULL(@rate, RatePerSqFt), DateOfApply = ISNULL(@doa, DateOfApply),
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId), TokenType = ISNULL(@ttype, TokenType),
+          PaymentPlanId = CASE WHEN @pptouched = 1 THEN @ppid ELSE PaymentPlanId END,
+          TokenType = ISNULL(@ttype, TokenType),
           TokenValue = ISNULL(@tval, TokenValue), BookingAmount = ISNULL(@bamt, BookingAmount),
           PaymentMode = ISNULL(@pmode, PaymentMode),
           BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),

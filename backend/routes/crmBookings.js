@@ -321,19 +321,20 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
 
     const booking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT UnitId, Status FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT UnitId, Status, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
     if (booking.recordset[0].Status === "Cancelled") {
       return res.status(400).json({ error: "Cannot change the unit on a cancelled booking" });
     }
     const oldUnitId = booking.recordset[0].UnitId;
+    const oldRow = booking.recordset[0];
     const newUnitId = parseInt(b.NewUnitId);
     if (newUnitId === oldUnitId) return res.status(400).json({ error: "New unit is the same as the current unit" });
 
     // Same lookup + availability checks as booking creation — the new unit
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt, u.DefaultPaymentPlanId,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
@@ -352,6 +353,23 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     await guardAndConvertHold(pool, "Unit", newUnitId, bookingAppId.recordset[0].ApplicationId);
 
     const actor = actorId(req);
+    const paid = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))
+    `);
+    const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
+    const newPlanId = canRegenerateSchedule && unitRow.DefaultPaymentPlanId ? unitRow.DefaultPaymentPlanId : null;
+    if (newPlanId) {
+      await validatePaymentPlanScope(pool, newPlanId, {
+        companyId: unitRow.CompanyId || null,
+        projectId: unitRow.ProjectId || null,
+        blockId: unitRow.BlockId || null,
+        unitId: unitRow.Id || null,
+      });
+    }
+    const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt) : null;
+    const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
+    const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
     await pool.request()
       .input("id",    sql.Int, id)
       .input("uid",   sql.Int, newUnitId)
@@ -362,14 +380,32 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
       .input("area",  sql.Decimal(18,2), unitRow.AreaSqFt || null)
+      .input("tot",   sql.Decimal(18,2), total)
+      .input("ppid",  sql.Int, newPlanId)
       .input("ub",    sql.Int, actor)
       .query(`
         UPDATE dbo.CrmBooking SET
           UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
           CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          TotalValue = @tot,
+          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+          GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    if (newPlanId) {
+      // Only the %-based schedule steps get wiped and regenerated — a
+      // Parking/Extra-Charge milestone is a fixed line item tied to a real
+      // allotment/charge row elsewhere (see the same exclusion in
+      // recalculateRemainingMilestones), not part of the plan schedule, and
+      // deleting it here would silently orphan that charge's own payment
+      // tracking.
+      await pool.request().input("bid", sql.Int, id).query(`
+        DELETE FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+      `);
+      await generateMilestonesForBooking(pool, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+    }
 
     await pool.request()
       .input("bid",    sql.Int, id)
@@ -386,7 +422,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
     ]);
 
-    res.json({ success: true, unitNo: unitRow.UnitName });
+    res.json({ success: true, unitNo: unitRow.UnitName, paymentPlanUpdated: !!newPlanId });
   } catch (e) {
     console.error("[crm-bookings] change-unit error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
