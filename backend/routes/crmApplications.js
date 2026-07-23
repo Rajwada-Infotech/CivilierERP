@@ -92,10 +92,19 @@ const APP_SELECT = `
 // booking. The Applications management page itself passes
 // ?includeConverted=1 (or an explicit ?stage=/?status=) to see everything,
 // which is how its own Converted/In Process/Not Converted tabs work.
+//
+// ?forBooking=1 — the New Booking dropdown's own dedicated filter (see
+// CrmBooking.tsx). "Open for booking" means both: not yet Converted (no
+// booking exists for it yet — one Application maps to at most one Booking,
+// ever) AND Status = 'Approved' (a Draft/Pending application hasn't cleared
+// the admin approval gate yet, so there's nothing complete enough to book;
+// Rejected/Cancelled are dead ends). This is deliberately independent of
+// the status/stage/includeConverted params above so it can't be silently
+// widened by combining with them.
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, stage, includeConverted } = req.query;
+    const { status, search, stage, includeConverted, forBooking } = req.query;
     const req0 = pool.request();
     const conds = ["a.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
@@ -106,7 +115,9 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     const where = "WHERE " + conds.join(" AND ");
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
     let rows = result.recordset;
-    if (stage) {
+    if (forBooking) {
+      rows = rows.filter((r) => r.Status === "Approved" && r.Stage !== "Converted");
+    } else if (stage) {
       rows = rows.filter((r) => r.Stage === stage);
     } else if (!status && !includeConverted) {
       rows = rows.filter((r) => r.Stage !== "Converted");

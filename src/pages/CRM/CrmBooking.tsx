@@ -3,13 +3,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2 } from "lucide-react";
+import {
+  Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
+  Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -44,14 +49,21 @@ const EMPTY_FORM = {
   UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
+  BookingAmount: "", BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
 };
 
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
+// One Application -> at most one Booking, ever (see crmEntityCreation.js's
+// createCrmBookingRecord). This dropdown must only ever offer applications
+// that are both COMPLETE (Status = 'Approved' — Draft/Pending haven't
+// cleared admin approval yet) and OPEN (not already Converted to a Booking)
+// — the exact ?forBooking=1 filter crmApplications.js enforces server-side,
+// never left to client-side filtering that could drift.
 async function fetchApps(): Promise<any[]> {
   try {
-    const res = await fetchWithAuth(APP_API);
+    const res = await fetchWithAuth(`${APP_API}?forBooking=1`);
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
@@ -145,6 +157,22 @@ const CrmBooking: React.FC = () => {
     return (units as any[]).filter((u: any) => u.IsActive && (!bookedIds.has(u.Id) || String(u.Id) === form.UnitId));
   }, [units, bookings, form.UnitId]);
 
+  // The selected Application's own PreferredUnitId — auto-fetched and locked
+  // here just like its other fields, since it's already been decided. Only
+  // when that unit is still actually available: two Applications can share
+  // the same PreferredUnitId, and if a different one already booked it, this
+  // dialog's whole reason for existing is to let staff pick a replacement —
+  // so it must fall back to a real picker rather than lock onto a unit the
+  // booking would then fail to save against.
+  const selectedApp = useMemo(
+    () => (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId),
+    [apps, form.ApplicationId]
+  );
+  const appPreferredUnitId: number | undefined = selectedApp?.PreferredUnitId;
+  const appPreferredUnitAvailable = appPreferredUnitId != null
+    && (availableUnits as any[]).some((u: any) => u.Id === appPreferredUnitId);
+  const unitLockedFromApp = !!appPreferredUnitId && appPreferredUnitAvailable;
+
   const handleUnitSelect = (unitId: string) => {
     const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
     const area = u?.AreaSqFt != null ? String(u.AreaSqFt) : "";
@@ -158,7 +186,10 @@ const CrmBooking: React.FC = () => {
       BlockName: u?.BlockName || f.BlockName,
       UnitType: u?.UnitType || "",
       AreaSqFt: area,
-      PaymentPlanId: u?.DefaultPaymentPlanId ? String(u.DefaultPaymentPlanId) : "",
+      // A locked (Application-sourced) PaymentPlanId always wins over the
+      // Unit's own default — only fall back to the Unit default when the
+      // Application didn't already specify a plan.
+      PaymentPlanId: f.PaymentPlanId || (u?.DefaultPaymentPlanId ? String(u.DefaultPaymentPlanId) : ""),
       TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
     }));
   };
@@ -202,6 +233,9 @@ const CrmBooking: React.FC = () => {
           TokenValue:    form.TokenValue   || null,
           PaymentPlanId: form.PaymentPlanId || null,
           AssignedTo:    form.AssignedTo   || null,
+          BookingAmount: form.BookingAmount || null,
+          BrokerId:      form.BrokerId || null,
+          BrokerageRatePercent: form.BrokerageRatePercent || null,
         }),
       });
       const data = await res.json();
@@ -255,7 +289,7 @@ const CrmBooking: React.FC = () => {
       ) },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
-        <div>
+        <div onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
@@ -264,7 +298,7 @@ const CrmBooking: React.FC = () => {
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div>
+          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
             <div>{b.ProjectName || "—"}</div>
             <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
             {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
@@ -272,12 +306,12 @@ const CrmBooking: React.FC = () => {
         );
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
-      cell: (i) => <span className="text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
+      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
     { id: "value", header: "Value", size: 130, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div>
+          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
             <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
@@ -289,15 +323,30 @@ const CrmBooking: React.FC = () => {
           </div>
         );
       } },
-    { accessorKey: "BookingAmount", header: "Booking Amt", size: 100, cell: (i) => <span>{fmt(i.row.original.BookingAmount)}</span> },
+    { accessorKey: "BookingAmount", header: "Booking Amt", size: 100,
+      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "BookingDate", header: "Date", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+          {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
+        </span>
+      ) },
     { id: "actions", header: "Actions", size: 220, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         const step = getNextStep(b);
+        // Same sequential gate getNextStep enforces for the primary
+        // step button — a stage is only reachable once every stage
+        // before it is actually done, so "Jump to Stage" can't be used
+        // to route around the gate the button itself respects.
+        const approved = b.Status === "Approved";
+        const welcomeCallReached = approved;
+        const bankDetailsReached = approved && b.HasWelcomeCall;
+        const agreementReached = bankDetailsReached && b.BankDetailsComplete;
+        const paymentsReached = agreementReached && !!b.AgreementId
+          && b.SeniorApprovalStatus === "Approved" && b.CustomerApprovalStatus === "Approved";
         return (
           <div className="flex items-center gap-2 flex-wrap">
             {/* submitOnly: Approve/Reject only ever happen from the
@@ -338,17 +387,46 @@ const CrmBooking: React.FC = () => {
                   <MoreHorizontal size={16} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)}>View Details / Invoice / Attachments</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)}>Welcome Call</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)}>Communication</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)}>Bank Details</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)}>Agreement</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)}>Payments</DropdownMenuItem>
-                {b.Status !== "Cancelled" && canEdit && (
-                  <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="text-rose-600 focus:text-rose-600">
-                    Change Unit
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)} className="gap-2">
+                  <Eye size={14} className="text-muted-foreground" /> View Details / Invoice / Attachments
+                </DropdownMenuItem>
+                {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
+                  </>
+                )}
+                {welcomeCallReached && (
+                  <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2">
+                    <Phone size={14} className="text-sky-600" /> Welcome Call
                   </DropdownMenuItem>
+                )}
+                {bankDetailsReached && (
+                  <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2">
+                    <Landmark size={14} className="text-amber-600" /> Bank Details
+                  </DropdownMenuItem>
+                )}
+                {agreementReached && (
+                  <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2">
+                    <FileSignature size={14} className="text-purple-600" /> Agreement
+                  </DropdownMenuItem>
+                )}
+                {paymentsReached && (
+                  <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2">
+                    <IndianRupee size={14} className="text-primary" /> Payments
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
+                  <MessageSquare size={14} className="text-violet-600" /> Communication
+                </DropdownMenuItem>
+                {b.Status !== "Cancelled" && canEdit && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="gap-2 text-rose-600 focus:text-rose-600">
+                      <Repeat size={14} /> Change Unit
+                    </DropdownMenuItem>
+                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -401,15 +479,25 @@ const CrmBooking: React.FC = () => {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Application *</label>
+              <label className="text-xs text-muted-foreground block mb-1">Application * (Approved, not yet booked)</label>
               <select value={form.ApplicationId} onChange={(e) => {
                 const app = (apps as any[]).find((a: any) => String(a.Id) === e.target.value);
                 const appUnit = app?.PreferredUnitId
                   ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
                   : null;
                 const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
-                const rate = parseFloat(form.RatePerSqFt);
+                // Everything the Application already captured (rate, token,
+                // booking amount, payment mode, assignee, plan, brokerage,
+                // notes) is auto-fetched and locked here — the exact same
+                // data createCrmBookingRecord would have used had auto-
+                // booking succeeded at Application-approval time (see
+                // crmApplications.js PUT /:id/approve). Staff filling this
+                // manual fallback dialog only ever need to pick the Unit;
+                // nothing Application-sourced should be re-typed or drift
+                // from what was already approved.
+                const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
                 const areaNum = parseFloat(area);
+                const rateNum = parseFloat(rate);
                 setForm((f) => ({
                   ...f,
                   ApplicationId: e.target.value,
@@ -419,8 +507,18 @@ const CrmBooking: React.FC = () => {
                   BlockName: appUnit?.BlockName || "",
                   UnitType: appUnit?.UnitType || "",
                   AreaSqFt: area,
-                  TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : "",
+                  RatePerSqFt: rate,
+                  TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
                   PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : (appUnit?.DefaultPaymentPlanId ? String(appUnit.DefaultPaymentPlanId) : ""),
+                  TokenType: app?.TokenType || "Percentage",
+                  TokenValue: app?.TokenValue != null ? String(app.TokenValue) : "",
+                  BookingAmount: app?.BookingAmount != null ? String(app.BookingAmount) : "",
+                  PaymentMode: app?.PaymentMode || "",
+                  AssignedTo: app?.AssignedTo != null ? String(app.AssignedTo) : "",
+                  Notes: app?.Notes || "",
+                  BrokerId: app?.BrokerId != null ? String(app.BrokerId) : "",
+                  BrokerageRatePercent: app?.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
+                  BrokerageSplitEnabled: !!app?.BrokerageSplitEnabled,
                 }));
               }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -434,14 +532,29 @@ const CrmBooking: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Unit * (from Unit Master — mandatory)</label>
-                <select value={form.UnitId} onChange={(e) => handleUnitSelect(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select unit</option>
-                  {(availableUnits as any[]).map((u: any) => (
-                    <option key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
-                  ))}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
+                </label>
+                {unitLockedFromApp ? (
+                  <input type="text" readOnly disabled
+                    value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+                ) : (
+                  <>
+                    <select value={form.UnitId} onChange={(e) => handleUnitSelect(e.target.value)}
+                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                      <option value="">Select unit</option>
+                      {(availableUnits as any[]).map((u: any) => (
+                        <option key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
+                      ))}
+                    </select>
+                    {appPreferredUnitId != null && !appPreferredUnitAvailable && (
+                      <p className="text-[11px] text-amber-600 mt-1">
+                        This Application's preferred unit is no longer available — select a different one.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Project (from selected unit)</label>
@@ -468,18 +581,25 @@ const CrmBooking: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking Token Type</label>
-                <select value={form.TokenType} onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  {TOKEN_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">Booking Token Type (from Application)</label>
+                {form.ApplicationId ? (
+                  <input type="text" value={form.TokenType} readOnly disabled
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+                ) : (
+                  <select value={form.TokenType} onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    {TOKEN_TYPES.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                )}
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Token {form.TokenType === "Percentage" ? "(%)" : "Amount (₹)"}
+                  Token {form.TokenType === "Percentage" ? "(%)" : "Amount (₹)"} {form.ApplicationId && form.TokenValue ? "(from Application)" : ""}
                 </label>
-                <input type="number" value={form.TokenValue} onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <input type="number" value={form.TokenValue}
+                  onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
+                  readOnly={!!form.ApplicationId && !!form.TokenValue} disabled={!!form.ApplicationId && !!form.TokenValue}
+                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.TokenValue ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
               </div>
               <div className="col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">Payment Plan (from the Application — not editable here)</label>
@@ -490,12 +610,19 @@ const CrmBooking: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select</option>
-                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Payment Mode {form.ApplicationId && form.PaymentMode ? "(from Application)" : ""}
+                </label>
+                {form.ApplicationId && form.PaymentMode ? (
+                  <input type="text" value={form.PaymentMode} readOnly disabled
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+                ) : (
+                  <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="">Select</option>
+                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                )}
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Area (sq ft) — from Unit Master</label>
@@ -504,9 +631,12 @@ const CrmBooking: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Rate per sq ft (₹)</label>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Rate per sq ft (₹) {form.ApplicationId && form.RatePerSqFt ? "(from Application)" : ""}
+                </label>
                 <input type="number" value={form.RatePerSqFt} onChange={(e) => handleRateChange(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  readOnly={!!form.ApplicationId && !!form.RatePerSqFt} disabled={!!form.ApplicationId && !!form.RatePerSqFt}
+                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.RatePerSqFt ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Total Value (₹) — auto-calculated</label>
@@ -514,12 +644,29 @@ const CrmBooking: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background font-semibold" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Assigned To</label>
-                <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Unassigned —</option>
-                  {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Booking Amount (₹) {form.ApplicationId && form.BookingAmount ? "(from Application)" : ""}
+                </label>
+                <input type="number" value={form.BookingAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
+                  readOnly={!!form.ApplicationId && !!form.BookingAmount} disabled={!!form.ApplicationId && !!form.BookingAmount}
+                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.BookingAmount ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Assigned To {form.ApplicationId && form.AssignedTo ? "(from Application)" : ""}
+                </label>
+                {form.ApplicationId && form.AssignedTo ? (
+                  <input type="text" readOnly disabled
+                    value={users.find((u) => u.value === form.AssignedTo)?.label || "— Assigned on Application —"}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+                ) : (
+                  <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="">— Unassigned —</option>
+                    {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                  </select>
+                )}
               </div>
             </div>
             {form.TotalValue && (
@@ -528,7 +675,9 @@ const CrmBooking: React.FC = () => {
               </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Notes {form.ApplicationId && form.Notes ? "(from Application — add to it below if needed)" : ""}
+              </label>
               <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>

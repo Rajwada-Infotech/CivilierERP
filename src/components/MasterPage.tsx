@@ -752,7 +752,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto overflow-y-hidden rounded-b-xl">
+          <div className="overflow-x-auto overflow-y-hidden rounded-b-xl thin-scroll">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">

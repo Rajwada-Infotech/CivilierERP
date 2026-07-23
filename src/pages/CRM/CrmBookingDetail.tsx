@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -7,7 +7,7 @@ import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
   ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
-  CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
+  CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -63,6 +63,19 @@ async function fetchAllBanks(): Promise<any[]> {
   const r = await fetchWithAuth(BANK_MASTER_API);
   return r.ok ? r.json() : [];
 }
+// Same Company/Project/Block/Unit scope filter every other payment-plan
+// picker in the app uses (Unit Master, Application) — a plan with no
+// scope set applies everywhere, otherwise it must match this booking's own.
+async function fetchScopedPaymentPlans(b: any): Promise<any[]> {
+  if (!b) return [];
+  const params = new URLSearchParams();
+  if (b.CompanyId) params.set("companyId", String(b.CompanyId));
+  if (b.ProjectId) params.set("projectId", String(b.ProjectId));
+  if (b.BlockId) params.set("blockId", String(b.BlockId));
+  if (b.UnitId) params.set("unitId", String(b.UnitId));
+  const r = await fetchWithAuth(`/api/crm/payment-plans?${params}`);
+  return r.ok ? r.json() : [];
+}
 async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`);
   return r.ok ? r.json() : [];
@@ -91,6 +104,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // can view the page can also edit it.
   const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Booking");
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const scrollTabs = (dir: 1 | -1) => tabScrollRef.current?.scrollBy({ left: dir * 160, behavior: "smooth" });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
@@ -107,6 +122,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [bookingAmountSaving, setBookingAmountSaving] = useState(false);
   const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
   const [paySaving, setPaySaving] = useState(false);
+  const [planEditOpen, setPlanEditOpen] = useState(false);
+  const [planEditValue, setPlanEditValue] = useState("");
+  const [planSaving, setPlanSaving] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["crm-booking-detail", bookingId],
@@ -137,6 +155,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // full company bank list as a fallback — same rule everywhere this pattern
   // is used (On-Account dialog, Milestone payments page).
   const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  const { data: scopedPlans = [] } = useQuery({
+    queryKey: ["crm-payment-plans-for-booking", bookingId],
+    queryFn: () => fetchScopedPaymentPlans(booking),
+    enabled: tab === "Payment Plan" && planEditOpen && !!booking,
+  });
   useEffect(() => {
     if (tab === "Payment" && projectBanks.length === 1 && !payForm.DepositBankId) {
       setPayForm((f) => ({ ...f, DepositBankId: String(projectBanks[0].BId) }));
@@ -446,6 +469,37 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  // Locked/read-only by default (auto-fetched from the Application, itself
+  // auto-fetched from the Unit's own default) — this is the deliberate
+  // escape hatch for when the deal genuinely needs a different plan than
+  // what was decided upstream. The backend (crmBookings.js PUT /:id) blocks
+  // the change outright once any real payment has been recorded against the
+  // existing schedule, and regenerates the milestone schedule from scratch
+  // for the new plan otherwise — same rule as every other plan-scope check.
+  const handleSavePaymentPlan = async () => {
+    setPlanSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ PaymentPlanId: planEditValue || null }),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Failed to update payment plan");
+      toast.success(resData.milestonesRegenerated
+        ? "Payment Plan updated — milestone schedule regenerated"
+        : "Payment Plan updated");
+      setPlanEditOpen(false);
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
   // Un-confirm a checklist item — for when a conflict or mistake is spotted
   // after the fact, so staff can re-check rather than being stuck with a
   // Confirm-only, one-way checklist. Also drops the booking out of the Admin
@@ -618,7 +672,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Building2 size={16} className="text-primary" />
@@ -637,7 +691,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 Bank Details, Attachments, Invoice) is supporting detail,
                 not part of the approval path. */}
             {booking.Status !== "Approved" && (
-              <div className="flex items-center gap-1.5 px-1 py-2 text-xs">
+              <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {[
                   { label: "1. Unit & Value", done: !!booking.UnitReviewConfirmed, t: "Booking" as Tab },
                   { label: "2. Payment Plan", done: !!booking.PlanReviewConfirmed, t: "Payment Plan" as Tab },
@@ -645,7 +699,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 ].map((s, i) => (
                   <React.Fragment key={s.label}>
                     <button onClick={() => setTab(s.t)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${
                         s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
                       }`}>
                       {s.done && <Check size={11} />} {s.label}
@@ -653,37 +707,41 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {i < 2 && <ArrowRight size={11} className="text-muted-foreground shrink-0" />}
                   </React.Fragment>
                 ))}
-                <span className="ml-auto text-muted-foreground">
+                <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
                   {mandatoryReady ? "All 3 steps complete — ready to Book" : "Complete all 3 to unlock Book"}
                 </span>
               </div>
             )}
 
-            <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
-              {TABS.map((t) => {
-                const optional = !["Booking", "Payment Plan", "Payment"].includes(t);
-                return (
-                  <button key={t} onClick={() => setTab(t)}
-                    className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                      tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}>
-                    {t}{optional && <span className="text-[10px] text-muted-foreground/70 font-normal"> (optional)</span>}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* ── Tab 1: Main ── */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className={`rounded-lg border px-3 py-2 ${booking.UnitReviewConfirmed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/20 text-muted-foreground"}`}>
-                <CheckCircle2 size={13} className="inline mr-1" /> Unit reviewed
+            {/* Native overflow scrollbars look clunky inside a dialog (thick
+                bar + up/down arrows) — hidden via the webkit/firefox
+                selectors below, with a pair of chevron buttons doing the
+                actual scrolling instead. Buttons always render (rather than
+                only when overflowing) since TABS is a fixed, known-long
+                list — simpler than measuring scrollWidth on every resize. */}
+            <div className="flex items-center gap-0.5 border-b border-border">
+              <button type="button" onClick={() => scrollTabs(-1)}
+                className="shrink-0 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                <ChevronLeft size={16} />
+              </button>
+              <div ref={tabScrollRef}
+                className="flex items-center gap-1 overflow-x-auto scroll-smooth min-w-0 flex-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {TABS.map((t) => {
+                  const optional = !["Booking", "Payment Plan", "Payment"].includes(t);
+                  return (
+                    <button key={t} onClick={() => setTab(t)}
+                      className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0 ${
+                        tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}>
+                      {t}{optional && <span className="text-[10px] text-muted-foreground/70 font-normal"> (optional)</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <div className={`rounded-lg border px-3 py-2 ${booking.PlanReviewConfirmed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/20 text-muted-foreground"}`}>
-                <ClipboardCheck size={13} className="inline mr-1" /> Plan reviewed
-              </div>
-              <div className={`rounded-lg border px-3 py-2 ${bookingAmountPaidInFull ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-                <CreditCard size={13} className="inline mr-1" /> {bookingAmountPaidInFull ? "Booking amount paid" : "Payment pending"}
-              </div>
+              <button type="button" onClick={() => scrollTabs(1)}
+                className="shrink-0 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                <ChevronRight size={16} />
+              </button>
             </div>
 
             {tab === "Booking" && (
@@ -743,16 +801,46 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment Plan" && (
               <div className="space-y-4 pt-2">
-                <div className="rounded-xl border border-border p-3.5 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
-                  {/* Read-only — the plan is decided once, at Unit Master
-                      setup time, and auto-fetched onto the Application when
-                      the unit was selected (or overridden there, if the deal
-                      needed a different one). Not re-selectable here; this
-                      tab is for reviewing/confirming it, not choosing it. */}
-                  <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                    <span className="text-sm text-foreground">{booking.PaymentPlanName || "No plan set — 7-stage default schedule"}</span>
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
+                    {/* Locked by default — auto-fetched from the Application
+                        (itself auto-fetched from the Unit's own default).
+                        "Edit" is the deliberate escape hatch for a genuinely
+                        different plan; blocked server-side once any real
+                        payment exists against the current schedule. */}
+                    {!planEditOpen && canEdit && booking.Status !== "Approved" && (
+                      <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId ? String(booking.PaymentPlanId) : ""); }}
+                        className="text-xs text-primary hover:underline shrink-0">
+                        Edit
+                      </button>
+                    )}
                   </div>
+                  {planEditOpen ? (
+                    <div className="space-y-2">
+                      <select value={planEditValue} onChange={(e) => setPlanEditValue(e.target.value)}
+                        className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                        <option value="">— Use default milestone schedule —</option>
+                        {(scopedPlans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
+                          <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
+                        ))}
+                      </select>
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setPlanEditOpen(false)}
+                          className="px-2.5 py-1 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                          Cancel
+                        </button>
+                        <button onClick={handleSavePaymentPlan} disabled={planSaving}
+                          className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          {planSaving ? "Saving..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <span className="text-sm text-foreground">{booking.PaymentPlanName || "No plan set — 7-stage default schedule"}</span>
+                    </div>
+                  )}
                 </div>
 
                 {booking.Status !== "Approved" && (
@@ -786,7 +874,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 This is the ONLY place money changes hands on a booking. ── */}
             {tab === "Payment" && (
               <div className="space-y-3 pt-2">
-                <div className="rounded-xl border border-border p-3.5 space-y-2">
+                <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-primary" /> Booking Amount</h3>
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
@@ -811,7 +899,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
 
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
-                  <div className="rounded-xl border border-border p-3.5 space-y-2">
+                  <div className="rounded-xl border border-border p-4 space-y-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Record Payment</h3>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount (balance ${fmt(bookingAmountBalance)})`} value={payForm.Amount}
@@ -860,7 +948,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Bank Details" && (
               <div className="space-y-4 pt-2">
                 {customer && (
-                  <div className="rounded-xl border border-border p-3.5">
+                  <div className="rounded-xl border border-border p-4">
                     <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><IdCard size={13} /> Customer</h3>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                       <div><span className="text-muted-foreground block">Name</span><span className="font-medium">{customer.CustomerName}</span></div>
@@ -876,7 +964,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     table), not CrmCustomer's intake-time fields — this is the
                     authoritative list once a booking exists, same source Welcome
                     Call's checklist uses, so the two never disagree. */}
-                <div className="rounded-xl border border-border p-3.5">
+                <div className="rounded-xl border border-border p-4">
                   <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Users2 size={13} /> Co-Applicants</h3>
                   {(data?.coApplicants || []).length > 0 ? (
                     <div className="space-y-1.5">
@@ -893,7 +981,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   )}
                 </div>
 
-                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                <div className="rounded-xl border border-border p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} /> Bank / KYC / Nominee Details</h3>
                     {canEdit && (
@@ -938,7 +1026,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Parking & Extra Work" && (
               <div className="space-y-4 pt-2">
-                <div className="rounded-xl border border-border p-3.5">
+                <div className="rounded-xl border border-border p-4">
                   <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Building2 size={13} /> Booking</h3>
                   <div className="grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
                     <div><span className="text-muted-foreground block">Unit</span><span className="font-medium">{booking.UnitNo || "—"}</span></div>
@@ -996,7 +1084,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Parking & Extra Charges — allot/remove directly here, not a
                     separate hidden dialog, so the numbers above and the
                     line items behind them live in the same place. */}
-                <div className="rounded-xl border border-border p-3.5 space-y-3">
+                <div className="rounded-xl border border-border p-4 space-y-3">
                   <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><Car size={13} /> Parking Allotment</h3>
                   {(parking as any[]).length > 0 && (
                     <div className="rounded-lg border border-border overflow-hidden">
@@ -1122,7 +1210,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
 
                 {invoices.length > 0 && (
-                  <div className="rounded-xl border border-border p-3.5">
+                  <div className="rounded-xl border border-border p-4">
                     <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><FileText size={13} /> Invoices</h3>
                     <div className="space-y-1.5">
                       {invoices.map((inv: any) => (

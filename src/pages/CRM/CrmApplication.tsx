@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -64,6 +65,10 @@ async function fetchApps(): Promise<any[]> {
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
+}
+async function fetchAppDetail(id: number): Promise<any> {
+  const r = await fetchWithAuth(`${API}/${id}`);
+  return r.ok ? r.json() : null;
 }
 
 const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
@@ -158,6 +163,7 @@ const CrmApplication: React.FC = () => {
   const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [viewingAppId, setViewingAppId] = useState<number | null>(null);
   const saveBankDetailsRef = useRef<null | (() => Promise<void>)>(null);
 
   // Every real payment now invoices itself automatically (see crmPayments.js
@@ -188,6 +194,11 @@ const CrmApplication: React.FC = () => {
   }, [invoiceRow?.BookingId]);
 
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
+  const { data: viewingAppDetail } = useQuery({
+    queryKey: ["crm-app-detail", viewingAppId],
+    queryFn: () => fetchAppDetail(viewingAppId as number),
+    enabled: !!viewingAppId,
+  });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
@@ -250,6 +261,19 @@ const CrmApplication: React.FC = () => {
       return true;
     });
   }, [paymentPlans, form.CompanyId, form.ProjectId, form.BlockId, form.PreferredUnitId]);
+  // Broader fallback for the "this unit was never given a default plan"
+  // case — every plan that applies to the Project (ignoring any Block/Unit-
+  // level narrowing a plan might carry), since the whole point here is
+  // giving staff a genuine choice rather than an empty/near-empty dropdown
+  // just because Unit Master setup was left incomplete for this one unit.
+  const projectPaymentPlans = useMemo(() => {
+    return (paymentPlans as any[]).filter((p: any) => {
+      if (!p.IsActive) return false;
+      if (p.CompanyId && String(p.CompanyId) !== form.CompanyId) return false;
+      if (p.Projects?.length && !p.Projects.some((x: any) => String(x.Id) === form.ProjectId)) return false;
+      return true;
+    });
+  }, [paymentPlans, form.CompanyId, form.ProjectId]);
 
   // Resume is only meaningful for a genuinely incomplete application — and
   // Status='Draft' is now that exact, authoritative signal (Step 1 of the
@@ -261,7 +285,7 @@ const CrmApplication: React.FC = () => {
   // incorrectly show Resume, while other field combinations could just as
   // easily fail to show it on a genuinely incomplete one. Status is the
   // real answer; stop guessing.
-  const isResumeEditable = (app: any) => !!app && app.Status === "Draft";
+  const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -571,33 +595,82 @@ const CrmApplication: React.FC = () => {
     }
   };
 
+  // The single place a Booking is ever created from — this Application's
+  // own row, once it's Approved and (per Stage) doesn't have one yet. Same
+  // fields Approval's own auto-booking passes to createCrmBookingRecord
+  // (see crmApplications.js PUT /:id/approve); this exists as the retry for
+  // when that auto-create silently failed (e.g. a stale hold conflict) —
+  // there is no separate "New Booking" form anywhere else in the app.
+  const [creatingBookingId, setCreatingBookingId] = useState<number | null>(null);
+  const handleCreateBooking = async (a: any) => {
+    if (!a.PreferredUnitId) {
+      toast.error("This application has no unit selected — edit it and pick a unit before a booking can be created");
+      return;
+    }
+    setCreatingBookingId(a.Id);
+    try {
+      const res = await fetchWithAuth("/api/crm/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ApplicationId: a.Id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
+          PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
+          TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
+          AssignedTo: a.AssignedTo, Notes: a.Notes,
+          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create booking");
+      toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setCreatingBookingId(null);
+    }
+  };
+
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+          {i.getValue() as string}
+        </span>
+      ) },
     { accessorKey: "ApplicantName", header: "Applicant", size: 160,
       cell: (i) => (
-        <div>
+        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
           {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "Mobile", header: "Mobile", size: 110,
+      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
     { accessorKey: "BookingNo", header: "Booking", size: 140,
       cell: (i) => (
-        <div>
+        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200">{i.row.original.BookingStatus}</span>
         </div>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 140, enableSorting: false,
-      cell: (i) => <span className="text-xs">{[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
+          {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
+        </span>
+      ) },
     { accessorKey: "BookingTotalValue", header: "Value", size: 110,
       cell: (i) => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
-        return <span className="text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
+        return <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
     { accessorKey: "BookingDate", header: "Booked On", size: 110,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+          {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
+        </span>
+      ) },
     { id: "actions", header: "", size: 180, enableSorting: false,
       cell: (i) => (
         <div className="flex items-center gap-3 flex-wrap">
@@ -617,20 +690,29 @@ const CrmApplication: React.FC = () => {
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+          {i.getValue() as string}
+        </span>
+      ) },
     { accessorKey: "ApplicantName", header: "Applicant", size: 150,
       cell: (i) => (
-        <div>
+        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
           {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 100, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
+    { accessorKey: "Mobile", header: "Mobile", size: 100,
+      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
     { id: "interestedProject", header: "Interested Project", size: 140, enableSorting: false,
-      cell: (i) => <span>{[i.row.original.InterestedProject, i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" · ") || "—"}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
+          {[i.row.original.InterestedProject, i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" · ") || "—"}
+        </span>
+      ) },
     { accessorKey: "Source", header: "Source", size: 130,
       cell: (i) => (
-        <div className="text-xs">
+        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
           <div className="text-muted-foreground">
             {[i.row.original.PlatformName, i.row.original.CampaignName, i.row.original.AdName].filter(Boolean).join(" › ") || i.row.original.ChannelPartnerName || ""}
@@ -638,12 +720,17 @@ const CrmApplication: React.FC = () => {
         </div>
       ) },
     { accessorKey: "RatePerSqFt", header: "Rate", size: 100,
-      cell: (i) => <span className="text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110, cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
+    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
+      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "CreatedAt", header: "Date", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</span> },
+      cell: (i) => (
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+          {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
+        </span>
+      ) },
     { id: "actions", header: "", size: 210, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
@@ -673,6 +760,19 @@ const CrmApplication: React.FC = () => {
                 />
                 {a.Status === "Pending" && (
                   <span className="text-xs text-muted-foreground">Pending admin approval</span>
+                )}
+                {/* Approval auto-creates the Booking; this only ever shows up
+                    when that auto-create didn't happen (e.g. a unit-hold
+                    conflict at the time) — the sole retry path, no separate
+                    "New Booking" form exists anywhere else. */}
+                {a.Status === "Approved" && (
+                  <button
+                    onClick={() => handleCreateBooking(a)}
+                    disabled={creatingBookingId === a.Id}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                  >
+                    <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
+                  </button>
                 )}
               </>
             ) : (
@@ -762,7 +862,7 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">
               New CRM Application {applicationNo ? `— ${applicationNo}` : ""}
@@ -906,13 +1006,13 @@ const CrmApplication: React.FC = () => {
                     ) : (
                       <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
                         <option value="">— Use default milestone schedule —</option>
-                        {applicablePaymentPlans.map((p: any) => (
+                        {(selectedUnit?.DefaultPaymentPlanId ? applicablePaymentPlans : projectPaymentPlans).map((p: any) => (
                           <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
                         ))}
                       </select>
                     )}
                     {!selectedUnit?.DefaultPaymentPlanId && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no default plan set in Unit Master — select one, or leave blank for the default 7-stage split.</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no default plan set in Unit Master — select any plan available for this project below, or leave blank for the default 7-stage split.</p>
                     )}
                   </div>
                 )}
@@ -1234,6 +1334,150 @@ const CrmApplication: React.FC = () => {
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {invoiceSaving ? "Generating..." : "Generate Invoice"}
             </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Application detail — opened by clicking any row, in every stage
+          tab (In Process/Converted/Not Converted). Read-only summary; the
+          actions that actually change something (Resume, Approve/Reject,
+          View Booking, Generate Invoice) stay on the row itself, not here. ── */}
+      <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) setViewingAppId(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              {viewingAppDetail ? (
+                <>
+                  <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
+                  <span>— {viewingAppDetail.application.ApplicantName}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
+                    {viewingAppDetail.application.Status}
+                  </span>
+                </>
+              ) : "Application Details"}
+            </DialogTitle>
+          </DialogHeader>
+          {!viewingAppDetail ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
+          ) : (() => {
+            const a = viewingAppDetail.application;
+            const booking = (viewingAppDetail.bookings || [])[0];
+            return (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><User size={14} className="text-primary" /> Applicant</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div className="flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" /> {a.Mobile}{a.AltMobile ? ` / ${a.AltMobile}` : ""}</div>
+                    <div className="flex items-center gap-1.5"><Mail size={12} className="text-muted-foreground" /> {a.Email || "—"}</div>
+                    <div className="flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" /> PAN: {a.PanNo || "—"}</div>
+                    <div className="flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" /> {a.CustomerNo || "—"}</div>
+                    <div className="col-span-2 flex items-start gap-1.5"><MapPin size={12} className="text-muted-foreground mt-0.5" />
+                      {[a.CustomerAddress, a.CustomerCity, a.CustomerState, a.CustomerPincode].filter(Boolean).join(", ") || "—"}
+                    </div>
+                  </div>
+                  {a.CoApplicantName && (
+                    <div className="pt-2 border-t border-border flex items-center gap-1.5 text-xs">
+                      <Users2 size={12} className="text-muted-foreground" />
+                      <span className="font-medium">{a.CoApplicantName}</span>
+                      {a.CoApplicantRelation && <span className="text-muted-foreground">({a.CoApplicantRelation})</span>}
+                      {a.CoApplicantMobile && <span className="text-muted-foreground">— {a.CoApplicantMobile}</span>}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Building2 size={14} className="text-primary" /> Project & Unit</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div><span className="text-muted-foreground">Company:</span> {a.CompanyName || "—"}</div>
+                    <div><span className="text-muted-foreground">Project:</span> {a.ProjectMasterName || a.InterestedProject || "—"}</div>
+                    <div><span className="text-muted-foreground">Preferred Unit:</span> {a.PreferredUnitName || a.InterestedUnit || "—"}</div>
+                    <div><span className="text-muted-foreground">Type:</span> {[a.PropertyType, a.BhkPreference].filter(Boolean).join(" · ") || "—"}</div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Financials</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div><span className="text-muted-foreground">Rate/sqft:</span> {a.RatePerSqFt ? `₹${Number(a.RatePerSqFt).toLocaleString("en-IN")}` : "—"}</div>
+                    <div><span className="text-muted-foreground">Payment Plan:</span> {a.PaymentPlanName || "Default 7-stage split"}</div>
+                    <div><span className="text-muted-foreground">Token:</span> {a.TokenValue != null ? `${a.TokenValue}${a.TokenType === "Percentage" ? "%" : " ₹"}` : "—"}</div>
+                    <div><span className="text-muted-foreground">Booking Amount:</span> {a.BookingAmount != null ? `₹${Number(a.BookingAmount).toLocaleString("en-IN")}` : "—"}</div>
+                  </div>
+                  {a.BrokerName && (
+                    <div className="pt-2 border-t border-border text-xs">
+                      <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Briefcase size={14} className="text-primary" /> Source & Assignment</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div><span className="text-muted-foreground">Source:</span> {a.Source || "—"}</div>
+                    <div><span className="text-muted-foreground">Assigned To:</span> {a.AssigneeName || "—"}</div>
+                    <div className="col-span-2 text-muted-foreground">
+                      {[a.PlatformName, a.CampaignName, a.AdName].filter(Boolean).join(" › ") || a.ChannelPartnerName || ""}
+                    </div>
+                  </div>
+                </div>
+
+                {booking && (
+                  <div className="rounded-xl border border-border p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Linked Booking</h3>
+                      <button onClick={() => { setViewingAppId(null); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
+                        className="text-xs text-primary hover:underline flex items-center gap-1">
+                        View Booking <ChevronRight size={12} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <div><span className="text-muted-foreground">Booking No:</span> {booking.BookingNo}</div>
+                      <div><span className="text-muted-foreground">Status:</span> {booking.Status}</div>
+                      <div><span className="text-muted-foreground">Unit:</span> {[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ") || "—"}</div>
+                      <div><span className="text-muted-foreground">Value:</span> {booking.TotalValue ? `₹${Number(booking.TotalValue).toLocaleString("en-IN")}` : "—"}</div>
+                    </div>
+                  </div>
+                )}
+
+                {a.Notes && (
+                  <div className="rounded-xl border border-border p-4 space-y-1">
+                    <h3 className="text-sm font-semibold">Notes</h3>
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">{a.Notes}</p>
+                  </div>
+                )}
+
+                {(viewingAppDetail.statusLog || []).length > 0 && (
+                  <div className="rounded-xl border border-border p-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><History size={14} className="text-primary" /> Status History</h3>
+                    <div className="space-y-1.5">
+                      {viewingAppDetail.statusLog.map((s: any) => (
+                        <div key={s.Id} className="flex items-center justify-between text-xs">
+                          <span>
+                            <span className="font-medium">{s.FromStatus ? `${s.FromStatus} → ${s.ToStatus}` : s.ToStatus}</span>
+                            {s.ActorName && <span className="text-muted-foreground"> by {s.ActorName}</span>}
+                          </span>
+                          <span className="text-muted-foreground">{s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => setViewingAppId(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+              Close
+            </button>
+            {viewingAppDetail && isResumeEditable(viewingAppDetail.application) && (
+              <button
+                onClick={() => { const id = viewingAppDetail.application.Id; setViewingAppId(null); loadApplicationIntoWizard(id); }}
+                disabled={loadingApplication}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
+              >
+                {loadingApplication ? "Loading..." : "Resume"}
+              </button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

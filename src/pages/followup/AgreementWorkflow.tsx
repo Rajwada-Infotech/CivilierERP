@@ -731,7 +731,7 @@ export default function AgreementWorkflowPage() {
 
       {/* ── Desktop table (hidden below md) ── */}
       <div className="hidden md:block border border-border rounded-xl overflow-hidden bg-card">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto thin-scroll">
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="bg-muted border-b border-border">
