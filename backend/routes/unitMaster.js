@@ -10,6 +10,34 @@ const { getPool, sql } = require("../db");
 
 bumpCacheVersion("unit-master").catch(() => {});
 
+// Shared lock check — mirrors the exact Booked/OnHold definitions used by
+// unitMatrix.js, so "locked" here always matches what the matrix displays.
+// A unit is locked (cannot be edited or deleted) if it has:
+//   - a live, non-cancelled/non-rejected booking ("Booked" / "Bought"), or
+//   - an active, unexpired inventory hold ("OnHold")
+// Returns a short reason string if locked, or null if the unit is free to
+// edit/delete.
+async function getUnitLockReason(pool, id) {
+  const result = await pool
+    .request()
+    .input("Id", sql.Int, id)
+    .query(`
+      SELECT TOP 1
+        bk.BookingNo,
+        h.Id AS HoldId
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.CrmBooking bk
+        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+      LEFT JOIN dbo.CrmInventoryHold h
+        ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      WHERE u.Id = @Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
+    `);
+  if (!result.recordset.length) return null;
+  const row = result.recordset[0];
+  if (row.BookingNo) return `has an active booking (${row.BookingNo})`;
+  return "is currently on hold";
+}
+
 // GET all units — ?isActive=1 filters out soft-deleted units (used by unit
 // pickers like CrmBooking's; the Unit Master admin grid itself omits this
 // param so it can still see/reactivate deactivated units).
@@ -33,11 +61,17 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.CreatedAt,
         u.UpdatedAt,
         u.DefaultPaymentPlanId,
-        pp.PlanName AS DefaultPaymentPlanName
+        pp.PlanName AS DefaultPaymentPlanName,
+        bk.BookingNo AS LockBookingNo,
+        h.Id AS LockHoldId
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise  ep ON ep.id = u.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = u.BlockId
       LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = u.DefaultPaymentPlanId
+      LEFT JOIN dbo.CrmBooking bk
+        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+      LEFT JOIN dbo.CrmInventoryHold h
+        ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName
     `);
@@ -97,6 +131,53 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
   const userName = req.user?.name || req.user?.email || null;
   try {
     const pool = getPool();
+
+    // Guard against duplicate units. Without this, deleting (soft-deleting)
+    // a unit and later re-adding one with the same Project+Block+UnitName
+    // creates a second row instead of reactivating the original — leaving
+    // one active row and one dangling inactive duplicate, both with the
+    // same name (this is how the current duplicates got created).
+    const dupe = await pool
+      .request()
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockId", sql.Int, parseInt(BlockId))
+      .input("UnitName", sql.NVarChar(100), UnitName)
+      .query(`
+        SELECT Id, IsActive FROM dbo.UnitMaster
+        WHERE ProjectId = @ProjectId AND BlockId = @BlockId AND UnitName = @UnitName
+      `);
+
+    if (dupe.recordset.length) {
+      const existing = dupe.recordset[0];
+      if (existing.IsActive) {
+        return res.status(409).json({ error: `Unit "${UnitName}" already exists in this Block.` });
+      }
+      // A soft-deleted unit with this exact name already exists — reactivate
+      // and update it instead of inserting a duplicate row.
+      await pool
+        .request()
+        .input("Id", sql.Int, existing.Id)
+        .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
+        .input("UnitType", sql.NVarChar(50), UnitType || null)
+        .input("Area", sql.Decimal(18, 2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
+        .input("PlanId", sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
+        .input("UpdatedBy", sql.Int, createdBy)
+        .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
+          UPDATE dbo.UnitMaster SET
+            FloorNo = @FloorNo,
+            UnitType = @UnitType,
+            AreaSqFt = @Area,
+            DefaultPaymentPlanId = @PlanId,
+            IsActive = 1,
+            UpdatedBy = @UpdatedBy,
+            UpdatedAt = @UpdatedAt
+          WHERE Id = @Id
+        `);
+      await bumpCacheVersion("unit-master");
+      logAudit({ module: "UnitMaster", recordId: existing.Id, recordNo: UnitName, action: "Reactivated", changedBy: userName });
+      return res.json({ message: "Unit reactivated successfully" });
+    }
+
     const result = await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
@@ -130,6 +211,34 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
   const userName = req.user?.name || req.user?.email || null;
   try {
     const pool = getPool();
+
+    // Same duplicate guard as POST — prevent editing a unit's name/block
+    // into a collision with another existing row.
+    const dupe = await pool
+      .request()
+      .input("Id", sql.Int, parseInt(id))
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockId", sql.Int, parseInt(BlockId))
+      .input("UnitName", sql.NVarChar(100), UnitName)
+      .query(`
+        SELECT Id FROM dbo.UnitMaster
+        WHERE ProjectId = @ProjectId AND BlockId = @BlockId AND UnitName = @UnitName AND Id <> @Id
+      `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({ error: `Unit "${UnitName}" already exists in this Block.` });
+    }
+
+    // A Booked or OnHold unit can never be edited — not just deactivated.
+    // Locking down every field, not only IsActive, since letting staff
+    // silently change a sold unit's block/name/area/etc. underneath a live
+    // booking is exactly the kind of drift that caused the A1-1001 mess.
+    const lockReason = await getUnitLockReason(pool, parseInt(id));
+    if (lockReason) {
+      return res.status(409).json({
+        error: `Unit "${UnitName}" ${lockReason} and cannot be edited. Cancel/release the booking or hold first.`,
+      });
+    }
+
     await pool
       .request()
       .input("Id",        sql.Int, parseInt(id))
@@ -174,6 +283,12 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
 // deactivation. Bookings themselves are unaffected either way since
 // CrmBooking snapshots UnitNo/BlockName/UnitType/AreaSqFt onto its own row
 // at creation time rather than re-joining UnitMaster live.
+//
+// Refuses to delete/deactivate a Booked or OnHold unit (see getUnitLockReason
+// above) — deactivating a booked unit makes it read as "Blocked" instead of
+// "Booked" in the unit matrix, which is what happened to A1-1001 and is the
+// most likely reason it got recreated as a duplicate row rather than the
+// underlying problem being noticed and fixed.
 router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -189,6 +304,14 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
     if (!existing.recordset.length)
       return res.status(404).json({ error: "Unit not found" });
     const { UnitName } = existing.recordset[0];
+
+    const lockReason = await getUnitLockReason(pool, id);
+    if (lockReason) {
+      return res.status(409).json({
+        error: `Unit "${UnitName}" ${lockReason} and cannot be deleted. Cancel/release the booking or hold first.`,
+      });
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, id)
@@ -205,6 +328,3 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
 });
 
 module.exports = router;
-
-
-

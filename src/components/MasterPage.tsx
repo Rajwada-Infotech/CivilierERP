@@ -158,6 +158,14 @@ interface MasterPageProps {
   canEdit?: boolean;
   canDelete?: boolean;
   canExport?: boolean;
+  /**
+   * Optional per-row lock check. Return a short reason string to disable
+   * that row's Edit and Delete buttons (shown as a tooltip on a lock icon
+   * in place of the normal action), or null/undefined to leave the row
+   * unlocked. Omit entirely for pages with no row-level locking — existing
+   * behavior is unchanged when this prop isn't passed.
+   */
+  isRowLocked?: (row: RecordWithId) => string | null | undefined;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -201,6 +209,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   canEdit = true,
   canDelete = true,
   canExport = true,
+  isRowLocked,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -385,7 +394,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const handleEdit = (id: string) => {
     const row = data.find((r) => r._id === id);
     if (!row) return;
-    setForm({ ...row });
+    // Re-apply externalFormPatch (e.g. __blocks/__paymentPlans) on top of the
+    // row data. Without this, entering edit mode replaces the whole form
+    // with just the row's own fields, wiping out any lookup data a page
+    // injected via externalFormPatch — which is only ever applied once, on
+    // mount, via a separate effect keyed on externalFormPatchKey. That left
+    // any optionsProvider depending on it (e.g. Block filtered by Project)
+    // with nothing to read and rendering as an empty "Select..." dropdown
+    // as soon as Edit was clicked.
+    setForm({ ...row, ...(externalFormPatch ?? {}) });
     setEditingId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -761,7 +778,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  sorted.map((row) => (
+                  sorted.map((row) => {
+                    const lockReason = isRowLocked?.(row) || null;
+                    return (
                     <tr
                       key={row._id}
                       className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
@@ -837,29 +856,50 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               )}
                               {rowActions?.(row, data)}
                               {canEdit && (
-                              <button
-                                onClick={() => handleEdit(row._id)}
-                                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
-                                title="Edit"
-                              >
-                                <Edit2 size={13} />
-                              </button>
+                                lockReason ? (
+                                  <button
+                                    disabled
+                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    title={lockReason}
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleEdit(row._id)}
+                                    className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                )
                               )}
                               {canDelete && (
-                              <button
-                                onClick={() => setDeleteConfirmId(row._id)}
-                                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                                lockReason ? (
+                                  <button
+                                    disabled
+                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    title={lockReason}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setDeleteConfirmId(row._id)}
+                                    className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )
                               )}
                             </>
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
