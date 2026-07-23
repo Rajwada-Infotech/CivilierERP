@@ -258,39 +258,35 @@ const UnitMaster: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to add unit");
-        toast.success("Unit added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to update unit");
-        toast.success("Unit updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "DELETE",
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to delete unit");
-        toast.success("Unit deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to add unit");
+      toast.success("Unit added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to update unit");
+      toast.success("Unit updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to delete unit");
+      toast.success("Unit deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
 
   if (isLoading)
