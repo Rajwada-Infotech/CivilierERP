@@ -47,7 +47,7 @@ const CrmPaymentPlans: React.FC = () => {
   const [planName, setPlanName] = useState("");
   const [description, setDescription] = useState("");
   const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [blockId, setBlockId] = useState("");
   const [unitId, setUnitId] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
@@ -68,21 +68,26 @@ const CrmPaymentPlans: React.FC = () => {
     return (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId);
   }, [projects, companyId]);
   const blocksForProject = useMemo(() => {
-    if (!projectId) return blocks as any[];
-    return (blocks as any[]).filter((b: any) => String(b.ProjectId) === projectId);
-  }, [blocks, projectId]);
+    if (!projectIds.length) return blocks as any[];
+    return (blocks as any[]).filter((b: any) => projectIds.includes(String(b.ProjectId)));
+  }, [blocks, projectIds]);
   const unitsForBlock = useMemo(() => {
     let list = units as any[];
-    if (projectId) list = list.filter((u: any) => String(u.ProjectId) === projectId);
+    if (projectIds.length) list = list.filter((u: any) => projectIds.includes(String(u.ProjectId)));
     if (blockId) list = list.filter((u: any) => String(u.BlockId) === blockId);
     return list;
-  }, [units, projectId, blockId]);
+  }, [units, projectIds, blockId]);
 
   const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
+  const toggleProject = (id: string) => {
+    setProjectIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]);
+    setBlockId(""); setUnitId("");
+  };
+
   const resetForm = () => {
     setEditingId(null);
-    setPlanName(""); setDescription(""); setCompanyId(""); setProjectId(""); setBlockId(""); setUnitId("");
+    setPlanName(""); setDescription(""); setCompanyId(""); setProjectIds([]); setBlockId(""); setUnitId("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
     setLocked(false);
   };
@@ -96,7 +101,7 @@ const CrmPaymentPlans: React.FC = () => {
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
     setCompanyId(plan.CompanyId ? String(plan.CompanyId) : "");
-    setProjectId(plan.ProjectId ? String(plan.ProjectId) : "");
+    setProjectIds((plan.Projects || []).map((p: any) => String(p.Id)));
     setBlockId(plan.BlockId ? String(plan.BlockId) : "");
     setUnitId(plan.UnitId ? String(plan.UnitId) : "");
     setItems(
@@ -121,7 +126,7 @@ const CrmPaymentPlans: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlanName: planName, Description: description, Items: items,
-          CompanyId: companyId || null, ProjectId: projectId || null, BlockId: blockId || null, UnitId: unitId || null,
+          CompanyId: companyId || null, ProjectIds: projectIds.map(Number), BlockId: blockId || null, UnitId: unitId || null,
         }),
       });
       const data = await res.json();
@@ -176,11 +181,11 @@ const CrmPaymentPlans: React.FC = () => {
             </div>
             <p className="text-xs text-muted-foreground mb-2">{p.Description || "—"}</p>
             <div className="flex items-center gap-1.5 text-xs mb-2">
-              {!p.CompanyId && !p.ProjectId && !p.BlockId && !p.UnitId ? (
+              {!p.CompanyId && !(p.Projects && p.Projects.length) && !p.BlockId && !p.UnitId ? (
                 <span className="px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-600 flex items-center gap-1"><Layers size={10} /> Global default</span>
               ) : (
                 <span className="px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-600 flex items-center gap-1">
-                  <Building2 size={10} /> {[p.CompanyName, p.ProjectName, p.BlockName, p.UnitName].filter(Boolean).join(" · ")}
+                  <Building2 size={10} /> {[p.CompanyName, (p.Projects || []).map((x: any) => x.Name).join(", "), p.BlockName, p.UnitName].filter(Boolean).join(" · ")}
                 </span>
               )}
             </div>
@@ -222,15 +227,10 @@ const CrmPaymentPlans: React.FC = () => {
             <div className="rounded-lg border border-border p-3 space-y-2">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} /> Scope (leave blank for a global default plan)</label>
               <div className="grid grid-cols-2 gap-2">
-                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); setBlockId(""); setUnitId(""); }}
+                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectIds([]); setBlockId(""); setUnitId(""); }}
                   className={inputCls}>
                   <option value="">Any company</option>
                   {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
-                </select>
-                <select value={projectId} disabled={locked} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); setUnitId(""); }}
-                  className={inputCls}>
-                  <option value="">Any project</option>
-                  {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
                 </select>
                 <select value={blockId} disabled={locked} onChange={(e) => { setBlockId(e.target.value); setUnitId(""); }}
                   className={inputCls}>
@@ -238,10 +238,30 @@ const CrmPaymentPlans: React.FC = () => {
                   {(blocksForProject as any[]).map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
                 </select>
                 <select value={unitId} disabled={locked} onChange={(e) => setUnitId(e.target.value)}
-                  className={inputCls}>
+                  className={`col-span-2 ${inputCls}`}>
                   <option value="">Any unit</option>
                   {(unitsForBlock as any[]).map((u: any) => <option key={u.Id} value={String(u.Id)}>{u.UnitName}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Projects — leave all unchecked for any project, or pick multiple to share this plan across them
+                </label>
+                <div className={`flex flex-wrap gap-1.5 border border-border rounded px-2 py-1.5 max-h-32 overflow-y-auto ${locked ? "opacity-70" : ""}`}>
+                  {(projectsForCompany as any[]).length === 0 ? (
+                    <span className="text-xs text-muted-foreground py-0.5">No projects available</span>
+                  ) : (projectsForCompany as any[]).map((p: any) => {
+                    const checked = projectIds.includes(String(p.Id));
+                    return (
+                      <label key={p.Id}
+                        className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border cursor-pointer ${checked ? "border-primary bg-primary/10 text-primary" : "border-border"} ${locked ? "pointer-events-none" : ""}`}>
+                        <input type="checkbox" checked={checked} disabled={locked}
+                          onChange={() => toggleProject(String(p.Id))} className="accent-primary" />
+                        {p.Name}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 

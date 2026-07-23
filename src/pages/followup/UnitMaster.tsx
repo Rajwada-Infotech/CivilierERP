@@ -88,7 +88,7 @@ const fields: FieldDef[] = [
       const blockId = form?.blockId as string | undefined;
       return plans
         .filter((p) => p.IsActive)
-        .filter((p) => !p.ProjectId || String(p.ProjectId) === projectId)
+        .filter((p) => !p.Projects?.length || p.Projects.some((x: any) => String(x.Id) === projectId))
         .filter((p) => !p.BlockId || String(p.BlockId) === blockId)
         .filter((p) => !p.UnitId || String(p.UnitId) === currentId)
         .map((p) => ({ value: String(p.Id), label: p.PlanName }));
@@ -111,7 +111,7 @@ const fields: FieldDef[] = [
       }
       const plans: any[] = (formData?.__paymentPlans as any) ?? [];
       const hasMatch = plans.some((p) =>
-        p.IsActive && (!p.ProjectId || String(p.ProjectId) === projectId) && (!p.BlockId || String(p.BlockId) === blockId)
+        p.IsActive && (!p.Projects?.length || p.Projects.some((x: any) => String(x.Id) === projectId)) && (!p.BlockId || String(p.BlockId) === blockId)
       );
       if (hasMatch) return null;
       return (
