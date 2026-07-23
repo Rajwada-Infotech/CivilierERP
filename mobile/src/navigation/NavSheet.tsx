@@ -33,6 +33,7 @@ import type { MainStackParamList } from "./MainStack";
 // no entry, so the chip just switches the nav tree below instead.
 const MODULE_ROUTES: Partial<Record<string, keyof MainStackParamList>> = {
   finance: "FinanceDashboard",
+  material: "MaterialDashboard",
 };
 
 type NavLeaf = { kind: "leaf"; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; nav?: keyof MainStackParamList };
@@ -49,7 +50,7 @@ type NavTree = Array<NavLeaf | NavGroup>;
 // group). "Finance Dashboard" navigates for real; every other leaf alerts.
 const FINANCE_NAV_TREE: NavTree = [
   { kind: "leaf", label: "Finance Dashboard", icon: LayoutDashboard, nav: "FinanceDashboard" },
-  { kind: "leaf", label: "Contract", icon: FileText },
+  { kind: "leaf", label: "Contract", icon: FileText, nav: "Contract" },
   {
     kind: "group",
     label: "Transaction",
@@ -62,19 +63,19 @@ const FINANCE_NAV_TREE: NavTree = [
       { label: "BRS", icon: BookOpen, nav: "Brs" },
     ],
   },
-  { kind: "leaf", label: "Journal Voucher", icon: BookText },
+  { kind: "leaf", label: "Journal Voucher", icon: BookText, nav: "JournalVoucher" },
   {
     kind: "group",
     label: "Query",
     icon: Search,
-    children: [{ label: "Trial Balance", icon: Scale }],
+    children: [{ label: "Trial Balance", icon: Scale, nav: "TrialBalance" }],
   },
 ];
 
 // RN port of materialNavItems (MaterialSidebar.ts) — same tree, same order.
 // No mobile screen exists yet for any of these, so every leaf alerts.
 const MATERIAL_NAV_TREE: NavTree = [
-  { kind: "leaf", label: "Material Dashboard", icon: LayoutDashboard },
+  { kind: "leaf", label: "Material Dashboard", icon: LayoutDashboard, nav: "MaterialDashboard" },
   {
     kind: "group",
     label: "Transaction",
@@ -123,12 +124,14 @@ export function NavSheet() {
   }, []);
 
   // Pulsing glow behind the FAB — RN port of the web trigger's
-  // `animate-pulse` blurred halo (MobileNav.tsx).
+  // `animate-pulse` blurred halo (MobileNav.tsx). Symmetric out/in ease
+  // instead of the old "grow then snap back to 0 instantly" — the instant
+  // reset was a visible flash at the end of every cycle.
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1400, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 1000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.in(Easing.ease), useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -137,10 +140,21 @@ export function NavSheet() {
 
   const openSheet = () => {
     setOpen(true);
-    Animated.timing(slide, { toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    // Spring, not timing — a fixed-duration ease always looks slightly
+    // mechanical for a sheet the user just summoned; a light spring settles
+    // with a touch of natural overshoot, closer to how iOS/Android's own
+    // sheets move.
+    Animated.spring(slide, {
+      toValue: 1,
+      useNativeDriver: true,
+      bounciness: 6,
+      speed: 16,
+    }).start();
   };
   const closeSheet = () => {
-    Animated.timing(slide, { toValue: 0, duration: 200, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => setOpen(false));
+    // Closing stays a plain ease-in timing (no bounce) — a spring overshoot
+    // on the way OUT would read as the sheet "coming back", not dismissing.
+    Animated.timing(slide, { toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => setOpen(false));
   };
 
   const go = (name: keyof MainStackParamList) => {
@@ -198,13 +212,19 @@ export function NavSheet() {
             }}
           >
             <Grip size={16} color="#fff" />
-            <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>Menu</Text>
+            <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>Module</Text>
           </View>
         </Pressable>
       </View>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={closeSheet}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={closeSheet}>
+      {/* animationType="none" — the Modal's own built-in fade used to run
+          alongside our `slide`-driven translate/opacity, two independent
+          animations racing each other on every open/close. Now `slide` is
+          the single source of truth for both the backdrop dim and the
+          sheet's motion, so they move in lockstep. */}
+      <Modal visible={open} transparent animationType="none" onRequestClose={closeSheet}>
+        <Animated.View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", opacity: slide }}>
+          <Pressable style={{ flex: 1 }} onPress={closeSheet} />
           <Animated.View
             style={{
               position: "absolute",
@@ -279,7 +299,13 @@ export function NavSheet() {
               {visibleModules.length > 0 && (
                 <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingBottom: 12, gap: 8 }}>
                   {visibleModules.map((m) => {
-                    const isActive = activeRoute === MODULE_ROUTES[m.id];
+                    // Single source of truth: whichever module's tree is
+                    // selected. Mixing this with a route check (finance)
+                    // let both chips light up at once — the moment you
+                    // switched to Material without navigating anywhere,
+                    // activeRoute was still "FinanceDashboard" from before,
+                    // so Finance stayed lit too.
+                    const isActive = activeModuleId === m.id;
                     return (
                       <Pressable
                         key={m.id}
@@ -343,7 +369,7 @@ export function NavSheet() {
                         style={{ backgroundColor: isExpanded ? `${colors.muted}80` : "transparent", borderWidth: 1, borderColor: isExpanded ? colors.border : "transparent" }}
                       >
                         <item.icon size={16} color={colors.mutedForeground} />
-                        <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium, flex: 1 }}>{item.label}</Text>
+                        <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.bold, flex: 1 }}>{item.label}</Text>
                         <ChevronRight
                           size={14}
                           color={colors.mutedForeground}
@@ -373,7 +399,7 @@ export function NavSheet() {
               })()}
             </ScrollView>
           </Animated.View>
-        </Pressable>
+        </Animated.View>
       </Modal>
     </>
   );

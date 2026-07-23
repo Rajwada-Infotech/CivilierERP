@@ -9,6 +9,13 @@ import ReceivedPaymentListScreen from "@/screens/finance/ReceivedPaymentListScre
 import BrsScreen from "@/screens/finance/BrsScreen";
 import InvoiceScreen from "@/screens/finance/InvoiceScreen";
 import InvoicePreviewScreen from "@/screens/finance/InvoicePreviewScreen";
+import MaterialDashboardScreen from "@/screens/material/MaterialDashboardScreen";
+import ContractListScreen from "@/screens/finance/ContractListScreen";
+import ContractDetailScreen from "@/screens/finance/ContractDetailScreen";
+import NewContractScreen from "@/screens/finance/NewContractScreen";
+import JournalVoucherScreen from "@/screens/finance/JournalVoucherScreen";
+import TrialBalanceScreen from "@/screens/finance/TrialBalanceScreen";
+import NewInvoiceScreen from "@/screens/finance/NewInvoiceScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -24,6 +31,13 @@ export type MainStackParamList = {
   Brs: undefined;
   Invoice: undefined;
   InvoicePreview: { id: string };
+  MaterialDashboard: undefined;
+  Contract: undefined;
+  ContractDetail: { id: number };
+  NewContract: { id?: number } | undefined;
+  JournalVoucher: undefined;
+  TrialBalance: undefined;
+  NewInvoice: { id?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -44,6 +58,13 @@ export default function MainStack() {
       <Stack.Screen name="Brs" component={BrsScreen} options={{ title: "BRS" }} />
       <Stack.Screen name="Invoice" component={InvoiceScreen} options={{ title: "Invoice" }} />
       <Stack.Screen name="InvoicePreview" component={InvoicePreviewScreen} options={{ title: "Invoice Preview" }} />
+      <Stack.Screen name="MaterialDashboard" component={MaterialDashboardScreen} options={{ title: "Material" }} />
+      <Stack.Screen name="Contract" component={ContractListScreen} options={{ title: "Contracts" }} />
+      <Stack.Screen name="ContractDetail" component={ContractDetailScreen} options={{ title: "Contract" }} />
+      <Stack.Screen name="NewContract" component={NewContractScreen} options={{ title: "New Contract" }} />
+      <Stack.Screen name="JournalVoucher" component={JournalVoucherScreen} options={{ title: "Journal Voucher" }} />
+      <Stack.Screen name="TrialBalance" component={TrialBalanceScreen} options={{ title: "Trial Balance" }} />
+      <Stack.Screen name="NewInvoice" component={NewInvoiceScreen} options={{ title: "New Invoice" }} />
     </Stack.Navigator>
   );
 }

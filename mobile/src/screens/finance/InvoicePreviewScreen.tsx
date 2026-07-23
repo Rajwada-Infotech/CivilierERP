@@ -1,16 +1,21 @@
-// RN port of a scoped slice of src/pages/material/ExpenseBookingPreviewModal.tsx
-// (~1450 lines on web) — Booking Information, Vendor/Supplier, Amount
-// Breakdown (standard computeBreakdown path, using the stored rates — the
-// live per-item GRN GST breakdown fetch isn't ported), and EMI details when
-// enabled. Not yet ported: the Posting tab (GL journal entry view), GRN
-// Items Summary table, Invoice & Allocation section, and Print/Edit
-// actions — this is a read-only preview of what the register already shows,
-// same "one page at a time" scoping as the rest of Finance mobile so far.
-import { useRoute, type RouteProp } from "@react-navigation/native";
+// RN port of src/pages/material/ExpenseBookingPreviewModal.tsx — Details
+// tab (Booking Information, Vendor/Supplier, GRN Items Summary when
+// GRN-linked, Amount Breakdown, EMI, Invoice & Allocation), a Posting tab
+// (view-only GL journal entry preview — this app never auto-posts to the
+// GL from mobile, unlike web's modal, which posts the instant the tab
+// opens; that's a side-effecting money write kept web-only), and Print
+// (expo-print renders a plain HTML invoice to PDF, expo-sharing opens the
+// native share sheet — web's window.print() has no RN equivalent, this is
+// the closest native analogue: share/save/print the generated PDF).
+import { useState } from "react";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { View, Text, ScrollView, ActivityIndicator, Pressable, Alert } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Truck, User, Package, Banknote, CreditCard, Receipt } from "lucide-react-native";
-import { fetchInvoiceById, computeBreakdown } from "@/api/invoiceApi";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import { CalendarDays, Truck, User, Package, Banknote, CreditCard, Receipt, FileText, Wallet, Hash, Printer } from "lucide-react-native";
+import { fetchInvoiceById, fetchGRNItemsFor, fetchInvoicePosting, computeBreakdown, type InvoiceRecord, type GRNItemLine } from "@/api/invoiceApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -19,10 +24,6 @@ const ACCENT = "#10b981";
 
 function fmt(n: number) {
   return (n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function notBuiltYet(title: string) {
-  Alert.alert(title, `The ${title} isn't built on mobile yet — use the web app for now.`);
 }
 
 function InfoTile({ label, value, mono }: { label: string; value: string | null | undefined; mono?: boolean }) {
@@ -65,13 +66,91 @@ function BreakdownRow({ label, sub, amount, isAdd, bold, tint }: { label: string
   );
 }
 
+// Plain, print-safe HTML — deliberately not trying to match the app's dark
+// glass UI (paper doesn't render backdrop-blur); this mirrors what web's
+// window.print() actually produces: a light, readable, ink-cheap document.
+function buildInvoiceHtml(rec: InvoiceRecord, bd: ReturnType<typeof computeBreakdown>, netAmount: number, grnItems: GRNItemLine[]): string {
+  const row = (label: string, value: string) => `<tr><td class="lbl">${label}</td><td class="val">${value}</td></tr>`;
+  const amtRow = (label: string, amount: number, sign = "") =>
+    `<tr><td>${label}</td><td class="amt">${sign}₹${fmt(amount)}</td></tr>`;
+
+  const termsRows = [
+    ...bd.preRows.map((r) => amtRow(`${r.term.masterTermName || "Term"} (pre-GST)`, r.amount, r.term.deductionType === "Addition" ? "+ " : "− ")),
+    ...bd.postRows.map((r) => amtRow(`${r.term.masterTermName || "Term"} (post-GST)`, r.amount, r.term.deductionType === "Addition" ? "+ " : "− ")),
+  ].join("");
+
+  const grnRows = grnItems.length
+    ? `<h3>GRN Items</h3><table class="tbl">
+        <tr><th>Item</th><th>Ordered</th><th>Received</th><th>UOM</th></tr>
+        ${grnItems.map((it) => `<tr><td>${it.itemName || "—"}</td><td>${it.orderedQty}</td><td>${it.receivedQty}</td><td>${it.uom || ""}</td></tr>`).join("")}
+      </table>`
+    : "";
+
+  return `
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; padding: 24px; }
+          h1 { font-size: 20px; margin: 0 0 4px; }
+          h2 { font-size: 13px; color: #555; margin: 0 0 20px; font-weight: normal; }
+          h3 { font-size: 13px; margin: 20px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; color: #333; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+          td, th { padding: 6px 4px; border-bottom: 1px solid #eee; font-size: 12px; text-align: left; }
+          .lbl { color: #666; width: 40%; }
+          .val { font-weight: 600; }
+          .amt { text-align: right; }
+          .tbl th { background: #f5f5f5; font-size: 11px; text-transform: uppercase; color: #666; }
+          .net { font-weight: 700; font-size: 14px; background: #f0fdf4; }
+        </style>
+      </head>
+      <body>
+        <h1>${rec.bookingReference || "Invoice"}</h1>
+        <h2>${rec.status} · ${rec.docTypeName || rec.materialCategory || "Invoice"}</h2>
+        <table>
+          ${row("Booking Date", rec.bookingDate || "—")}
+          ${row("Due Date", rec.dueDate || "—")}
+          ${row("Company", rec.companyName || "—")}
+          ${row("Project / Site", rec.projectName || "—")}
+          ${row("Supplier / Vendor", rec.supplier || "—")}
+        </table>
+        ${grnRows}
+        <h3>Amount Breakdown</h3>
+        <table>
+          ${amtRow("Basic Amount", rec.basicAmount)}
+          ${termsRows}
+          ${rec.cgstRate > 0 ? amtRow("CGST", bd.cgstAmount, "+ ") : ""}
+          ${rec.sgstRate > 0 ? amtRow("SGST", bd.sgstAmount, "+ ") : ""}
+          ${rec.igstRate > 0 ? amtRow("IGST", bd.igstAmount, "+ ") : ""}
+          <tr class="net"><td>Net Payable</td><td class="amt">₹${fmt(netAmount)}</td></tr>
+        </table>
+        ${rec.emi.enabled ? `<h3>EMI</h3><table>${row("Installments", String(rec.emi.installmentCount))}${row("Per EMI", `₹${fmt(rec.emi.emiAmount)}`)}${row("Start Date", rec.emi.startDate || "—")}</table>` : ""}
+      </body>
+    </html>
+  `;
+}
+
 export default function InvoicePreviewScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const route = useRoute<RouteProp<MainStackParamList, "InvoicePreview">>();
   const { id } = route.params;
+  const [tab, setTab] = useState<"details" | "posting">("details");
 
   const { data: rec, isLoading, isError } = useQuery({
     queryKey: ["invoice", id],
     queryFn: () => fetchInvoiceById(id),
+  });
+
+  const { data: grnItems = [] } = useQuery({
+    queryKey: ["invoice-grn-items", id, rec?.eSourceType, rec?.eSourceId],
+    queryFn: () => fetchGRNItemsFor(rec!.eSourceType, rec!.eSourceId, rec!.linkedGrnIds),
+    enabled: !!rec && rec.eSourceType === "GRN",
+  });
+
+  const { data: posting, isLoading: postingLoading } = useQuery({
+    queryKey: ["invoice-posting", id],
+    queryFn: () => fetchInvoicePosting(id),
+    enabled: tab === "posting",
   });
 
   if (isLoading) {
@@ -97,6 +176,20 @@ export default function InvoicePreviewScreen() {
   const netAmount = rec.netAmount ?? bd.netAmount;
   const hasEmi = !!(rec.emi?.enabled && rec.emi.installmentCount > 0);
 
+  const handlePrint = async () => {
+    try {
+      const html = buildInvoiceHtml(rec, bd, netAmount, grnItems);
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: rec.bookingReference || "Invoice" });
+      } else {
+        await Print.printAsync({ uri });
+      }
+    } catch (e: any) {
+      Alert.alert("Print failed", e?.message ?? "Could not generate the invoice PDF.");
+    }
+  };
+
   return (
     <ScrollView className="flex-1" style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
       {/* Header */}
@@ -112,14 +205,88 @@ export default function InvoicePreviewScreen() {
         Invoice · {rec.status}
       </Text>
 
-      <Pressable
-        onPress={() => notBuiltYet("Edit Invoice")}
-        className="rounded-xl mt-4 mb-1 items-center"
-        style={{ backgroundColor: ACCENT, paddingVertical: 10 }}
-      >
-        <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Edit Invoice</Text>
-      </Pressable>
+      <View className="flex-row gap-2 mt-4 mb-1">
+        <Pressable
+          onPress={() => navigation.navigate("NewInvoice", { id: rec.id })}
+          className="flex-1 rounded-xl items-center"
+          style={{ backgroundColor: ACCENT, paddingVertical: 10 }}
+        >
+          <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Edit Invoice</Text>
+        </Pressable>
+        <Pressable
+          onPress={handlePrint}
+          className="flex-row items-center justify-center gap-1.5 rounded-xl"
+          style={{ paddingHorizontal: 16, borderWidth: 1, borderColor: `${colors.border}80` }}
+        >
+          <Printer size={14} color={colors.mutedForeground} />
+          <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Print</Text>
+        </Pressable>
+      </View>
 
+      {/* Tab bar */}
+      <View className="flex-row gap-1.5 mt-4 mb-1">
+        {(["details", "posting"] as const).map((t) => {
+          const active = tab === t;
+          return (
+            <Pressable
+              key={t}
+              onPress={() => setTab(t)}
+              className="flex-1 flex-row items-center justify-center gap-1.5 py-2 rounded-lg"
+              style={{ backgroundColor: active ? `${ACCENT}22` : "transparent", borderWidth: 1, borderColor: active ? `${ACCENT}50` : colors.border }}
+            >
+              {t === "details" ? <FileText size={12} color={active ? ACCENT : colors.mutedForeground} /> : <Wallet size={12} color={active ? ACCENT : colors.mutedForeground} />}
+              <Text style={{ color: active ? ACCENT : colors.mutedForeground, fontSize: 11, fontFamily: fonts.heading.medium, textTransform: "capitalize" }}>{t}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {tab === "posting" ? (
+        <View className="mt-4">
+          {postingLoading ? (
+            <View className="py-10 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
+          ) : !posting ? (
+            <Text className="text-center py-8" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>Could not load posting data.</Text>
+          ) : (
+            <>
+              <View className="flex-row items-center justify-between mb-3">
+                <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1 }}>
+                  Journal Entry — Invoice Posting
+                </Text>
+                {posting.isPosted ? (
+                  <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: "#10b98122", borderWidth: 1, borderColor: "#10b98140" }}>
+                    <Text style={{ color: "#10b981", fontSize: 9.5, fontFamily: fonts.heading.semibold }}>Posted · {posting.jvNo}</Text>
+                  </View>
+                ) : (
+                  <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: "#f59e0b22", borderWidth: 1, borderColor: "#f59e0b40" }}>
+                    <Text style={{ color: "#f59e0b", fontSize: 9.5, fontFamily: fonts.heading.semibold }}>Not posted</Text>
+                  </View>
+                )}
+              </View>
+              {posting.isGrnLinked && (
+                <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 10, fontFamily: fonts.body.regular, marginBottom: 10, lineHeight: 15 }}>
+                  GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
+                </Text>
+              )}
+              <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
+                {posting.isGrnLinked ? (
+                  <>
+                    <BreakdownRow label={posting.accounts.pgrn?.label ?? "Provision for Pending GRN A/c"} amount={posting.baseAmount} isAdd tint="green" bold />
+                    {posting.taxAmount > 0 && <BreakdownRow label={posting.accounts.gstCredit?.label ?? "GST Credit Available"} amount={posting.taxAmount} isAdd tint="green" />}
+                    <BreakdownRow label={posting.accounts.supplier?.label ?? "Supplier / Creditor A/c"} amount={posting.totalAmount} isAdd={false} tint="red" bold />
+                  </>
+                ) : (
+                  <>
+                    <BreakdownRow label={posting.accounts.purchase?.label ?? "Purchase A/c"} amount={posting.totalAmount} isAdd tint="green" bold />
+                    <BreakdownRow label={posting.accounts.supplier?.label ?? "Supplier / Creditor A/c"} amount={posting.totalAmount} isAdd={false} tint="red" bold />
+                  </>
+                )}
+              </View>
+            </>
+          )}
+        </View>
+      ) : (
+      <>
       {/* Booking Information */}
       <View className="mt-6">
         <SectionTitle icon={CalendarDays}>Booking Information</SectionTitle>
@@ -159,6 +326,32 @@ export default function InvoicePreviewScreen() {
           )}
         </View>
       </View>
+
+      {/* GRN Items Summary — only for GRN-linked invoices */}
+      {rec.eSourceType === "GRN" && grnItems.length > 0 && (
+        <View className="mt-4">
+          <SectionTitle icon={Truck}>{`GRN Items Summary (${grnItems.length})`}</SectionTitle>
+          <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
+            {grnItems.map((it, i) => (
+              <View
+                key={i}
+                className="flex-row items-center justify-between px-3.5 py-2.5"
+                style={i < grnItems.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}50` } : undefined}
+              >
+                <View className="flex-1 min-w-0 pr-2">
+                  <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium }}>{it.itemName || "—"}</Text>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 1 }}>
+                    Ordered {it.orderedQty} · Remaining {it.remainingQty} {it.uom}
+                  </Text>
+                </View>
+                <Text style={{ color: it.remainingQty > 0 ? "#f59e0b" : colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
+                  {it.receivedQty} {it.uom}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Amount Breakdown */}
       <View className="mt-4">
@@ -224,6 +417,22 @@ export default function InvoicePreviewScreen() {
             </View>
           </View>
         </View>
+      )}
+
+      {/* Invoice & Allocation */}
+      {(rec.vendorInvoiceNo || rec.costCenter || rec.glAccount || rec.workDoneRef) && (
+        <View className="mt-4 mb-2">
+          <SectionTitle icon={Hash}>Invoice & Allocation</SectionTitle>
+          <View className="flex-row flex-wrap justify-between">
+            {!!rec.vendorInvoiceNo && <InfoTile label="Vendor Invoice No" value={rec.vendorInvoiceNo} mono />}
+            {!!rec.vendorInvoiceDate && <InfoTile label="Vendor Invoice Date" value={rec.vendorInvoiceDate} />}
+            {!!rec.costCenter && <InfoTile label="Cost Centre" value={rec.costCenter} />}
+            {!!rec.glAccount && <InfoTile label="GL Account" value={rec.glAccount} />}
+            {!!rec.workDoneRef && <InfoTile label="Work Done Ref" value={rec.workDoneRef} mono />}
+          </View>
+        </View>
+      )}
+      </>
       )}
     </ScrollView>
   );
