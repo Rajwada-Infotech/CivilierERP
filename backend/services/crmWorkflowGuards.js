@@ -621,16 +621,19 @@ function tierBrokeragePercent(totalValue) {
 
 /**
  * Auto-advance step: the moment a booking's first payment milestone is fully
- * Paid, a broker selected at Application/Booking stage automatically gets a
- * real CrmBrokerageMaster record — instead of requiring staff to remember to
- * create one manually (the old flow, still available as POST / for bookings
- * that never had a broker picked up front, gated on Agreement Executed).
- * Idempotent: no-op if the booking has no BrokerId, or a brokerage record
- * already exists for it. Rate: booking.BrokerageRatePercent if set, else the
- * tier default off booking.TotalValue. If BrokerageSplitEnabled, creates TWO
- * half-rate rows ('Before Agreement', unlocked immediately since Milestone 1
- * is the trigger; 'After Agreement', locked until maybeUnlockBrokerageTranche
- * fires) instead of one full-rate row.
+ * Paid, a broker selected at Application/Booking stage automatically gets
+ * ONE CrmBrokerageMaster row PER payment milestone — the broker's payout
+ * follows the exact same milestone schedule the customer's own payments do,
+ * not a fixed one/two-tranche split. Each row's ComputedAmount is that
+ * milestone's own share of the total brokerage (milestone.Percent% of the
+ * total brokerage amount, mirroring how the milestone itself is that
+ * Percent% of the booking's TotalValue). A milestone that's already Paid by
+ * the time this fires (Milestone #1 itself, the trigger) is created
+ * unlocked; every later milestone is created locked until
+ * maybeUnlockBrokerageMilestoneTranche fires for it.
+ * Idempotent: no-op if the booking has no BrokerId, or brokerage rows
+ * already exist for it (still available as crmBrokerage.js POST / for
+ * bookings that never had a broker picked up front).
  * Call site: createReceiptForMilestone in crmPayments.js, gated additionally
  * on this being Milestone #1 specifically — the other auto-advance guards in
  * this file react to "all milestones settled", not milestone 1 alone, so
@@ -638,7 +641,7 @@ function tierBrokeragePercent(totalValue) {
  */
 async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT BrokerId, BrokerageRatePercent, BrokerageSplitEnabled, TotalValue, AssignedTo, BookingNo
+    SELECT BrokerId, BrokerageRatePercent, TotalValue, AssignedTo, BookingNo
     FROM dbo.CrmBooking WHERE Id = @bid
   `);
   const bk = booking.recordset[0];
@@ -655,44 +658,65 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 
   const totalValue = Number(bk.TotalValue) || 0;
   const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
-
   // Mirrors crmBrokerage.js POST /'s own ComputedAmount formula exactly, so
-  // an auto-created row and a manually-created one compute the same way.
-  const amountFor = (pct) => Math.round(totalValue * pct) / 100;
+  // a full-payout manually-created row and the sum of these auto-created
+  // ones compute the same total.
+  const totalBrokerageAmount = Math.round(totalValue * totalPercent) / 100;
 
-  const insertRow = async (ratePercent, trancheLabel, isLocked) => {
-    const computedAmount = amountFor(ratePercent);
-    const result = await pool.request()
-      .input("bid",   sql.Int,           bookingId)
-      .input("brid",  sql.Int,           brk.LHeadId)
-      .input("name",  sql.NVarChar(200), brk.LHeadName)
-      .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
-      .input("rt",    sql.NVarChar(20),  "Percentage")
-      .input("rv",    sql.Decimal(18,2), ratePercent)
-      .input("camt",  sql.Decimal(18,2), computedAmount)
-      .input("label", sql.NVarChar(30),  trancheLabel)
-      .input("lock",  sql.Bit,           isLocked ? 1 : 0)
-      .input("notes", sql.NVarChar(sql.MAX), "Auto-created — broker selected at Application stage, Milestone #1 paid")
-      .input("cb",    sql.Int,           actorUserId || null)
-      .query(`
-        INSERT INTO dbo.CrmBrokerageMaster
-          (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @label, @lock, 'Pending', @notes, @cb, SYSDATETIME())
-      `);
-    return result.recordset[0].Id;
-  };
+  // %-based schedule steps only — an Extra-Charge/Parking milestone is a
+  // fixed line item the customer negotiated directly, not part of the deal
+  // value the broker actually sold, so it earns no brokerage share (same
+  // exclusion recalculateRemainingMilestones already applies for the
+  // customer-facing schedule).
+  const milestones = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT Id, MilestoneNo, [Percent], Status
+    FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+    ORDER BY MilestoneNo
+  `);
+  if (!milestones.recordset.length) return null;
+
+  const rows = milestones.recordset;
+  const totalPct = rows.reduce((s, m) => s + Number(m.Percent || 0), 0);
+  const share = (pct) => (totalPct > 0 ? pct / totalPct : 1 / rows.length);
 
   let ids;
   try {
-    if (bk.BrokerageSplitEnabled) {
-      const half = totalPercent / 2;
-      ids = [
-        await insertRow(half, "Before Agreement", false),
-        await insertRow(half, "After Agreement", true),
-      ];
-    } else {
-      ids = [await insertRow(totalPercent, null, false)];
+    ids = [];
+    let allocated = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const m = rows[i];
+      const isLast = i === rows.length - 1;
+      // Last row absorbs the rounding remainder so the tranches always sum
+      // exactly to totalBrokerageAmount, same pattern
+      // recalculateRemainingMilestones uses for the customer schedule.
+      const computedAmount = isLast
+        ? Math.round((totalBrokerageAmount - allocated) * 100) / 100
+        : Math.round(totalBrokerageAmount * share(Number(m.Percent || 0)) * 100) / 100;
+      allocated += computedAmount;
+      const ratePercent = Math.round((totalPercent * share(Number(m.Percent || 0))) * 100) / 100;
+      const isLocked = m.Status !== "Paid" && m.Status !== "Waived";
+
+      const result = await pool.request()
+        .input("bid",   sql.Int,           bookingId)
+        .input("brid",  sql.Int,           brk.LHeadId)
+        .input("name",  sql.NVarChar(200), brk.LHeadName)
+        .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
+        .input("rt",    sql.NVarChar(20),  "Percentage")
+        .input("rv",    sql.Decimal(18,2), ratePercent)
+        .input("camt",  sql.Decimal(18,2), computedAmount)
+        .input("mid",   sql.Int,           m.Id)
+        .input("mno",   sql.Int,           m.MilestoneNo)
+        .input("lock",  sql.Bit,           isLocked ? 1 : 0)
+        .input("notes", sql.NVarChar(sql.MAX), `Auto-created — follows Milestone #${m.MilestoneNo} of the booking's own payment schedule`)
+        .input("cb",    sql.Int,           actorUserId || null)
+        .query(`
+          INSERT INTO dbo.CrmBrokerageMaster
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+        `);
+      ids.push(result.recordset[0].Id);
     }
   } catch (e) {
     // Race with another milestone-paid trigger reaching here concurrently —
@@ -703,8 +727,8 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 
   if (bk.AssignedTo) {
     await emitNotification(pool, bk.AssignedTo, "crm_brokerage_ready",
-      "Brokerage Record Created",
-      `Brokerage auto-created for booking ${bk.BookingNo} — Milestone #1 paid for broker ${brk.LHeadName}.`,
+      "Brokerage Schedule Created",
+      `Brokerage schedule auto-created for booking ${bk.BookingNo} — ${ids.length} milestone-tranche(s) for broker ${brk.LHeadName}.`,
       ids[0], "crm_brokerage");
   }
 
@@ -712,18 +736,21 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 }
 
 /**
- * Unlocks the "After Agreement" tranche the moment the Agreement this
- * booking is attached to actually reaches Executed — before that, the row
- * exists (IsLocked=1) but can't be approved or paid (see the IsLocked gate
- * in crmBrokerage.js). No-op if there's no such row (single-payout bookings,
- * or bookings with no broker at all).
- * Call site: crmAgreements.js's PUT /:id/mark-executed, alongside the other
- * auto-advance calls already there.
+ * Unlocks the brokerage tranche tied to one specific payment milestone the
+ * moment that milestone becomes Paid (or Waived — waiving still resolves
+ * the milestone, and the broker's cut for it shouldn't stay stuck forever
+ * just because the customer's own charge was forgiven). No-op if there's no
+ * such row (bookings with no broker, or a milestone excluded from the
+ * brokerage schedule).
+ * Call sites: every place in crmPayments.js where a milestone's Status
+ * transitions to Paid/Waived — createReceiptForMilestone, the direct
+ * milestone PUT /:id edit, PUT /:id/waive, and the on-account "apply to
+ * milestone" route.
  */
-async function maybeUnlockBrokerageTranche(pool, bookingId) {
-  await pool.request().input("bid", sql.Int, bookingId).query(`
+async function maybeUnlockBrokerageMilestoneTranche(pool, bookingId, milestoneId) {
+  await pool.request().input("bid", sql.Int, bookingId).input("mid", sql.Int, milestoneId).query(`
     UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
-    WHERE BookingId = @bid AND TrancheLabel = 'After Agreement' AND IsLocked = 1
+    WHERE BookingId = @bid AND MilestoneId = @mid AND IsLocked = 1
   `);
 }
 
@@ -776,7 +803,7 @@ module.exports = {
   maybeAutoGenerateBookingInvoice,
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
-  maybeUnlockBrokerageTranche,
+  maybeUnlockBrokerageMilestoneTranche,
   maybeResolveAgreementDate,
   finalizeAgreementDate,
   syncLegalMilestoneStep,

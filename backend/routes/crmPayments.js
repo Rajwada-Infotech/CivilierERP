@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, maybeUnlockBrokerageMilestoneTranche, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 
@@ -308,12 +308,15 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
     await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
     await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorUserId);
 
-    // Brokerage's own trigger is Milestone #1 specifically becoming Paid —
-    // unlike the two guards above, which react to "all milestones settled" —
-    // so it needs its own inline condition, not the same "Paid" check reused.
+    // Brokerage's creation trigger is Milestone #1 specifically becoming
+    // Paid — unlike the two guards above, which react to "all milestones
+    // settled" — so it needs its own inline condition, not the same "Paid"
+    // check reused. Once the schedule exists, every later milestone's own
+    // Paid transition unlocks that milestone's own tranche.
     if (targetRow.MilestoneNo === 1) {
       await maybeAutoCreateBrokerage(pool, targetRow.BookingId, actorUserId);
     }
+    await maybeUnlockBrokerageMilestoneTranche(pool, targetRow.BookingId, milestoneId);
   }
 
   return { receiptId, ReceiptNo: receiptNo, bookingId: targetRow.BookingId };
@@ -522,6 +525,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     if (updated?.Status === "Paid") {
       await maybeAutoCreateSalesDeed(pool, updated.BookingId, actorId(req));
       await maybeAutoGenerateInvoice(pool, updated.BookingId, actorId(req));
+      await maybeUnlockBrokerageMilestoneTranche(pool, updated.BookingId, id);
       brokerWarning = await warnIfBrokerUnpaid(pool, updated.BookingId, actorId(req));
     }
 
@@ -569,6 +573,10 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     // Auto-flow: a waived milestone can also be the last one outstanding.
     await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
     await maybeAutoGenerateInvoice(pool, result.recordset[0].BookingId, actorId(req));
+    // Waiving still resolves the milestone — the broker's tranche for it
+    // shouldn't stay locked forever just because the customer's charge was
+    // forgiven.
+    await maybeUnlockBrokerageMilestoneTranche(pool, result.recordset[0].BookingId, id);
 
     res.json({ success: true, status: "Waived" });
   } catch (e) {
@@ -747,6 +755,7 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
     if (finalCheck.recordset[0]?.Status === "Paid") {
       await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorId(req));
       await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorId(req));
+      await maybeUnlockBrokerageMilestoneTranche(pool, targetRow.BookingId, milestoneId);
     }
 
     res.json({ success: true, applied: requested, remaining: remaining - requested });

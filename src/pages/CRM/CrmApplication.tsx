@@ -341,8 +341,6 @@ const CrmApplication: React.FC = () => {
   // TotalValue once one exists (see maybeAutoCreateBrokerage in
   // crmWorkflowGuards.js); this just gives staff a rate hint at intake time.
   const brokerageTierDefault = computedTotal >= 10000000 ? 1 : 2;
-  const effectiveBrokerageRate = form.BrokerageRatePercent !== "" ? Number(form.BrokerageRatePercent) : brokerageTierDefault;
-  const brokerageHalfRate = (effectiveBrokerageRate / 2).toFixed(2).replace(/\.?0+$/, "");
 
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
@@ -899,16 +897,18 @@ const CrmApplication: React.FC = () => {
                   picked from Broker Master (AccountHeadMaster, LHeadType=BR),
                   never a fresh Customer-level concept. His own identity
                   (name/phone/PAN/RERA) is never re-typed, only ever selected
-                  and shown read-only. The ONLY editable fields on this whole
-                  block are the per-deal commission override % and the
-                  before/after-Agreement split — everything else is fetched,
-                  not entered. Rate/split here are captured now but only
-                  become a real commission record once Milestone #1 is paid
-                  (maybeAutoCreateBrokerage). */}
+                  and shown read-only. The ONLY editable field on this whole
+                  block is the per-deal commission override % — everything
+                  else is fetched, not entered. The rate here is captured now
+                  but only becomes a real commission schedule once Milestone
+                  #1 is paid (maybeAutoCreateBrokerage), at which point it's
+                  split into one tranche per payment milestone, each
+                  unlocking as that milestone is paid — not a manual toggle
+                  here. */}
               <div className="rounded-lg border border-border p-3 space-y-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   <input type="checkbox" checked={form.ViaBroker}
-                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false }) }))} />
+                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
                   Via Broker
                 </label>
                 {form.ViaBroker && (
@@ -967,11 +967,9 @@ const CrmApplication: React.FC = () => {
                           placeholder={String(brokerageTierDefault)} className={inputCls} />
                       </div>
                     </div>
-                    <label className="flex items-center gap-2 text-xs text-foreground">
-                      <input type="checkbox" checked={form.BrokerageSplitEnabled}
-                        onChange={(e) => setForm((f) => ({ ...f, BrokerageSplitEnabled: e.target.checked }))} />
-                      Split {brokerageHalfRate}% before Agreement, {brokerageHalfRate}% (remaining) after Agreement
-                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
+                    </p>
                   </div>
                 )}
               </div>
