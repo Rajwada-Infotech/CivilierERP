@@ -11,7 +11,12 @@ const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
 bumpCacheVersion("parking-master").catch(() => {});
 
-// GET all parking rates
+// GET all parking rates — includes an InUse flag (any CrmParkingAllotment
+// row ever referencing this rate) so the frontend can grey out Delete
+// pre-emptively, same isDeleteLocked pattern as Block Master. Edit is never
+// locked here — like a Block, a rate is looked up live by ProjectId/
+// BlockId/ParkingType rather than snapshotted, so a correction is expected
+// to apply immediately to anything not yet booked.
 router.get("/", cache("parking-master", 300), async (req, res) => {
   try {
     const pool = getPool();
@@ -20,7 +25,10 @@ router.get("/", cache("parking-master", 300), async (req, res) => {
         p.Id, p.ProjectId, e.name AS ProjectName,
         p.BlockId, b.BlockName,
         p.ParkingType, p.Charge, p.GstRate, p.IsActive,
-        p.CreatedAt, p.UpdatedAt
+        p.CreatedAt, p.UpdatedAt,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dbo.CrmParkingAllotment pa WHERE pa.ParkingMasterId = p.Id
+        ) THEN 1 ELSE 0 END AS InUse
       FROM dbo.ParkingMaster p
       LEFT JOIN dbo.enterprise  e ON e.id = p.ProjectId AND e.business_type = 'P'
       LEFT JOIN dbo.BlockMaster b ON b.Id = p.BlockId
@@ -70,6 +78,45 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Guard against duplicate rates — same reasoning as blockMaster.js:
+    // without this, deactivating a rate and re-adding one with the same
+    // Project+Block+ParkingType creates a second row instead of
+    // reactivating the original. BlockId is optional (NULL = whole
+    // project) so it's compared with ISNULL to treat two NULLs as equal.
+    const dupe = await pool
+      .request()
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockId", sql.Int, BlockId ? parseInt(BlockId) : null)
+      .input("Type", sql.NVarChar(50), ParkingType)
+      .query(`
+        SELECT Id, IsActive FROM dbo.ParkingMaster
+        WHERE ProjectId = @ProjectId
+          AND ISNULL(BlockId, -1) = ISNULL(@BlockId, -1)
+          AND ParkingType = @Type
+      `);
+
+    if (dupe.recordset.length) {
+      const existing = dupe.recordset[0];
+      if (existing.IsActive) {
+        return res.status(409).json({ error: `A "${ParkingType}" parking rate already exists for this Project/Block.` });
+      }
+      await pool
+        .request()
+        .input("Id", sql.Int, existing.Id)
+        .input("Charge", sql.Decimal(18, 2), parseFloat(Charge))
+        .input("Gst", sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+        .input("UpdatedBy", sql.Int, createdBy)
+        .query(`
+          UPDATE dbo.ParkingMaster SET
+            Charge = @Charge, GstRate = @Gst, IsActive = 1,
+            UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+      await bumpCacheVersion("parking-master");
+      return res.json({ message: "Parking rate reactivated successfully" });
+    }
+
     await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
@@ -101,6 +148,26 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Same duplicate guard as POST — prevent editing a rate's
+    // Project/Block/Type into a collision with another existing row.
+    const dupe = await pool
+      .request()
+      .input("Id", sql.Int, parseInt(id))
+      .input("ProjectId", sql.Int, parseInt(ProjectId))
+      .input("BlockId", sql.Int, BlockId ? parseInt(BlockId) : null)
+      .input("Type", sql.NVarChar(50), ParkingType)
+      .query(`
+        SELECT Id FROM dbo.ParkingMaster
+        WHERE ProjectId = @ProjectId
+          AND ISNULL(BlockId, -1) = ISNULL(@BlockId, -1)
+          AND ParkingType = @Type
+          AND Id <> @Id
+      `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({ error: `A "${ParkingType}" parking rate already exists for this Project/Block.` });
+    }
+
     await pool
       .request()
       .input("Id",        sql.Int, parseInt(id))
@@ -126,10 +193,16 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-// DELETE
+// DELETE — soft delete (IsActive = 0), matching the platform-wide convention:
+// re-adding the same Project/Block/Type later reactivates this row (via the
+// POST dupe guard above) instead of creating a duplicate. A rate that has
+// ever been allotted against (even a past/cancelled booking) stays blocked
+// from deletion since bookings may still display/report off it live —
+// deactivate it instead.
 router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
     const inUse = await pool.request().input("id", sql.Int, id)
@@ -140,9 +213,13 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
     const existing = await pool.request().input("Id", sql.Int, id)
       .query("SELECT ParkingType FROM dbo.ParkingMaster WHERE Id = @Id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Parking rate not found" });
-    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingMaster WHERE Id = @Id");
+    await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("UpdatedBy", sql.Int, updatedBy)
+      .query("UPDATE dbo.ParkingMaster SET IsActive = 0, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
     await bumpCacheVersion("parking-master");
-    res.json({ message: `Parking rate "${existing.recordset[0].ParkingType}" deleted successfully` });
+    res.json({ message: `Parking rate "${existing.recordset[0].ParkingType}" deactivated successfully` });
   } catch (err) {
     console.error("[parking-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
