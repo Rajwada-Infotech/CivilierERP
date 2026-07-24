@@ -405,41 +405,50 @@ const salesAutomationSetupItems: SetupItem[] = [
   },
 ];
 
+// Unit/Block/Room/Parking/Extra-Charge masters are shared with the
+// Follow-Up module (same underlying data and pageKey gating), but they're
+// now ALSO registered under /crm/setup/* in App.tsx so these links stay
+// inside the crm module — a /followup/... URL would flip the whole app
+// into Follow-Up chrome the moment it's clicked (ModuleContext derives
+// activeModule purely from the path prefix). pageKey still points at the
+// real (shared, followup-*) permission the route actually checks, so
+// visibility for non-privileged users matches the real access gate. Kept
+// in sync with TopNavbar.tsx's own copy.
 const crmSetupItems: SetupItem[] = [
   {
     icon: Users,
     label: "Customer Master",
-    path: "/crm/setup/customer-master",
+    path: "/masters/customers",
     color: "text-violet-500",
-    pageKey: "crm-customer-master",
+    pageKey: "customer-master",
   },
   {
     icon: Ruler,
     label: "Unit Master",
     path: "/crm/setup/unit-master",
     color: "text-orange-500",
-    pageKey: "crm-unit-master",
+    pageKey: "followup-unit-master",
   },
   {
     icon: Layers,
     label: "Block Master",
     path: "/crm/setup/block-master",
     color: "text-cyan-500",
-    pageKey: "crm-block-master",
+    pageKey: "followup-block-master",
   },
   {
     icon: DoorOpen,
     label: "Room Master",
     path: "/crm/setup/room-master",
     color: "text-teal-500",
-    pageKey: "crm-room-master",
+    pageKey: "followup-room-master",
   },
   {
     icon: HardHat,
     label: "Broker Master",
     path: "/masters/brokers",
     color: "text-amber-500",
-    pageKey: "crm-broker-master",
+    pageKey: "broker-master",
   },
   {
     icon: ClipboardList,
@@ -467,35 +476,35 @@ const crmSetupItems: SetupItem[] = [
     label: "Parking Rate Master",
     path: "/crm/setup/parking-master",
     color: "text-blue-500",
-    pageKey: "crm-parking-master",
+    pageKey: "followup-parking-master",
   },
   {
     icon: Hash,
     label: "Parking Slot Master",
     path: "/crm/setup/parking-slot-master",
     color: "text-sky-500",
-    pageKey: "crm-parking-slot-master",
+    pageKey: "followup-parking-slot-master",
   },
   {
     icon: PlusCircle,
     label: "Extra Charge Master",
     path: "/crm/setup/extra-charge-master",
     color: "text-pink-500",
-    pageKey: "crm-extra-charge-master",
+    pageKey: "followup-extra-charge-master",
   },
   {
     icon: Activity,
     label: "Pending Tasks",
     path: "/crm/setup/pending-tasks",
     color: "text-purple-500",
-    pageKey: "crm-pending-tasks",
+    pageKey: "followup-pending-tasks",
   },
   {
     icon: Calendar,
     label: "Reminders",
     path: "/crm/setup/reminders",
     color: "text-indigo-500",
-    pageKey: "crm-reminders",
+    pageKey: "followup-reminders",
   },
 ];
 

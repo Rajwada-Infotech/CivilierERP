@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -72,6 +73,56 @@ const fields: FieldDef[] = [
     required: true,
   },
   {
+    name: "defaultPaymentPlanId",
+    label: "Default Payment Plan",
+    type: "select",
+    required: true,
+    // Every place a unit gets selected (Application wizard, etc.) auto-fetches
+    // and locks this plan — staff can still override per-deal, but the
+    // starting point is decided once here rather than re-picked every time.
+    // Scoped the same way the Payment Plan Master itself is: a plan with no
+    // Project/Block set applies everywhere, otherwise it must match this
+    // unit's own Project/Block.
+    optionsProvider: (_data, currentId, form) => {
+      const plans: any[] = (form?.__paymentPlans as any) ?? [];
+      const projectId = form?.projectId as string | undefined;
+      const blockId = form?.blockId as string | undefined;
+      return plans
+        .filter((p) => p.IsActive)
+        .filter((p) => !p.Projects?.length || p.Projects.some((x: any) => String(x.Id) === projectId))
+        .filter((p) => !p.BlockId || String(p.BlockId) === blockId)
+        .filter((p) => !p.UnitId || String(p.UnitId) === currentId)
+        .map((p) => ({ value: String(p.Id), label: p.PlanName }));
+    },
+  },
+  {
+    // Not a real column — a plain explanatory line so an empty dropdown
+    // above doesn't read as broken. It usually just means no Payment Plan
+    // Master entry exists yet for this exact Project/Block combination
+    // (or Project/Block haven't been picked yet).
+    name: "__paymentPlanHint",
+    label: "",
+    type: "custom",
+    fullWidth: true,
+    render: ({ formData }) => {
+      const projectId = formData?.projectId as string | undefined;
+      const blockId = formData?.blockId as string | undefined;
+      if (!projectId || !blockId) {
+        return <p className="text-[11px] text-muted-foreground -mt-2">Select Project and Block above to see the payment plans that apply here.</p>;
+      }
+      const plans: any[] = (formData?.__paymentPlans as any) ?? [];
+      const hasMatch = plans.some((p) =>
+        p.IsActive && (!p.Projects?.length || p.Projects.some((x: any) => String(x.Id) === projectId)) && (!p.BlockId || String(p.BlockId) === blockId)
+      );
+      if (hasMatch) return null;
+      return (
+        <p className="text-[11px] text-amber-600 -mt-2">
+          No Payment Plan Master entry covers this Project/Block yet — create one there first (Company/Project/Block scoping, or leave those blank to apply everywhere) before this unit can be saved.
+        </p>
+      );
+    },
+  },
+  {
     name: "floorNo",
     label: "Floor No.",
     type: "number",
@@ -102,7 +153,8 @@ const columns = [
   { key: "floorNo", label: "Floor No." },
   { key: "unitType", label: "Type of Unit" },
   { key: "areaSqFt", label: "Area (sq ft)" },
-  { key: "isActive", label: "Status" },
+  { key: "defaultPaymentPlanName", label: "Default Payment Plan" },
+  { key: "status", label: "Status" },
 ];
 
 const exportColumns: ExportColumn[] = [
@@ -112,7 +164,8 @@ const exportColumns: ExportColumn[] = [
   { header: "Floor No.", accessor: "floorNo" },
   { header: "Type of Unit", accessor: "unitType" },
   { header: "Area (sq ft)", accessor: "areaSqFt" },
-  { header: "Status", accessor: "isActive" },
+  { header: "Default Payment Plan", accessor: "defaultPaymentPlanName" },
+  { header: "Status", accessor: "status" },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -142,6 +195,18 @@ const UnitMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Same pattern as __blocks — every payment plan, filtered client-side in
+  // the field's optionsProvider by the form's current project/block.
+  const { data: allPaymentPlans = [] } = useQuery<any[]>({
+    queryKey: ["unit-master-payment-plans"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/crm/payment-plans");
+      if (!res.ok) throw new Error("Failed to fetch payment plans");
+      return res.json().catch(() => ([]));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Backend → frontend shape; also inject __blocks so optionsProvider can see them
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(units)) return [];
@@ -155,14 +220,30 @@ const UnitMaster: React.FC = () => {
       floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
       unitType: item.UnitType ?? "",
       areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
+      defaultPaymentPlanId: item.DefaultPaymentPlanId != null ? String(item.DefaultPaymentPlanId) : "",
+      defaultPaymentPlanName: item.DefaultPaymentPlanName ?? "",
       isActive: Boolean(item.IsActive),
+      lockBookingNo: item.LockBookingNo ?? null,
+      lockHoldId: item.LockHoldId ?? null,
+      // Same precedence unitMatrix.js derives Status with server-side
+      // (Blocked > Booked > OnHold > Available), driven off the exact same
+      // LockBookingNo/LockHoldId this GET endpoint already returns — never
+      // a separate guess, so it can't drift from what the matrix shows.
+      status: !Boolean(item.IsActive)
+        ? "Blocked"
+        : item.LockBookingNo
+          ? "Booked"
+          : item.LockHoldId
+            ? "On Hold"
+            : "Available",
     }));
   }, [units]);
 
-  // externalFormPatch injects __blocks into the form so optionsProvider can filter
+  // externalFormPatch injects __blocks/__paymentPlans into the form so each
+  // field's optionsProvider can filter off the current project/block
   const blocksPatch = React.useMemo(
-    () => ({ __blocks: allBlocks }),
-    [allBlocks],
+    () => ({ __blocks: allBlocks, __paymentPlans: allPaymentPlans }),
+    [allBlocks, allPaymentPlans],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -172,43 +253,40 @@ const UnitMaster: React.FC = () => {
     FloorNo: r.floorNo !== "" && r.floorNo != null ? parseInt(r.floorNo) : null,
     UnitType: r.unitType || null,
     AreaSqFt: r.areaSqFt !== "" && r.areaSqFt != null ? parseFloat(r.areaSqFt) : null,
+    DefaultPaymentPlanId: r.defaultPaymentPlanId ? parseInt(r.defaultPaymentPlanId) : null,
     IsActive: r.isActive !== false,
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to add unit");
-        toast.success("Unit added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to update unit");
-        toast.success("Unit updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "DELETE",
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to delete unit");
-        toast.success("Unit deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to add unit");
+      toast.success("Unit added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to update unit");
+      toast.success("Unit updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to delete unit");
+      toast.success("Unit deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
 
   if (isLoading)
@@ -224,14 +302,30 @@ const UnitMaster: React.FC = () => {
         title="Unit"
         fields={fields}
         columns={columns}
+        columnRenderers={{
+          status: (value) => <StatusBadge status={value as string} />,
+        }}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        // A Booked or OnHold unit can't be edited or deleted from here —
+        // matches the server-side guard in unitMaster.js exactly, using the
+        // lock fields the GET endpoint now returns per row.
+        isRowLocked={(row) =>
+          row.lockBookingNo
+            ? `Booked (${row.lockBookingNo as string})`
+            : row.lockHoldId
+              ? "On Hold"
+              : null
+        }
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
-        externalFormPatchKey={allBlocks.length}
+        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}`}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "projectId") {
-            return { ...form, blockId: "" };
+            return { ...form, blockId: "", defaultPaymentPlanId: "" };
+          }
+          if (fieldName === "blockId") {
+            return { ...form, defaultPaymentPlanId: "" };
           }
           return form;
         }}
@@ -249,7 +343,8 @@ const UnitMaster: React.FC = () => {
             { key: "floorNo", label: "Floor No." },
             { key: "unitType", label: "Type of Unit" },
             { key: "areaSqFt", label: "Area (sq ft)" },
-            { key: "isActive", label: "Status" },
+            { key: "defaultPaymentPlanName", label: "Default Payment Plan" },
+            { key: "status", label: "Status" },
           ],
         }}
         onPrint={(row) => {
@@ -265,7 +360,8 @@ const UnitMaster: React.FC = () => {
               <tr><td>Floor No.</td><td>${row.floorNo || "—"}</td></tr>
               <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
               <tr><td>Area (sq ft)</td><td>${row.areaSqFt || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+              <tr><td>Default Payment Plan</td><td>${row.defaultPaymentPlanName || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.status || "—"}</td></tr>
             </table></body></html>
           `);
           win.document.close();

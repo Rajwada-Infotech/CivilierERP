@@ -784,7 +784,7 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
               Unable to load followup data.
             </div>
           )}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto thin-scroll">
             <Table>
               <TableHeader>
                 <TableRow>

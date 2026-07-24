@@ -14,12 +14,24 @@ router.use(apiRateLimit);
 
 // Fields the Application page ("select company/project, auto-fetch
 // everything from the customer") reads directly, plus the co-applicant set
-// and PAN/Address that now live here instead of being typed fresh on every
-// application.
+// and PAN/Aadhaar/Address that now live here instead of being typed fresh
+// on every application.
+//
+// Address is split two ways:
+//   - PermanentAddress/City/State/Pincode  → dbo.CrmCustomer's original
+//     Address/City/State/Pincode columns (kept as-is, no rename)
+//   - CurrentAddress/City/State/Pincode    → new columns; when
+//     IsCurrentSameAsPermanent = 1 these are kept in lockstep with the
+//     permanent fields on every write (see POST/PUT below), so any
+//     consumer reading Current* directly always gets a real value instead
+//     of having to fall back to Permanent* itself.
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.Address, c.City, c.State, c.Pincode, c.DateOfBirth,
+    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
+    c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
+    c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
+    c.DateOfBirth,
     c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation,
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
@@ -92,12 +104,39 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
   }
 });
 
-// POST / — register a new customer. Name/Mobile/PAN/Address are the
-// must-needed fields kept mandatory; everything else (co-applicant, DOB,
-// city/state/pincode) is optional detail filled in as it becomes available.
-// Deduped by Mobile — reusing an existing customer instead of silently
-// creating a second identity for the same phone number, mirroring the
-// SaLead dedup pattern already used elsewhere in the CRM.
+// Resolves the Current-address fields to write, given the incoming payload.
+// When IsCurrentSameAsPermanent is truthy (including "unset", which
+// defaults to true — same-as-permanent is the common case), Current* is
+// copied from Permanent* on every write rather than left blank, so any
+// consumer reading CurrentAddress directly (without knowing about the
+// flag) always sees a real value.
+function resolveCurrentAddress(b) {
+  const sameAsPermanent = b.IsCurrentSameAsPermanent !== false;
+  if (sameAsPermanent) {
+    return {
+      sameAsPermanent: true,
+      currentAddress: b.PermanentAddress?.trim() || null,
+      currentCity: b.PermanentCity || null,
+      currentState: b.PermanentState || null,
+      currentPincode: b.PermanentPincode || null,
+    };
+  }
+  return {
+    sameAsPermanent: false,
+    currentAddress: b.CurrentAddress?.trim() || null,
+    currentCity: b.CurrentCity || null,
+    currentState: b.CurrentState || null,
+    currentPincode: b.CurrentPincode || null,
+  };
+}
+
+// POST / — register a new customer. Name/Mobile/PAN/Permanent Address are
+// the must-needed fields kept mandatory; everything else (Aadhaar,
+// Occupation, Annual Income, co-applicant, DOB, current address,
+// city/state/pincode) is optional detail filled in as it becomes
+// available. Deduped by Mobile — reusing an existing customer instead of
+// silently creating a second identity for the same phone number,
+// mirroring the SaLead dedup pattern already used elsewhere in the CRM.
 router.post("/", requirePageRight("crm-customers", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -106,7 +145,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     if (!b.CustomerName?.trim()) missing.push("Customer Name");
     if (!b.Mobile?.trim()) missing.push("Mobile");
     if (!b.PanNo?.trim()) missing.push("PAN Number");
-    if (!b.Address?.trim()) missing.push("Address");
+    if (!b.PermanentAddress?.trim()) missing.push("Permanent Address");
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
 
     const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
@@ -118,33 +157,46 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       });
     }
 
+    const cur = resolveCurrentAddress(b);
     const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
     const result = await pool.request()
-      .input("no",     sql.NVarChar(30),  customerNo)
-      .input("lid",     sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
-      .input("name",    sql.NVarChar(200), b.CustomerName.trim())
-      .input("mob",     sql.NVarChar(20),  b.Mobile.trim())
-      .input("altmob",  sql.NVarChar(20),  b.AltMobile || null)
-      .input("email",   sql.NVarChar(200), b.Email || null)
-      .input("pan",     sql.NVarChar(20),  b.PanNo.trim())
-      .input("addr",    sql.NVarChar(500), b.Address.trim())
-      .input("city",    sql.NVarChar(100), b.City || null)
-      .input("state",   sql.NVarChar(100), b.State || null)
-      .input("pin",     sql.NVarChar(10),  b.Pincode || null)
-      .input("dob",     sql.Date,          b.DateOfBirth || null)
-      .input("coname",  sql.NVarChar(200), b.CoApplicantName || null)
-      .input("comob",   sql.NVarChar(20),  b.CoApplicantMobile || null)
-      .input("copan",   sql.NVarChar(20),  b.CoApplicantPanNo || null)
-      .input("corel",   sql.NVarChar(50),  b.CoApplicantRelation || null)
-      .input("notes",   sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",      sql.Int,           actorId(req))
+      .input("no",       sql.NVarChar(30),  customerNo)
+      .input("lid",       sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
+      .input("name",      sql.NVarChar(200), b.CustomerName.trim())
+      .input("mob",       sql.NVarChar(20),  b.Mobile.trim())
+      .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
+      .input("email",     sql.NVarChar(200), b.Email || null)
+      .input("pan",       sql.NVarChar(20),  b.PanNo.trim())
+      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
+      .input("occ",       sql.NVarChar(100), b.Occupation || null)
+      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
+      .input("addr",      sql.NVarChar(500), b.PermanentAddress.trim())
+      .input("city",      sql.NVarChar(100), b.PermanentCity || null)
+      .input("state",     sql.NVarChar(100), b.PermanentState || null)
+      .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)
+      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
+      .input("curcity",   sql.NVarChar(100), cur.currentCity)
+      .input("curstate",  sql.NVarChar(100), cur.currentState)
+      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
+      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
+      .input("dob",       sql.Date,          b.DateOfBirth || null)
+      .input("coname",    sql.NVarChar(200), b.CoApplicantName || null)
+      .input("comob",     sql.NVarChar(20),  b.CoApplicantMobile || null)
+      .input("copan",     sql.NVarChar(20),  b.CoApplicantPanNo || null)
+      .input("corel",     sql.NVarChar(50),  b.CoApplicantRelation || null)
+      .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",        sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmCustomer
-          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode,
+          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
+           Address, City, State, Pincode,
+           CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
            DateOfBirth, CoApplicantName, CoApplicantMobile, CoApplicantPanNo, CoApplicantRelation, Notes,
            CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @addr, @city, @state, @pin,
+        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
+                @addr, @city, @state, @pin,
+                @curaddr, @curcity, @curstate, @curpin, @cursame,
                 @dob, @coname, @comob, @copan, @corel, @notes, @cb, SYSDATETIME())
       `);
     const newId = result.recordset[0].Id;
@@ -178,30 +230,42 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
+    const cur = resolveCurrentAddress(b);
     await pool.request()
-      .input("id",      sql.Int,           id)
-      .input("name",    sql.NVarChar(200), b.CustomerName || null)
-      .input("mob",     sql.NVarChar(20),  b.Mobile || null)
-      .input("altmob",  sql.NVarChar(20),  b.AltMobile ?? null)
-      .input("email",   sql.NVarChar(200), b.Email ?? null)
-      .input("pan",     sql.NVarChar(20),  b.PanNo || null)
-      .input("addr",    sql.NVarChar(500), b.Address || null)
-      .input("city",    sql.NVarChar(100), b.City ?? null)
-      .input("state",   sql.NVarChar(100), b.State ?? null)
-      .input("pin",     sql.NVarChar(10),  b.Pincode ?? null)
-      .input("dob",     sql.Date,          b.DateOfBirth || null)
-      .input("coname",  sql.NVarChar(200), b.CoApplicantName ?? null)
-      .input("comob",   sql.NVarChar(20),  b.CoApplicantMobile ?? null)
-      .input("copan",   sql.NVarChar(20),  b.CoApplicantPanNo ?? null)
-      .input("corel",   sql.NVarChar(50),  b.CoApplicantRelation ?? null)
-      .input("notes",   sql.NVarChar(sql.MAX), b.Notes ?? null)
-      .input("ub",      sql.Int,           actorId(req))
+      .input("id",       sql.Int,           id)
+      .input("name",      sql.NVarChar(200), b.CustomerName || null)
+      .input("mob",       sql.NVarChar(20),  b.Mobile || null)
+      .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
+      .input("email",     sql.NVarChar(200), b.Email ?? null)
+      .input("pan",       sql.NVarChar(20),  b.PanNo || null)
+      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
+      .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
+      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
+      .input("addr",      sql.NVarChar(500), b.PermanentAddress || null)
+      .input("city",      sql.NVarChar(100), b.PermanentCity ?? null)
+      .input("state",     sql.NVarChar(100), b.PermanentState ?? null)
+      .input("pin",       sql.NVarChar(10),  b.PermanentPincode ?? null)
+      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
+      .input("curcity",   sql.NVarChar(100), cur.currentCity)
+      .input("curstate",  sql.NVarChar(100), cur.currentState)
+      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
+      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
+      .input("dob",       sql.Date,          b.DateOfBirth || null)
+      .input("coname",    sql.NVarChar(200), b.CoApplicantName ?? null)
+      .input("comob",     sql.NVarChar(20),  b.CoApplicantMobile ?? null)
+      .input("copan",     sql.NVarChar(20),  b.CoApplicantPanNo ?? null)
+      .input("corel",     sql.NVarChar(50),  b.CoApplicantRelation ?? null)
+      .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("ub",        sql.Int,           actorId(req))
       .query(`
         UPDATE dbo.CrmCustomer SET
           CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
           AltMobile = @altmob, Email = @email,
-          PanNo = ISNULL(@pan, PanNo), Address = ISNULL(@addr, Address),
-          City = @city, State = @state, Pincode = @pin, DateOfBirth = ISNULL(@dob, DateOfBirth),
+          PanNo = ISNULL(@pan, PanNo), AadhaarNo = @aadhaar, Occupation = @occ, AnnualIncome = @income,
+          Address = ISNULL(@addr, Address), City = @city, State = @state, Pincode = @pin,
+          CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
+          IsCurrentSameAsPermanent = @cursame,
+          DateOfBirth = ISNULL(@dob, DateOfBirth),
           CoApplicantName = @coname, CoApplicantMobile = @comob, CoApplicantPanNo = @copan, CoApplicantRelation = @corel,
           Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
@@ -236,7 +300,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     // forever. No-op if the customer has no ledger head yet.
     try {
       await syncCrmCustomerLedgerHead(pool, id, {
-        CustomerName: b.CustomerName, Mobile: b.Mobile, Email: b.Email, Address: b.Address, PanNo: b.PanNo,
+        CustomerName: b.CustomerName, Mobile: b.Mobile, Email: b.Email, Address: b.PermanentAddress, PanNo: b.PanNo,
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);

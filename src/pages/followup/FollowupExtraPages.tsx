@@ -324,7 +324,7 @@ function ScopedLogPage({
           />
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto thin-scroll">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -608,7 +608,7 @@ function ReportPage({
           <CardHeader>
             <CardTitle>Customer pipeline</CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent className="overflow-x-auto thin-scroll">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -642,7 +642,7 @@ function ReportPage({
           <CardHeader>
             <CardTitle>Financial follow-up</CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent className="overflow-x-auto thin-scroll">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -678,7 +678,7 @@ function ReportPage({
           <CardHeader>
             <CardTitle>Project status</CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent className="overflow-x-auto thin-scroll">
             <Table>
               <TableHeader>
                 <TableRow>

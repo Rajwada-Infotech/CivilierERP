@@ -2142,7 +2142,7 @@ export default function BookingsPage() {
           </div>
         ) : (
           <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto thin-scroll">
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">

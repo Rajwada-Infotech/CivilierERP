@@ -1149,7 +1149,7 @@ export default function ApplicationsPage() {
           {applications.length > 0 && <StatusPipeline apps={applications} />}
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto thin-scroll">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
