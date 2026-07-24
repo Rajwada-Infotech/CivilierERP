@@ -95,6 +95,11 @@ const CrmParkingBooking: React.FC = () => {
           ParkingSlotNo: form.ParkingSlotId ? undefined : (form.ParkingSlotNo || null),
           Quantity: parseInt(form.Quantity) || 1,
           Notes: form.Notes || null,
+          // This page sells parking standalone — no unit, no Booking will
+          // ever get created to convert a hold into a real sale later. The
+          // Application wizard's Parking step is the only caller that wants
+          // the hold-first behavior (crmParking.js POST /standalone).
+          Immediate: true,
         }),
       });
       const data = await res.json();

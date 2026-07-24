@@ -25,7 +25,7 @@ const PARKING_API = "/api/crm/parking";
 const PARKING_MASTER_API = "/api/parking-master";
 const PARKING_SLOT_API = "/api/parking-slot-master";
 
-const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled"];
+const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
@@ -36,6 +36,7 @@ const statusColor: Record<string, string> = {
   Approved:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
   Cancelled: "text-orange-600 bg-orange-50 border-orange-200",
+  Expired:   "text-slate-500 bg-slate-100 border-slate-200",
 };
 
 const EMPTY_FORM = {
@@ -1694,9 +1695,14 @@ const ParkingSelectionStep: React.FC<{
     }
   };
 
-  const handleRemoveParking = async (id: number) => {
+  const handleRemoveParking = async (a: any) => {
     try {
-      const res = await fetchWithAuth(`${PARKING_API}/${id}`, { method: "DELETE" });
+      // A slot pick is only a hold until the Booking is created (see
+      // crmParking.js POST /standalone) — releasing it goes through the
+      // hold-release route, not the allotment DELETE, since there's no
+      // CrmParkingAllotment row yet to delete.
+      const url = a.Kind === "Hold" ? `${PARKING_API}/hold/${a.Id}` : `${PARKING_API}/${a.Id}`;
+      const res = await fetchWithAuth(url, { method: "DELETE" });
       if (!res.ok) throw new Error((await res.json()).error);
       refetchParking();
     } catch (e: any) {
@@ -1730,9 +1736,17 @@ const ParkingSelectionStep: React.FC<{
         {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
-              <div key={a.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span>{a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}</span>
-                <button onClick={() => handleRemoveParking(a.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+              <div key={`${a.Kind}-${a.Id}`} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+                <span className="flex items-center gap-1.5">
+                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}
+                  {a.Kind === "Hold" && (
+                    <span title="Reserved — becomes a permanent allotment once this application's booking is created"
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-600">
+                      Held
+                    </span>
+                  )}
+                </span>
+                <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
               </div>
             ))}
           </div>

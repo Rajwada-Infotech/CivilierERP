@@ -19,6 +19,10 @@
  */
 const { getPool, sql } = require("../db");
 const { emitNotification } = require("./notify");
+const { advanceApplicationStatus, syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
+const { logCrmAudit } = require("./crmAudit");
+const { findActiveHold, releaseHold } = require("./crmHoldService");
+const { releaseAllParkingForBooking } = require("../routes/crmParking");
 const logger = require("../logger");
 
 const INTERVAL_MS = 60 * 60 * 1000; // hourly, same cadence as escalationEngine.js
@@ -151,6 +155,105 @@ const REGISTRY = [
           "Hold Expired",
           `${label} — hold for ${row.ApplicantName} has expired and is now back to Available.`,
           row.Id, "crm_inventory_hold");
+      }
+
+      // If this was the LAST thing keeping the Application open — no other
+      // still-Active hold, and it never got Approved into a real Booking —
+      // move the Application itself into a distinct terminal status instead
+      // of leaving it sitting in Draft/Pending forever with no visible sign
+      // anything happened. Never deletes the row — status-only, same as
+      // every other terminal transition here, so the Application stays in
+      // CrmApplicationStatusLog's audit trail permanently. Scoped to
+      // Draft/Pending only: an Approved application already has a real
+      // Booking (its hold would have been Converted, not still Active), so
+      // this can never fire against a live sale.
+      const app = await pool.request().input("aid", sql.Int, row.ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (app.recordset.length && ["Draft", "Pending"].includes(app.recordset[0].Status)) {
+        const otherActive = await pool.request().input("aid", sql.Int, row.ApplicationId)
+          .query("SELECT TOP 1 Id FROM dbo.CrmInventoryHold WHERE ApplicationId = @aid AND Status = 'Active'");
+        if (!otherActive.recordset.length) {
+          await advanceApplicationStatus(pool, row.ApplicationId, "Expired",
+            "HoldExpiry", `Auto-expired — ${label} hold expired with no other active hold on this application.`,
+            null, { force: true });
+        }
+      }
+      return true;
+    },
+  },
+  {
+    // A Booking existing does NOT mean "Booked" anymore — the Unit/Parking
+    // Matrix only shows Booked once it's Approved AND its booking-amount
+    // milestone is Paid (see unitMatrix.js/parkingMatrix.js). Until then it
+    // still occupies the SAME 3-day window the original hold promised
+    // (ConfirmDeadline, snapshotted at Booking creation — see
+    // crmEntityCreation.js). If that window passes with the Booking still
+    // unconfirmed, the Booking itself auto-expires here — the Unit/Parking
+    // genuinely frees up for someone else, exactly like an unconverted hold
+    // would, instead of sitting Pending forever with inventory silently
+    // locked behind it.
+    entityType: "crm-booking-confirm-expiry",
+    async fetch(pool) {
+      const r = await pool.request().query(`
+        SELECT bk.Id, bk.BookingNo, bk.ApplicationId, bk.UnitId, bk.AssignedTo,
+               a.ApplicantName, u.UnitName
+        FROM dbo.CrmBooking bk
+        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
+        LEFT JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
+        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+          AND bk.ConfirmDeadline IS NOT NULL AND bk.ConfirmDeadline < SYSDATETIME()
+      `);
+      return r.recordset;
+    },
+    async notify(pool, row) {
+      // Re-check-and-write in one statement rather than trusting the fetch()
+      // snapshot — staff could have approved/cancelled/rejected this exact
+      // Booking in the moments between this run's fetch and this write (the
+      // engine runs hourly, but the window isn't zero). Only actually
+      // expires it, and only runs the release cascade below, if it's still
+      // genuinely in a state this sweep should touch.
+      const claimed = await pool.request().input("id", sql.Int, row.Id).query(`
+        UPDATE dbo.CrmBooking SET Status = 'Expired'
+        OUTPUT INSERTED.Id
+        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+      `);
+      if (!claimed.recordset.length) return false;
+
+      await logCrmAudit(pool, "Booking", row.Id, null, [
+        { field: "Status", oldVal: "Pending", newVal: "Expired" },
+      ]);
+
+      // Free the Unit back up — release its hold if the sweep hasn't
+      // already caught it separately (it may still be 'Converted', not
+      // 'Active', since guardAndConvertHold ran at Booking creation; only
+      // release what's actually still Active).
+      const unitHold = await findActiveHold(pool, "Unit", row.UnitId);
+      if (unitHold) await releaseHold(pool, unitHold.Id, null);
+
+      // Same cascade a real Booking cancellation performs for parking
+      // (crmCancellations.js) — an unpaid milestone tied to a now-dead
+      // Booking must go too, or it'd sit forever demanding payment for a
+      // sale that no longer exists.
+      try { await releaseAllParkingForBooking(pool, row.Id); }
+      catch (parkErr) { console.error("[crm-sla-engine] parking release on booking expiry failed:", parkErr.message); }
+
+      // Same reasoning as the Application-expiry cascade above and the
+      // manual cancel/reject cascades in crmCancellations.js/crmBookings.js
+      // — the Application was force-advanced to 'Approved' the instant this
+      // Booking was created and nothing has touched it since. Without this
+      // it would sit at 'Approved' forever with an Expired Booking
+      // underneath, indistinguishable from a genuinely active sale.
+      await syncApplicationOnBookingTerminal(pool, row.Id, "Expired", "BookingConfirmExpiry",
+        `Auto-expired — its Booking (${row.BookingNo}) was never confirmed in time.`, null);
+
+      const label = row.UnitName ? `Unit ${row.UnitName}` : row.BookingNo;
+      await logCustomerNotice(pool, row.ApplicationId, "Booking Expired",
+        `Your booking for ${label} was not confirmed (approved and paid) in time and has expired. It is now available to other buyers.`);
+      if (row.AssignedTo) {
+        await emitNotification(pool, row.AssignedTo, "crm_booking_confirm_expired",
+          "Booking Expired — Not Confirmed In Time",
+          `${row.BookingNo} (${row.ApplicantName}) — ${label} was never approved/paid within its window and has expired.`,
+          row.Id, "crm_booking");
       }
       return true;
     },

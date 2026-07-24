@@ -12,7 +12,7 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, validatePaymentPlanScope } = require("../services/crmEntityCreation");
-const { placeHoldIfNeeded } = require("../services/crmHoldService");
+const { placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -478,6 +478,16 @@ router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (r
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    // A Rejected Application can only have gotten here from Pending — no
+    // Booking exists yet at that stage (Booking only ever comes from
+    // Approve), so any Active hold on its picked Unit/Parking is now dead
+    // weight. Release it immediately instead of leaving it to the hourly
+    // SLA sweep to notice HoldUntil has passed — the entity should go back
+    // to Available for other customers right away, not hours later.
+    if (result.newStatus === "Rejected") {
+      try { await releaseAllHoldsForApplication(getPool(), id, actorId(req)); }
+      catch (holdErr) { console.error("[crm-applications] hold release on reject failed:", holdErr.message); }
+    }
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-applications] reject error:", e.message);
@@ -492,8 +502,37 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     const pool = getPool();
     const id = parseInt(req.params.id);
     const remarks = req.body?.Remarks || null;
+
+    // An Application with an active Booking must be cancelled through the
+    // Booking's own cancellation flow (crmCancellations.js: request ->
+    // admin-approved -> refund/parking/hold/amendment cascade), not this
+    // single-step any-editor action. Without this check, cancelling here
+    // leaves the Booking (possibly Approved, mid-Agreement, or mid-payments)
+    // completely untouched -- orphaned under a Cancelled parent, invisible
+    // to the sales-deed check, refund computation, parking release, hold
+    // release, and amendment auto-rejection that a real Booking cancellation
+    // performs. The Stage logic above (see BOOKING_SELECT/CrmApplication
+    // query comment: "once ANY booking has ever been created for this
+    // application, it's Converted for good") already treats a booked
+    // Application and its Booking as one linked lifecycle -- this just
+    // enforces that on the cancel path too.
+    const activeBooking = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+    if (activeBooking.recordset.length) {
+      const bk = activeBooking.recordset[0];
+      return res.status(400).json({
+        error: `This application has an active booking (${bk.BookingNo}, ${bk.Status}) — cancel the booking itself (Cancellation Request) instead of the application`,
+      });
+    }
+
     const result = await advanceApplicationStatus(pool, id, "Cancelled", "Manual", remarks, actorId(req));
     if (!result.ok) return res.status(result.error === "Application not found" ? 404 : 400).json({ error: result.error });
+    // Same reasoning as the Reject path above — the active-Booking check
+    // just above guarantees nothing but a hold could still be tying up real
+    // inventory for this Application, so release it now rather than
+    // waiting on the hourly SLA sweep.
+    try { await releaseAllHoldsForApplication(pool, id, actorId(req)); }
+    catch (holdErr) { console.error("[crm-applications] hold release on cancel failed:", holdErr.message); }
     res.json({ success: true, status: result.to });
   } catch (e) {
     console.error("[crm-applications] cancel error:", e.message);

@@ -67,6 +67,7 @@ const AGR_SELECT = `
     ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.SentToCustomerAt, ag.DateApprovalStatus,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue,
+    b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
     pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword
@@ -77,6 +78,30 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
 `;
+
+// Shared lock check — nothing here previously checked whether the Booking
+// behind an Agreement was still live. A Booking can be cancelled after its
+// Agreement already exists (independently, from the Bookings module), and
+// until now the Agreement page had zero visibility into that: it would keep
+// showing Edit/Send/Mark Executed/etc. as normal, active actions on a
+// contract for a sale that no longer exists. Mirrors the same
+// IsActive/Status NOT IN ('Cancelled','Rejected') definition used
+// everywhere else in the codebase (see unitMaster.js). Only /:id/cancel is
+// deliberately exempt — closing out the agreement itself must stay possible.
+async function getAgreementBookingLockReason(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT b.Status AS BookingStatus, b.IsActive AS BookingIsActive
+    FROM dbo.CrmAgreement ag
+    JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+    WHERE ag.Id = @id
+  `);
+  if (!result.recordset.length) return null;
+  const row = result.recordset[0];
+  if (row.BookingIsActive === false || ["Cancelled", "Rejected"].includes(row.BookingStatus)) {
+    return `the underlying booking is ${row.BookingStatus || "inactive"}`;
+  }
+  return null;
+}
 
 // GET / — all agreements
 router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => {
@@ -91,6 +116,43 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings that may legitimately have a NEW
+// agreement created for them right now. Registered ahead of GET /:id so
+// "eligible-bookings" is never swallowed by the :id param route.
+//
+// Mirrors validateAgreementPreparationPrerequisites() exactly (same function,
+// not a re-implementation) so this list can never drift out of sync with
+// the real gate POST / already enforces. In the normal flow an agreement
+// auto-creates the moment every prerequisite lands (see
+// maybeAutoCreateAgreement in crmWorkflowGuards.js, wired from
+// crmWelcomeCalls.js and crmCustomerBankDetails.js) — so this list is
+// usually short: bookings that are Approved with no Agreement yet, most of
+// which are still missing a prerequisite. That's intentional; the "New
+// Agreement" dialog is a manual/admin path, not the primary one.
+router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const candidates = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.Status = 'Approved' AND b.IsActive = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
+      ORDER BY b.BookingNo
+    `);
+
+    const eligible = [];
+    for (const c of candidates.recordset) {
+      const prereq = await validateAgreementPreparationPrerequisites(pool, c.Id);
+      if (prereq.ok) eligible.push({ Id: c.Id, BookingNo: c.BookingNo, ApplicantName: c.ApplicantName });
+    }
+    res.json(eligible);
+  } catch (e) {
+    console.error("[crm-agreements] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -140,6 +202,14 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
+    if (!bookingRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bkg = bookingRow.recordset[0];
+    if (bkg.IsActive === false || ["Cancelled", "Rejected"].includes(bkg.Status)) {
+      return res.status(400).json({ error: `Cannot create an agreement — this booking is ${bkg.Status || "inactive"}.` });
+    }
 
     const prereq = await validateAgreementPreparationPrerequisites(pool, bookingId);
     if (!prereq.ok) {
@@ -228,8 +298,10 @@ router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-agreements", id, "Pending", userEmail, req.user?.role);
     const pool = getPool();
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot resubmit — ${lockReason}. Cancel the agreement instead.` });
+    const result = await approvalTransition("crm-agreements", id, "Pending", userEmail, req.user?.role);
     await pool.request()
       .input("id", sql.Int, id)
       .query(`
@@ -258,7 +330,19 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const remarks = req.body?.Remarks || null;
+    const pool0 = getPool();
+    const lockReason0 = await getAgreementBookingLockReason(pool0, id);
+    if (lockReason0) return res.status(409).json({ error: `Cannot approve — ${lockReason0}. Cancel the agreement instead.` });
+    // The Admin Approval Inbox's Approve/Reject buttons render through the
+    // shared ApprovalActions component (src/components/ApprovalActions.tsx),
+    // which posts { note: ... } — not { Remarks: ... }, which is what every
+    // other approval-gated module (BOQ, Journal Voucher, Inter-Company
+    // Transfer) already reads. This route was the one outlier still reading
+    // the wrong field name, so any remarks staff typed on approve/reject
+    // were silently discarded — worse once reject's remarks became
+    // mandatory below, since that field-name mismatch would then hard-block
+    // every real reject even when staff DID type a reason.
+    const remarks = req.body?.note || null;
     const result = await approvalTransition("crm-agreements", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
     if (result.newStatus === "Approved") {
       const pool = getPool();
@@ -347,9 +431,22 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-agreements", id, "Rejected", userEmail, req.user?.role, remarks);
+    // Same field-name fix as /approve above — the shared ApprovalActions
+    // component posts { note: ... }.
+    const remarks = req.body?.note?.trim() || null;
+    if (!remarks) return res.status(400).json({ error: "Remarks are required when rejecting an agreement" });
     const pool = getPool();
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reject — ${lockReason}. Cancel the agreement instead.` });
+
+    // Snapshot before the transition touches anything — same content, no
+    // VersionNo bump, but tagged with why it bounced back. Mirrors the
+    // Recheck-branch fix in crmPortal.js's POST /agreement/respond.
+    const oldRow = (await pool.request().input("id", sql.Int, id)
+      .query("SELECT VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
+
+    const result = await approvalTransition("crm-agreements", id, "Rejected", userEmail, req.user?.role, remarks);
     await pool.request()
       .input("id", sql.Int, id)
       .input("rem", sql.NVarChar(sql.MAX), remarks)
@@ -364,6 +461,25 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    if (oldRow) {
+      await pool.request()
+        .input("agid", sql.Int, id)
+        .input("ver",  sql.Int, oldRow.VersionNo)
+        .input("adt",  sql.Date, oldRow.AgreementDate)
+        .input("lname",sql.NVarChar(300), oldRow.LegalName)
+        .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+        .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+        .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+        .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+        .input("reason", sql.NVarChar(500), `Senior rejection${remarks ? `: ${remarks}` : ""}`)
+        .input("cb",   sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementRevision
+            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+        `);
+    }
 
     await logApprovalHistory(id, "SeniorReject", remarks, actorId(req));
     res.json({ success: true, status: result.newStatus });
@@ -385,7 +501,13 @@ router.put("/:id/date/approve", requirePageRight("crm-agreements", "edit"), asyn
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const remarks = req.body?.Remarks || null;
+    const pool0 = getPool();
+    const lockReason0 = await getAgreementBookingLockReason(pool0, id);
+    if (lockReason0) return res.status(409).json({ error: `Cannot approve a date — ${lockReason0}. Cancel the agreement instead.` });
+    // Same field-name fix as Senior Approval above — this route is also
+    // reached through the shared ApprovalActions component (module
+    // "crm-agreement-date" in ApprovalInbox.tsx), which posts { note: ... }.
+    const remarks = req.body?.note || null;
     const result = await approvalTransition("crm-agreement-date", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
     if (result.newStatus === "Approved") {
       const pool = getPool();
@@ -427,9 +549,12 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-agreement-date", id, "Rejected", userEmail, req.user?.role, remarks);
+    // Same field-name fix as above.
+    const remarks = req.body?.note || null;
     const pool = getPool();
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reject a date — ${lockReason}. Cancel the agreement instead.` });
+    const result = await approvalTransition("crm-agreement-date", id, "Rejected", userEmail, req.user?.role, remarks);
     await pool.request().input("id", sql.Int, id).query(`
       UPDATE dbo.CrmAgreement SET
         DateApprovalStatus = 'NotRequired', ProposedDateByCompany = NULL, ProposedDateByCustomer = NULL
@@ -491,6 +616,9 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     const pool = getPool();
     const id = parseInt(req.params.id);
     const { proposedDate } = req.body;
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot send to customer — ${lockReason}. Cancel the agreement instead.` });
 
     const ag = await pool.request().input("id", sql.Int, id).query(`
       SELECT
@@ -567,6 +695,9 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
     const { proposedDate } = req.body;
     if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
 
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot propose a date — ${lockReason}. Cancel the agreement instead.` });
+
     const ag = await pool.request().input("id", sql.Int, id).query(`
       SELECT ag.SentToCustomerAt, ag.AgreementDate, ag.DateApprovalStatus, ag.AgreementNo, ag.BookingId
       FROM dbo.CrmAgreement ag WHERE ag.Id = @id
@@ -640,6 +771,9 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const oldRow = old.recordset[0];
 
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot edit — ${lockReason}. Cancel the agreement instead.` });
+
     // AgreementDate is deliberately NOT accepted here — see the note on
     // POST / above. Edit Details can correct legal identity fields, but the
     // agreement date can only ever come from both sides' proposals matching.
@@ -681,7 +815,9 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
       .query(`
         UPDATE dbo.CrmAgreement SET
           LegalName = ISNULL(@lname, LegalName),
-          LegalAddress = @laddr, PanNo = @pan, AadhaarNo = @aadh,
+          LegalAddress = ISNULL(@laddr, LegalAddress),
+          PanNo = ISNULL(@pan, PanNo),
+          AadhaarNo = ISNULL(@aadh, AadhaarNo),
           Notes = @note, VersionNo = VersionNo + @bump,
           LegalExecutiveId = @leg,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
@@ -733,6 +869,16 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     if (!row.AgreementDate) {
       return res.status(400).json({ error: "Both sides must agree on an agreement date first — propose a date and wait for the customer's matching response before marking executed" });
     }
+    const unverified = await pool.request().input("id", sql.Int, id).query(`
+      SELECT DocumentType, Label, Status FROM dbo.CrmAgreementDocument
+      WHERE AgreementId = @id AND IsMandatory = 1 AND Status <> 'Verified'
+    `);
+    if (unverified.recordset.length) {
+      const names = unverified.recordset.map(d => d.Label || d.DocumentType).join(", ");
+      return res.status(400).json({ error: `Cannot mark executed — mandatory document(s) not yet verified: ${names}` });
+    }
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot mark executed — ${lockReason}. Cancel the agreement instead.` });
 
     await pool.request()
       .input("id",  sql.Int, id)
@@ -782,6 +928,8 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     if (!deed.recordset.length || !deed.recordset[0].RegistrationNo) {
       return res.status(400).json({ error: "A Sales Deed with a Registration No. must exist before this agreement can be marked Registered" });
     }
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot mark registered — ${lockReason}. Cancel the agreement instead.` });
 
     await pool.request()
       .input("id", sql.Int, id)
@@ -851,6 +999,9 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
 
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot attach a document — ${lockReason}.` });
+
     const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
     const nextVersion = ver.recordset[0].N;
@@ -891,6 +1042,9 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
 
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot request a document — ${lockReason}.` });
+
     const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
     const nextVersion = ver.recordset[0].N;
@@ -928,6 +1082,15 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
       if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+
+      const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+      if (lockReason) {
+        for (const file of req.files) {
+          const resolved = path.resolve(file.path);
+          if (resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolved, () => {});
+        }
+        return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
+      }
 
       const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType)
         .query("SELECT ISNULL(MAX(VersionNo), 0) AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
@@ -1034,8 +1197,29 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
   try {
     const pool = getPool();
     const b = req.body;
+    const agreementId = parseInt(req.params.id);
+    const docId = parseInt(req.params.docId);
+    const actor = actorId(req);
+
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot review a document — ${lockReason}.` });
+
+    // The :id in the URL was previously dead — any docId updated regardless
+    // of which agreement it actually belonged to. Scope the lookup by both,
+    // so a stale/wrong docId 404s instead of silently touching the wrong
+    // agreement's document.
+    const cur = await pool.request()
+      .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
+      .query("SELECT Status, FilePath FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
+    const oldRow = cur.recordset[0];
+
+    if (b.Status === "Verified" && !oldRow.FilePath) {
+      return res.status(400).json({ error: "Cannot verify a document that hasn't been uploaded yet" });
+    }
+
     await pool.request()
-      .input("id",  sql.Int,          parseInt(req.params.docId))
+      .input("id",  sql.Int,          docId)
       .input("st",  sql.NVarChar(30), b.Status || null)
       .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
       .query(`
@@ -1043,9 +1227,75 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
           Status = ISNULL(@st, Status), Remarks = @rem
         WHERE Id = @id
       `);
+
+    if (b.Status && b.Status !== oldRow.Status) {
+      await logCrmAudit(pool, "AgreementDocument", docId, actor, [
+        { field: "Status", oldVal: oldRow.Status, newVal: b.Status },
+      ]);
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT document error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/portal/deactivate, PUT /:id/portal/reactivate — flip the
+// customer's portal account IsActive flag. Was previously a display-only
+// column (AGR_SELECT already surfaces PortalActive above) with no route
+// anywhere that ever wrote to it — staff had visibility into portal status
+// but no way to act on it. Reached from this file (not crmPortal.js, which
+// is exclusively the customer-facing surface, gated by portal JWTs, not
+// staff sessions) since this is where portal status is already shown to
+// staff. Only meaningful together with the crmPortal.js gate that now
+// re-checks IsActive on every request — before that fix, flipping this had
+// no real effect until the customer's existing 7-day token happened to
+// expire on its own.
+async function setPortalActive(pool, agreementId, isActive) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT a.Id AS ApplicationId, pu.Id AS PortalUserId
+    FROM dbo.CrmAgreement ag
+    JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
+    WHERE ag.Id = @id
+  `);
+  if (!row.recordset.length) return { error: "Agreement not found", status: 404 };
+  if (!row.recordset[0].PortalUserId) return { error: "No portal account exists for this customer yet", status: 404 };
+  await pool.request().input("id", sql.Int, row.recordset[0].PortalUserId).input("act", sql.Bit, isActive ? 1 : 0)
+    .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
+  return { ok: true };
+}
+
+router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await setPortalActive(pool, id, false);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    await logCrmAudit(pool, "Agreement", id, actorId(req), [
+      { field: "PortalAccess", oldVal: "Active", newVal: "Deactivated" },
+    ]);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] portal deactivate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await setPortalActive(pool, id, true);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    await logCrmAudit(pool, "Agreement", id, actorId(req), [
+      { field: "PortalAccess", oldVal: "Deactivated", newVal: "Active" },
+    ]);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] portal reactivate error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
