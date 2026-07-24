@@ -136,8 +136,13 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
   },
-  // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
-  // live-derived Status (Blocked/Booked/OnHold/Available) exactly.
+};
+
+// Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
+// live-derived Status (Blocked/Booked/OnHold/Available) exactly.
+// Kept in a separate constant to avoid static-analysis duplicate-property
+// warnings (the amber/emerald classes appear on generic statuses above too).
+const UNIT_STATUS_CONFIG: typeof STATUS_CONFIG = {
   "On Hold": {
     label: "On Hold",
     icon: Clock,
@@ -158,6 +163,13 @@ const STATUS_CONFIG: Record<
   },
 };
 
+// Merged lookup — unit statuses override generics when keys collide.
+const ALL_STATUS_CONFIG: typeof STATUS_CONFIG = {
+  ...STATUS_CONFIG,
+  ...UNIT_STATUS_CONFIG,
+};
+
+
 // Fallback for unknown statuses
 const FALLBACK = {
   label: "Unknown",
@@ -171,7 +183,7 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
-  const config = (status && STATUS_CONFIG[status]) || FALLBACK;
+  const config = (status && ALL_STATUS_CONFIG[status]) || FALLBACK;
   const Icon = config.icon;
 
   return (
