@@ -194,7 +194,7 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       style={{ width: pctOf(header.column.columnDef.size) }}
-                      className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${header.column.id === "actions" ? "text-right" : "text-left"} ${
+                      className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""

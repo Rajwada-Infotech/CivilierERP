@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -7,7 +7,7 @@ import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
   Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
   ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
-  CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight,
+  CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -97,15 +97,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const qc = useQueryClient();
   const { canDoAction, currentUser } = useAuth();
   const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
-  // Bookings is now a review + restricted-edit surface (Applications and
-  // Bookings) — super admin grants "crm-bookings" edit per-user via Menu
-  // Rights instead of it being a broad role default, so every mutating
-  // control here must check this explicitly rather than assume anyone who
-  // can view the page can also edit it.
   const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Booking");
-  const tabScrollRef = useRef<HTMLDivElement>(null);
-  const scrollTabs = (dir: 1 | -1) => tabScrollRef.current?.scrollBy({ left: dir * 160, behavior: "smooth" });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
@@ -672,7 +665,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Building2 size={16} className="text-primary" />
@@ -713,35 +706,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* Native overflow scrollbars look clunky inside a dialog (thick
-                bar + up/down arrows) — hidden via the webkit/firefox
-                selectors below, with a pair of chevron buttons doing the
-                actual scrolling instead. Buttons always render (rather than
-                only when overflowing) since TABS is a fixed, known-long
-                list — simpler than measuring scrollWidth on every resize. */}
-            <div className="flex items-center gap-0.5 border-b border-border">
-              <button type="button" onClick={() => scrollTabs(-1)}
-                className="shrink-0 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-                <ChevronLeft size={16} />
-              </button>
-              <div ref={tabScrollRef}
-                className="flex items-center gap-1 overflow-x-auto scroll-smooth min-w-0 flex-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {TABS.map((t) => {
-                  const optional = !["Booking", "Payment Plan", "Payment"].includes(t);
-                  return (
-                    <button key={t} onClick={() => setTab(t)}
-                      className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0 ${
-                        tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                      }`}>
-                      {t}{optional && <span className="text-[10px] text-muted-foreground/70 font-normal"> (optional)</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <button type="button" onClick={() => scrollTabs(1)}
-                className="shrink-0 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-                <ChevronRight size={16} />
-              </button>
+            {/* Wraps onto a second line instead of scrolling — simpler and
+                more robust than a custom horizontal scroller (which kept
+                clipping against the dialog's own bounds), and there's
+                always room to wrap inside the dialog's max width. */}
+            <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 border-b border-border px-1">
+              {TABS.map((t) => {
+                const optional = !["Booking", "Payment Plan", "Payment"].includes(t);
+                return (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                      tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}>
+                    {t}{optional && <span className="text-[10px] text-muted-foreground/70 font-normal"> (optional)</span>}
+                  </button>
+                );
+              })}
             </div>
 
             {tab === "Booking" && (
@@ -804,11 +784,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
-                    {/* Locked by default — auto-fetched from the Application
-                        (itself auto-fetched from the Unit's own default).
-                        "Edit" is the deliberate escape hatch for a genuinely
-                        different plan; blocked server-side once any real
-                        payment exists against the current schedule. */}
                     {!planEditOpen && canEdit && booking.Status !== "Approved" && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId ? String(booking.PaymentPlanId) : ""); }}
                         className="text-xs text-primary hover:underline shrink-0">
@@ -869,9 +844,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* ── Payment — second-to-last step. Set the real Booking
-                Amount, record the actual payment against it, then Book.
-                This is the ONLY place money changes hands on a booking. ── */}
             {tab === "Payment" && (
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
@@ -919,486 +891,433 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       ) : null}
                       <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background col-span-2">
-                        <option value="">Deposited To (Company Bank) — optional</option>
-                        {(bankOptions as any[]).map((b: any) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                        <option value="">— Select deposit bank —</option>
+                        {(bankOptions as any[]).map((b: any) => (
+                          <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                        ))}
                       </select>
+                      {payForm.PaymentMode === "Cheque" && (
+                        <input type="date" value={payForm.ChequeDate} onChange={(e) => setPayForm((f) => ({ ...f, ChequeDate: e.target.value }))}
+                          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      )}
                     </div>
-                    <div className="flex justify-end">
-                      <button onClick={handleRecordPayment} disabled={paySaving}
-                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                        {paySaving ? "Recording..." : "Record Payment"}
-                      </button>
-                    </div>
+                    <button onClick={handleRecordPayment} disabled={paySaving}
+                      className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                      {paySaving ? "Recording..." : `Record Payment`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === "Parking & Extra Work" && (
+              <div className="space-y-4 pt-2">
+                {/* Pending amendments banner */}
+                {isAmendmentApprover && (pendingAmendments as any[]).length > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-amber-800"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
+                    {(pendingAmendments as any[]).map((a: any) => (
+                      <div key={a.Id} className="text-xs bg-white rounded-lg p-2 border border-amber-100 flex items-start justify-between gap-2">
+                        <div><span className="font-medium">{a.FieldName}</span> — {a.NewValue ? `→ ${a.NewValue}` : "Removed"} <span className="text-muted-foreground">by {a.CreatedByName}</span></div>
+                        <div className="flex gap-1 shrink-0">
+                          <button onClick={() => handleApproveAmendment(a.Id)} disabled={reviewingAmendmentId === a.Id}
+                            className="px-2 py-0.5 text-[10px] bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-40">
+                            Approve
+                          </button>
+                          <button onClick={() => handleRejectAmendment(a.Id)} disabled={reviewingAmendmentId === a.Id}
+                            className="px-2 py-0.5 text-[10px] bg-red-600 text-white rounded font-medium hover:bg-red-700 disabled:opacity-40">
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                <div className={`rounded-xl border p-3.5 ${mandatoryReady ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-                  <p className="text-sm font-semibold">{mandatoryReady ? "Ready to book" : "On hold / payment pending"}</p>
-                  <p className="text-xs mt-1">
-                    {!booking.UnitReviewConfirmed && "Confirm Unit, Rate & Total Value on the Booking tab. "}
-                    {!booking.PlanReviewConfirmed && "Confirm the Payment Plan on the Payment Plan tab. "}
-                    {!bookingAmountPaidInFull && "Booking amount is not yet fully paid. "}
-                    {mandatoryReady && "All requirements are complete — click Book below to confirm this booking. An invoice generates automatically and admins are notified for final approval."}
-                  </p>
+                {/* Parking */}
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-primary" /> Parking Allotments</h3>
+                  </div>
+                  {(parking as any[]).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No parking allotments linked to this booking.</p>
+                  ) : (
+                    <div className="overflow-x-auto thin-scroll">
+                      <div className="min-w-[500px]">
+                        {(parking as any[]).map((p: any) => (
+                          <div key={p.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 mb-1.5">
+                            <div className="space-y-0.5 min-w-0">
+                              <span className="text-sm font-medium">{p.ParkingSlotName}</span>
+                              <div className="flex gap-3 text-xs text-muted-foreground">
+                                <span>Qty: {p.Quantity}</span>
+                                <span>Amount: {fmt(p.Amount)}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {editingParkingId === p.Id ? (
+                                <>
+                                  <input type="number" min="1" value={parkingForm.Quantity}
+                                    onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                                    className="w-16 text-sm border border-border rounded px-1.5 py-1 bg-background" />
+                                  <button onClick={handleAddParking} disabled={chargesSaving}
+                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    Save
+                                  </button>
+                                  <button onClick={cancelEditParking}
+                                    className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => startEditParking(p)}
+                                    className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
+                                    Edit
+                                  </button>
+                                  {canEdit && (
+                                    <button onClick={() => handleRemoveParking(p.Id)}
+                                      className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
+                                      Release
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Extra Charges */}
+                <div className="rounded-xl border border-border p-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> Extra Charges</h3>
+                  <div className="overflow-x-auto thin-scroll">
+                    {(extras as any[]).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
+                    ) : (
+                      <div className="min-w-[500px]">
+                        {(extras as any[]).map((c: any) => (
+                          <div key={c.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 mb-1.5">
+                            <div className="space-y-0.5 min-w-0">
+                              <span className="text-sm font-medium">{c.Description}</span>
+                              <div className="flex gap-3 text-xs text-muted-foreground">
+                                <span>{fmt(c.Amount)}</span>
+                                <span>GST: {c.GstRate}%</span>
+                                <span>Total: {fmt(c.TotalAmount)}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {editingExtraId === c.Id ? (
+                                <>
+                                  <input placeholder="Description" value={extraForm.Description}
+                                    onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
+                                    className="w-28 text-xs border border-border rounded px-1.5 py-1 bg-background" />
+                                  <input type="number" placeholder="Amount" value={extraForm.Amount}
+                                    onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
+                                    className="w-20 text-xs border border-border rounded px-1.5 py-1 bg-background" />
+                                  <button onClick={handleAddExtra} disabled={chargesSaving}
+                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    Save
+                                  </button>
+                                  <button onClick={cancelEditExtra}
+                                    className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => startEditExtra(c)}
+                                    className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
+                                    Edit
+                                  </button>
+                                  {canEdit && (
+                                    <button onClick={() => handleRemoveExtra(c.Id)}
+                                      className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
+                                      Remove
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {canEdit && !editingExtraId && booking.Status !== "Approved" && (
+                    <>
+                      {legalWorkStarted && (
+                        <input placeholder="Reason for amendment (required)" value={extraReason}
+                          onChange={(e) => setExtraReason(e.target.value)}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      )}
+                      <div className="flex items-center gap-2">
+                        <select value={extraForm.ExtraChargeMasterId} onChange={(e) => {
+                          const selected = (chargeTypes as any[]).find((ct: any) => String(ct.Id) === e.target.value);
+                          setExtraForm((f) => ({
+                            ...f,
+                            ExtraChargeMasterId: e.target.value,
+                            Description: selected?.Name || f.Description,
+                            Amount: selected?.DefaultAmount ? String(selected.DefaultAmount) : f.Amount,
+                            GstRate: selected?.GstRate != null ? String(selected.GstRate) : f.GstRate,
+                          }));
+                        }}
+                          className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                          <option value="">— Select charge type —</option>
+                          {(chargeTypes as any[]).map((ct: any) => (
+                            <option key={ct.Id} value={String(ct.Id)}>{ct.Name} {ct.DefaultAmount ? `(${fmt(ct.DefaultAmount)})` : ""}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input placeholder="Description" value={extraForm.Description}
+                          onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
+                          className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        <input type="number" placeholder="Amount" value={extraForm.Amount}
+                          onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
+                          className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        <select value={extraForm.GstRate} onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
+                          className="w-20 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                          {["0", "5", "12", "18", "28"].map((r) => <option key={r} value={r}>{r}%</option>)}
+                        </select>
+                        <button onClick={handleAddExtra} disabled={chargesSaving}
+                          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                          {chargesSaving ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
 
             {tab === "Bank Details" && (
               <div className="space-y-4 pt-2">
-                {customer && (
-                  <div className="rounded-xl border border-border p-4">
-                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><IdCard size={13} /> Customer</h3>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                      <div><span className="text-muted-foreground block">Name</span><span className="font-medium">{customer.CustomerName}</span></div>
-                      <div><span className="text-muted-foreground block">Mobile</span><span className="font-medium">{customer.Mobile}{customer.AltMobile ? ` / ${customer.AltMobile}` : ""}</span></div>
-                      <div><span className="text-muted-foreground block">Email</span><span className="font-medium">{customer.Email || "—"}</span></div>
-                      <div><span className="text-muted-foreground block">PAN</span><span className="font-medium font-mono">{customer.PanNo || "—"}</span></div>
-                      <div className="col-span-2"><span className="text-muted-foreground block">Address</span><span className="font-medium">{customer.Address || "—"}{[customer.City, customer.State, customer.Pincode].filter(Boolean).length ? ` · ${[customer.City, customer.State, customer.Pincode].filter(Boolean).join(", ")}` : ""}</span></div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Co-applicants: sourced from dbo.CrmCoApplicant (the per-booking
-                    table), not CrmCustomer's intake-time fields — this is the
-                    authoritative list once a booking exists, same source Welcome
-                    Call's checklist uses, so the two never disagree. */}
-                <div className="rounded-xl border border-border p-4">
-                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Users2 size={13} /> Co-Applicants</h3>
-                  {(data?.coApplicants || []).length > 0 ? (
-                    <div className="space-y-1.5">
-                      {(data.coApplicants as any[]).map((ca) => (
-                        <div key={ca.Id} className="text-xs flex items-center gap-1.5">
-                          <span className="font-medium">{ca.Name}</span>
-                          {ca.Relation && <span className="text-muted-foreground">({ca.Relation})</span>}
-                          <span className="text-muted-foreground">— {ca.Mobile || "—"}</span>
+                {!bankLoaded ? (
+                  <div className="py-8 text-center text-xs text-muted-foreground">Loading bank details...</div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {[
+                        { key: "BankName", label: "Bank Name", type: "text" },
+                        { key: "BranchName", label: "Branch Name", type: "text" },
+                        { key: "AccountNo", label: "Account Number", type: "text" },
+                        { key: "IfscCode", label: "IFSC Code", type: "text" },
+                        { key: "AccountHolderName", label: "Account Holder Name", type: "text" },
+                        { key: "PanNo", label: "PAN Number", type: "text" },
+                        { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
+                        { key: "Occupation", label: "Occupation", type: "text" },
+                        { key: "AnnualIncome", label: "Annual Income", type: "number" },
+                      ].map((f) => (
+                        <div key={f.key}>
+                          <label className="text-xs text-muted-foreground block mb-1">{f.label}</label>
+                          <input type={f.type} value={(bank as any)[f.key] || ""}
+                            onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No co-applicant on record.</p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-border p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} /> Bank / KYC / Nominee Details</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {[
+                        { key: "NomineeName", label: "Nominee Name", type: "text" },
+                        { key: "NomineeRelation", label: "Relation", type: "text" },
+                        { key: "NomineeDob", label: "Nominee DOB", type: "date" },
+                        { key: "NomineeContact", label: "Nominee Contact", type: "text" },
+                      ].map((f) => (
+                        <div key={f.key}>
+                          <label className="text-xs text-muted-foreground block mb-1">{f.label}</label>
+                          <input type={f.type} value={(bank as any)[f.key] || ""}
+                            onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        </div>
+                      ))}
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">Nominee Address</label>
+                        <textarea value={bank.NomineeAddress}
+                          onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" rows={2} />
+                      </div>
+                    </div>
                     {canEdit && (
-                      <button onClick={handleSaveBank} disabled={bankSaving || !bankLoaded}
-                        className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40">
-                        {bankSaving ? "Saving..." : "Save"}
+                      <button onClick={handleSaveBank} disabled={bankSaving}
+                        className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        {bankSaving ? "Saving..." : "Save Bank/KYC Details"}
                       </button>
                     )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
-                      ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
-                      ["Occupation", "Occupation"], ["AnnualIncome", "Annual Income"],
-                    ].map(([key, label]) => (
-                      <div key={key}>
-                        <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                        <input value={(bank as any)[key]} disabled={!canEdit}
-                          onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60" />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="pt-2 border-t border-border/60">
-                    <p className="text-xs font-medium text-foreground mb-2">Nominee</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        ["NomineeName", "Name"], ["NomineeRelation", "Relation"], ["NomineeContact", "Contact"], ["NomineeAddress", "Address"],
-                      ].map(([key, label]) => (
-                        <div key={key}>
-                          <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                          <input value={(bank as any)[key]} disabled={!canEdit}
-                            onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))}
-                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {tab === "Parking & Extra Work" && (
-              <div className="space-y-4 pt-2">
-                <div className="rounded-xl border border-border p-4">
-                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><Building2 size={13} /> Booking</h3>
-                  <div className="grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
-                    <div><span className="text-muted-foreground block">Unit</span><span className="font-medium">{booking.UnitNo || "—"}</span></div>
-                    <div><span className="text-muted-foreground block">Block</span><span className="font-medium">{booking.BlockName || "—"}</span></div>
-                    <div><span className="text-muted-foreground block">Floor</span><span className="font-medium">{booking.FloorName || "—"}</span></div>
-                    <div><span className="text-muted-foreground block">Area</span><span className="font-medium">{booking.AreaSqFt ? `${booking.AreaSqFt} sqft` : "—"}</span></div>
-                    <div><span className="text-muted-foreground block">Rate / sqft</span><span className="font-medium">{fmt(booking.RatePerSqFt)}</span></div>
-                    <div><span className="text-muted-foreground block">Booking Date</span><span className="font-medium">{booking.BookingDate ? String(booking.BookingDate).slice(0, 10) : "—"}</span></div>
-                    <div><span className="text-muted-foreground block">Total Value</span><span className="font-semibold">{fmt(booking.TotalValue)}</span></div>
-                    <div><span className="text-muted-foreground block">Booking Amount</span><span className="font-semibold">{fmt(booking.BookingAmount)}</span></div>
-                    <div><span className="text-muted-foreground block">Token</span><span className="font-medium">{booking.TokenType === "Percentage" ? `${booking.TokenValue}%` : fmt(booking.TokenValue)}</span></div>
-                    <div><span className="text-muted-foreground block">Parking</span><span className="font-medium">{fmt(booking.ParkingTotal)}</span></div>
-                    <div><span className="text-muted-foreground block">Extra Charges</span><span className="font-medium">{fmt(booking.ExtraChargesTotal)}</span></div>
-                    <div><span className="text-muted-foreground block">Grand Total</span><span className="font-bold text-primary">{fmt(booking.GrandTotal)}</span></div>
-                  </div>
-                </div>
-
-                {legalWorkStarted && (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
-                    Legal documents are already under verification for this booking — Unit/Parking/Extra Charge changes below now require a reason and admin/marketing_head approval before they apply.
-                  </div>
-                )}
-
-                {pendingAmendments.length > 0 && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 space-y-2">
-                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
-                      <ShieldAlert size={13} className="text-primary" /> Pending Amendment Requests ({pendingAmendments.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {(pendingAmendments as any[]).map((r: any) => (
-                        <div key={r.Id} className="rounded-lg border border-border bg-card p-2.5 text-xs space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium">{r.Action} — {r.ChangeType === "ExtraCharge" ? "Extra Charge" : "Parking Allotment"}</span>
-                            <span className="text-muted-foreground">{r.RequestedByName || "—"} · {r.RequestedAt ? String(r.RequestedAt).slice(0, 10) : "—"}</span>
-                          </div>
-                          <p className="text-muted-foreground">Reason: {r.Reason}</p>
-                          {isAmendmentApprover && (
-                            <div className="flex items-center gap-1.5 pt-1">
-                              <button onClick={() => handleApproveAmendment(r.Id)} disabled={reviewingAmendmentId === r.Id}
-                                className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-                                <Check size={12} /> Approve
-                              </button>
-                              <button onClick={() => handleRejectAmendment(r.Id)} disabled={reviewingAmendmentId === r.Id}
-                                className="flex items-center gap-1 text-xs px-2.5 py-1 border border-border rounded-md hover:bg-muted disabled:opacity-40">
-                                <XIcon size={12} /> Reject
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Parking & Extra Charges — allot/remove directly here, not a
-                    separate hidden dialog, so the numbers above and the
-                    line items behind them live in the same place. */}
-                <div className="rounded-xl border border-border p-4 space-y-3">
-                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground"><Car size={13} /> Parking Allotment</h3>
-                  {(parking as any[]).length > 0 && (
-                    <div className="rounded-lg border border-border overflow-hidden">
-                      {(parking as any[]).map((p: any) => (
-                        <div key={p.Id} className="flex items-center justify-between px-2.5 py-1.5 border-b border-border last:border-0 text-xs">
-                          <div>
-                            <span className="font-medium">{p.CurrentParkingType}</span>
-                            {p.ParkingSlotNo && <span className="text-muted-foreground"> · {p.ParkingSlotNo}</span>}
-                            <span className="text-muted-foreground"> · Qty {p.Quantity}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{fmt(p.TotalAmount)}</span>
-                            {canEdit && p.Id !== editingParkingId && <button onClick={() => startEditParking(p)} className="text-primary hover:underline">Edit</button>}
-                            {canEdit && <button onClick={() => handleRemoveParking(p.Id)} className="text-red-600 hover:underline">{legalWorkStarted ? "Request Release" : "Release"}</button>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {canEdit && editingParkingId != null && (
-                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 space-y-1.5">
-                      <p className="text-[11px] text-muted-foreground">Editing quantity only — to change rate or slot, release this allotment and add a new one.</p>
-                      {legalWorkStarted && (
-                        <input placeholder="Reason for this change (required)" value={parkingReason}
-                          onChange={(e) => setParkingReason(e.target.value)}
-                          className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
-                      )}
-                      <div className="flex items-center gap-1.5">
-                        <input type="number" min={1} placeholder="Qty" value={parkingForm.Quantity}
-                          onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                          className="w-24 text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                        <button onClick={handleAddParking} disabled={chargesSaving}
-                          className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                          {chargesSaving ? "Saving..." : legalWorkStarted ? "Request Amendment" : "Save Changes"}
-                        </button>
-                        <button onClick={cancelEditParking} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted">Cancel</button>
-                      </div>
-                    </div>
-                  )}
-                  {canEdit && (parking as any[]).length === 0 && editingParkingId == null && (
-                    <p className="text-xs text-muted-foreground">No parking allotted yet — new parking is sold from the Application (Parking Selection step), not here. This tab is for editing quantity or releasing an existing allotment.</p>
-                  )}
-
-                  <div className="pt-2 border-t border-border/60 space-y-2">
-                    <h3 className="text-xs font-semibold text-muted-foreground">Extra Charges (Custom Requirements)</h3>
-                    {(extras as any[]).length > 0 && (
-                      <div className="rounded-lg border border-border overflow-hidden">
-                        {(extras as any[]).map((c: any) => (
-                          <div key={c.Id} className="flex items-center justify-between px-2.5 py-1.5 border-b border-border last:border-0 text-xs">
-                            <span className="font-medium">{c.Description}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold">{fmt(c.TotalAmount)}</span>
-                              {canEdit && c.Id !== editingExtraId && <button onClick={() => startEditExtra(c)} className="text-primary hover:underline">Edit</button>}
-                              {canEdit && <button onClick={() => handleRemoveExtra(c.Id)} className="text-red-600 hover:underline">{legalWorkStarted ? "Request Removal" : "Remove"}</button>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {canEdit && (
-                      <>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <select value={extraForm.ExtraChargeMasterId}
-                            onChange={(e) => {
-                              const master = (chargeTypes as any[]).find((c: any) => String(c.Id) === e.target.value);
-                              setExtraForm((f) => ({
-                                ...f,
-                                ExtraChargeMasterId: e.target.value,
-                                Description: master ? master.ChargeName : f.Description,
-                                Amount: master?.DefaultAmount != null ? String(master.DefaultAmount) : f.Amount,
-                                GstRate: master ? String(master.GstRate) : f.GstRate,
-                              }));
-                            }}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background">
-                            <option value="">Custom (type below)</option>
-                            {(chargeTypes as any[]).filter((c: any) => c.IsActive).map((c: any) => (
-                              <option key={c.Id} value={String(c.Id)}>{c.ChargeName}</option>
-                            ))}
-                          </select>
-                          <input placeholder="Description" value={extraForm.Description}
-                            onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                          <input type="number" placeholder="Amount (₹)" value={extraForm.Amount}
-                            onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                          <input type="number" placeholder="GST %" value={extraForm.GstRate}
-                            onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-                            className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                        </div>
-                        {legalWorkStarted && (
-                          <input placeholder="Reason for this change (required)" value={extraReason}
-                            onChange={(e) => setExtraReason(e.target.value)}
-                            className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background" />
-                        )}
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={handleAddExtra} disabled={chargesSaving}
-                            className={editingExtraId != null || legalWorkStarted
-                              ? "text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
-                              : "text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-40"}>
-                            {chargesSaving ? "Saving..." : legalWorkStarted ? "Request Amendment" : editingExtraId != null ? "Save Changes" : "+ Add Charge"}
-                          </button>
-                          {editingExtraId != null && (
-                            <button onClick={cancelEditExtra} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted">Cancel</button>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className={`rounded-xl border p-3.5 ${paymentSummary.balance > 0 ? "border-amber-200 bg-amber-50/40" : "border-border"}`}>
-                  <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><IndianRupee size={13} /> Payment Summary</h3>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{fmt(paymentSummary.totalDue)}</span></div>
-                    <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">{fmt(paymentSummary.totalPaid)}</span></div>
-                    <div><span className="text-muted-foreground block">Balance</span><span className="font-semibold text-amber-700">{fmt(paymentSummary.balance)}</span></div>
-                  </div>
-                  {onAccount?.availableBalance > 0 && (
-                    <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium mt-2 pt-2 border-t border-border/60">
-                      <Wallet size={12} /> {fmt(onAccount.availableBalance)} sitting on account, not yet applied to a milestone
-                    </div>
-                  )}
-                </div>
-
-                {invoices.length > 0 && (
-                  <div className="rounded-xl border border-border p-4">
-                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2"><FileText size={13} /> Invoices</h3>
-                    <div className="space-y-1.5">
-                      {invoices.map((inv: any) => (
-                        <div key={inv.Id} className="flex items-center justify-between text-xs">
-                          <span className="font-mono text-primary">{inv.InvoiceNo}</span>
-                          <span className="text-muted-foreground">{inv.InvoiceType}</span>
-                          <span className="font-semibold">{fmt(inv.Amount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  </>
                 )}
               </div>
             )}
 
-            {/* ── Tab 3: Attachments ── */}
             {tab === "Attachments" && (
-              <div className="space-y-3 pt-2">
+              <div className="space-y-4 pt-2">
                 {canEdit && (
-                  <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl py-6 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors">
-                    <Upload size={16} className="text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">{uploading ? "Uploading..." : "Click to upload files (PDF, images, Office docs — up to 25MB each)"}</span>
-                    <input type="file" multiple className="hidden" disabled={uploading}
-                      onChange={(e) => { handleUpload(e.target.files); e.target.value = ""; }} />
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-lg cursor-pointer hover:bg-muted">
+                      <Upload size={14} />
+                      {uploading ? "Uploading..." : "Upload Files"}
+                      <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} disabled={uploading} />
+                    </label>
+                  </div>
                 )}
-
-                {attachments.length === 0 ? (
-                  <div className="py-6 text-center text-muted-foreground text-sm">No attachments yet</div>
+                {(attachments as any[]).length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-4">No attachments yet.</p>
                 ) : (
-                  <div className="space-y-2">
-                    {(attachments as any[]).map((a: any) => (
-                      <div key={a.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Paperclip size={14} className="text-muted-foreground shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{a.Label || a.FileName}</div>
-                            <div className="text-[11px] text-muted-foreground">{a.FileName} · {a.FileSize ? `${(a.FileSize / 1024).toFixed(0)} KB` : ""} · {a.UploadedByName || "—"}</div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <a href={`${API}/${bookingId}/attachments/file/${a.Id}`} target="_blank" rel="noreferrer"
-                            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Download size={14} /></a>
-                          {canEdit && (
-                            <button onClick={() => handleDeleteAttachment(a.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto thin-scroll">
+                    <div className="min-w-[600px]">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="text-left px-2.5 py-2 text-xs text-muted-foreground font-medium">File</th>
+                            <th className="text-left px-2.5 py-2 text-xs text-muted-foreground font-medium">Date</th>
+                            <th className="text-right px-2.5 py-2 text-xs text-muted-foreground font-medium">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(attachments as any[]).map((a: any) => (
+                            <tr key={a.Id} className="border-b border-border hover:bg-muted/30">
+                              <td className="px-2.5 py-2 flex items-center gap-1.5">
+                                <Paperclip size={12} className="text-muted-foreground shrink-0" />
+                                <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
+                              </td>
+                              <td className="px-2.5 py-2 text-xs text-muted-foreground">{a.CreatedAt ? new Date(a.CreatedAt).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="px-2.5 py-2 text-right">
+                                <a href={a.FileUrl} target="_blank" rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
+                                  <Download size={11} /> Download
+                                </a>
+                                {canEdit && (
+                                  <button onClick={() => handleDeleteAttachment(a.Id)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded ml-1">
+                                    <Trash2 size={11} /> Delete
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ── Tab 4: Invoice ── */}
             {tab === "Invoice" && (
-              <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">Every invoice generated here is immediately visible to the customer in their portal.</p>
-                  {canEdit && (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
+                  {canEdit && booking.Status !== "Approved" && (
                     <button onClick={openInvoiceDialog}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 shrink-0">
-                      <Plus size={14} /> Generate Invoice
+                      className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
+                      + Generate Invoice
                     </button>
                   )}
                 </div>
-
-                {invoices.length === 0 ? (
-                  <div className="py-8 text-center text-muted-foreground text-sm">No invoices generated yet</div>
+                {(invoices as any[]).length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-4">No invoices generated yet.</p>
                 ) : (
-                  <div className="rounded-xl border border-border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-muted/40 text-left">
-                          {INVOICE_SORT_COLS.map(({ key, label }) => {
-                            const sorted = invoiceSort?.key === key ? invoiceSort.dir : null;
-                            return (
-                              <th key={key} onClick={() => toggleInvoiceSort(key)}
-                                className="px-3 py-2 text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors">
-                                <span className="inline-flex items-center gap-1">
-                                  {label}
-                                  <span className="text-muted-foreground/50">
-                                    {sorted === "asc" ? (
-                                      <ChevronUp size={11} className="text-emerald-500" />
-                                    ) : sorted === "desc" ? (
-                                      <ChevronDown size={11} className="text-emerald-500" />
-                                    ) : (
-                                      <ChevronsUpDown size={11} />
-                                    )}
-                                  </span>
+                  <div className="overflow-x-auto thin-scroll">
+                    <div className="min-w-[700px]">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border">
+                            {INVOICE_SORT_COLS.map((c) => (
+                              <th key={c.key} onClick={() => toggleInvoiceSort(c.key)}
+                                className="text-left px-2.5 py-2 text-xs text-muted-foreground font-medium cursor-pointer hover:text-foreground select-none whitespace-nowrap">
+                                <span className="flex items-center gap-0.5">
+                                  {c.label}
+                                  {invoiceSort?.key === c.key && (
+                                    invoiceSort.dir === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+                                  )}
                                 </span>
                               </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedInvoices.map((inv: any) => (
-                          <tr key={inv.Id} className="border-t border-border">
-                            <td className="px-3 py-2 font-mono text-xs font-semibold text-primary">{inv.InvoiceNo}</td>
-                            <td className="px-3 py-2 text-xs">{inv.InvoiceType}</td>
-                            <td className="px-3 py-2 font-semibold">{fmt(inv.Amount)}</td>
-                            <td className="px-3 py-2 text-xs">{String(inv.InvoiceDate).slice(0, 10)}</td>
-                            <td className="px-3 py-2">
-                              <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200 flex items-center gap-1 w-fit">
-                                <CheckCircle2 size={10} /> {inv.Status}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {sortedInvoices.map((inv: any) => (
+                            <tr key={inv.Id} className="border-b border-border hover:bg-muted/30">
+                              <td className="px-2.5 py-2 whitespace-nowrap">{inv.InvoiceNo}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">{inv.InvoiceType}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap font-medium">{fmt(inv.Amount)}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap text-xs text-muted-foreground">{inv.InvoiceDate ? new Date(inv.InvoiceDate).toLocaleDateString("en-IN") : "—"}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">{inv.Status || "Active"}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Invoice dialog */}
+                {invoiceDialog && (
+                  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
+                    <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="text-sm font-semibold">Generate Invoice</h3>
+                      <div className="space-y-2">
+                        <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                          <option value="Booking">Booking</option>
+                          <option value="Maintenance">Maintenance</option>
+                          <option value="Other">Other</option>
+                        </select>
+                        <input type="number" placeholder="Amount" value={invoiceForm.Amount}
+                          onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        <input type="date" value={invoiceForm.InvoiceDate}
+                          onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        <input placeholder="Description" value={invoiceForm.Description}
+                          onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
+                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button onClick={() => setInvoiceDialog(false)}
+                          className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                          Cancel
+                        </button>
+                        <button onClick={handleGenerateInvoice} disabled={saving}
+                          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          {saving ? "Generating..." : "Generate"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             )}
+
+            {/* Footer navigation */}
+            <div className="flex items-center justify-between gap-2 pt-4 border-t border-border mt-4">
+              <div className="flex items-center gap-2">
+                <button onClick={() => goStep(-1)} disabled={activeTabIndex === 0}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1">
+                  <ArrowLeft size={14} /> Previous
+                </button>
+                <button onClick={() => goStep(1)} disabled={activeTabIndex === TABS.length - 1}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1">
+                  Next <ArrowRight size={14} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {booking.Status !== "Approved" && mandatoryReady && (
+                  <button onClick={handleFinalBook} disabled={bookingRequesting}
+                    className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-1">
+                    {bookingRequesting ? "Submitting..." : "Book"}
+                    {!bookingRequesting && <Check size={14} />}
+                  </button>
+                )}
+              </div>
+            </div>
           </>
         )}
-
-        <div className="flex items-center justify-between gap-2 pt-3 border-t border-border">
-          <div className="flex items-center gap-2">
-            <button onClick={() => goStep(-1)} disabled={activeTabIndex === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
-              <ArrowLeft size={14} /> Previous
-            </button>
-            {activeTabIndex < TABS.length - 1 && (
-              <button onClick={() => goStep(1)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                Next <ArrowRight size={14} />
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {tab === "Payment" && booking?.Status !== "Approved" && (
-              <button onClick={handleFinalBook} disabled={!mandatoryReady || bookingRequesting}
-                title={!mandatoryReady ? "Complete review and booking amount payment first" : "Notify admins this booking is ready for approval"}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                {bookingRequesting ? "Sending..." : booking?.ReadyForApprovalAt ? "Re-notify Admin" : mandatoryReady ? "Book / Send for Approval" : "Book Blocked"}
-              </button>
-            )}
-            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          </div>
-        </div>
       </DialogContent>
-
-      {/* Generate Invoice Dialog */}
-      <Dialog open={invoiceDialog} onOpenChange={(o) => { if (!o) setInvoiceDialog(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><FileText size={16} className="text-primary" /> Generate Invoice</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Invoice Type</label>
-              <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="Booking">Booking</option>
-                <option value="Agreement">Agreement</option>
-                <option value="Possession">Possession</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-              <input type="number" value={invoiceForm.Amount} onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Invoice Date</label>
-              <input type="date" value={invoiceForm.InvoiceDate} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Description</label>
-              <textarea value={invoiceForm.Description} onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setInvoiceDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleGenerateInvoice} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Generating..." : "Generate"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </Dialog>
   );
 }
