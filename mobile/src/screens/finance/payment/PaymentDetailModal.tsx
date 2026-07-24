@@ -14,7 +14,7 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import {
   X, Receipt, AlertTriangle, RefreshCw, ArrowLeft, BookOpen, Pencil, Trash2, Check, Send, Printer,
-} from "lucide-react-native";
+} from "lucide-react-native"; // ArrowRight removed — unused
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";

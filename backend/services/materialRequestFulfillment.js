@@ -13,7 +13,7 @@
  * material has been committed to a supplier either way.
  */
 
-const { getPool, sql } = require("../db");
+const { sql } = require("../db");
 
 // Per MR line item: requested vs. already-ordered (across all non-voided
 // POs that were created from this MR item) vs. what's still pending.

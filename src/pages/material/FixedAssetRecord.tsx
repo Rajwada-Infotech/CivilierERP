@@ -137,7 +137,6 @@ type ViewMode = "list" | "form" | "detail";
 
 // ── small presentational helpers ──────────────────────────────────────────────
 const inputCls    = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
-const filterCls   = "h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 shrink-0";
 const labelCls    = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
 const sectionCls  = "bg-card border border-border rounded-xl p-5 space-y-4";
 

@@ -14,7 +14,7 @@
  *         services/materialRequestFulfillment.js)
  */
 
-const { getPool, sql } = require("../db");
+const { sql } = require("../db");
 const { getMRItemFulfillment } = require("./materialRequestFulfillment");
 
 async function searchCandidates(pool, { docType, finYearId, companyId, projectId }) {

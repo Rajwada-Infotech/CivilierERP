@@ -124,14 +124,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchDetail(bookingId),
   });
   const booking = data?.booking;
-  const customer = data?.customer;
+  // customer is available via data?.customer if needed in future tabs
   const agreement = data?.agreement;
   // Once the booking's Agreement has at least one uploaded document, Unit/
   // Parking/Extra-Charge changes route through the amendment-approval queue
   // instead of applying directly (see isLegalWorkStarted in the backend) —
   // the numbers may already be baked into a document under review.
   const legalWorkStarted = !!(agreement && agreement.DocumentCount > 0);
-  const paymentSummary = data?.paymentSummary || {};
+  // paymentSummary available via data?.paymentSummary if reinstated
 
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
@@ -164,11 +164,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchInvoices(bookingId),
     enabled: tab === "Invoice" || tab === "Payment",
   });
-  const { data: onAccount } = useQuery({
+  useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
     enabled: tab === "Payment",
-  });
+  }); // result not yet consumed; query kept for prefetch / cache warming
   const { data: attachments = [] } = useQuery({
     queryKey: ["crm-booking-attachments", bookingId],
     queryFn: () => fetchAttachments(bookingId),
