@@ -2279,12 +2279,7 @@ function App() {
         <AuthSessionBridge>
           {initialLoading ? <Loader /> : null}
           {initialLoading ? null : (
-            <Router
-              future={{
-                v7_startTransition: true,
-                v7_relativeSplatPath: true,
-              }}
-            >
+            <Router>
               <ModuleProvider>
                 <ThemeProvider>
                   <AppRoutes />
