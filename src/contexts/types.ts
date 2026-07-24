@@ -72,6 +72,7 @@ export interface AppUser {
   initials: string;
   avatarUrl?: string | null;
   can_accept_tickets?: boolean;
+  showLoginReminders?: boolean;
   pagePermissions: PagePermission[];
   isActive: boolean;
 }

@@ -197,8 +197,15 @@ router.get("/", async (req, res) => {
           END                      AS SupplierName,
           ISNULL(eb.ENetAmount, eb.EAmount) AS Amount,
           -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
+          -- Multi-GRN combined invoices (ELinkedGrnIds set — see
+          -- backend/services/invoiceLinking.js) have no single source GRN to
+          -- pull a live total from; grn_eb only ever joins the primary/first
+          -- one, so recomputing from it alone understates the real total.
+          -- For those, leave this NULL so the frontend falls back to the
+          -- already-correct combined Amount above (same guard as GET /:id
+          -- in expenseBooking.js).
           CASE
-            WHEN eb.ESourceType = 'GRN' AND grn_eb.TotalAmount IS NOT NULL AND grn_eb.TotalAmount > 0
+            WHEN eb.ESourceType = 'GRN' AND eb.ELinkedGrnIds IS NULL AND grn_eb.TotalAmount IS NOT NULL AND grn_eb.TotalAmount > 0
             THEN grn_eb.TotalAmount
             ELSE NULL
           END                      AS GrnTotalAmount,

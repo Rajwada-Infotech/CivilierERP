@@ -40,7 +40,9 @@ import {
   Download,
   Upload,
   Loader2,
+  Lock,
 } from "lucide-react";
+import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import {
   computeRemainingPOItems,
@@ -856,6 +858,39 @@ export default function GRN() {
   const [grnPostingData, setGrnPostingData] = useState<any | null>(null);
   const [grnPostingLoading, setGrnPostingLoading] = useState(false);
   const [grnPosting, setGrnPosting] = useState(false);
+  const [grnPostingError, setGrnPostingError] = useState<string | null>(null);
+
+  // Auto-post as soon as the posting tab's data has loaded and it isn't
+  // posted yet — no manual "Post to GL" click; the journal entry is created
+  // the moment the user looks at the posting tab.
+  React.useEffect(() => {
+    if (
+      viewModalTab !== "posting" ||
+      grnPostingLoading ||
+      !grnPostingData ||
+      grnPostingData.isPosted ||
+      grnPosting ||
+      !viewingGrn?.GRNID
+    )
+      return;
+    const grnId = viewingGrn.GRNID;
+    setGrnPosting(true);
+    setGrnPostingError(null);
+    fetchWithAuth(`/api/grns/${grnId}/post-to-gl`, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setGrnPostingData((prev: any) => ({
+          ...prev,
+          isPosted: true,
+          jvNo: body.jvNo,
+          jvId: body.jvId,
+        }));
+      })
+      .catch((err: any) => setGrnPostingError(err.message ?? "Posting failed"))
+      .finally(() => setGrnPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewModalTab, grnPostingLoading, grnPostingData, viewingGrn?.GRNID]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [grnStatusFilter, setGrnStatusFilter] = useState("All");
@@ -901,10 +936,13 @@ export default function GRN() {
 
   // Selectable years for the (now unlocked) Financial Year filter — same
   // "YYYY-YYYY" shape as activeFinYearRange so it matches what the backend
-  // computes per-GRN.
+  // computes per-GRN. Restricted to Active fin years from the Fin Year
+  // master — a GRN is a live receiving transaction, not a backdated entry
+  // against a closed year.
   const finYearOptions = useMemo(
     () =>
       finYears
+        .filter((fy) => fy.status === "Active")
         .map((fy) =>
           fy.startDate
             ? `${new Date(fy.startDate).getFullYear()}-${new Date(fy.startDate).getFullYear() + 1}`
@@ -1028,6 +1066,22 @@ export default function GRN() {
     queryFn: () => getProjects(formData.companyId || null),
   });
 
+  // POs eligible for a GRN must have at least one Vehicle In/Out already
+  // logged against them — goods can't be receipted before a vehicle's
+  // actually brought them in.
+  const { data: poIdsWithVio = [] } = useQuery({
+    queryKey: ["po-ids-with-vio"],
+    queryFn: () =>
+      fetchWithAuth("/api/vehicle-in-out/po-ids-with-vio")
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d.map(Number) : [])),
+    staleTime: 60_000,
+  });
+  const poIdsWithVioSet = useMemo(
+    () => new Set(poIdsWithVio as number[]),
+    [poIdsWithVio],
+  );
+
   const { data: companiesData = [] } = useQuery({
     queryKey: ["grn-companies"],
     queryFn: getCompanies,
@@ -1060,6 +1114,10 @@ export default function GRN() {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)
               return false;
           }
+          // A GRN can only be raised once a vehicle's actually brought the
+          // goods in — a PO with no Vehicle In/Out logged against it yet
+          // has nothing to receipt.
+          if (!poIdsWithVioSet.has(Number(po.PurchaseOrderID))) return false;
           return true;
         })
         .map((po) => {
@@ -1082,6 +1140,7 @@ export default function GRN() {
       formData.projectId,
       formData.poId,
       editingId,
+      poIdsWithVioSet,
     ],
   );
 
@@ -1488,6 +1547,18 @@ export default function GRN() {
       )
     )
       errs.items = errs.items || "Enter billing qty for each received item";
+    // Received can't exceed what was actually ordered on the PO line —
+    // matters most for the "remaining items" flow, where orderedQty is the
+    // PO's own line quantity (the Vehicle In/Out flow already locks the
+    // input to what the vehicle brought in, and the backend separately
+    // rejects any GRN qty over that lot's own recorded quantity).
+    const overOrdered = formData.items.find(
+      (i) => i.orderedQty > 0 && i.receivedQty > i.orderedQty,
+    );
+    if (overOrdered)
+      errs.items =
+        errs.items ||
+        `${overOrdered.itemName || "An item"}: received quantity (${overOrdered.receivedQty}) exceeds ordered quantity (${overOrdered.orderedQty})`;
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -1686,6 +1757,133 @@ export default function GRN() {
     } finally {
       setImporting(false);
     }
+  };
+
+  // ── Print a GRN — a standalone document opened in its own window rather
+  // than window.print()'ing the live modal. The modal uses theme CSS
+  // variables (bg-card, text-muted-foreground, ...) which don't have a
+  // print-safe light-on-white override, so printing it directly produced
+  // an unreadable page. This builds independent light-themed HTML instead,
+  // same blob-URL pattern used by PurchaseOrderMaster.tsx / VehicleInOut.tsx.
+  const handlePrintGRN = (
+    grn: any,
+    items: GRNItemLine[],
+    subtotal: number,
+    gstTotal: number,
+  ) => {
+    const grnNo = grn.GRNNo
+      ? grn.GRNNo.startsWith("GRN-")
+        ? grn.GRNNo
+        : `GRN-${grn.GRNNo}`
+      : "—";
+    const total = subtotal + gstTotal;
+
+    const itemRows = items
+      .map(
+        (it, i) => safeHtml`
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
+        <td style="padding:8px 10px;font-weight:500;">${it.itemName || "—"}</td>
+        <td style="padding:8px 10px;text-align:center;">${it.orderedQty ?? "—"}</td>
+        <td style="padding:8px 10px;text-align:center;font-weight:600;">${it.receivedQty ?? "—"}</td>
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${it.uom || "—"}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${Number(it.rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        <td style="padding:8px 10px;text-align:center;">${it.gstPct ? it.gstPct + "%" : "—"}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${Number(it.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+      </tr>`,
+      )
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(grnNo)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
+    <div style="font-size:20px;font-weight:800;color:#4f46e5;">${escapeHtml(grn.CompanyName || "CivilierERP")}</div>
+    <div style="text-align:right;">
+      <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">GOODS RECEIPT NOTE</div>
+      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${escapeHtml(grnNo)}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}</strong></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
+      <div style="font-weight:700;font-size:13px;">${escapeHtml(grn.SupplierName || "—")}</div>
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Purchase Order</div>
+      <div style="font-weight:700;font-size:13px;">${escapeHtml(grn.PONumber || "—")}</div>
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company / Project</div>
+      <div style="font-weight:600;font-size:13px;">${escapeHtml(grn.CompanyName || "—")}</div>
+      <div style="font-size:11px;color:#374151;">${escapeHtml(grn.ProjectName || "—")}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px;text-align:center;">#</th>
+        <th style="text-align:left;">Item</th>
+        <th style="text-align:center;">Ordered</th>
+        <th style="text-align:center;">Received</th>
+        <th style="text-align:center;">UOM</th>
+        <th style="text-align:right;">Rate (₹)</th>
+        <th style="text-align:center;">GST %</th>
+        <th style="text-align:right;">Amount (₹)</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+    <table style="width:260px;border-collapse:collapse;">
+      <tbody>
+        <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+        ${gstTotal > 0 ? `<tr><td style="color:#6b7280;padding:5px 8px;">GST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${gstTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
+        <tr style="border-top:2px solid #4f46e5;">
+          <td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td>
+          <td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  ${grn.Remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${escapeHtml(grn.Remarks)}</div></div>` : ""}
+
+  <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+    <span>Generated by CivilierERP</span>
+    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=960,height=720");
+    if (!win) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Pop-up blocked — please allow pop-ups for this site.");
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
   };
 
   // ─── JSX ─────────────────────────────────────────────────────────────────────
@@ -1891,7 +2089,11 @@ export default function GRN() {
                     </div>
                   </div>
 
-                  {/* Godown */}
+                  {/* Godown — once a Project is picked, this is locked to
+                      that project's own linked godown (auto-selected above
+                      by findProjectGodownId) rather than letting the user
+                      pick any godown company-wide. No project yet → falls
+                      back to the full godown list so it isn't blocked. */}
                   <div>
                     <FieldLabel>
                       <span className="inline-flex items-center gap-1">
@@ -1900,29 +2102,48 @@ export default function GRN() {
                       </span>
                     </FieldLabel>
                     <div className="relative">
-                      <select
-                        value={formData.godownId}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            godownId: e.target.value,
-                          }))
-                        }
-                        className={inpSel}
-                      >
-                        <option value="">Main Godown</option>
-                        {godowns
-                          .filter((g: any) => !g.IsMain)
-                          .map((g: any) => (
-                            <option key={g.GodownID} value={String(g.GodownID)}>
-                              {g.GodownName}
-                            </option>
-                          ))}
-                      </select>
-                      <ChevronDown
-                        size={12}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
+                      {formData.projectId ? (
+                        <div
+                          className={`${inpSel} flex items-center gap-1.5 bg-muted/30 cursor-not-allowed`}
+                          title="Locked to this project's linked godown"
+                        >
+                          <Lock size={11} className="text-muted-foreground shrink-0" />
+                          <span className="truncate">
+                            {formData.godownId
+                              ? (godowns.find(
+                                  (g: any) =>
+                                    String(g.GodownID) === formData.godownId,
+                                )?.GodownName ?? "Main Godown")
+                              : "Main Godown"}
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            value={formData.godownId}
+                            onChange={(e) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                godownId: e.target.value,
+                              }))
+                            }
+                            className={inpSel}
+                          >
+                            <option value="">Main Godown</option>
+                            {godowns
+                              .filter((g: any) => !g.IsMain)
+                              .map((g: any) => (
+                                <option key={g.GodownID} value={String(g.GodownID)}>
+                                  {g.GodownName}
+                                </option>
+                              ))}
+                          </select>
+                          <ChevronDown
+                            size={12}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -2306,28 +2527,42 @@ export default function GRN() {
                                     *
                                   </span>
                                 </label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={
-                                    field !== "receivedQty" ? "0.01" : "0.001"
-                                  }
-                                  value={
-                                    field === "receivedQty"
+                                {formData.grnSourceMode === "vehicleInOut" ? (
+                                  <div
+                                    className={`${inp} text-right text-xs flex items-center justify-end gap-1 bg-muted/30`}
+                                    title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                  >
+                                    <Lock size={10} className="text-muted-foreground shrink-0" />
+                                    {field === "receivedQty"
                                       ? item.receivedQty
                                       : field === "rate"
                                         ? item.rate
-                                        : item.quantity
-                                  }
-                                  onChange={(e) =>
-                                    updateItemField(
-                                      idx,
-                                      field,
-                                      Number(e.target.value),
-                                    )
-                                  }
-                                  className={`${inp} text-right text-xs`}
-                                />
+                                        : item.quantity}
+                                  </div>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={
+                                      field !== "receivedQty" ? "0.01" : "0.001"
+                                    }
+                                    value={
+                                      field === "receivedQty"
+                                        ? item.receivedQty
+                                        : field === "rate"
+                                          ? item.rate
+                                          : item.quantity
+                                    }
+                                    onChange={(e) =>
+                                      updateItemField(
+                                        idx,
+                                        field,
+                                        Number(e.target.value),
+                                      )
+                                    }
+                                    className={`${inp} text-right text-xs`}
+                                  />
+                                )}
                               </div>
                             ),
                           )}
@@ -2455,17 +2690,27 @@ export default function GRN() {
                               {item.orderedQty}
                             </td>
                             <td className="px-1.5 py-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                max={item.orderedQty || undefined}
-                                step="0.001"
-                                value={item.receivedQty}
-                                onChange={(e) =>
-                                  updateReceivedQty(idx, Number(e.target.value))
-                                }
-                                className={`${inp} text-right text-xs py-1.5`}
-                              />
+                              {formData.grnSourceMode === "vehicleInOut" ? (
+                                <span
+                                  className="flex items-center justify-end gap-1 text-xs font-medium text-foreground pr-2 py-1.5"
+                                  title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                >
+                                  <Lock size={10} className="text-muted-foreground shrink-0" />
+                                  {item.receivedQty}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={item.orderedQty || undefined}
+                                  step="0.001"
+                                  value={item.receivedQty}
+                                  onChange={(e) =>
+                                    updateReceivedQty(idx, Number(e.target.value))
+                                  }
+                                  className={`${inp} text-right text-xs py-1.5`}
+                                />
+                              )}
                             </td>
                             <td
                               className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
@@ -2476,38 +2721,58 @@ export default function GRN() {
                               {item.uom || "—"}
                             </td>
                             <td className="px-1.5 py-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={item.rate}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    idx,
-                                    "rate",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className={`${inp} text-right text-xs py-1.5`}
-                                placeholder="0.00"
-                              />
+                              {formData.grnSourceMode === "vehicleInOut" ? (
+                                <span
+                                  className="flex items-center justify-end gap-1 text-xs font-medium text-foreground pr-2 py-1.5"
+                                  title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                >
+                                  <Lock size={10} className="text-muted-foreground shrink-0" />
+                                  {item.rate}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.rate}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      idx,
+                                      "rate",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  className={`${inp} text-right text-xs py-1.5`}
+                                  placeholder="0.00"
+                                />
+                              )}
                             </td>
                             <td className="px-1.5 py-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={item.quantity}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    idx,
-                                    "quantity",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className={`${inp} text-right text-xs py-1.5`}
-                                placeholder="0"
-                              />
+                              {formData.grnSourceMode === "vehicleInOut" ? (
+                                <span
+                                  className="flex items-center justify-end gap-1 text-xs font-medium text-foreground pr-2 py-1.5"
+                                  title="Locked to the quantity recorded on the selected Vehicle In/Out"
+                                >
+                                  <Lock size={10} className="text-muted-foreground shrink-0" />
+                                  {item.quantity}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      idx,
+                                      "quantity",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  className={`${inp} text-right text-xs py-1.5`}
+                                  placeholder="0"
+                                />
+                              )}
                             </td>
                             <td className="px-2 py-2 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               {item.totalAmount > 0
@@ -2817,7 +3082,13 @@ export default function GRN() {
       {/* ══════════════════════════════════════════════════════════════════ */}
       {viewingGrn &&
         (() => {
-          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
+          // Only lines actually received — a GRN sourced from "remaining
+          // items" can be saved with some lines still at 0 (the user chose
+          // not to receive them in this lot), and those shouldn't show up
+          // in a "Received Items" list.
+          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems).filter(
+            (i) => Number(i.receivedQty) > 0,
+          );
           const subtotal = items.reduce(
             (s, i) => s + (Number(i.totalAmount) || 0),
             0,
@@ -2828,21 +3099,8 @@ export default function GRN() {
           );
           const subtotalInclGST = subtotal + gstTotal;
           return (
-            <div className="grn-print-overlay fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-              <style>{`
-                  @media print {
-                    body > * { display: none !important; }
-                    /* The overlay itself is a body > * child — its own
-                       display:none would hide .grn-print-modal regardless
-                       of the modal's own display override, since a child
-                       can't un-hide a hidden ancestor. Un-hide the overlay
-                       too, stripped of its backdrop/centering styles. */
-                    body > .grn-print-overlay { display: block !important; position: static !important; background: none !important; backdrop-filter: none !important; padding: 0 !important; }
-                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; max-width: none !important; width: 100% !important; }
-                    .grn-print-modal .sticky { position: static !important; }
-                  }
-                `}</style>
-              <div className="grn-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+            <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+              <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
                 {/* Modal header */}
                 <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
                   <div>
@@ -2860,7 +3118,9 @@ export default function GRN() {
                   <div className="flex items-center gap-2">
                     {rights.canPrint && (
                       <button
-                        onClick={() => window.print()}
+                        onClick={() =>
+                          handlePrintGRN(viewingGrn, items, subtotal, gstTotal)
+                        }
                         title="Print GRN"
                         className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
                       >
@@ -2962,6 +3222,18 @@ export default function GRN() {
                                 value: viewingGrn.SourceWDDocNo,
                                 mono: true,
                                 color: "text-orange-600 dark:text-orange-400",
+                              },
+                            ]
+                          : []),
+                        ...(viewingGrn.VehicleInOutDocNo
+                          ? [
+                              {
+                                label: "Vehicle In/Out",
+                                value: viewingGrn.VehicleInOutVehicleNo
+                                  ? `${viewingGrn.VehicleInOutDocNo} — ${viewingGrn.VehicleInOutVehicleNo}`
+                                  : viewingGrn.VehicleInOutDocNo,
+                                mono: true,
+                                color: "text-sky-600 dark:text-sky-400",
                               },
                             ]
                           : []),
@@ -3360,13 +3632,24 @@ export default function GRN() {
                         Could not load posting data.
                       </div>
                     ) : (() => {
-                      const { baseAmount, taxAmount, totalAmount, costCentre, accounts } = grnPostingData;
+                      const { baseAmount, taxAmount, costCentre, accounts } = grnPostingData;
                       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
+                      // Base and tax post as two separate self-balancing
+                      // pairs: Purchase Dr (base) = PGRN Cr (base), and
+                      // Provisional Credit Dr (tax) = Purchase Cr (tax) — a
+                      // same-account repetition rather than crediting PGRN
+                      // with the GST-inclusive total. Mirrors backend
+                      // /post-to-gl's `lines` construction exactly.
                       const rows: PostRow[] = [
-                        { key: "purchase", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "debit", amount: baseAmount },
-                        { key: "pgrn", label: accounts?.pgrn?.label ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null, side: "credit", amount: totalAmount },
-                        ...(taxAmount > 0 ? [{ key: "provisional", label: accounts?.provisional?.label ?? "Provisional Credit Available", code: accounts?.provisional?.code ?? null, side: "debit" as const, amount: taxAmount }] : []),
+                        { key: "purchase-base", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "debit", amount: baseAmount },
+                        { key: "pgrn", label: accounts?.pgrn?.label ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null, side: "credit", amount: baseAmount },
+                        ...(taxAmount > 0
+                          ? [
+                              { key: "provisional", label: accounts?.provisional?.label ?? "Provisional Credit Available", code: accounts?.provisional?.code ?? null, side: "debit" as const, amount: taxAmount },
+                              { key: "purchase-tax", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "credit" as const, amount: taxAmount },
+                            ]
+                          : []),
                       ];
                       const totalDebit = rows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
                       const totalCredit = rows.filter(r => r.side === "credit").reduce((s, r) => s + r.amount, 0);
@@ -3408,41 +3691,30 @@ export default function GRN() {
                       );
                     })()}
 
-                    {/* Post to GL / Posted status */}
+                    {/* Posted / auto-posting status — posting happens
+                        automatically the moment this tab's data loads, no
+                        manual "Post to GL" click required. */}
                     {!grnPostingLoading && grnPostingData && (
                       grnPostingData.isPosted ? (
                         <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
                           <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
                           <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                            Already posted to General Ledger as <span className="font-semibold">{grnPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                            Posted to General Ledger as <span className="font-semibold">{grnPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
+                          </p>
+                        </div>
+                      ) : grnPostingError ? (
+                        <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                          <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                          <p className="text-xs text-destructive">
+                            Auto-posting failed: {grnPostingError}
                           </p>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                           <p className="text-xs text-muted-foreground">
-                            Posting will create a balanced journal entry and update the Trial Balance immediately.
+                            Posting to General Ledger…
                           </p>
-                          <button
-                            disabled={grnPosting}
-                            onClick={async () => {
-                              if (!viewingGrn?.GRNID) return;
-                              setGrnPosting(true);
-                              try {
-                                const r = await fetchWithAuth(`/api/grns/${viewingGrn.GRNID}/post-to-gl`, { method: "POST" });
-                                const body = await r.json();
-                                if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                                setGrnPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
-                              } catch (err: any) {
-                                alert(err.message ?? "Posting failed");
-                              } finally {
-                                setGrnPosting(false);
-                              }
-                            }}
-                            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                          >
-                            <BookOpen size={11} />
-                            {grnPosting ? "Posting…" : "Post to GL"}
-                          </button>
                         </div>
                       )
                     )}

@@ -160,10 +160,48 @@ export interface MRPOPrefillItem {
   UOMCode: string;
   UOMName: string;
   Quantity: number;
+  /** Already ordered against this MR item across earlier POs. */
+  OrderedQty: number;
+  /** What's left to order — the cap for this PO's quantity input. */
+  PendingQty: number;
   Remarks: string;
   M_CGST: number | null;
   M_SGST: number | null;
   M_IGST: number | null;
+}
+
+export interface MRItemFulfillment {
+  MRItemId: number;
+  ItemId: string;
+  ItemName: string;
+  UOMCode: string;
+  RequestedQty: number;
+  OrderedQty: number;
+  PendingQty: number;
+}
+
+export interface MRPendingSummary {
+  MRId: number;
+  items: MRItemFulfillment[];
+  totalRequested: number;
+  totalOrdered: number;
+  totalPending: number;
+}
+
+export interface MRPendingSummaryTotals {
+  MRId: number;
+  totalRequested: number;
+  totalOrdered: number;
+  totalPending: number;
+}
+
+export interface MRLinkedPO {
+  purchaseOrderId: number;
+  poNumber: string;
+  date: string;
+  status: string;
+  orderedQty: number;
+  remainingQtyAfter: number;
 }
 
 export interface MRPOPrefill {
@@ -218,4 +256,21 @@ export const getMRPOPrefill = (id: number | string) =>
 export const markMROrdered = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/mark-ordered`, { method: "PUT" }).then((r) =>
     handleResponse(r),
+  );
+
+// ── Partial-fulfillment tracking ────────────────────────────────────────────────
+
+export const getMRPendingSummary = (id: number | string) =>
+  fetchWithAuth(`${BASE}/${id}/pending-summary`).then((r) =>
+    handleResponse<MRPendingSummary>(r),
+  );
+
+export const getBulkMRPendingSummary = () =>
+  fetchWithAuth(`${BASE}/pending-summary`).then((r) =>
+    handleResponse<MRPendingSummaryTotals[]>(r),
+  );
+
+export const getMRLinkedPOs = (id: number | string) =>
+  fetchWithAuth(`${BASE}/${id}/linked-pos`).then((r) =>
+    handleResponse<MRLinkedPO[]>(r),
   );

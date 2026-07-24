@@ -15,15 +15,14 @@ export interface UOMOption {
 }
 
 /** Given the full UOM list and the currently-selected unit, return only the
- * units relevant to it — same category, plus the unit itself. If the current
- * unit has no category (or isn't found), every unit is returned unfiltered,
- * same as before this feature existed. */
+ * units relevant to it — same category. Units with no category (Bags, Box,
+ * Set...) are matched against each other too, so a packaging-unit item still
+ * only offers other packaging units instead of the entire UOM list. */
 export function relevantUOMs<T extends { category?: string | null }>(
   allUoms: T[],
   currentCategory: string | null | undefined,
 ): T[] {
-  if (!currentCategory) return allUoms;
-  return allUoms.filter((u) => u.category === currentCategory);
+  return allUoms.filter((u) => (u.category ?? null) === (currentCategory ?? null));
 }
 
 /** Rate quoted per `fromFactor` unit, converted to a rate per `toFactor` unit.

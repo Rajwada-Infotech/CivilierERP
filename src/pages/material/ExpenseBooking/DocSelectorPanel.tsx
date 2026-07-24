@@ -15,6 +15,7 @@ import {
   Hash,
   User,
   Plus,
+  ArrowLeftRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "./apiFetch";
@@ -634,6 +635,7 @@ export function DocSelectorPanel({
                       subtotal,
                       cgstRate: dCgst,
                       sgstRate: dSgst,
+                      igstRate: dIgst,
                     } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "WO_PO",
@@ -647,6 +649,10 @@ export function DocSelectorPanel({
                       subtotal: subtotal > 0 ? subtotal : undefined,
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
+                      derivedIgstRate: dIgst,
+                      costCenterLabel: po.CostCenterId
+                        ? `${po.CostCenterCode ?? ""}${po.CostCenterCode ? " - " : ""}${po.CostCenterName ?? ""}`.trim()
+                        : null,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,
@@ -799,6 +805,10 @@ export function DocSelectorPanel({
                       >
                         ✓
                       </span>
+                    ) : g.POType === "InterCompanyTransfer" ? (
+                      <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <ArrowLeftRight size={12} className="text-violet-500" />
+                      </div>
                     ) : (
                       <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Truck size={12} className="text-teal-500" />
@@ -814,10 +824,20 @@ export function DocSelectorPanel({
                             {g.Status}
                           </span>
                         )}
-                        {g.PONumber && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                            PO: {g.PONumber}
+                        {/* Inter-company stock transfers get their own PO
+                            chain (see backend/routes/interCompanyTransfer.js),
+                            not a real supplier purchase — flag it so it isn't
+                            mistaken for a normal GRN in this shared list. */}
+                        {g.POType === "InterCompanyTransfer" ? (
+                          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                            <ArrowLeftRight size={9} /> Inter-Company Transfer
                           </span>
+                        ) : (
+                          g.PONumber && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              PO: {g.PONumber}
+                            </span>
+                          )
                         )}
                       </div>
                       <p className="text-[10px] text-muted-foreground truncate">
@@ -908,6 +928,7 @@ export function DocSelectorPanel({
                       subtotal,
                       cgstRate: dCgst,
                       sgstRate: dSgst,
+                      igstRate: dIgst,
                     } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "PO",
@@ -921,6 +942,10 @@ export function DocSelectorPanel({
                       subtotal: subtotal > 0 ? subtotal : undefined,
                       derivedCgstRate: dCgst,
                       derivedSgstRate: dSgst,
+                      derivedIgstRate: dIgst,
+                      costCenterLabel: po.CostCenterId
+                        ? `${po.CostCenterCode ?? ""}${po.CostCenterCode ? " - " : ""}${po.CostCenterName ?? ""}`.trim()
+                        : null,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,

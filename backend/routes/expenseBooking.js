@@ -22,6 +22,81 @@ const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier")
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 
+// Base/GST for a single GRN's item lines.
+async function computeSingleGrnBaseTax(pool, grnId) {
+  const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
+    .query(`SELECT GRNNo, GRNDate, GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+  const row = itemsRes.recordset[0];
+  const rawItems = JSON.parse(row?.GRNItems || "[]");
+  const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+  let tBase = 0, tGST = 0;
+  if (received.length) {
+    const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+    let masterMap = {};
+    if (itemIds.length) {
+      const mReq = pool.request();
+      const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+      const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+      for (const r of mRes.recordset) masterMap[r.M_Id]={cgstRate:parseFloat(r.M_CGST)||0,sgstRate:parseFloat(r.M_SGST)||0};
+    }
+    for (const it of received) {
+      const itemId = String(it.itemId||it.ItemId||"");
+      const qty = Number(it.receivedQty||it.ReceivedQty||0);
+      const rate = Number(it.rate||it.Rate||0);
+      const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+      const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+      const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+      const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+      tBase += base;
+      tGST += base*(totalGSTRate/100);
+    }
+  }
+  const baseAmount = Math.round(tBase*100)/100;
+  const taxAmount = Math.round(tGST*100)/100;
+  return {
+    grnId,
+    docNo: row?.GRNNo ?? null,
+    date: row?.GRNDate ?? null,
+    baseAmount,
+    taxAmount,
+    totalAmount: Math.round((baseAmount+taxAmount)*100)/100,
+  };
+}
+
+// Sums base/GST across every GRN in `grnIds` — used for invoice-posting
+// totals on GRN-linked bookings. A multi-GRN combined invoice (see
+// backend/services/invoiceLinking.js) has several GRNs merged into it;
+// summing only the primary one silently understates the posted amount.
+// Also returns the per-GRN breakdown (doc no, date, amounts) so a combined
+// invoice's posting tab can show what each individual GRN contributed.
+async function computeGrnBaseTax(pool, grnIds) {
+  const perGrn = [];
+  for (const grnId of grnIds) {
+    perGrn.push(await computeSingleGrnBaseTax(pool, grnId));
+  }
+  const baseAmount = Math.round(perGrn.reduce((s, g) => s + g.baseAmount, 0) * 100) / 100;
+  const taxAmount = Math.round(perGrn.reduce((s, g) => s + g.taxAmount, 0) * 100) / 100;
+  return {
+    baseAmount,
+    taxAmount,
+    totalAmount: Math.round((baseAmount+taxAmount)*100)/100,
+    perGrn,
+  };
+}
+
+// Resolves every GRN id feeding an invoice — the primary eb.ESourceId, plus
+// every id in eb.ELinkedGrnIds for a multi-GRN combined invoice.
+function resolveGrnIds(eb) {
+  if (eb.ELinkedGrnIds) {
+    try {
+      const ids = JSON.parse(eb.ELinkedGrnIds);
+      if (Array.isArray(ids) && ids.length) return ids.map((id) => parseInt(id, 10)).filter(Boolean);
+    } catch { /* fall through to primary-only */ }
+  }
+  const primary = parseInt(eb.ESourceId, 10);
+  return primary ? [primary] : [];
+}
+
 router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
 // Helper: Require authenticated user email
@@ -760,6 +835,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
           eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
+          eb.ELinkedGrnIds,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
           eb.EBillingTermId, eb.EBillingTermName,
           eb.ETCId, eb.ETCName, eb.ETCText,
@@ -3442,11 +3518,16 @@ router.get("/:id/posting", async (req, res) => {
   try {
     const pool = getPool();
 
+    const ebSupplierPost = expenseBookingSupplierSql("eb", "postprev");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+             eb.ELinkedGrnIds,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
-             eb.EName AS SupplierName
+             eb.EName AS SupplierName,
+             ${ebSupplierPost.idExpr} AS ResolvedSupplierId,
+             ${ebSupplierPost.nameExpr} AS ResolvedSupplierName
       FROM dbo.ExpenseBooking eb
+      ${ebSupplierPost.joins}
       WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -3454,53 +3535,33 @@ router.get("/:id/posting", async (req, res) => {
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
-    let baseAmount = 0, taxAmount = 0, totalAmount = 0;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null;
 
     if (isGrnLinked) {
-      // Pull totalInclGST from GRN breakdown
-      const grnId = parseInt(eb.ESourceId, 10);
-      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
-        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
-      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
-      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
-      let tBase = 0, tGST = 0;
-      if (received.length) {
-        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
-        let masterMap = {};
-        if (itemIds.length) {
-          const mReq = pool.request();
-          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
-          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
-          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
-        }
-        for (const it of received) {
-          const itemId = String(it.itemId||it.ItemId||"");
-          const qty = Number(it.receivedQty||it.ReceivedQty||0);
-          const rate = Number(it.rate||it.Rate||0);
-          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
-          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
-          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
-          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
-          tBase += base;
-          tGST += base*(totalGSTRate/100);
-        }
-      }
-      baseAmount = Math.round(tBase*100)/100;
-      taxAmount = Math.round(tGST*100)/100;
-      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
       baseAmount = totalAmount;
     }
 
-    // System ledgers
+    // System ledgers (Purchase, PGRN) plus the invoice's own resolved
+    // supplier — "Supplier / Creditor A/c" is that specific vendor's own
+    // AccountHeadMaster row, not a shared system-generated placeholder
+    // (there isn't one; every vendor has their own ledger). The row label
+    // stays the generic "Supplier / Creditor A/c" — only the underlying
+    // LHeadId points at the specific vendor, which is what actually
+    // determines which account the posting lands in.
     const ledRes = await pool.request().query(`SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1`);
     const leds = ledRes.recordset;
     const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName } : null; };
     const accounts = {
       purchase:  find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
       pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
-      supplier:  find((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor")),
+      supplier:  eb.ResolvedSupplierId ? { id: eb.ResolvedSupplierId, label: "Supplier / Creditor A/c" } : null,
+      // Confirmed input tax credit, recognized once the invoice matches the
+      // GRN — distinct from Provisional Credit Available (the GRN-stage
+      // provisional estimate, left untouched at invoice time).
+      gstCredit: find((l)=>l.LHeadName.toLowerCase().includes("gst credit")),
     };
 
     // Check if already posted
@@ -3511,6 +3572,10 @@ router.get("/:id/posting", async (req, res) => {
     res.json({
       isGrnLinked: !!isGrnLinked,
       baseAmount, taxAmount, totalAmount,
+      // Per-GRN breakdown (doc no, date, amounts) — only meaningfully
+      // multi-row for a combined invoice; a single-GRN invoice still gets
+      // a 1-row array so the frontend can render one consistent shape.
+      grnBreakdown: perGrn,
       supplierName: eb.SupplierName,
       accounts,
       isPosted,
@@ -3533,10 +3598,15 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
     const { postVoucher } = require("../services/generalLedger");
 
+    const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
-      FROM dbo.ExpenseBooking eb WHERE eb.Eid = @Eid
+             eb.ELinkedGrnIds,
+             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
+             ${ebSupplierPost2.idExpr} AS ResolvedSupplierId
+      FROM dbo.ExpenseBooking eb
+      ${ebSupplierPost2.joins}
+      WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
     const eb = ebRes.recordset[0];
@@ -3549,39 +3619,30 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
     let baseAmount = 0, taxAmount = 0, totalAmount = 0;
 
+    let perGrn = null;
     if (isGrnLinked) {
-      const grnId = parseInt(eb.ESourceId, 10);
-      const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
-        .query(`SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
-      const rawItems = JSON.parse(itemsRes.recordset[0]?.GRNItems || "[]");
-      const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
-      let tBase = 0, tGST = 0;
-      if (received.length) {
-        const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
-        let masterMap = {};
-        if (itemIds.length) {
-          const mReq = pool.request();
-          const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
-          const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
-          for (const row of mRes.recordset) masterMap[row.M_Id]={cgstRate:parseFloat(row.M_CGST)||0,sgstRate:parseFloat(row.M_SGST)||0};
-        }
-        for (const it of received) {
-          const itemId = String(it.itemId||it.ItemId||"");
-          const qty = Number(it.receivedQty||it.ReceivedQty||0);
-          const rate = Number(it.rate||it.Rate||0);
-          const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
-          const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
-          const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
-          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
-          tBase += base;
-          tGST += base*(totalGSTRate/100);
-        }
-      }
-      baseAmount = Math.round(tBase*100)/100;
-      taxAmount = Math.round(tGST*100)/100;
-      totalAmount = Math.round((baseAmount+taxAmount)*100)/100;
+      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+    }
+
+    // Cost Centre for the posted GL legs — ExpenseBooking only stores a text
+    // label (ECostCenter), not an FK, so resolve the actual id from the
+    // source PO: via the linked GRN's own parent PO, or directly if this
+    // invoice was booked straight off a PO.
+    let costCenterId = null;
+    if (eb.ESourceType === "GRN" && eb.ESourceId) {
+      const ccRes = await pool.request().input("GrnId", sql.Int, parseInt(eb.ESourceId, 10)).query(`
+        SELECT po.CostCenterId FROM dbo.GoodsReceiptNotes grn
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        WHERE grn.GRNID = @GrnId
+      `);
+      costCenterId = ccRes.recordset[0]?.CostCenterId ?? null;
+    } else if (eb.ESourceType === "PO" && eb.ESourceId) {
+      const ccRes = await pool.request().input("PoId", sql.Int, parseInt(eb.ESourceId, 10)).query(
+        `SELECT CostCenterId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PoId`,
+      );
+      costCenterId = ccRes.recordset[0]?.CostCenterId ?? null;
     }
 
     if (totalAmount <= 0) return res.status(400).json({ error: "No amount to post." });
@@ -3591,23 +3652,53 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const findId = (fn) => leds.find(fn)?.LHeadId;
     const purchaseId  = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
     const pgrnId      = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
-    const supplierId  = findId((l)=>l.LHeadName.toLowerCase().includes("supplier")||l.LHeadName.toLowerCase().includes("creditor"));
-    if (!supplierId) return res.status(422).json({ error: "Supplier/Creditor system ledger not configured." });
+    const gstCreditId = findId((l)=>l.LHeadName.toLowerCase().includes("gst credit"));
+    // "Supplier / Creditor A/c" is the invoice's own resolved supplier —
+    // that specific vendor's own AccountHeadMaster row. There's no shared
+    // system-generated GL placeholder for this (every vendor has their own
+    // ledger), which is why searching IsSystemGenerated=1 rows for it
+    // always failed with "Supplier/Creditor system ledger not configured."
+    const supplierId = eb.ResolvedSupplierId;
+    if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
+    if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
     if (!isGrnLinked && !purchaseId) return res.status(422).json({ error: "Purchase system ledger not configured." });
 
+    // GRN-linked: base clears the GRN provision; tax is recognized as
+    // confirmed ITC (GST Credit Available) now that an actual invoice
+    // exists — previously the whole GST-inclusive total was debited to
+    // PGRN alone. A combined invoice (multiple GRNs) posts one set of
+    // legs PER GRN — each dated in its own narration — rather than one
+    // lumped set, so the journal entry itself carries a full per-GRN
+    // audit trail instead of only the summary "Combined" total.
+    const fmtGrnDate = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
     const lines = isGrnLinked
-      ? [
-          { LHeadId: pgrnId,     DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal)` },
-          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
-        ]
+      ? (perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
+          .flatMap((g) => [
+            { LHeadId: pgrnId, DebitAmount: g.baseAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
+            ...(g.taxAmount > 0
+              ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
+              : []),
+            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
+          ])
       : [
           { LHeadId: purchaseId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Purchase` },
           { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
         ];
 
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, eb.CompanyId, eb.ProjectId).catch(() => ({ finalDocNo: null }));
+    // lockNextDocNumber takes a single options object, not positional args —
+    // calling it positionally (as this used to) silently failed every time,
+    // leaving VoucherNo as the JV-<id> fallback instead of a real locked doc
+    // number, and the frontend showing "Posted as ." (blank jvNo).
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
     const insertHdr = await pool.request()
       .input("JVNo", sql.NVarChar(100), finalDocNo || null)
       .input("JVDate", sql.Date, new Date())
@@ -3631,7 +3722,17 @@ router.post("/:id/post-to-gl", async (req, res) => {
         .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
     }
 
-    await postVoucher(pool, { sourceType: "InvoicePosting", sourceId: ebId, legs: lines.map((l) => ({ lheadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })) });
+    await postVoucher(pool, {
+      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherDate: new Date(),
+      sourceType: "InvoicePosting",
+      sourceId: ebId,
+      companyId: eb.CompanyId ?? null,
+      projectId: eb.ProjectId ?? null,
+      costCenterId,
+      createdBy: userEmail,
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+    });
 
     res.json({ jvId, jvNo: finalDocNo, message: "Posted successfully." });
   } catch (err) {

@@ -249,7 +249,10 @@ async function fetchContractAttachments(pool, actor) {
         size: a.size ?? null,
         uploadedBy: r.CreatedBy || null,
         uploadedAt: r.CreatedAt,
-        url: a.url,
+        // Was the raw base64 data URI (a.url) — fetchWithAuth() treats any
+        // non-http(s) string as a relative API path, so a data: URI 404'd.
+        // Point at the real streaming endpoint instead.
+        url: `/api/contract/${r.ContractId}/attachment/${i}`,
       });
     });
   }

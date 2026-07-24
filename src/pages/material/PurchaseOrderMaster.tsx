@@ -8,6 +8,7 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { ItemPicker } from "./ItemPicker";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { AlertTriangle } from "lucide-react";
@@ -100,6 +101,13 @@ import {
 } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { relevantUOMs, convertRate } from "@/lib/uomConversion";
+import {
+  alternatesForItem,
+  getItemUomFactor,
+  convertItemRate,
+  convertItemQuantity,
+} from "@/lib/itemUomAlternates";
+import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 
@@ -175,6 +183,8 @@ interface POLineItem {
   taxAmount: number; // qty * rate * gstRate / 100
   amount: number; // qty * rate + taxAmount (inclusive of GST)
   uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
+  mrItemId?: number | null; // source MaterialRequestItems row, when this line came from an MR
+  mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item
 }
 
 interface POForm {
@@ -330,6 +340,11 @@ const getStatusConfig = (status: string) => {
       icon: <AlertCircle size={12} />,
       cls: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
     };
+  if (s === "short closed")
+    return {
+      icon: <XCircle size={12} />,
+      cls: "bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700",
+    };
   return {
     icon: <FileText size={12} />,
     cls: "bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700",
@@ -347,6 +362,49 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
     </span>
   );
 };
+
+// Items are tagged with CGST, SGST, and IGST rates all at once in Item
+// Master — which one actually applies depends on whether the supplier and
+// ordering company share a GST state. Shared by every line-item source
+// (manual item pick, MR prefill, Quotation prefill) so a PO's GST split
+// isn't at the mercy of whichever fields happen to be populated on the
+// item master row — most items only ever have M_IGST filled in, which
+// used to mean every prefilled line showed IGST regardless of whether the
+// order was actually intrastate.
+function resolveLineGstSplit(
+  cgst: number,
+  sgst: number,
+  igst: number,
+  resolvedTotal: number,
+  isIntraState: boolean,
+): { cgstRate: number; sgstRate: number; igstRate: number; gstRate: number } {
+  let cgstRate = 0;
+  let sgstRate = 0;
+  let igstRate = 0;
+  if (isIntraState) {
+    if (cgst > 0 || sgst > 0) {
+      cgstRate = cgst;
+      sgstRate = sgst;
+    } else if (igst > 0) {
+      // Only an IGST rate is on file — split it evenly for an intrastate order.
+      cgstRate = igst / 2;
+      sgstRate = igst / 2;
+    } else if (resolvedTotal > 0) {
+      cgstRate = resolvedTotal / 2;
+      sgstRate = resolvedTotal / 2;
+    }
+  } else {
+    if (igst > 0) {
+      igstRate = igst;
+    } else if (cgst > 0 || sgst > 0) {
+      // Only a CGST/SGST split is on file — combine it for an interstate order.
+      igstRate = cgst + sgst;
+    } else if (resolvedTotal > 0) {
+      igstRate = resolvedTotal;
+    }
+  }
+  return { cgstRate, sgstRate, igstRate, gstRate: cgstRate + sgstRate + igstRate };
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -558,7 +616,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["purchase-orders", page, limit, poTypeFilter],
     queryFn: () =>
-      getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
+      getPurchaseOrders({
+        page,
+        limit,
+        poType: poTypeFilter || undefined,
+        includeShortClosed: true,
+      }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -576,6 +639,11 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: uomsRaw = [] } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUOMs,
+  });
+  const { data: itemUomAlternates = [] } = useQuery({
+    queryKey: ["item-uom-alternates"],
+    queryFn: getAllItemUomAlternates,
+    staleTime: 60_000,
   });
   const { data: itemsRaw = [] } = useQuery({
     queryKey: ["item-master"],
@@ -677,6 +745,7 @@ const PurchaseOrderMaster: React.FC = () => {
         description: i.M_Description ?? "",
         hsn: i.M_HSN ?? "",
         uom: i.M_UOM ?? "",
+        itemType: i.M_Type ?? "",
         cgst: Number(i.M_CGST ?? 0),
         sgst: Number(i.M_SGST ?? 0),
         igst: Number(i.M_IGST ?? 0),
@@ -976,8 +1045,13 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
-      const qty = Number(it.Quantity ?? 1);
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
+      // Default to what's actually still pending on this MR item, not the
+      // original full requested qty — a second/third PO off the same MR
+      // should only ever offer the remaining balance.
+      const pendingQty = Number(it.PendingQty ?? it.Quantity ?? 1);
+      const qty = pendingQty;
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
 
@@ -1000,12 +1074,14 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        mrItemId: it.MRItemId ?? null,
+        mrPendingQty: pendingQty,
       };
     });
 
@@ -1058,7 +1134,8 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
       const qty = Number(it.Quantity ?? 1);
       const rate = Number(it.Rate ?? 0);
       const taxAmount = (qty * rate * gstRate) / 100;
@@ -1081,9 +1158,9 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
@@ -1273,8 +1350,10 @@ const PurchaseOrderMaster: React.FC = () => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
-      const gstRate = igst > 0 ? igst : cgst + sgst;
-      const qty = Number(it.Quantity ?? 1);
+      const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
+        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
+      const pendingQty = Number(it.PendingQty ?? it.Quantity ?? 1);
+      const qty = pendingQty;
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
       const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
@@ -1294,12 +1373,14 @@ const PurchaseOrderMaster: React.FC = () => {
         uomId: uomMatch?.id ?? null,
         unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
-        cgstRate: cgst,
-        sgstRate: sgst,
-        igstRate: igst,
+        cgstRate: cgstResolved,
+        sgstRate: sgstResolved,
+        igstRate: igstResolved,
         gstRate,
         taxAmount,
         amount: qty * rate + taxAmount,
+        mrItemId: it.MRItemId ?? null,
+        mrPendingQty: pendingQty,
       };
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
@@ -1486,37 +1567,13 @@ const PurchaseOrderMaster: React.FC = () => {
     // CGST+SGST; different state → IGST. This is why the identical item can
     // price out differently on two POs raised against two different-state
     // suppliers.
-    const mc = Number(item.cgst ?? 0);
-    const ms = Number(item.sgst ?? 0);
-    const mi = Number(item.igst ?? 0);
-    const resolvedTotal = item.resolvedGstRate ?? 0;
-
-    let cgstRate = 0;
-    let sgstRate = 0;
-    let igstRate = 0;
-    if (isIntraState) {
-      if (mc > 0 || ms > 0) {
-        cgstRate = mc;
-        sgstRate = ms;
-      } else if (mi > 0) {
-        // Only an IGST rate is on file — split it evenly for an intrastate order.
-        cgstRate = mi / 2;
-        sgstRate = mi / 2;
-      } else if (resolvedTotal > 0) {
-        cgstRate = resolvedTotal / 2;
-        sgstRate = resolvedTotal / 2;
-      }
-    } else {
-      if (mi > 0) {
-        igstRate = mi;
-      } else if (mc > 0 || ms > 0) {
-        // Only a CGST/SGST split is on file — combine it for an interstate order.
-        igstRate = mc + ms;
-      } else if (resolvedTotal > 0) {
-        igstRate = resolvedTotal;
-      }
-    }
-    const gstRate = cgstRate + sgstRate + igstRate;
+    const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(
+      Number(item.cgst ?? 0),
+      Number(item.sgst ?? 0),
+      Number(item.igst ?? 0),
+      item.resolvedGstRate ?? 0,
+      isIntraState,
+    );
 
     updateLine(idx, {
       itemId,
@@ -1546,10 +1603,30 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.supplierId) e.supplierId = true;
     if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
+    if (!form.costCenterId) e.costCenterId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
-    return Object.keys(e).length === 0;
+    if (Object.keys(e).length > 0) {
+      toast.error("Please fill in all required fields.");
+      return false;
+    }
+
+    // MR-sourced lines can't exceed what's still pending on that MR item —
+    // a repeat PO off the same MR must stay within the remaining balance.
+    const overCap = lineItems.find(
+      (li) =>
+        li.mrItemId != null &&
+        li.mrPendingQty != null &&
+        li.quantity - li.mrPendingQty > 0.0001,
+    );
+    if (overCap) {
+      toast.error(
+        `"${overCap.itemName}" exceeds the pending Material Request quantity (max ${overCap.mrPendingQty}).`,
+      );
+      return false;
+    }
+    return true;
   };
 
   const toPayload = () => {
@@ -1585,6 +1662,7 @@ const PurchaseOrderMaster: React.FC = () => {
         igstRate: li.igstRate,
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
+        mrItemId: li.mrItemId ?? null,
       })),
       PaymentTerms:
         selectedTCs.length > 0
@@ -1626,10 +1704,10 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!validate()) {
-      toast.error("Please fill in all required fields.");
-      return;
-    }
+    // validate() already shows its own specific toast for whichever check
+    // failed (missing fields vs. over the MR-pending cap) — don't stack a
+    // second, generic one on top.
+    if (!validate()) return;
     setSaving(true);
     try {
       if (viewMode === "create") {
@@ -1843,6 +1921,30 @@ const PurchaseOrderMaster: React.FC = () => {
           Number(li.Rate ?? li.rate ?? 0),
       0,
     );
+    // Per-line CGST/SGST/IGST breakdown — previously this print only ever
+    // showed a Subtotal → Grand Total jump with no tax line at all, even
+    // though the item table's own GST% column proved tax was applied.
+    let totalCgstVal = 0;
+    let totalSgstVal = 0;
+    let totalIgstVal = 0;
+    for (const li of lineItemsArr) {
+      const base =
+        Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
+      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
+      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
+      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
+    }
+    const taxRowsPreview = [
+      totalCgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">CGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalCgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalSgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">SGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalSgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalIgstVal > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">IGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalIgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+    ].join("");
 
     const tcHtml = payTermsEsc
       ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTermsEsc}</div></div>`
@@ -1915,6 +2017,7 @@ const PurchaseOrderMaster: React.FC = () => {
 <div style="display:flex;justify-content:flex-end;margin-top:16px;">
   <table style="width:260px;border-collapse:collapse;"><tbody>
     <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotalVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+    ${taxRowsPreview}
     <tr style="border-top:2px solid #4f46e5;"><td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td><td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
   </tbody></table>
 </div>
@@ -2749,7 +2852,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   >
                     <Printer size={13} /><span className="hidden sm:inline">Print</span>
                   </button>
-                  {rights.canEdit && (
+                  {rights.canEdit && viewingPO.Status !== "Short Closed" && (
                     <button
                       onClick={() => {
                         const item = listData.find(
@@ -3346,7 +3449,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       <Printer size={14} /> Print
                     </button>
                   )}
-                  {rights.canEdit && (
+                  {rights.canEdit && form.status !== "Short Closed" && (
                     <button
                       onClick={() => {
                         const item = listData.find((r) => r._id === editingId);
@@ -3363,7 +3466,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           </div>
         </Card>
 
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
           {/* ── MR Doc Number Lookup (only shown in create mode, before any source is set) ── */}
           {viewMode === "create" &&
@@ -3371,21 +3474,19 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !sourceWD &&
             !sourceWO &&
             !isReadOnly && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+              <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+                <h3
+                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2"
+                  title="Filter by company and project, then select an approved Material Request to auto-fill items and details."
+                >
                   <ClipboardList
                     size={11}
                     className="text-emerald-600 dark:text-emerald-400"
                   />
                   Load from Material Request
                 </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Filter by company and project, then select an approved
-                  Material Request to auto-fill items and details.
-                </p>
 
-                {/* MR Filters: Company + Project */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="relative">
                     <select
                       value={mrFilterCompanyId}
@@ -3396,7 +3497,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       }}
                       className={`${inputCls} pr-8 appearance-none`}
                     >
-                      <option value="">— Filter by Company —</option>
+                      <option value="">Company —</option>
                       {companies.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
@@ -3418,7 +3519,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       disabled={filteredMRProjects.length === 0}
                       className={`${inputCls} pr-8 appearance-none`}
                     >
-                      <option value="">— Filter by Project —</option>
+                      <option value="">Project —</option>
                       {filteredMRProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -3430,11 +3531,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
                   </div>
-                </div>
-
-                {/* MR Dropdown */}
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 relative">
+                  <div className="relative">
                     <select
                       value={mrDropdownValue}
                       onChange={(e) =>
@@ -3445,10 +3542,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     >
                       <option value="">
                         {approvedMRsLoading
-                          ? "Loading approved MRs…"
+                          ? "Loading MRs…"
                           : approvedMRs.length === 0
-                            ? "No approved Material Requests"
-                            : "— Select a Material Request —"}
+                            ? "No approved MRs"
+                            : "Material Request —"}
                       </option>
                       {approvedMRs.map((mr) => (
                         <option key={mr.MRId} value={String(mr.MRId)}>
@@ -3458,24 +3555,25 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         </option>
                       ))}
                     </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    {mrDropdownError && (
-                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                        <AlertCircle size={11} />
-                        {mrDropdownError}
-                      </p>
+                    {mrDropdownLoading ? (
+                      <RefreshCw
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin"
+                      />
+                    ) : (
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
                     )}
                   </div>
-                  {mrDropdownLoading && (
-                    <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground shrink-0">
-                      <RefreshCw size={13} className="animate-spin" />
-                      Loading…
-                    </div>
-                  )}
                 </div>
+                {mrDropdownError && (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={11} />
+                    {mrDropdownError}
+                  </p>
+                )}
               </div>
             )}
 
@@ -3484,52 +3582,48 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !sourceWD &&
             !sourceWO &&
             !isReadOnly && (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+              <div className="rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-sm flex flex-wrap items-center gap-2">
+                <span
+                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 shrink-0"
+                  title="Enter a paid Sale Invoice doc number to link this PO to a Sale Invoice. The backend will validate that the invoice is fully paid before saving."
+                >
                   <Receipt size={11} className="text-blue-500" />
-                  Link to Sale Invoice (optional)
-                </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Enter a paid Sale Invoice doc number to link this PO to a Sale
-                  Invoice. The backend will validate that the invoice is fully
-                  paid before saving.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="number"
-                    value={saleInvoiceInput}
-                    onChange={(e) => setSaleInvoiceInput(e.target.value)}
-                    placeholder="Sale Invoice ID (numeric)"
-                    className={`${inputCls} flex-1`}
-                    disabled={!!sourceSaleInvoice}
-                    min={1}
-                  />
-                  {!sourceSaleInvoice ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const id = parseInt(saleInvoiceInput.trim(), 10);
-                        if (!id || id <= 0) return;
-                        setSourceSaleInvoice({ id, docNo: `SI-${id}` });
-                      }}
-                      disabled={!saleInvoiceInput.trim()}
-                      className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-                    >
-                      Link
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSourceSaleInvoice(null);
-                        setSaleInvoiceInput("");
-                      }}
-                      className="px-3 py-2 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
+                  Link Sale Invoice
+                </span>
+                <input
+                  type="number"
+                  value={saleInvoiceInput}
+                  onChange={(e) => setSaleInvoiceInput(e.target.value)}
+                  placeholder="Sale Invoice ID (optional)"
+                  className={`${inputCls} flex-1 min-w-[140px] !py-1.5`}
+                  disabled={!!sourceSaleInvoice}
+                  min={1}
+                />
+                {!sourceSaleInvoice ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = parseInt(saleInvoiceInput.trim(), 10);
+                      if (!id || id <= 0) return;
+                      setSourceSaleInvoice({ id, docNo: `SI-${id}` });
+                    }}
+                    disabled={!saleInvoiceInput.trim()}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    Link
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSourceSaleInvoice(null);
+                      setSaleInvoiceInput("");
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             )}
 
@@ -3915,12 +4009,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
 
               {/* Cost Center */}
               <div>
-                <FieldLabel>Cost Center</FieldLabel>
+                <FieldLabel required>Cost Center</FieldLabel>
                 <select
                   value={form.costCenterId}
                   onChange={(e) => setField("costCenterId", e.target.value)}
                   disabled={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} ${errors.costCenterId ? "border-red-400" : ""}`}
                 >
                   <option value="">— Select Cost Center —</option>
                   {costCenters.map((cc) => (
@@ -3929,6 +4023,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     </option>
                   ))}
                 </select>
+                {errors.costCenterId && (
+                  <p className="text-xs text-destructive mt-1">
+                    Cost Center is required
+                  </p>
+                )}
               </div>
 
             </div>
@@ -4137,7 +4236,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           )}
 
           {/* ── Line Items Card ───────────────────────────────────────────────── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm min-w-0">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                 <Boxes
@@ -4206,7 +4305,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   {lineItems.map((li, idx) => (
                     <tr
                       key={li.id}
-                      className="group hover:bg-muted/10 transition-colors"
+                      className="group hover:bg-muted/10 transition-colors align-top"
                     >
                       {/* Row number */}
                       <td className="px-3 py-2 text-center text-xs text-muted-foreground font-mono">
@@ -4220,26 +4319,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {li.itemName || "—"}
                           </span>
                         ) : (
-                          <div className="relative">
-                            <select
-                              value={li.itemId}
-                              onChange={(e) =>
-                                handleItemSelect(idx, e.target.value)
-                              }
-                              className={cellSelect}
-                            >
-                              <option value="">— Select Item —</option>
-                              {items.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.name}
-                                </option>
-                              ))}
-                            </select>
-                            <ChevronDown
-                              size={11}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                            />
-                          </div>
+                          <ItemPicker
+                            items={items}
+                            value={li.itemId}
+                            onChange={(id) => handleItemSelect(idx, id)}
+                          />
                         )}
                       </td>
 
@@ -4274,18 +4358,84 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                               : "0"}
                           </span>
                         ) : (
-                          <input
-                            type="number"
-                            min={0}
-                            step="any"
-                            value={li.quantity}
-                            onChange={(e) =>
-                              updateLine(idx, {
-                                quantity: parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            className={`${cellInput} text-right`}
-                          />
+                          <div>
+                            <input
+                              type="number"
+                              min={0}
+                              max={li.mrPendingQty ?? undefined}
+                              step="any"
+                              value={li.quantity}
+                              onChange={(e) =>
+                                updateLine(idx, {
+                                  quantity: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                              title={
+                                li.mrPendingQty != null
+                                  ? `Pending on MR: ${li.mrPendingQty}`
+                                  : undefined
+                              }
+                              className={`${cellInput} text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
+                            />
+                            {li.mrPendingQty != null && (
+                              <p
+                                className={`mt-1 pb-0.5 text-[10px] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
+                              >
+                                {Math.max(0, li.mrPendingQty - li.quantity)} remaining MR
+                              </p>
+                            )}
+                            {/* Live equivalents in this item's other tagged UOMs */}
+                            {li.quantity > 0 &&
+                              (() => {
+                                const lineItem = items.find((i) => i.id === li.itemId);
+                                if (!lineItem) return null;
+                                const itemAlternates = alternatesForItem(
+                                  itemUomAlternates,
+                                  lineItem.id,
+                                );
+                                if (itemAlternates.length === 0) return null;
+                                const currentCode =
+                                  uoms.find((u) => u.id === li.uomId)?.code ??
+                                  lineItem.uom;
+                                const fromFactor = getItemUomFactor(
+                                  itemUomAlternates,
+                                  lineItem.id,
+                                  currentCode,
+                                  lineItem.uom,
+                                );
+                                if (fromFactor == null) return null;
+                                const others: { label: string; qty: number }[] = [];
+                                if (lineItem.uom && lineItem.uom !== currentCode) {
+                                  others.push({
+                                    label: lineItem.uom,
+                                    qty: convertItemQuantity(li.quantity, fromFactor, 1),
+                                  });
+                                }
+                                for (const a of itemAlternates) {
+                                  if (a.uomCode === currentCode) continue;
+                                  others.push({
+                                    label: a.symbol || a.uomName || a.uomCode,
+                                    qty: convertItemQuantity(
+                                      li.quantity,
+                                      fromFactor,
+                                      a.conversionFactor,
+                                    ),
+                                  });
+                                }
+                                if (others.length === 0) return null;
+                                return (
+                                  <p className="text-[10px] text-muted-foreground text-right mt-1">
+                                    ≈{" "}
+                                    {others
+                                      .map(
+                                        (o) =>
+                                          `${o.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${o.label}`,
+                                      )
+                                      .join(" · ")}
+                                  </p>
+                                );
+                              })()}
+                          </div>
                         )}
                       </td>
 
@@ -4317,6 +4467,21 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           // (Bags, Box, Set, ...) fall back to the full list,
                           // same as before this feature existed.
                           const options = relevantUOMs(uoms, currentUom?.category);
+
+                          // Item-tagged alternates (e.g. Cement in CFT) have no
+                          // fixed physical category, so they're never in the
+                          // category-based `options` above — merge them in.
+                          const lineItem = items.find((i) => i.id === li.itemId);
+                          const itemAlternates = lineItem
+                            ? alternatesForItem(itemUomAlternates, lineItem.id)
+                            : [];
+                          const extraOptions = itemAlternates
+                            .map((a) => uoms.find((u) => u.code === a.uomCode))
+                            .filter(
+                              (u): u is (typeof uoms)[number] =>
+                                !!u && !options.some((o) => o.id === u.id) && u.id !== currentUom?.id,
+                            );
+
                           return (
                           <div className="relative">
                             <select
@@ -4326,18 +4491,48 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   (u) => u.id === Number(e.target.value),
                                 );
                                 if (!uom) return;
-                                // Same-category switch (e.g. tonne -> kg):
-                                // re-price the rate so the line's total value
-                                // doesn't silently change under the user —
-                                // a supplier quote of ₹100/tonne becomes
-                                // ₹0.1/kg, not ₹100/kg.
-                                const nextRate =
+
+                                // Item-specific conversion (e.g. Cement Bag <->
+                                // CFT) takes priority over the category-based
+                                // one — it's the more precise, item-authored
+                                // figure when both are available.
+                                const itemFromFactor = lineItem
+                                  ? getItemUomFactor(
+                                      itemUomAlternates,
+                                      lineItem.id,
+                                      currentUom?.code ?? "",
+                                      lineItem.uom,
+                                    )
+                                  : null;
+                                const itemToFactor = lineItem
+                                  ? getItemUomFactor(
+                                      itemUomAlternates,
+                                      lineItem.id,
+                                      uom.code,
+                                      lineItem.uom,
+                                    )
+                                  : null;
+
+                                let nextRate = li.rate;
+                                if (itemFromFactor != null && itemToFactor != null) {
+                                  nextRate = convertItemRate(
+                                    li.rate,
+                                    itemFromFactor,
+                                    itemToFactor,
+                                  );
+                                } else if (
                                   currentUom?.category &&
                                   uom.category === currentUom.category &&
                                   currentUom.baseFactor &&
                                   uom.baseFactor
-                                    ? convertRate(li.rate, currentUom.baseFactor, uom.baseFactor)
-                                    : li.rate;
+                                ) {
+                                  // Same-category switch (e.g. tonne -> kg):
+                                  // re-price the rate so the line's total value
+                                  // doesn't silently change under the user —
+                                  // a supplier quote of ₹100/tonne becomes
+                                  // ₹0.1/kg, not ₹100/kg.
+                                  nextRate = convertRate(li.rate, currentUom.baseFactor, uom.baseFactor);
+                                }
                                 updateLine(idx, {
                                   uomId: uom.id,
                                   unit: uom.name,
@@ -4352,6 +4547,15 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                   {u.name}
                                 </option>
                               ))}
+                              {extraOptions.length > 0 && (
+                                <optgroup label="Tagged for this item">
+                                  {extraOptions.map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
                             </select>
                             <ChevronDown
                               size={11}
@@ -4812,11 +5016,18 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           {/* Bottom action bar */}
           {!isReadOnly &&
             (() => {
+              const poOverMrCap = lineItems.some(
+                (li) =>
+                  li.mrItemId != null &&
+                  li.mrPendingQty != null &&
+                  li.quantity - li.mrPendingQty > 0.0001,
+              );
               const poCanSave = !!(
                 form.supplierId &&
                 form.companyId &&
                 form.projectId &&
-                lineItems.some((li) => li.itemName || li.rate > 0)
+                lineItems.some((li) => li.itemName || li.rate > 0) &&
+                !poOverMrCap
               );
               const poIsDirty = !!(
                 form.supplierId ||
@@ -4836,6 +5047,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     ) : poCanSave ? (
                       <span className="text-emerald-500 font-medium">
                         Ready to save
+                      </span>
+                    ) : poOverMrCap ? (
+                      <span className="text-red-500 font-medium">
+                        A line exceeds the remaining Material Request quantity
                       </span>
                     ) : (
                       "Fill in the required fields to save"

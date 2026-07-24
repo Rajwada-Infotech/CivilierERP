@@ -186,15 +186,22 @@ async function handleResponse<T = any>(res: Response): Promise<T> {
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const getPurchaseOrders = (
-  query: { page?: number; limit?: number; poType?: string; fyId?: number } = {},
+  query: {
+    page?: number;
+    limit?: number;
+    poType?: string;
+    fyId?: number;
+    includeShortClosed?: boolean;
+  } = {},
 ) => {
-  const { page = 1, limit = 10, poType, fyId } = query;
+  const { page = 1, limit = 10, poType, fyId, includeShortClosed } = query;
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (poType) params.set("poType", poType);
   if (fyId) params.set("fyId", String(fyId));
+  if (includeShortClosed) params.set("includeShortClosed", "1");
   return fetchWithAuth(`/purchase-orders?${params.toString()}`)
     .then((r) => handleResponse<POListResponse>(r))
     .then((r: any): POListResponse => {

@@ -9,7 +9,10 @@
 // touch device the way it does with a mouse.
 import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import {
   HardHat, RefreshCw, AlertCircle, ShieldCheck, Users, BarChart3, IndianRupee,
   TrendingUp, CreditCard, Package, Warehouse, Wrench, Building2, FileText,
@@ -39,6 +42,7 @@ const notBuiltYet = (title: string) =>
 
 export default function DashboardScreen() {
   const { currentUser } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [refreshing, setRefreshing] = useState(false);
   const { role, privileged, isAdmin, isDba, access } = useModuleAccess();
 
@@ -258,7 +262,7 @@ export default function DashboardScreen() {
           {access.finance && (
             <ModuleCard
               title="Finance" icon={BarChart3} accent={moduleAccents.finance} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Finance")}
+              onPress={() => navigation.navigate("FinanceDashboard")}
               stats={[
                 { label: "Total payments", value: fin?.payments?.totalCount ?? 0, accent: moduleAccents.finance },
                 { label: "Paid this month (₹L)", value: Math.round((fin?.payments?.thisMonthAmount ?? 0) / 100000), accent: "#10b981", icon: TrendingUp },
@@ -271,7 +275,7 @@ export default function DashboardScreen() {
           {access.material && (
             <ModuleCard
               title="Material" icon={Package} accent={moduleAccents.material} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Material")}
+              onPress={() => navigation.navigate("MaterialDashboard")}
               stats={[
                 { label: "GRNs this month", value: mat?.grns?.thisMonth ?? 0, accent: moduleAccents.material },
                 { label: "Open POs", value: mat?.purchaseOrders?.open ?? 0, accent: "#f59e0b" },

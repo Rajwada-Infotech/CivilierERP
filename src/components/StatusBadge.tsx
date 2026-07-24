@@ -85,8 +85,20 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
   },
+  Completed: {
+    label: "Completed",
+    icon: PackageCheck,
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
+  },
   "Partially Ordered": {
     label: "Partial PO",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  "Partially Fulfilled": {
+    label: "Partially Fulfilled",
     icon: PackageSearch,
     classes:
       "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
@@ -135,6 +147,14 @@ const STATUS_CONFIG: Record<
     icon: XCircle,
     classes:
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  // Year-end housekeeping: partially-fulfilled PO/MR permanently retired —
+  // see src/pages/material/ShortClose.tsx.
+  "Short Closed": {
+    label: "Short Closed",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
   },
 };
 

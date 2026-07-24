@@ -1,7 +1,7 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -40,6 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useAuth } from "@/contexts/AuthContext";
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 import {
   fetchNextDocNumber,
   fetchDocTypes,
@@ -52,6 +54,12 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
+import {
+  alternatesForItem,
+  getItemUomFactor,
+  convertItemQuantity,
+} from "@/lib/itemUomAlternates";
+import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -166,10 +174,91 @@ const fmtDate = (d?: string | null) =>
       })
     : "—";
 
+// ─── Linked Purchase Orders ─────────────────────────────────────────────────────
+// Every PO raised against this MR, newest first, with a running "what's left"
+// balance — same audit-trail pattern as GRN ↔ Vehicle In/Out. Clicking a row
+// opens that PO directly in preview mode (?view=<id>, matches the deep-link
+// convention PurchaseOrderMaster.tsx already supports).
+
+const LinkedPurchaseOrders: React.FC<{
+  mrId: number;
+  navigate: ReturnType<typeof useNavigate>;
+}> = ({ mrId, navigate }) => {
+  const { data: linkedPOs = [], isLoading } = useQuery({
+    queryKey: ["mr-linked-pos", mrId],
+    queryFn: () => mrApi.getMRLinkedPOs(mrId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="h-16 rounded-xl border border-dashed border-border animate-pulse" />
+    );
+  }
+  if (linkedPOs.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
+        <ShoppingCart size={13} className="text-muted-foreground" />
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Linked Purchase Orders
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-muted/20 text-[9px] uppercase tracking-widest text-muted-foreground">
+              <th className="px-3 py-2 text-left">PO Number</th>
+              <th className="px-3 py-2 text-left">Date</th>
+              <th className="px-3 py-2 text-right">Ordered Qty</th>
+              <th className="px-3 py-2 text-left">Status</th>
+              <th className="px-3 py-2 text-right">Remaining Qty</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {linkedPOs.map((po) => (
+              <tr
+                key={po.purchaseOrderId}
+                className="hover:bg-muted/20 cursor-pointer transition-colors"
+                onClick={() =>
+                  navigate(`/material/purchase-order?view=${po.purchaseOrderId}`)
+                }
+              >
+                <td className="px-3 py-2 font-mono font-semibold text-primary">
+                  {po.poNumber}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {fmtDate(po.date)}
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {po.orderedQty}
+                </td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={po.status} />
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {po.remainingQtyAfter > 0 ? (
+                    <span className="text-amber-500">{po.remainingQtyAfter}</span>
+                  ) : (
+                    <span className="text-emerald-500">0</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
   const rights = usePageRights("material-request");
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const isAdmin = !!currentUser && isPrivilegedRole(currentUser.role);
   const queryClient = useQueryClient();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -245,6 +334,12 @@ export default function MaterialRequest() {
     staleTime: 5 * 60_000,
   });
 
+  const { data: itemUomAlternates = [] } = useQuery({
+    queryKey: ["item-uom-alternates"],
+    queryFn: getAllItemUomAlternates,
+    staleTime: 60_000,
+  });
+
   // ── MR doc types (for the plain Request No select) ──────────────────────────
 
   const [mrDocTypes, setMrDocTypes] = useState<DocType[]>([]);
@@ -282,6 +377,20 @@ export default function MaterialRequest() {
     queryFn: () =>
       mrApi.getMaterialRequests({ page, limit, search, status: statusFilter }),
   });
+
+  // Bulk pending-qty totals for every MR that's reached the fulfillment
+  // lifecycle (Approved/Partially Fulfilled/Completed) — powers the
+  // "Pending - N Qty" / "Completed" pill without an N+1 fetch per row.
+  const { data: pendingSummaryList = [] } = useQuery({
+    queryKey: ["mr-pending-summary"],
+    queryFn: mrApi.getBulkMRPendingSummary,
+    staleTime: 30_000,
+  });
+  const pendingSummaryByMRId = useMemo(() => {
+    const m = new Map<number, mrApi.MRPendingSummaryTotals>();
+    for (const row of pendingSummaryList) m.set(row.MRId, row);
+    return m;
+  }, [pendingSummaryList]);
 
   // ── Auto-select active fin year ──────────────────────────────────────────────
 
@@ -548,7 +657,7 @@ export default function MaterialRequest() {
       accessorKey: "Priority",
       header: "Priority",
       size: 90,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => {
         const v = (getValue() as string) || "Normal";
         return (
@@ -564,20 +673,20 @@ export default function MaterialRequest() {
       id: "CompanyName",
       accessorKey: "CompanyName",
       header: "Company",
-      size: 160,
-      meta: { className: "hidden sm:table-cell" },
+      size: 200,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
-        <span className="text-sm truncate">{String(getValue() || "—")}</span>
+        <span className="block text-sm truncate" title={String(getValue() || "")}>{String(getValue() || "—")}</span>
       ),
     },
     {
       id: "ProjectName",
       accessorKey: "ProjectName",
       header: "Project",
-      size: 160,
-      meta: { className: "hidden sm:table-cell" },
+      size: 180,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground truncate">{String(getValue() || "—")}</span>
+        <span className="block text-sm text-muted-foreground truncate" title={String(getValue() || "")}>{String(getValue() || "—")}</span>
       ),
     },
     {
@@ -585,7 +694,7 @@ export default function MaterialRequest() {
       accessorKey: "ItemCount",
       header: "Items",
       size: 140,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm whitespace-nowrap">
           <span className="font-semibold">{row.original.ItemCount || 0}</span>
@@ -598,7 +707,7 @@ export default function MaterialRequest() {
       accessorKey: "RequestDate",
       header: "Requested",
       size: 110,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
         <span className="text-sm text-muted-foreground">
           {fmtDate(getValue() as string)}
@@ -610,7 +719,7 @@ export default function MaterialRequest() {
       accessorKey: "RequiredByDate",
       header: "Required By",
       size: 110,
-      meta: { className: "hidden sm:table-cell" },
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
         const isUrgent = v && new Date(v) < new Date();
@@ -628,15 +737,28 @@ export default function MaterialRequest() {
       accessorKey: "Status",
       header: "Status",
       size: 180,
-      meta: { className: "hidden sm:table-cell" },
-      cell: ({ row }) => (
-        <div className="whitespace-nowrap">
-          <ApprovalStatusChain
-            table="MaterialRequests"
-            recordId={row.original.MRId}
-          />
-        </div>
-      ),
+      meta: { className: "hidden lg:table-cell" },
+      cell: ({ row }) => {
+        const pending = pendingSummaryByMRId.get(row.original.MRId);
+        return (
+          <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
+            <ApprovalStatusChain
+              table="MaterialRequests"
+              recordId={row.original.MRId}
+            />
+            {pending &&
+              (pending.totalPending > 0 ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  Pending &middot; {pending.totalPending} Qty
+                </span>
+              ) : pending.totalOrdered > 0 ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  Completed
+                </span>
+              ) : null)}
+          </div>
+        );
+      },
     },
     {
       id: "actions",
@@ -657,13 +779,17 @@ export default function MaterialRequest() {
               <Eye size={15} />
             </button>
 
-            {/* Update — Draft only */}
-            {rights.canEdit && status === "Draft" && (
+            {/* Update — Draft only, or any status for admins */}
+            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || isAdmin) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
                 className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-                title="Edit this request"
+                title={
+                  status === "Draft"
+                    ? "Edit this request"
+                    : "Edit (admin override)"
+                }
               >
                 <Edit3 size={15} />
               </button>
@@ -833,18 +959,18 @@ export default function MaterialRequest() {
 
         <CardContent className="p-5 space-y-4">
           {/* Doc number / Type of Doc */}
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
             <FileText size={13} className="text-muted-foreground shrink-0" />
             <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
               Request No:
             </span>
             {editingId ? (
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm break-all">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
-              <div className="flex-1 flex items-center gap-3 min-w-0">
-                <div className="relative">
+              <div className="flex-1 flex flex-wrap items-center gap-3 min-w-0">
+                <div className="relative flex-1 min-w-[200px]">
                   <select
                     value={header.docTypeId ? String(header.docTypeId) : ""}
                     onChange={async (e) => {
@@ -1060,15 +1186,15 @@ export default function MaterialRequest() {
 
       {/* Items card */}
       <Card className="border-border shadow-sm">
-        <CardHeader className="px-6 py-4 border-b border-border flex flex-row items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+        <CardHeader className="px-4 sm:px-6 py-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
               <ShoppingCart
                 size={15}
                 className="text-emerald-600 dark:text-emerald-400"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <CardTitle className="text-sm font-semibold">
                 Requested Items
               </CardTitle>
@@ -1087,7 +1213,7 @@ export default function MaterialRequest() {
             variant="outline"
             size="sm"
             onClick={addCartRow}
-            className="gap-1.5 h-8 text-xs"
+            className="gap-1.5 h-8 text-xs self-start sm:self-auto"
           >
             <Plus size={13} /> Add Item
           </Button>
@@ -1161,13 +1287,36 @@ export default function MaterialRequest() {
                         // Only offer UOMs relevant to the item's own default
                         // unit (same measurement category, e.g. Weight units
                         // for a Weight item) — a water/liquid item no longer
-                        // gets offered something like "Running Meter".
-                        // Units with no category (Bags, Box, Set, ...) fall
-                        // back to the full list, same as before this feature.
+                        // gets offered something like "Running Meter", and a
+                        // packaging item (Box) only sees other packaging
+                        // units (Pieces, Bags, ...) instead of the full list.
                         const relevant = relevantUOMs(
-                          uoms as any[],
+                          (uoms as any[]).map((u) => ({
+                            ...u,
+                            category: u.UOMCategory ?? null,
+                          })),
                           defaultCategory,
                         ).filter((u: any) => u.UOMCode !== ci.DefaultUOM);
+
+                        // Item-tagged alternates (e.g. Cement in CFT) have no
+                        // fixed physical category, so they're never in the
+                        // category-based `relevant` list above — merge them
+                        // in separately, deduped against it.
+                        const itemAlternates = ci.ItemId
+                          ? alternatesForItem(itemUomAlternates, ci.ItemId)
+                          : [];
+                        const extraAlternates = itemAlternates
+                          .filter(
+                            (a) =>
+                              a.uomCode !== ci.DefaultUOM &&
+                              !relevant.some((u: any) => u.UOMCode === a.uomCode),
+                          )
+                          .map((a) => ({
+                            UOMCode: a.uomCode,
+                            UOMName: a.uomName || a.uomCode,
+                            Symbol: a.symbol,
+                          }));
+
                         return (
                           <select
                             value={ci.UOMCode}
@@ -1175,22 +1324,55 @@ export default function MaterialRequest() {
                               const nextCode = e.target.value;
                               const nextUom = uomMap[nextCode];
                               const currentUom = uomMap[ci.UOMCode];
-                              // Same-category switch (e.g. tonne -> kg): convert
-                              // the already-entered quantity so it still means
-                              // the same physical amount in the new unit.
-                              const nextQty =
+
+                              // Item-specific conversion (e.g. Cement Bag <->
+                              // CFT) takes priority over the category-based
+                              // one — it's the more precise, item-authored
+                              // figure when both are available.
+                              const itemFromFactor = ci.ItemId
+                                ? getItemUomFactor(
+                                    itemUomAlternates,
+                                    ci.ItemId,
+                                    ci.UOMCode,
+                                    ci.DefaultUOM,
+                                  )
+                                : null;
+                              const itemToFactor = ci.ItemId
+                                ? getItemUomFactor(
+                                    itemUomAlternates,
+                                    ci.ItemId,
+                                    nextCode,
+                                    ci.DefaultUOM,
+                                  )
+                                : null;
+
+                              let nextQty = ci.Quantity;
+                              if (itemFromFactor != null && itemToFactor != null) {
+                                nextQty = String(
+                                  convertItemQuantity(
+                                    parseFloat(ci.Quantity) || 0,
+                                    itemFromFactor,
+                                    itemToFactor,
+                                  ),
+                                );
+                              } else if (
                                 currentUom?.UOMCategory &&
                                 nextUom?.UOMCategory === currentUom.UOMCategory &&
                                 currentUom.BaseFactor &&
                                 nextUom.BaseFactor
-                                  ? String(
-                                      convertQuantity(
-                                        parseFloat(ci.Quantity) || 0,
-                                        Number(currentUom.BaseFactor),
-                                        Number(nextUom.BaseFactor),
-                                      ),
-                                    )
-                                  : ci.Quantity;
+                              ) {
+                                // Same-category switch (e.g. tonne -> kg): convert
+                                // the already-entered quantity so it still means
+                                // the same physical amount in the new unit.
+                                nextQty = String(
+                                  convertQuantity(
+                                    parseFloat(ci.Quantity) || 0,
+                                    Number(currentUom.BaseFactor),
+                                    Number(nextUom.BaseFactor),
+                                  ),
+                                );
+                              }
+
                               setCart((prev) =>
                                 prev.map((c) =>
                                   c._key === ci._key
@@ -1219,6 +1401,16 @@ export default function MaterialRequest() {
                                 {u.Symbol ? ` (${u.Symbol})` : ""}
                               </option>
                             ))}
+                            {extraAlternates.length > 0 && (
+                              <optgroup label="Tagged for this item">
+                                {extraAlternates.map((u) => (
+                                  <option key={u.UOMCode} value={u.UOMCode}>
+                                    {u.UOMName}
+                                    {u.Symbol ? ` (${u.Symbol})` : ""}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         );
                       })()}
@@ -1251,6 +1443,61 @@ export default function MaterialRequest() {
                         placeholder="0.00"
                       />
                     </div>
+                    {/* Live equivalents in this item's other tagged UOMs */}
+                    {ci.ItemId &&
+                      ci.UOMCode &&
+                      parseFloat(ci.Quantity) > 0 &&
+                      (() => {
+                        const itemAlternates = alternatesForItem(
+                          itemUomAlternates,
+                          ci.ItemId,
+                        );
+                        const fromFactor = getItemUomFactor(
+                          itemUomAlternates,
+                          ci.ItemId,
+                          ci.UOMCode,
+                          ci.DefaultUOM,
+                        );
+                        if (fromFactor == null || itemAlternates.length === 0)
+                          return null;
+                        const others: { label: string; qty: number }[] = [];
+                        if (ci.DefaultUOM && ci.DefaultUOM !== ci.UOMCode) {
+                          others.push({
+                            label:
+                              uomMap[ci.DefaultUOM]?.Symbol ||
+                              uomMap[ci.DefaultUOM]?.UOMName ||
+                              ci.DefaultUOM,
+                            qty: convertItemQuantity(
+                              parseFloat(ci.Quantity) || 0,
+                              fromFactor,
+                              1,
+                            ),
+                          });
+                        }
+                        for (const a of itemAlternates) {
+                          if (a.uomCode === ci.UOMCode) continue;
+                          others.push({
+                            label: a.symbol || a.uomName || a.uomCode,
+                            qty: convertItemQuantity(
+                              parseFloat(ci.Quantity) || 0,
+                              fromFactor,
+                              a.conversionFactor,
+                            ),
+                          });
+                        }
+                        if (others.length === 0) return null;
+                        return (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            ≈{" "}
+                            {others
+                              .map(
+                                (o) =>
+                                  `${o.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${o.label}`,
+                              )
+                              .join(" · ")}
+                          </p>
+                        );
+                      })()}
                   </div>
 
                   {/* Remove */}
@@ -1286,7 +1533,7 @@ export default function MaterialRequest() {
 
           {/* Cart summary */}
           {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
               <div className="flex items-center gap-3 text-muted-foreground">
                 <Package size={14} />
                 <span>
@@ -1392,6 +1639,19 @@ export default function MaterialRequest() {
                 {viewingRecord.DocNo || `MR-${viewingRecord.MRId}`}
               </h2>
               <StatusBadge status={viewingRecord.Status || "Draft"} />
+              {(() => {
+                const pending = pendingSummaryByMRId.get(viewingRecord.MRId);
+                if (!pending) return null;
+                return pending.totalPending > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Pending &middot; {pending.totalPending} Qty
+                  </span>
+                ) : pending.totalOrdered > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Completed
+                  </span>
+                ) : null;
+              })()}
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.Normal}`}>
                 {priority}
               </span>
@@ -1437,7 +1697,7 @@ export default function MaterialRequest() {
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-            {rights.canEdit && viewingRecord.Status === "Draft" && (
+            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
@@ -1556,6 +1816,9 @@ export default function MaterialRequest() {
               </table>
             </div>
           </div>
+
+          {/* ── Linked Purchase Orders ── */}
+          <LinkedPurchaseOrders mrId={viewingRecord.MRId} navigate={navigate} />
 
           {/* ── Document chain ── */}
           <DocumentChainPanel docType="mr" id={viewingRecord.MRId} />

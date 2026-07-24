@@ -82,6 +82,7 @@ async function postVoucher(pool, {
   sourceId,
   companyId = null,
   projectId = null,
+  costCenterId = null,
   createdBy = null,
 }) {
   if (!legs || legs.length < 2) {
@@ -119,13 +120,14 @@ async function postVoucher(pool, {
         .input("SourceId", sql.Int, sourceId)
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectId", sql.Int, projectId)
+        .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
         .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
           INSERT INTO dbo.GeneralLedgerEntry
             (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
+             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy)
           VALUES
             (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy)
         `);
     }
     await tx.commit();
@@ -141,6 +143,9 @@ async function postVoucher(pool, {
 
 /**
  * GRN approved — goods received, not yet invoiced (GR/IR clearing pattern).
+ * Also the single point where a GRN's items are credited to StockLedger —
+ * see the inline comment below for why that's gated on approval rather
+ * than GRN creation.
  *   Dr Purchase A/c ................. taxable/base amount
  *   Dr Provisional Credit Available .. GST amount (input tax credit, pending)
  *   Cr PROVISION FOR PENDING GRN A/C . total incl. GST
@@ -151,7 +156,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
 
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
-           grn.TotalAmount, grn.SupplierID, grn.POID,
+           grn.TotalAmount, grn.SupplierID, grn.POID, grn.GodownID,
            p.CompanyId, p.ProjectId
     FROM dbo.GoodsReceiptNotes grn
     LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
@@ -170,6 +175,36 @@ async function postGRNApproval(pool, grnId, userEmail) {
     items = [];
   }
 
+  const docNo = grn.DocNo || grn.GRNNo || `GRN-${grnId}`;
+
+  // Credit the warehouse now that the delivery has cleared approval — stock
+  // deliberately does NOT move at GRN creation (a Draft/Pending GRN hasn't
+  // been vetted yet, so it shouldn't inflate available stock). This is the
+  // single place a GRN's items ever get counted. Delete-then-insert makes
+  // it idempotent against re-entrant approval attempts. Runs independently
+  // of the GL voucher below — a zero/negative-value GRN (e.g. free samples)
+  // still received real, countable goods even if there's nothing to post
+  // to accounts.
+  await pool
+    .request()
+    .input("RefID", sql.Int, grnId)
+    .query(`DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID`);
+  for (const item of items) {
+    if (item.itemId && Number(item.receivedQty) > 0) {
+      await pool
+        .request()
+        .input("ItemID", sql.NVarChar(50), item.itemId)
+        .input("Qty", sql.Decimal(18, 2), Number(item.receivedQty))
+        .input("UOM", sql.NVarChar(20), item.uom || null)
+        .input("RefID", sql.Int, grnId)
+        .input("DocNo", sql.NVarChar(100), docNo)
+        .input("GodownID", sql.Int, grn.GodownID || null).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, 'IN', 'GRN', @RefID, @DocNo, @GodownID, GETDATE())
+        `);
+    }
+  }
+
   const baseAmount = items.reduce(
     (s, i) => s + (Number(i.totalAmount) || 0),
     0,
@@ -178,7 +213,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
   const gstAmount = Math.max(0, totalInclGst - baseAmount);
 
   if (totalInclGst <= 0)
-    return { posted: false, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
+    return { posted: false, stockPosted: true, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -190,7 +225,6 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
-  const docNo = grn.DocNo || grn.GRNNo || `GRN-${grnId}`;
   await postVoucher(pool, {
     voucherNo: docNo,
     voucherDate: grn.GRNDate,
@@ -217,7 +251,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
       },
     ],
   });
-  return { posted: true };
+  return { posted: true, stockPosted: true };
 }
 
 /**
@@ -393,30 +427,33 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
  * name match on EName. If there's no expense ref to resolve from, the
  * posting is skipped rather than guessing the wrong counter-account.
  */
-async function postPaymentApproval(pool, paymentId, userEmail) {
-  if (await hasPosting(pool, "NewPayment", paymentId))
-    return { posted: true, reason: "already posted (idempotent)" };
-
-  const result = await pool
-    .request()
-    .input("PPaymentID", sql.Int, paymentId)
-    .query(`
-      SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject
-      FROM dbo.NewPayment
-      WHERE PPaymentID = @PPaymentID
-    `);
-  const payment = result.recordset[0];
-  if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
-  if (!payment.PBankID)
-    return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
-
-  const amount = Number(payment.PAmount) || 0;
-  if (amount <= 0)
-    return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
-
+// Resolves the counter-account (supplier/contractor AccountHeadMaster row)
+// a payment should post against. Shared by postPaymentApproval below and by
+// newPayment.js's own posting endpoints, which previously searched for a
+// system-generated GL head literally named "supplier"/"creditor" — no such
+// account exists (every vendor has their own ledger), so that always failed
+// with "Supplier/Creditor system ledger not configured."
+//
+// Precedence:
+//   1. Contract-linked payment (advance against a Contract, no real invoice
+//      yet) — resolve straight from the Contract's own party tag. Takes
+//      priority because for this case PExpenseRef (if set at all) holds the
+//      Contract's own DocNo, not a real ExpenseBooking reference.
+//   2. PExpenseRef → the linked ExpenseBooking's own resolved supplier
+//      (GRN's SupplierID, or a name-matched head for other source types).
+//   3. PPartyId — the direct party picked on the payment form, last resort.
+async function resolvePaymentSupplierHeadId(pool, payment) {
   let supplierHeadId = null;
-  if (payment.PExpenseRef) {
+
+  if (payment.ContractId) {
+    const contractResult = await pool
+      .request()
+      .input("ContractId", sql.Int, payment.ContractId)
+      .query(`SELECT ContactPartyId FROM dbo.Contract WHERE ContractId = @ContractId`);
+    supplierHeadId = contractResult.recordset[0]?.ContactPartyId ?? null;
+  }
+
+  if (!supplierHeadId && payment.PExpenseRef) {
     // EMI payments store PExpenseRef as "{parentEDocNo}-EMI-{n}".
     // Strip the suffix to resolve the parent booking for GL purposes.
     const lookupRef = payment.PExpenseRef.replace(/-EMI-\d+$/i, "");
@@ -442,12 +479,46 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       }
     }
   }
+
+  // Direct-invoice / manual payments carry PPartyId (AccountHeadMaster.LHeadId)
+  // straight from the party picker — the last, most literal fallback.
+  if (!supplierHeadId && payment.PPartyId) {
+    supplierHeadId = payment.PPartyId;
+  }
+
+  return supplierHeadId;
+}
+
+async function postPaymentApproval(pool, paymentId, userEmail) {
+  if (await hasPosting(pool, "NewPayment", paymentId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const result = await pool
+    .request()
+    .input("PPaymentID", sql.Int, paymentId)
+    .query(`
+      SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
+             PCompany, PProject, ContractId, PPartyId
+      FROM dbo.NewPayment
+      WHERE PPaymentID = @PPaymentID
+    `);
+  const payment = result.recordset[0];
+  if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
+  if (!payment.PBankID)
+    return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
+
+  const amount = Number(payment.PAmount) || 0;
+  if (amount <= 0)
+    return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
+
+  const supplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
+
   if (!supplierHeadId)
     return {
       posted: false,
       reason: payment.PExpenseRef
         ? `Payment ${paymentId}: could not resolve supplier from expense ref "${payment.PExpenseRef}"`
-        : `Payment ${paymentId}: no PExpenseRef, cannot resolve counter-account`,
+        : `Payment ${paymentId}: no PExpenseRef/ContractId/PPartyId, cannot resolve counter-account`,
     };
 
   const companyId = parseInt(payment.PCompany, 10);
@@ -611,6 +682,7 @@ module.exports = {
   postGRNApproval,
   postExpenseBookingApproval,
   postPaymentApproval,
+  resolvePaymentSupplierHeadId,
   postReceivedPaymentApproval,
   postJournalVoucherApproval,
 };
