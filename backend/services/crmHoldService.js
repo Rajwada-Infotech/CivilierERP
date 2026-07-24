@@ -129,4 +129,30 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
     .query("UPDATE dbo.CrmInventoryHold SET Status = 'Converted', ReleasedAt = SYSDATETIME() WHERE Id = @id");
 }
 
-module.exports = { ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold, guardAndConvertHold };
+// Releases every still-Active hold (Unit and/or Parking) tied to an
+// Application — called when the Application itself is rejected/cancelled/
+// expired, so a dead Application never keeps real inventory tied up until
+// the hourly SLA sweep eventually notices HoldUntil has passed. Booking
+// cancellation already has its own equivalent cascade
+// (crmCancellations.js) for the post-Booking stage; this covers the
+// pre-Booking stage, where the Application itself is the only thing that
+// was ever holding the entity.
+async function releaseAllHoldsForApplication(pool, applicationId, userId) {
+  const rows = await pool.request().input("aid", sql.Int, applicationId)
+    .query("SELECT Id FROM dbo.CrmInventoryHold WHERE ApplicationId = @aid AND Status = 'Active'");
+  for (const row of rows.recordset) {
+    try {
+      await releaseHold(pool, row.Id, userId);
+    } catch (e) {
+      // Non-blocking — same partial-failure tolerance as every other
+      // cascade release in this codebase (see crmCancellations.js).
+      console.error("[crm-hold-service] releaseAllHoldsForApplication failed for hold", row.Id, e.message);
+    }
+  }
+  return { released: rows.recordset.length };
+}
+
+module.exports = {
+  ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold,
+  guardAndConvertHold, releaseAllHoldsForApplication,
+};

@@ -10,7 +10,6 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/agreements";
-const BKG_API = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
 
 const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
@@ -22,6 +21,19 @@ const agrStatusColor: Record<string, string> = {
   Registered: "text-green-600 bg-green-50 border-green-200",
   Cancelled:  "text-red-600 bg-red-50 border-red-200",
 };
+// A Booking can be cancelled independently, from the Bookings module, after
+// its Agreement already exists — this flags that so the workflow actions
+// below (Edit, Send, Mark Executed, etc.) can be locked, matching the
+// server-side guard in crmAgreements.js.
+function isBookingCancelled(a: { BookingStatus?: string | null; BookingIsActive?: boolean | null }): boolean {
+  return a.BookingIsActive === false || ["Cancelled", "Rejected"].includes(a.BookingStatus || "");
+}
+
+// Mirrors the backend's mark-executed check (crmAgreements.js) — mandatory
+// documents must be Verified before execution, not just present.
+function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
+  return (documents || []).filter((d) => d.IsMandatory && d.Status !== "Verified");
+}
 const docStatusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
   Requested: "text-amber-600 bg-amber-50 border-amber-200",
@@ -123,8 +135,15 @@ async function fetchDateHistory(id: number): Promise<any[]> {
 async function fetchRevisions(id: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/${id}/revisions`); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Only bookings that are Approved, have no Agreement yet, and pass every
+// agreement-prep prerequisite (welcome call Welcomed, bank/nominee/PAN/
+// Aadhaar details, unit linked, email/mobile present) — same gate
+// POST /api/crm/agreements enforces server-side, so a booking picked here
+// can never be rejected for "prerequisites incomplete" on save. Deliberately
+// NOT the raw /api/crm/bookings list, which includes Pending/Draft bookings
+// and bookings that already have an agreement.
 async function fetchBookings(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
+  try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 const CrmAgreement: React.FC = () => {
@@ -182,6 +201,33 @@ const CrmAgreement: React.FC = () => {
       !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
         || a.AgreementNo?.includes(search) || a.BookingNo?.includes(search)
     ), [agreements, search]);
+
+  // Arriving here via CrmBooking.tsx's "Agreement" next-step link
+  // (`/crm/agreements?bookingId=X`) means the booking already cleared
+  // Welcome Call + Bank Details, so an Agreement has usually already been
+  // auto-created for it (see maybeAutoCreateAgreement). Jump straight to
+  // reviewing/approving that agreement instead of dropping staff on the
+  // unfiltered list to go find it themselves. Only falls back to opening
+  // the New Agreement dialog (pre-filled) for the rare case where
+  // auto-create hasn't fired yet — e.g. a prerequisite landed through a
+  // path that doesn't call it, or a previous auto-create attempt failed.
+  // Runs once per bkgFilter value so it doesn't fight with the user closing
+  // the dialog or switching to a different agreement afterward. Explicit
+  // ?id= links (opening a specific agreement directly) always take
+  // priority and skip this entirely.
+  const handledBkgFilterRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bkgFilter || idFilter || isLoading) return;
+    if (handledBkgFilterRef.current === bkgFilter) return;
+    handledBkgFilterRef.current = bkgFilter;
+    const existing = (agreements as any[]).find((a) => String(a.BookingId) === String(bkgFilter));
+    if (existing) {
+      setSelectedId(existing.Id);
+    } else {
+      setAgrForm((f) => ({ ...f, BookingId: bkgFilter }));
+      setAgrDialog(true);
+    }
+  }, [bkgFilter, idFilter, agreements, isLoading]);
 
   const handleSaveAgreement = async () => {
     if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
@@ -364,6 +410,23 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
+  const [togglingPortal, setTogglingPortal] = useState(false);
+  const handleTogglePortalAccess = async (deactivate: boolean) => {
+    if (!selectedId) return;
+    setTogglingPortal(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setTogglingPortal(false);
+    }
+  };
+
   const openEdit = () => {
     if (!detail?.agreement) return;
     setEditForm({
@@ -434,6 +497,9 @@ const CrmAgreement: React.FC = () => {
                   <span className="text-sm font-medium truncate">{a.ApplicantName}</span>
                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
                 </div>
+                {isBookingCancelled(a) && (
+                  <div className="text-[10px] font-semibold text-red-600 mt-0.5">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
+                )}
                 <div className="text-xs text-muted-foreground mt-0.5 font-mono">{a.AgreementNo}</div>
                 <div className="text-xs text-muted-foreground">{a.BookingNo} · {a.UnitNo}</div>
                 <div className="text-xs text-muted-foreground">{a.DocumentCount || 0} document(s)</div>
@@ -469,32 +535,70 @@ const CrmAgreement: React.FC = () => {
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${agrStatusColor[detail.agreement?.Status] || ""}`}>
                       {detail.agreement?.Status}
                     </span>
-                    {detail.agreement?.Status === "Draft" && (
-                      <button onClick={openEdit}
-                        className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                        Edit Details
-                      </button>
+                    {detail.agreement && isBookingCancelled(detail.agreement) && (
+                      <span title={`Booking ${detail.agreement.BookingStatus || "inactive"} — Edit/Send/Mark actions are locked. Cancel the agreement instead.`}
+                        className="text-xs px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-600 font-medium cursor-help">
+                        ⚠ Booking {detail.agreement.BookingStatus || "Inactive"}
+                      </span>
                     )}
                     {detail.agreement?.Status === "Draft" && (
-                      detail.agreement?.SeniorApprovalStatus === "Approved"
+                      isBookingCancelled(detail.agreement) ? (
+                        <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                          Edit Details
+                        </span>
+                      ) : (
+                        <button onClick={openEdit}
+                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          Edit Details
+                        </button>
+                      )
+                    )}
+                    {detail.agreement?.Status === "Draft" && (() => {
+                      const pendingDocs = unverifiedMandatoryDocs(detail.documents);
+                      if (isBookingCancelled(detail.agreement)) {
+                        return (
+                          <span title="Booking is cancelled — cannot mark executed" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                            Mark Executed
+                          </span>
+                        );
+                      }
+                      const approvalsReady = detail.agreement?.SeniorApprovalStatus === "Approved"
                         && detail.agreement?.CustomerApprovalStatus === "Approved"
-                        && detail.agreement?.AgreementDate ? (
+                        && detail.agreement?.AgreementDate;
+                      if (!approvalsReady) {
+                        return (
+                          <span title="Requires senior approval, customer approval, and a mutually agreed date"
+                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            Mark Executed (not ready)
+                          </span>
+                        );
+                      }
+                      if (pendingDocs.length) {
+                        return (
+                          <span title={`Mandatory document(s) not yet verified: ${pendingDocs.map((d) => d.Label || d.DocumentType).join(", ")}`}
+                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            Mark Executed (docs pending)
+                          </span>
+                        );
+                      }
+                      return (
                         <button onClick={() => handleAgreementAction("mark-executed")}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
                           Mark Executed
                         </button>
-                      ) : (
-                        <span title="Requires senior approval, customer approval, and a mutually agreed date"
-                          className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
-                          Mark Executed (not ready)
-                        </span>
-                      )
-                    )}
+                      );
+                    })()}
                     {detail.agreement?.Status === "Executed" && (
-                      <button onClick={() => handleAgreementAction("mark-registered")}
-                        className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                        Mark Registered
-                      </button>
+                      isBookingCancelled(detail.agreement) ? (
+                        <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                          Mark Registered
+                        </span>
+                      ) : (
+                        <button onClick={() => handleAgreementAction("mark-registered")}
+                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          Mark Registered
+                        </button>
+                      )
                     )}
                     {(detail.agreement?.Status === "Draft" || detail.agreement?.Status === "Executed") && (
                       <button onClick={() => { if (window.confirm("Cancel this agreement?")) handleAgreementAction("cancel"); }}
@@ -518,19 +622,34 @@ const CrmAgreement: React.FC = () => {
                     <div key={k}><span className="text-xs text-muted-foreground">{k}: </span><span className="font-medium">{v}</span></div>
                   ))}
                 </div>
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 flex items-center justify-between gap-3 text-xs">
-                  <div>
-                    <span className="text-muted-foreground">Customer Portal Account: </span>
-                    {detail.agreement?.PortalEmail ? (
-                      <span className="font-medium">{detail.agreement.PortalEmail}</span>
-                    ) : (
-                      <span className="text-amber-600">Not yet provisioned — applicant needs an email and mobile on file</span>
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-muted-foreground">Customer Portal Account: </span>
+                      {detail.agreement?.PortalEmail ? (
+                        <span className="font-medium">{detail.agreement.PortalEmail}</span>
+                      ) : (
+                        <span className="text-amber-600">Not yet provisioned — applicant needs an email and mobile on file</span>
+                      )}
+                    </div>
+                    {detail.agreement?.PortalEmail && (
+                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalMustChangePassword ? "text-orange-600 bg-orange-50 border-orange-200" : "text-green-600 bg-green-50 border-green-200"}`}>
+                        {detail.agreement.PortalMustChangePassword ? "First login pending" : "Password set"}
+                      </span>
                     )}
                   </div>
                   {detail.agreement?.PortalEmail && (
-                    <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalMustChangePassword ? "text-orange-600 bg-orange-50 border-orange-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-                      {detail.agreement.PortalMustChangePassword ? "First login pending" : "Password set"}
-                    </span>
+                    <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/60">
+                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalActive === false ? "text-rose-600 bg-rose-50 border-rose-200" : "text-green-600 bg-green-50 border-green-200"}`}>
+                        {detail.agreement.PortalActive === false ? "Access Deactivated" : "Access Active"}
+                      </span>
+                      <button
+                        onClick={() => handleTogglePortalAccess(detail.agreement.PortalActive !== false)}
+                        disabled={togglingPortal}
+                        className={`px-2.5 py-1 rounded-md border font-medium hover:bg-muted disabled:opacity-40 ${detail.agreement.PortalActive === false ? "border-green-200 text-green-600" : "border-rose-200 text-rose-600"}`}>
+                        {togglingPortal ? "Working..." : detail.agreement.PortalActive === false ? "Reactivate Access" : "Deactivate Access"}
+                      </button>
+                    </div>
                   )}
                 </div>
                 {detail.agreement?.PortalEmail && detail.agreement?.PortalMustChangePassword && (
@@ -639,16 +758,28 @@ const CrmAgreement: React.FC = () => {
                     <span className="text-xs text-muted-foreground">Pending admin approval</span>
                   )}
                   {detail.agreement?.SeniorApprovalStatus === "Approved" && !detail.agreement?.SentToCustomerAt && (
-                    <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
-                      className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                      Send to Customer Portal
-                    </button>
+                    isBookingCancelled(detail.agreement) ? (
+                      <span title="Booking is cancelled — cannot send to customer" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
+                        Send to Customer Portal
+                      </span>
+                    ) : (
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
+                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                        Send to Customer Portal
+                      </button>
+                    )
                   )}
                   {detail.agreement?.CustomerApprovalStatus === "RecheckRequested" && detail.agreement?.SeniorApprovalStatus === "Approved" && (
-                    <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
-                      className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                      Resend After Recheck
-                    </button>
+                    isBookingCancelled(detail.agreement) ? (
+                      <span title="Booking is cancelled — cannot resend" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
+                        Resend After Recheck
+                      </span>
+                    ) : (
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
+                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                        Resend After Recheck
+                      </button>
+                    )
                   )}
                   {/* Date negotiation is the step AFTER both ends approve the
                       agreement's content (spec: "...CUSTOMER APPROVAL ->
@@ -659,6 +790,10 @@ const CrmAgreement: React.FC = () => {
                     detail.agreement?.DateApprovalStatus === "Pending" ? (
                       <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
                         Awaiting Super Admin Approval
+                      </span>
+                    ) : isBookingCancelled(detail.agreement) ? (
+                      <span title="Booking is cancelled — cannot propose a date" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
+                        {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
                       </span>
                     ) : (
                       <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); }}
@@ -751,6 +886,18 @@ const CrmAgreement: React.FC = () => {
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
               </select>
+              {bookings.length === 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  No bookings are eligible yet — a booking needs to be Approved, have its welcome call marked
+                  Welcomed, and have customer bank/nominee/PAN/Aadhaar details on file before an agreement can be created.
+                </p>
+              )}
+              {bkgFilter && !(bookings as any[]).some((b) => String(b.Id) === String(bkgFilter)) && (
+                <p className="text-xs text-amber-600 mt-1">
+                  This dialog was opened for a specific booking, but that booking isn't eligible for an agreement yet
+                  — pick from the list above, or complete its remaining prerequisites first.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>

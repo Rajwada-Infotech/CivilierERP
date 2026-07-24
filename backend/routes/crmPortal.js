@@ -54,6 +54,39 @@ router.post("/login", async (req, res) => {
 
 router.use(portalAuth);
 
+// Server-side enforcement of (1) account deactivation and (2) the forced
+// first-login password reset. The JWT itself carries neither signal and is
+// valid for 7 days regardless — until now nothing re-checked either flag
+// per-request, so:
+//   - staff deactivating a portal account (IsActive=0) had no actual effect
+//     until the customer's existing token happened to expire on its own
+//   - a customer could keep using the account indefinitely, still on the
+//     mobile-number password, by navigating directly to any other portal
+//     URL instead of the one that forces a reset right after login
+// IsActive is checked first and blocks EVERY route with no exception (a
+// deactivated account can't even reach /change-password — there's nothing
+// left to protect access to). MustChangePassword only blocks routes other
+// than /change-password, which is the one place that actually resolves it.
+router.use(async (req, res, next) => {
+  try {
+    const pool = getPool();
+    const row = await pool.request().input("id", sql.Int, req.portalUser.portalUserId)
+      .query("SELECT IsActive, MustChangePassword FROM dbo.CrmCustomerPortalUser WHERE Id = @id");
+    if (!row.recordset.length) return res.status(401).json({ error: "Portal account not found" });
+    if (!row.recordset[0].IsActive) {
+      return res.status(401).json({ error: "This portal account has been deactivated" });
+    }
+    if (req.path === "/change-password") return next();
+    if (row.recordset[0].MustChangePassword) {
+      return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
+    }
+    next();
+  } catch (e) {
+    console.error("[crm-portal] password-change gate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /change-password — force-set a real password on first login
 router.post("/change-password", async (req, res) => {
   try {
@@ -429,7 +462,8 @@ router.post("/agreement/respond", async (req, res) => {
 
     const ag = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.RecheckCount, ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
-             ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+             ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName,
+             ag.VersionNo, ag.AgreementDate, ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo, ag.Notes
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -483,6 +517,27 @@ router.post("/agreement/respond", async (req, res) => {
             CustomerApprovedAt = NULL,
             LastRecheckRemarks = @rem
           WHERE Id = @id
+        `);
+
+      // Not a legal-content edit — VersionNo doesn't bump — but Version
+      // History should still surface *why* the customer bounced it back,
+      // not just silently sit at RecheckRequested. Snapshot the current
+      // (unchanged) content, tagged with the customer's own remarks.
+      // CreatedBy is NULL here (no staff actor — this came from the portal).
+      await pool.request()
+        .input("agid", sql.Int, agreementId)
+        .input("ver",  sql.Int, agreementRow.VersionNo)
+        .input("adt",  sql.Date, agreementRow.AgreementDate)
+        .input("lname",sql.NVarChar(300), agreementRow.LegalName)
+        .input("laddr",sql.NVarChar(sql.MAX), agreementRow.LegalAddress)
+        .input("pan",  sql.NVarChar(20), agreementRow.PanNo)
+        .input("aadh", sql.NVarChar(20), agreementRow.AadhaarNo)
+        .input("note", sql.NVarChar(sql.MAX), agreementRow.Notes)
+        .input("reason", sql.NVarChar(500), `Customer recheck requested: ${remarks}`)
+        .query(`
+          INSERT INTO dbo.CrmAgreementRevision
+            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
         `);
     }
 

@@ -10,7 +10,9 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
-const { guardAndConvertHold } = require("../services/crmHoldService");
+const { guardAndConvertHold, findActiveHold, releaseHold } = require("../services/crmHoldService");
+const { releaseAllParkingForBooking } = require("./crmParking");
+const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
@@ -67,7 +69,14 @@ const BOOKING_SELECT = `
     cu.name AS CreatedByName,
     pp.PlanName AS PaymentPlanName,
     comp.name AS CompanyName,
-    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wc WHERE wc.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS HasWelcomeCall,
+    -- Must match the outcome the real prerequisite gate requires
+    -- (validateAgreementPreparationPrerequisites in crmWorkflowGuards.js,
+    -- and crmWelcomeCalls.js's own status check) -- a logged call with any
+    -- other outcome (NotReachable/Busy/VoiceMail/SwitchedOff/RequestedCallback)
+    -- must NOT be treated as the step being done, or the Bookings page tells
+    -- staff to move on to Bank Details while Agreement auto-create stays
+    -- silently blocked behind an outcome they were never told to fix.
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wc WHERE wc.BookingId = b.Id AND wc.Outcome = 'Welcomed') THEN 1 ELSE 0 END AS BIT) AS HasWelcomeCall,
     CAST(CASE WHEN EXISTS (
       SELECT 1 FROM dbo.CrmCustomerBankDetail bd WHERE bd.BookingId = b.Id
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.BankName, ''))), '') IS NOT NULL
@@ -320,12 +329,17 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
 
+    // Same active-booking gate every other lifecycle-mutating route uses
+    // (blocks both Cancelled and Rejected, not just Cancelled) — re-pointing
+    // a real legal transaction to a different physical unit is exactly the
+    // kind of action that gate exists for, and there's no reason a Rejected
+    // booking should be exempt from it when nothing else is.
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     const booking = await pool.request().input("id", sql.Int, id)
       .query("SELECT UnitId, Status, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    if (booking.recordset[0].Status === "Cancelled") {
-      return res.status(400).json({ error: "Cannot change the unit on a cancelled booking" });
-    }
     const oldUnitId = booking.recordset[0].UnitId;
     const oldRow = booking.recordset[0];
     const newUnitId = parseInt(b.NewUnitId);
@@ -686,6 +700,36 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-bookings", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+
+    // Only reachable from Pending (approvalTransition enforces this), so
+    // there's never a real sale to protect here — same cascade
+    // crmCancellations.js runs for an approved-then-cancelled Booking,
+    // just triggered earlier in the lifecycle. Without this, a rejected
+    // Booking's parking allotment rows stay IsActive=1 with BookingId still
+    // set — parkingMatrix.js's Status derivation would then show the slot
+    // stuck OnHold forever, since the CrmBooking join simply excludes
+    // Rejected rows rather than anything actively clearing the allotment.
+    if (result.newStatus === "Rejected") {
+      const pool = getPool();
+      try { await releaseAllParkingForBooking(pool, id); }
+      catch (parkErr) { console.error("[crm-bookings] parking release on reject failed:", parkErr.message); }
+      try {
+        const bk = await pool.request().input("id", sql.Int, id).query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @id");
+        const unitId = bk.recordset[0]?.UnitId;
+        if (unitId) {
+          const stuckHold = await findActiveHold(pool, "Unit", unitId);
+          if (stuckHold) await releaseHold(pool, stuckHold.Id, actorId(req));
+        }
+      } catch (holdErr) { console.error("[crm-bookings] hold release on reject failed:", holdErr.message); }
+
+      // Same reasoning as crmCancellations.js's cascade — the Application
+      // was force-advanced to 'Approved' the instant this Booking was
+      // created and nothing has touched it since. Without this it would sit
+      // at 'Approved' forever with a Rejected Booking underneath.
+      await syncApplicationOnBookingTerminal(pool, id, "Cancelled", "BookingRejected",
+        "Application cancelled — its booking was rejected", actorId(req));
+    }
+
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-bookings] reject error:", e.message);
@@ -943,9 +987,10 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
 router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
-    const result = await pool.request().input("id", sql.Int, attId)
-      .query("SELECT StoredName, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id");
+    const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
+      .query("SELECT StoredName, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
     const row = result.recordset[0];
     const resolvedPath = path.resolve(UPLOAD_DIR, row.StoredName);
@@ -964,9 +1009,10 @@ router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "vie
 router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
+    const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
-    const result = await pool.request().input("id", sql.Int, attId)
-      .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id");
+    const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
+      .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
     await pool.request().input("id", sql.Int, attId).query("DELETE FROM dbo.CrmBookingAttachment WHERE Id = @id");
     const resolvedPath = path.resolve(UPLOAD_DIR, result.recordset[0].StoredName);

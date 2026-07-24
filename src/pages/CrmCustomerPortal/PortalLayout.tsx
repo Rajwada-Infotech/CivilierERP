@@ -66,6 +66,14 @@ const PortalLayout: React.FC = () => {
       localStorage.removeItem("crm_portal_token");
       navigate("/crm-client-portal/login");
     }
+    // Server now enforces the forced first-login reset on every route except
+    // /change-password itself — a customer who bookmarked or typed a direct
+    // deep link straight into the dashboard (skipping the redirect that
+    // normally fires right after login) gets sent to the reset form here
+    // instead of just seeing a raw "must set a new password" error.
+    if ((meError as any)?.message === "password_change_required" || (tlError as any)?.message === "password_change_required") {
+      navigate("/crm-client-portal/change-password");
+    }
   }, [meError, tlError, navigate]);
 
   const handleLogout = () => {

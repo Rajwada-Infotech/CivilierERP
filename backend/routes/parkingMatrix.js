@@ -69,8 +69,11 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
     const result = await request.query(`
       SELECT
         s.Id, s.SlotNo, s.ParkingType, s.BlockId, blk.BlockName, s.IsActive AS SlotIsActive,
-        pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo,
+        pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo, b.Status AS BookingStatus, b.ConfirmDeadline,
         pa.TotalAmount, pa.PaymentStatus AS AllotmentPaymentStatus, pa.Quantity,
+        CASE WHEN pa.BookingId IS NOT NULL AND EXISTS (
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = pa.BookingId AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+        ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
@@ -79,7 +82,7 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       FROM dbo.ParkingSlot s
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = s.BlockId
       LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
+      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
@@ -89,35 +92,56 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       ORDER BY s.SlotNo
     `);
 
-    const slots = result.recordset.map((r) => ({
-      Id: r.Id,
-      SlotNo: r.SlotNo,
-      ParkingType: r.ParkingType,
-      BlockId: r.BlockId,
-      BlockName: r.BlockName,
-      Status: !r.SlotIsActive ? "Blocked" : r.AllotmentId ? "Booked" : r.HoldId ? "OnHold" : "Available",
-      AllotmentId: r.AllotmentId || null,
-      BookingId: r.BookingId || null,
-      BookingNo: r.BookingNo || null,
-      AllotmentDate: r.AllotmentDate || null,
-      TotalAmount: r.TotalAmount ?? null,
-      AllotmentPaymentStatus: r.AllotmentPaymentStatus || null,
-      Quantity: r.Quantity ?? null,
-      ApplicationId: r.ApplicationId || null,
-      ApplicationNo: r.ApplicationNo || null,
-      ApplicantName: r.ApplicantName || null,
-      Mobile: r.Mobile || null,
-      AssignedToName: r.AssignedToName || null,
-      AssignedToEmail: r.AssignedToEmail || null,
-      HoldId: r.HoldId || null,
-      HoldUntil: r.HoldUntil || null,
-      HoldApplicationId: r.HoldApplicationId || null,
-      HoldApplicationNo: r.HoldApplicationNo || null,
-      HoldApplicantName: r.HoldApplicantName || null,
-      HoldMobile: r.HoldMobile || null,
-      HoldAssignedToName: r.HoldAssignedToName || null,
-      HoldAssignedToEmail: r.HoldAssignedToEmail || null,
-    }));
+    const slots = result.recordset.map((r) => {
+      // Two different "Booked" definitions depending on how this slot was
+      // sold (see crmParking.js POST /standalone's Immediate flag):
+      //   - Unit-linked (BookingId set): rides the SAME Approved+Milestone1
+      //     gate as the unit itself — the parking add-on isn't a separate
+      //     sale, it's part of the one Booking.
+      //   - Truly standalone (no BookingId, sold directly via
+      //     CrmParkingBooking.tsx): its own PaymentStatus is the only signal
+      //     there is — there's no Booking to gate on.
+      const unitLinkedConfirmed = r.BookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
+      const standaloneConfirmed = r.AllotmentId && !r.BookingId && r.AllotmentPaymentStatus === "Paid";
+      const isBooked = !!(unitLinkedConfirmed || standaloneConfirmed);
+      const isOnHold = !isBooked && (r.AllotmentId || r.HoldId);
+      return {
+        Id: r.Id,
+        SlotNo: r.SlotNo,
+        ParkingType: r.ParkingType,
+        BlockId: r.BlockId,
+        BlockName: r.BlockName,
+        Status: !r.SlotIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
+        AllotmentId: r.AllotmentId || null,
+        BookingId: r.BookingId || null,
+        BookingNo: r.BookingNo || null,
+        BookingStatus: r.BookingStatus || null,
+        AllotmentDate: r.AllotmentDate || null,
+        TotalAmount: r.TotalAmount ?? null,
+        AllotmentPaymentStatus: r.AllotmentPaymentStatus || null,
+        Quantity: r.Quantity ?? null,
+        ApplicationId: r.ApplicationId || null,
+        ApplicationNo: r.ApplicationNo || null,
+        ApplicantName: r.ApplicantName || null,
+        Mobile: r.Mobile || null,
+        AssignedToName: r.AssignedToName || null,
+        AssignedToEmail: r.AssignedToEmail || null,
+        HoldId: r.HoldId || null,
+        // Unit-linked pending allotment: countdown comes from the parent
+        // Booking's own ConfirmDeadline snapshot (its hold already got
+        // Converted the moment the allotment was created — see
+        // crmEntityCreation.js). A bare pre-Booking hold, or a standalone
+        // sale with no deadline concept at all, falls back to the live
+        // hold's HoldUntil (or null — "—" on the frontend).
+        HoldUntil: r.BookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
+        HoldApplicationId: r.HoldApplicationId || null,
+        HoldApplicationNo: r.HoldApplicationNo || null,
+        HoldApplicantName: r.HoldApplicantName || null,
+        HoldMobile: r.HoldMobile || null,
+        HoldAssignedToName: r.HoldAssignedToName || null,
+        HoldAssignedToEmail: r.HoldAssignedToEmail || null,
+      };
+    });
 
     res.json(slots);
   } catch (err) {

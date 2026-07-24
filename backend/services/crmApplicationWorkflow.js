@@ -16,12 +16,20 @@
  */
 const { sql } = require("../db");
 
+// 'Expired' is a system-only terminal status — reached exclusively via the
+// force-advance path (see crmSlaEngine.js's crm-hold-expiry handler), the
+// same way AutoBooking force-advances to Approved. It's not reachable
+// through any normal user-facing transition, so it's intentionally absent
+// from the allowed-transitions lists below (force bypasses that check).
+// Never a hard delete — the Application record stays, permanently
+// distinguishable from a real Cancel/Reject in CrmApplicationStatusLog.
 const APPLICATION_TRANSITIONS = {
   Draft:     ["Cancelled"],
   Pending:   ["Cancelled"],
   Approved:  ["Cancelled"],
   Rejected:  ["Cancelled"],
   Cancelled: [],
+  Expired:   [],
 };
 
 async function logStatusChange(pool, applicationId, fromStatus, toStatus, trigger, remarks, actorId) {
@@ -68,4 +76,29 @@ async function advanceApplicationStatus(pool, applicationId, toStatus, trigger, 
   return { ok: true, from: fromStatus, to: toStatus };
 }
 
-module.exports = { APPLICATION_TRANSITIONS, logStatusChange, advanceApplicationStatus };
+// The Application's Status is only ever force-advanced to 'Approved' once,
+// the moment its Booking is created (createCrmBookingRecord) — nothing
+// afterwards ever revisits it. So when the Booking later dies (Cancelled by
+// the cancellation-request flow, Rejected while still Pending, or
+// Expired by the confirm-deadline sweep), the Application is left sitting
+// at 'Approved' forever with no live Booking underneath it — indistinguishable
+// from a genuinely active sale unless someone opens the Booking itself.
+// Call this from every place CrmBooking.Status is set to one of those three
+// terminal values so the Application always reflects reality. Force-advances
+// (system-triggered, not a manual user transition) and is intentionally
+// silent/non-throwing on failure — the caller's own action (cancelling,
+// rejecting, expiring the Booking) has already committed and must not be
+// undone by a cascade step failing.
+async function syncApplicationOnBookingTerminal(pool, bookingId, toStatus, trigger, remarks, actorId) {
+  try {
+    const row = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
+    const applicationId = row.recordset[0]?.ApplicationId;
+    if (!applicationId) return;
+    await advanceApplicationStatus(pool, applicationId, toStatus, trigger, remarks, actorId, { force: true });
+  } catch (e) {
+    console.error("[crm-application-workflow] syncApplicationOnBookingTerminal failed:", e.message);
+  }
+}
+
+module.exports = { APPLICATION_TRANSITIONS, logStatusChange, advanceApplicationStatus, syncApplicationOnBookingTerminal };

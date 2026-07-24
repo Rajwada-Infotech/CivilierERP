@@ -13,7 +13,7 @@ const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold } = require("./crmHoldService");
-const { rollupBookingTotals } = require("../routes/crmParking");
+const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { createReceiptForMilestone } = require("../routes/crmPayments");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
 
@@ -430,6 +430,26 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
+  // The Application must have actually cleared its own Approved-role gate
+  // (crmApplications.js PUT /:id/approve, admin/super_admin/dba-tier) before
+  // a Booking can exist for it. Enforced here -- the single choke point
+  // every caller (the /approve auto-create path AND the manual/fallback
+  // POST /api/crm/bookings route, which only checks "crm-bookings":"create"
+  // and never checks Application-approval rights) goes through -- because
+  // this function ends by force-advancing the Application to 'Approved'
+  // (see advanceApplicationStatus(..., { force: true }) below). Without this
+  // check, the manual booking-creation escape hatch could be used to
+  // silently rubber-stamp a Draft/Pending/Rejected/Cancelled Application
+  // into Approved, bypassing the real approval workflow and its role gate
+  // entirely -- the booking creation itself becoming the de facto approval.
+  const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("SELECT Status, IsActive FROM dbo.CrmApplication WHERE Id = @aid");
+  if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
+  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
+    throw new CrmCreationError(
+      `Application must be Approved before a Booking can be created (current status: ${appRow.recordset[0].Status})`, 400);
+  }
+
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
            u.DefaultPaymentPlanId,
@@ -446,6 +466,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   const taken = await pool.request().input("uid", sql.Int, parseInt(b.UnitId))
     .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
   if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
+
+  // A customer can't actually get their Booking approved/paid against an
+  // unapproved Application, so the real "confirm within N days" clock only
+  // makes sense starting now — a fresh 3 days from Booking creation, not
+  // whatever was left on the original pick-time hold (which may have
+  // already burned most of its window sitting in the admin approval
+  // queue). This Booking still isn't a confirmed sale (Status stays
+  // 'Pending' until Approved AND Milestone #1 is Paid — see
+  // unitMatrix.js/parkingMatrix.js's Status derivation), so the deadline
+  // below is what the Matrix keeps counting down against in the meantime.
+  const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
@@ -499,13 +530,14 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("brkid", sql.Int,           b.BrokerId ? parseInt(b.BrokerId) : null)
     .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
     .input("brksplit", sql.Bit,        b.BrokerageSplitEnabled ? 1 : 0)
+    .input("cdl",   sql.DateTime2(3),  confirmDeadline)
     .query(`
       INSERT INTO dbo.CrmBooking
         (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
          AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
          BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
          ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
-         BrokerId, BrokerageRatePercent, BrokerageSplitEnabled)
+         BrokerId, BrokerageRatePercent, BrokerageSplitEnabled, ConfirmDeadline)
       OUTPUT INSERTED.Id
       VALUES
         (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
@@ -513,7 +545,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
          ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
          @asgn, 'Pending', @note, 1,
          0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
-         @brkid, @brkpct, @brksplit)
+         @brkid, @brkpct, @brksplit, @cdl)
     `);
 
   const bookingId = result.recordset[0].Id;
@@ -530,9 +562,48 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
   await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+
+  // Application-stage slot picks are now only a temporary hold, not a real
+  // allotment (see crmParking.js POST /standalone) — convert each one into a
+  // real CrmParkingAllotment against this Booking now that it exists, the
+  // same way the Unit itself goes from a soft PreferredUnitId + hold into
+  // this real Booking. applyAddParking does the hold-conversion
+  // (guardAndConvertHold), the insert, and the matching payment milestone in
+  // one call — reusing it here keeps this path byte-for-byte identical to a
+  // parking sale added any other way. Never blocks Booking creation if one
+  // slot's conversion fails (e.g. it expired in the seconds between wizard
+  // submit and admin approval) — same partial-failure tolerance as the rest
+  // of this function; the slot just goes back to Available and staff can
+  // re-add it manually from the Booking's own Parking tab.
+  const parkingHolds = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
+    SELECT h.Id, h.EntityId AS ParkingSlotId
+    FROM dbo.CrmInventoryHold h
+    WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+  `);
+  for (const hold of parkingHolds.recordset) {
+    try {
+      const slot = await pool.request().input("sid", sql.Int, hold.ParkingSlotId)
+        .query("SELECT ProjectId, BlockId, ParkingType FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+      if (!slot.recordset.length) continue;
+      const { ProjectId, BlockId, ParkingType } = slot.recordset[0];
+      const rate = await pool.request()
+        .input("pid", sql.Int, ProjectId).input("bid2", sql.Int, BlockId).input("pt", sql.NVarChar(50), ParkingType)
+        .query(`
+          SELECT TOP 1 Id FROM dbo.ParkingMaster
+          WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1 AND (BlockId = @bid2 OR BlockId IS NULL)
+          ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
+        `);
+      if (!rate.recordset.length) continue;
+      await applyAddParking(pool, bookingId, { ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1 }, actorUserId);
+    } catch (parkErr) {
+      console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
+    }
+  }
+
   // ParkingTotal/GrandTotal were computed above with ParkingTotal = 0 since no
   // parking allotment had BookingId set yet — recompute now that the backfill
-  // above has linked any Application-stage parking selections to this Booking.
+  // and hold-conversion above have linked any Application-stage parking
+  // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
 
   await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);

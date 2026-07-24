@@ -101,6 +101,9 @@ const fmt = (n: number | null | undefined) =>
 type NextStep = { label: string; color: string; path: string } | null;
 function getNextStep(b: any): NextStep {
   if (b.Status !== "Approved") return null; // Pending/Rejected/Cancelled have no forward step
+  // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
+  // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
+  // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
   if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
@@ -245,6 +248,7 @@ const CrmBooking: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM, ApplicationId: appFilter });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["crm-apps"] }); // the Application just became Converted — the New Booking dropdown's app list must reflect that immediately, not after the 5-minute staleTime
     } catch (e: any) {
       toast.error(e.message);
     } finally {
