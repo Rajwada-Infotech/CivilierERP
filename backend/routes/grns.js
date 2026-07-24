@@ -690,13 +690,16 @@ router.get("/:id", async (req, res) => {
           p.TotalAmount    AS POTotalAmount,
           p.SubtotalAmount AS POSubtotalAmount,
           td.Prefix AS DocTypePrefix,
-          td.Description AS DocTypeDescription
+          td.Description AS DocTypeDescription,
+          vio.DocNo AS VehicleInOutDocNo,
+          vio.VehicleNo AS VehicleInOutVehicleNo
         FROM GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
         LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+        LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
         WHERE grn.GRNID = @GRNID
       `);
 
@@ -902,16 +905,11 @@ async function createGRNInternal(pool, body, userEmail) {
         parseIdList(body.attachmentIds),
       );
 
-      // IMPORTANT: use transaction.request() not pool.request() ΓÇö the GRN row
-      // only exists inside this uncommitted transaction; pool sees nothing yet.
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        finalDocNo,
-        resolvedGodownId,
-      );
-
+      // Stock is intentionally NOT credited here — a freshly-created GRN
+      // starts Draft/Pending and hasn't been vetted yet. StockLedger only
+      // gets its IN rows once the GRN clears approval (postGRNApproval in
+      // services/generalLedger.js), so available stock never counts goods
+      // nobody has actually approved receipt of.
       await transaction.commit();
 
       // backPatchRecordId uses pool directly ΓÇö must run after commit
@@ -1132,6 +1130,16 @@ router.put(
         return res.status(404).json({ error: "GRN not found" });
       }
 
+      // Stock only ever reflects an Approved GRN's items (see
+      // postGRNApproval in services/generalLedger.js, which is what
+      // normally credits StockLedger). Editing a Draft/Pending GRN has
+      // nothing to resync since it was never counted. Editing an
+      // already-Approved GRN (allowed via allowPostApproval) DOES need a
+      // resync here, though, since transition() only fires its GL_POSTERS
+      // hook on a fresh Draft/Pending -> Approved transition, not on a
+      // same-status edit — this is the one path that has to redo it
+      // directly rather than going through that hook.
+      const resultingStatus = status || "Draft";
       await transaction
         .request()
         .input("RefID", sql.Int, grnId)
@@ -1139,29 +1147,31 @@ router.put(
           "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
         );
 
-      // Preserve the godown that was set when the GRN was created.
-      // Must read via `transaction`, not `pool` ΓÇö the UPDATE above is still
-      // uncommitted and holds a lock on this row on the transaction's
-      // connection. A read from a different pooled connection would block
-      // waiting on that lock until transaction.commit() runs, but commit()
-      // is sequenced after this read ΓÇö the same self-deadlock as the POST
-      // handler's old GodownID UPDATE, just with a SELECT instead.
-      const grnGodownRes = await transaction
-        .request()
-        .input("GID", sql.Int, grnId)
-        .query(
-          "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+      if (resultingStatus === "Approved") {
+        // Preserve the godown that was set when the GRN was created.
+        // Must read via `transaction`, not `pool` ΓÇö the UPDATE above is still
+        // uncommitted and holds a lock on this row on the transaction's
+        // connection. A read from a different pooled connection would block
+        // waiting on that lock until transaction.commit() runs, but commit()
+        // is sequenced after this read ΓÇö the same self-deadlock as the POST
+        // handler's old GodownID UPDATE, just with a SELECT instead.
+        const grnGodownRes = await transaction
+          .request()
+          .input("GID", sql.Int, grnId)
+          .query(
+            "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+          );
+        const putGodownId =
+          grnGodownRes.recordset[0]?.GodownID ??
+          (await resolveMainGodownId(pool));
+        await insertStockLedgerEntries(
+          transaction,
+          grnId,
+          grnItems,
+          docNo,
+          putGodownId,
         );
-      const putGodownId =
-        grnGodownRes.recordset[0]?.GodownID ??
-        (await resolveMainGodownId(pool));
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        docNo,
-        putGodownId,
-      );
+      }
       await transaction.commit();
       await linkGRNAttachments(
         pool,
@@ -1448,7 +1458,11 @@ router.put(
         userEmail,
         req.user?.role,
       );
+      // On full approval, transition()'s GL_POSTERS hook already ran
+      // postGRNApproval — the one place StockLedger gets credited for this
+      // GRN (see services/generalLedger.js). Just bust the caches here.
       await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
       await bumpCacheVersion("expense-booking-options");
       res.json({ message: "GRN approved", ...result });
     } catch (err) {
@@ -1478,7 +1492,18 @@ router.put(
         req.user?.role,
         note || null,
       );
+
+      // Reversal — normally a no-op today (reject only fires from Pending,
+      // and stock isn't credited until Approved), but this keeps the
+      // Approved -> Rejected path safe too if that transition is ever
+      // allowed, and guards against any stock rows a pre-approval-gate GRN
+      // may still be carrying.
+      await getPool()
+        .request()
+        .input("RefID", sql.Int, id)
+        .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
       await bumpCacheVersion("grns");
+      await bumpCacheVersion("stock-ledger");
       await bumpCacheVersion("expense-booking-options");
       res.json({ message: "GRN rejected", ...result });
     } catch (err) {
@@ -1751,7 +1776,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // Fetch posting preview (reuse endpoint logic via internal call)
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
-             po.CompanyId, po.ProjectId
+             po.CompanyId, po.ProjectId, po.CostCenterId
       FROM dbo.GoodsReceiptNotes g
       LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
       WHERE g.GRNID = @GRNID
@@ -1792,7 +1817,6 @@ router.post("/:id/post-to-gl", async (req, res) => {
     }
     totalBase = Math.round(totalBase*100)/100;
     totalGST = Math.round(totalGST*100)/100;
-    const totalInclGST = Math.round((totalBase+totalGST)*100)/100;
 
     if (totalBase <= 0) return res.status(400).json({ error: "GRN has no receivable amount to post." });
 
@@ -1805,16 +1829,39 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const provisionalId = findId((l)=>l.LHeadName.toLowerCase().includes("provisional")&&l.LHeadName.toLowerCase().includes("credit"));
     if (!purchaseId || !pgrnId || !provisionalId) return res.status(422).json({ error: "One or more required system ledgers (Purchase, PGRN, Provisional Credit) are not configured." });
 
-    // JV lines: Debit Purchase (base) + Debit Provisional Credit (tax) = Credit PGRN (total incl GST)
+    // JV lines: base amount and tax are posted as two separate self-balancing
+    // pairs rather than one lump PGRN credit —
+    //   1. Purchase A/c Dr (base)         = Provision for Pending GRN A/c Cr (base)
+    //   2. Provisional Credit Available Dr (tax) = Purchase A/c Cr (tax)
+    // The second pair is a same-account repetition of the Purchase ledger
+    // (once as the base-amount debit, once as the tax-amount credit) rather
+    // than crediting PGRN with the GST-inclusive total, so PGRN only ever
+    // reflects the base receivable and the ITC leg nets against Purchase.
     const lines = [
       { LHeadId: purchaseId,    DebitAmount: totalBase,    CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)` },
-      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalInclGST, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
-      ...(totalGST > 0 ? [{ LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` }] : []),
+      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
+      ...(totalGST > 0
+        ? [
+            { LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` },
+            { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: totalGST, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)` },
+          ]
+        : []),
     ];
 
     // Create JV
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const { finalDocNo } = await lockNextDocNumber(pool, sql, "JV", dtId, grn.CompanyId, grn.ProjectId).catch(() => ({ finalDocNo: null }));
+    // lockNextDocNumber takes a single options object, not positional args —
+    // calling it positionally (as this used to) silently failed every time
+    // (caught below), leaving VoucherNo as the JV-<id> fallback instead of a
+    // real locked doc number, and the frontend showing "Posted as ." (blank).
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
     const insertHdr = await pool.request()
       .input("JVNo", sql.NVarChar(100), finalDocNo || null)
       .input("JVDate", sql.Date, new Date())
@@ -1848,6 +1895,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       sourceId: grnId,
       companyId: grn.CompanyId ?? null,
       projectId: grn.ProjectId ?? null,
+      costCenterId: grn.CostCenterId ?? null,
       createdBy: userEmail,
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });
@@ -2143,15 +2191,10 @@ router.post(
 
       const grnId = grnResult.recordset[0].GRNID;
 
-      // ΓöÇΓöÇ 6. Insert StockLedger IN entries for the destination godown ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-      await insertStockLedgerEntries(
-        transaction,
-        grnId,
-        grnItems,
-        finalDocNo,
-        parseInt(transfer.ToGodownID, 10),
-      );
-
+      // Stock is credited on approval (postGRNApproval), not here — this
+      // GRN still starts Draft and gets auto-submitted to Pending below,
+      // same as any other GRN; it isn't exempt from being vetted just
+      // because it originated from a transfer.
       await transaction.commit();
 
       // Back-patch the doc number reservation record with the real GRNID

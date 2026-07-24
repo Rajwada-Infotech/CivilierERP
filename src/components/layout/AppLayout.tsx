@@ -9,6 +9,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
+import { LoginRemindersPopup } from "@/components/LoginRemindersPopup";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
 );
@@ -227,6 +228,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             {/* Auto-logout on inactivity — mounted once for every
                 authenticated page rendered through AppLayout. */}
             <IdleLogoutWatcher />
+
+            {/* Reminders popup shown once right after a fresh login (see
+                the __just_logged_in one-shot flag in AuthContext.login).
+                Toggleable off from the Profile page. */}
+            <LoginRemindersPopup />
 
             {/* Universal assistant — fixed-position, mounted once for every
                 page rendered through AppLayout. Suggested queries adapt to

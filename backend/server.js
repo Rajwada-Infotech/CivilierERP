@@ -186,6 +186,7 @@ const ALL_ROUTES = [
   { path: "/api/work-orders", file: "./routes/workOrder" },
   { path: "/api/user-profile", file: "./routes/userProfile" },
   { path: "/api/uom-master", file: "./routes/uomMaster" },
+  { path: "/api/item-uom-alternates", file: "./routes/itemUomAlternates" },
   { path: "/api/debit-note", file: "./routes/debitNote" },
   { path: "/api/tc-master", file: "./routes/tcMaster" },
   { path: "/api/transactions", file: "./routes/transactions" },
@@ -205,6 +206,7 @@ const ALL_ROUTES = [
   { path: "/api/material-issues", file: "./routes/materialIssues" },
   { path: "/api/material-issue-returns", file: "./routes/issueReturn" },
   { path: "/api/material-requests", file: "./routes/materialRequests" },
+  { path: "/api/short-close", file: "./routes/shortClose" },
   { path: "/api/quotations", file: "./routes/quotations" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },
@@ -528,7 +530,7 @@ async function createApp() {
     app.use(
       "/api/dba",
       authMiddleware,
-      require("./middleware/role")("dba", "admin", "director"),
+      require("./middleware/role")("dba", "admin", "director", "super_admin"),
       require("./routes/dba"),
     );
     routeResults.loaded.push("dba");

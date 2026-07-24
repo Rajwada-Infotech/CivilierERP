@@ -29,14 +29,16 @@ export function Field({
   required,
   hint,
   children,
+  className,
 }: {
   label: string;
   required?: boolean;
   hint?: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5${className ? ` ${className}` : ""}`}>
       <Label className="text-xs">
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}

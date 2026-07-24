@@ -499,7 +499,11 @@ export default function MaterialExpenseBooking() {
         },
       } as any);
 
-      const mAutoCostCenter = resolveCostCenterForProject(doc.projectId);
+      // The linked PO's own CostCenterId (fetched in applyMultiGRNDoc) is
+      // the authoritative source — only guess from the project when the PO
+      // itself has none set.
+      const mAutoCostCenter =
+        doc.costCenterLabel || resolveCostCenterForProject(doc.projectId);
       setForm((prev) => {
         const linkedSupplier = linkSupplierToInvoice(doc, {
           supplier: prev.supplier,
@@ -513,6 +517,7 @@ export default function MaterialExpenseBooking() {
           // columns show something other than 0%.
           cgstRate: doc.derivedCgstRate ?? prev.cgstRate,
           sgstRate: doc.derivedSgstRate ?? prev.sgstRate,
+          igstRate: doc.derivedIgstRate ?? prev.igstRate,
           bookingReference: doc.docNo,
           bookingName: doc.nameLabel ?? prev.bookingName,
           basicAmount: totalBase > 0 ? totalBase : (doc.amount ?? prev.basicAmount),
@@ -596,8 +601,17 @@ export default function MaterialExpenseBooking() {
         .finally(() => setGrnItemsLoading(false));
     }
 
-    const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
-    const autoCostCenter = resolveCostCenterForProject(doc.projectId);
+    const { cgst, sgst, igst } = resolveGstRates(
+      doc,
+      form.cgstRate,
+      form.sgstRate,
+      form.igstRate ?? 0,
+    );
+    // The linked PO/WO_PO's own CostCenterId is authoritative — only
+    // guess one from the project when the doc itself has none set (e.g.
+    // TOD/direct bookings, which have no PO to inherit from).
+    const autoCostCenter =
+      doc.costCenterLabel || resolveCostCenterForProject(doc.projectId);
     setForm((prev) => {
       const linkedSupplier = linkSupplierToInvoice(doc, {
         supplier: prev.supplier,
@@ -637,6 +651,7 @@ export default function MaterialExpenseBooking() {
                   : doc.docNo.split("/")[0],
         cgstRate: cgst,
         sgstRate: sgst,
+        igstRate: igst,
         workDoneRef:
           doc.kind === "WORK_DONE"
             ? doc.docNo
@@ -665,16 +680,25 @@ export default function MaterialExpenseBooking() {
     // (agg.cgstRate/sgstRate) if the PO can't be fetched.
     let cgstRate = agg.cgstRate;
     let sgstRate = agg.sgstRate;
+    let igstRate = 0;
+    let poCostCenterLabel: string | null = null;
     if (agg.poId) {
       try {
         const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
-        const { cgstRate: poCgst, sgstRate: poSgst } = derivePOGst(
-          po?.POItems ?? [],
-        );
-        if (poCgst > 0 || poSgst > 0) {
+        const {
+          cgstRate: poCgst,
+          sgstRate: poSgst,
+          igstRate: poIgst,
+        } = derivePOGst(po?.POItems ?? []);
+        if (poIgst > 0) {
+          cgstRate = 0;
+          sgstRate = 0;
+          igstRate = poIgst;
+        } else if (poCgst > 0 || poSgst > 0) {
           cgstRate = poCgst;
           sgstRate = poSgst;
         }
+        if (po?.CostCenterId) poCostCenterLabel = po.CostCenterName ?? null;
       } catch {
         /* non-fatal: keep the GRN-derived fallback rate */
       }
@@ -693,6 +717,8 @@ export default function MaterialExpenseBooking() {
       subtotal: agg.basicAmount,
       derivedCgstRate: cgstRate,
       derivedSgstRate: sgstRate,
+      derivedIgstRate: igstRate,
+      costCenterLabel: poCostCenterLabel,
       projectId: primary.ProjectId,
       companyId: primary.CompanyId,
       gst:
@@ -724,6 +750,19 @@ export default function MaterialExpenseBooking() {
       basicAmount: 0,
       supplier: "",
       supplierLHeadId: null,
+      // These are all set unconditionally from the selected doc in
+      // applyDoc (no "keep previous" fallback), so they're just as stale
+      // as bookingReference once the doc is cleared — bookingName was the
+      // visibly reported case, but cgst/sgst/igst and cost centre are the
+      // same bug: silently wrong GST/cost-centre data left over from the
+      // previous document if the user then saves as a manual entry.
+      bookingName: "",
+      cgstRate: 0,
+      sgstRate: 0,
+      igstRate: 0,
+      costCenter: "",
+      materialCategory: "",
+      workDoneRef: undefined,
     }));
   };
 
@@ -1188,9 +1227,21 @@ export default function MaterialExpenseBooking() {
                       </p>
                       <Select
                         value={form.companyId ? String(form.companyId) : ""}
-                        onValueChange={(val) =>
-                          set("companyId", val ? parseInt(val, 10) : null)
-                        }
+                        onValueChange={(val) => {
+                          const nextCompanyId = val ? parseInt(val, 10) : null;
+                          // A project belongs to one company — switching
+                          // company to a different one leaves the previous
+                          // project selection pointing at the wrong company.
+                          if (nextCompanyId !== form.companyId) {
+                            setForm((prev) => ({
+                              ...prev,
+                              companyId: nextCompanyId,
+                              projectSite: "",
+                            }));
+                          } else {
+                            set("companyId", nextCompanyId);
+                          }
+                        }}
                       >
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue
@@ -1544,6 +1595,11 @@ export default function MaterialExpenseBooking() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field
                       label="Cost Center"
+                      className={
+                        isDirect && selectedDoc?.kind === "TOD"
+                          ? undefined
+                          : "sm:col-span-2"
+                      }
                       hint={selectedDoc?.projectId ? "Auto-filled from the selected document's project when a matching cost center exists" : "Select a cost center for expense allocation"}
                     >
                       <Select value={form.costCenter || "__none__"} onValueChange={(val) => set("costCenter", val === "__none__" ? "" : val)}>
@@ -1559,9 +1615,16 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="GL Account">
-                      <Input value={form.glAccount ?? ""} onChange={(e) => set("glAccount", e.target.value)} placeholder="Optional GL account" />
-                    </Field>
+                    {/* GL Account only makes sense for Other Expenses (TOD)
+                        bookings — PO/GRN/WO-linked invoices already resolve
+                        their GL posting from the linked document's own
+                        accounts, so a free-text GL field there is unused and
+                        confusing. */}
+                    {isDirect && selectedDoc?.kind === "TOD" && (
+                      <Field label="GL Account">
+                        <Input value={form.glAccount ?? ""} onChange={(e) => set("glAccount", e.target.value)} placeholder="Optional GL account" />
+                      </Field>
+                    )}
                   </div>
                 </div>
               </div>

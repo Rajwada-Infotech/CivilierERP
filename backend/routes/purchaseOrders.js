@@ -21,6 +21,10 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+const {
+  getMRItemFulfillment,
+  recomputeMRFulfillment,
+} = require("../services/materialRequestFulfillment");
 
 router.use(checkPermissionForMethod("Material", "PurchaseOrders"));
 
@@ -182,13 +186,14 @@ const syncLineItems = async (
       .input("LineAmt", sqlRef.Decimal(18, 2), amount)
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
+      .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, CreatedAt)
+           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CreatedAt)
         VALUES
           (@POID, @ItemId, @ItemName, @ItemCode, @Desc,
-           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @Now)
+           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @Now)
       `);
   }
 };
@@ -307,12 +312,33 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     }
 
     const mrStatus = mrCheck.recordset[0].Status;
-    if (mrStatus !== "Approved") {
+    if (!["Approved", "Partially Fulfilled"].includes(mrStatus)) {
       const err = new Error(
-        `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
+        `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved or Partially Fulfilled Material Requests can be used to raise a Purchase Order.`,
       );
       err.status = 400;
       throw err;
+    }
+
+    // Per-line cap: this PO's quantity for each MR-linked item, plus whatever
+    // was already ordered against that same MR item, can't exceed what was
+    // requested — prevents over-ordering across repeat partial POs even if
+    // the frontend's own cap gets bypassed (e.g. a stale prefill).
+    const mrItemsWithMrItemId = poItemsArray.filter((it) => it.mrItemId);
+    if (mrItemsWithMrItemId.length > 0) {
+      const fulfillment = await getMRItemFulfillment(pool, mrId);
+      const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+      for (const it of mrItemsWithMrItemId) {
+        const f = pendingByItem.get(parseInt(it.mrItemId, 10));
+        const qty = parseFloat(it.quantity) || 0;
+        if (f && qty - f.PendingQty > 0.0001) {
+          const err = new Error(
+            `Cannot order ${qty} of "${it.itemDescription || f.ItemName}" — only ${f.PendingQty} still pending on Material Request.`,
+          );
+          err.status = 400;
+          throw err;
+        }
+      }
     }
   }
 
@@ -639,12 +665,20 @@ router.get(
         ? req.query.poType.toString().trim()
         : null;
 
+      // Short Closed POs are legacy year-end write-offs — excluded from every
+      // operational lookup (GRN's PO picker, etc.) by default so they can't
+      // accidentally be selected for a new transaction, but the PO list page
+      // itself opts back in via ?includeShortClosed=1 so they stay fully
+      // visible for document search/history.
+      const includeShortClosed = req.query.includeShortClosed === "1";
+
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
       if (sourceSaleInvoiceId)
         whereConditions.push("po.SourceSaleInvoiceId = @sourceSaleInvoiceId");
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
+      if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -779,19 +813,13 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
 
     const { SourceMRId, SourceQTId } = req.body;
 
-    // Mark the source MR as Ordered once a PO is raised against it.
+    // Recompute the source MR's fulfillment (Approved → Partially Fulfilled
+    // → Completed) from actual ordered-vs-requested quantities, now that
+    // this PO's items (with their MRItemId links) are committed.
     if (SourceMRId) {
       (async () => {
         try {
-          const mrId = parseInt(SourceMRId, 10);
-          await pool
-            .request()
-            .input("mrId", sql.Int, mrId)
-            .input("user", sql.NVarChar(200), userEmail).query(`
-              UPDATE dbo.MaterialRequests
-              SET Status = 'Ordered', UpdatedBy = @user, UpdatedAt = GETDATE()
-              WHERE MRId = @mrId AND Status = 'Approved'
-            `);
+          await recomputeMRFulfillment(pool, parseInt(SourceMRId, 10), userEmail);
         } catch (e) {
           console.error("MR status update failed:", e.message);
         }
@@ -1233,27 +1261,13 @@ router.delete("/:id", requirePageRight("purchase-orders", "delete"), async (req,
 
     await bumpCacheVersion("purchase-orders");
 
-    // If this PO was raised from a Material Request, reset that MR back to
-    // 'Approved' so a new PO can be created against it — but only when no
-    // other active PO still references the same MR.
+    // If this PO was raised from a Material Request, recompute that MR's
+    // fulfillment now that the deleted PO's items no longer count — drops
+    // it back to Approved / Partially Fulfilled as the remaining ordered
+    // quantity actually warrants, not just an all-or-nothing reset.
     if (sourceMRId) {
       try {
-        const remainingPOs = await pool
-          .request()
-          .input("MRId", sql.Int, sourceMRId).query(`
-            SELECT COUNT(*) AS cnt
-            FROM dbo.PurchaseOrders
-            WHERE SourceMRId = @MRId
-              AND ISNULL(Status, '') NOT IN ('Deleted', 'Rejected')
-          `);
-
-        if (Number(remainingPOs.recordset[0]?.cnt) === 0) {
-          await pool.request().input("MRId", sql.Int, sourceMRId).query(`
-              UPDATE dbo.MaterialRequests
-              SET Status = 'Approved', UpdatedAt = GETDATE()
-              WHERE MRId = @MRId AND Status = 'Ordered'
-            `);
-        }
+        await recomputeMRFulfillment(pool, sourceMRId, null);
       } catch (mrErr) {
         console.error("MR status reset failed (non-fatal):", mrErr.message);
       }

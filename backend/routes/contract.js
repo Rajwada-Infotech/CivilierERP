@@ -39,6 +39,7 @@ router.get("/", authenticateToken, async (req, res) => {
         pr.name          AS ProjectName,
         c.FinYear,
         c.ContactPerson,
+        c.ContactPartyId,
         c.Reason,
         c.NatureOfContract,
         c.ContractAmount,
@@ -47,7 +48,19 @@ router.get("/", authenticateToken, async (req, res) => {
         c.Remarks,
         c.Status,
         c.CreatedBy,
-        c.CreatedAt
+        c.CreatedAt,
+        -- Already-paid (total advances recorded) and still-unpaid balance
+        -- of the contract value — lets pickers (e.g. the Payment page's
+        -- contract selector) show "Paid ₹X · Pending ₹Y" without a
+        -- separate round-trip per contract.
+        ISNULL((
+          SELECT SUM(cl.Amount) FROM dbo.ContractLedger cl
+          WHERE cl.ContractId = c.ContractId AND cl.TxnType = 'Advance'
+        ), 0) AS TotalPaid,
+        ISNULL(c.ContractAmount, 0) - ISNULL((
+          SELECT SUM(cl.Amount) FROM dbo.ContractLedger cl
+          WHERE cl.ContractId = c.ContractId AND cl.TxnType = 'Advance'
+        ), 0) AS PendingAmount
       FROM dbo.Contract c
       LEFT JOIN dbo.enterprise co ON co.id = c.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = c.ProjectId
@@ -177,6 +190,65 @@ router.get("/:id", authenticateToken, async (req, res) => {
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
     res.json(result.recordset[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/attachment/:index — stream one attachment ─────────────────────
+// Contract attachments have no dedicated binary-storage table like GRN/
+// Vehicle In/Out — they're stored as a JSON array of {name, url, type, size}
+// on dbo.Contract.Attachments, where `url` is a base64 data URI. That raw
+// data URI was previously handed straight to the frontend as the record's
+// download/preview link (via recordsRoutes.js), which fetch()s it as if it
+// were a real HTTP path — a data: URI isn't one, so every preview/download
+// 404'd. This decodes it server-side and streams real bytes with the right
+// Content-Type instead, matching how every other module's attachments work.
+router.get("/:id/attachment/:index", authenticateToken, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const index = parseInt(req.params.index, 10);
+  if (!Number.isFinite(id) || !Number.isFinite(index) || index < 0)
+    return res.status(400).json({ error: "Invalid id or index" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("ContractId", sql.Int, id)
+      .query("SELECT Attachments FROM dbo.Contract WHERE ContractId = @ContractId");
+    if (!result.recordset.length) return res.status(404).json({ error: "Contract not found" });
+
+    let attachments;
+    try {
+      attachments = JSON.parse(result.recordset[0].Attachments || "[]");
+    } catch {
+      return res.status(404).json({ error: "Attachment not found" });
+    }
+    const att = Array.isArray(attachments) ? attachments[index] : null;
+    if (!att || !att.url) return res.status(404).json({ error: "Attachment not found" });
+
+    const match = /^data:([^;]+);base64,(.+)$/.exec(att.url);
+    if (!match) {
+      // A handful of contracts predate a fix to the upload code and still
+      // hold a browser blob: object URL instead of the file's actual bytes
+      // — that URL only ever existed in the uploader's browser tab, so
+      // there's nothing to serve; the file itself was never sent to the
+      // server. Not recoverable — the only fix is re-uploading it.
+      const isStaleBlobUrl = /^blob:/.test(att.url);
+      return res.status(422).json({
+        error: isStaleBlobUrl
+          ? "This attachment was uploaded before file storage was fixed and can't be recovered — please remove and re-upload it."
+          : "Attachment is not a valid data URI",
+      });
+    }
+    const [, mimeType, base64Data] = match;
+    const buffer = Buffer.from(base64Data, "base64");
+
+    res.setHeader("Content-Type", att.type || mimeType || "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${(att.name || `attachment-${index}`).replace(/"/g, "")}"`,
+    );
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

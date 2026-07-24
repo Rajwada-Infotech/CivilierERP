@@ -78,6 +78,7 @@ router.post("/login", async (req, res) => {
           .input("email", sql.NVarChar, normalizedEmail).query(`
             SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                    ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
+                   ISNULL(u.ShowLoginReminders, 1) AS ShowLoginReminders,
                    r.RName AS roleName
             FROM dbo.users u
             LEFT JOIN dbo.Role r ON u.RoleId = r.RId
@@ -155,6 +156,7 @@ router.post("/login", async (req, res) => {
         role: normalizedRole,
         roleId: user.RoleId,
         can_accept_tickets: !!user.can_accept_tickets,
+        showLoginReminders: !!user.ShowLoginReminders,
         pagePermissions: await (async () => {
           try {
             const {

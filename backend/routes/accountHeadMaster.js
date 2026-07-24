@@ -571,8 +571,18 @@ router.get("/options", async (req, res) => {
                  FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1`;
     const request = pool.request();
     if (req.query.type) {
-      query += " AND LHeadType = @type";
-      request.input("type", sql.VarChar(50), req.query.type);
+      // Accepts a single type ("S") or a comma-separated list ("S,C") —
+      // the Payment page's Payee/Party picker needs both Suppliers and
+      // Contractors since a Contract can be tagged to either.
+      const types = String(req.query.type).split(",").map((t) => t.trim()).filter(Boolean);
+      if (types.length === 1) {
+        query += " AND LHeadType = @type";
+        request.input("type", sql.VarChar(50), types[0]);
+      } else if (types.length > 1) {
+        const params = types.map((t, i) => `@type${i}`);
+        query += ` AND LHeadType IN (${params.join(",")})`;
+        types.forEach((t, i) => request.input(`type${i}`, sql.VarChar(50), t));
+      }
     }
     query += " ORDER BY LHeadName";
     const result = await request.query(query);
@@ -990,7 +1000,8 @@ router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, 
       const row = await pool.request().input("id", sql.Int, id)
         .query("SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
       if (!row.recordset.length || row.recordset[0].LHeadType !== "BR") {
-        fs.unlink(req.file.path, () => {});
+        const resolved = path.resolve(req.file.path);
+        if (resolved.startsWith(path.resolve(BROKER_CERT_DIR) + path.sep)) fs.unlink(resolved, () => {});
         return res.status(404).json({ error: "Broker not found" });
       }
       await pool.request()

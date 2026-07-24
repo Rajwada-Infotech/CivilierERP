@@ -3,9 +3,9 @@ import { Loader2, MessageCircle, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { connectSocket } from "@/lib/socket";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,15 +51,6 @@ function roleTone(role: string | null | undefined) {
   if (["admin", "super_admin", "dba"].includes(normalized)) return "bg-indigo-500 text-white";
   if (normalized === "engineer") return "bg-sky-500 text-white";
   return "bg-slate-500 text-white";
-}
-
-function getInitials(name: string) {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
 }
 
 function formatMessageDate(dateString: string) {
@@ -296,16 +287,17 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
             <div className="space-y-2">
               {group.items.map((message) => {
                 const isMine = message.author_id === currentUser.id;
-                const alignmentClass = isMine ? "flex-row-reverse" : "flex-row";
                 const textAlignment = isMine ? "items-end text-right" : "items-start text-left";
 
                 return (
-                  <div key={message.Id ?? message.id ?? message.tempId} className={cn("flex gap-2", alignmentClass)}>
-                    <Avatar className="h-6 w-6 shrink-0">
-                      <AvatarFallback className={cn("text-[9px] font-bold", roleTone(message.author_role))}>
-                        {getInitials(message.author_name || "U")}
-                      </AvatarFallback>
-                    </Avatar>
+                  <Message
+                    key={message.Id ?? message.id ?? message.tempId}
+                    from={isMine ? "mine" : "theirs"}
+                  >
+                    <MessageAvatar
+                      name={message.author_name || "U"}
+                      tone={roleTone(message.author_role)}
+                    />
 
                     <div className={cn("flex min-w-0 max-w-[80%] sm:max-w-[75%] flex-col gap-0.5", textAlignment)}>
                       <div className={cn("flex items-baseline gap-1.5", isMine ? "justify-end" : "justify-start")}>
@@ -313,22 +305,16 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
                         <span className="text-[10px] text-muted-foreground/50 shrink-0">{formatTime(message.created_at)}</span>
                       </div>
 
-                      <div
-                        className={cn(
-                          "rounded-2xl px-3 py-2 transition-opacity",
-                          isMine ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm",
-                          message.pending && "opacity-60",
-                        )}
-                      >
+                      <MessageContent pending={message.pending}>
                         <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.comment}</p>
                         {message.pending && (
                           <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium opacity-70">
                             <Loader2 size={10} className="animate-spin" /> Sending
                           </span>
                         )}
-                      </div>
+                      </MessageContent>
                     </div>
-                  </div>
+                  </Message>
                 );
               })}
             </div>

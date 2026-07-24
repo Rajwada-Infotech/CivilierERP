@@ -158,6 +158,7 @@ const Payment: React.FC = () => {
   const [pmtPostingData, setPmtPostingData] = useState<any | null>(null);
   const [pmtPostingLoading, setPmtPostingLoading] = useState(false);
   const [pmtPosting, setPmtPosting] = useState(false);
+  const [pmtPostingError, setPmtPostingError] = useState<string | null>(null);
   const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
@@ -242,6 +243,39 @@ const Payment: React.FC = () => {
       .catch(() => setPmtPostingData(null))
       .finally(() => setPmtPostingLoading(false));
   }, [detailTab, viewingRec?.id, viewingRec?.expenseRef]);
+
+  // Auto-post as soon as posting data has loaded — no manual "Post to GL"
+  // click. Entries post one at a time (posting the next only after the
+  // current one resolves, via re-running whenever pmtPostingData changes)
+  // rather than all at once, since each hits the same doc-number lock.
+  useEffect(() => {
+    if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
+    const entries: any[] = pmtPostingData?.entries ?? [];
+    const next = entries.find((e) => !e.isPosted && !e.isBounced);
+    if (!next) return;
+    const url =
+      next.type === "bounce_charge"
+        ? `/api/new-payment/${next.pmtId}/post-bounce-charge-to-gl`
+        : `/api/new-payment/${next.pmtId}/post-to-gl`;
+    setPmtPosting(true);
+    setPmtPostingError(null);
+    fetchWithAuth(url, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setPmtPostingData((prev: any) => ({
+          ...prev,
+          entries: prev.entries.map((e: any) =>
+            e.pmtId === next.pmtId && e.type === next.type
+              ? { ...e, isPosted: true, jvNo: body.jvNo }
+              : e,
+          ),
+        }));
+      })
+      .catch((err: any) => setPmtPostingError(err.message ?? "Posting failed"))
+      .finally(() => setPmtPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, pmtPostingLoading, pmtPostingData, pmtPosting]);
 
   // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
   // /payments?view=<PPaymentID>, so this payment's receipt should open
@@ -715,15 +749,49 @@ const Payment: React.FC = () => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
     setLinkedGRNs([]);
+    // Resolve Company/Project against the actual dropdown option lists
+    // rather than trusting the contract's own denormalized name strings —
+    // the Company/Project <select>s match by exact label string, and a
+    // casing/whitespace difference between dbo.enterprise (source of these
+    // dropdowns) and the contract's own joined name silently left the
+    // select unmatched (shows "Select company…" despite a value being set).
+    // Matching by id first and reading the label back from the option list
+    // guarantees it's a string the select actually has.
+    const companyOpt = companyOptions.find((c) => c.id === contract.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === contract.ProjectId);
+    const companyLabel = companyOpt?.label || contract.CompanyName || String(contract.CompanyId || "");
+    const projectLabel = projectOpt?.label || contract.ProjectName || String(contract.ProjectId || "");
     setForm((prev) => ({
       ...prev,
       paymentName: purpose,
       expenseRef: contract.DocNo || "",
+      // Clear any stale invoice-side link — picking a contract supersedes
+      // it. Previously this cleanup happened via a *separate* onChange("")
+      // call fired right after this handler by the picker, which raced
+      // with this setForm and usually won, wiping out the company/project/
+      // party fields being set below. Doing it in the same update instead.
+      expenseId: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
       contractId: contract.ContractId != null ? String(contract.ContractId) : "",
-      company: contract.CompanyName || String(contract.CompanyId || ""),
-      project: contract.ProjectName || String(contract.ProjectId || ""),
-      projectSite: contract.ProjectName || String(contract.ProjectId || ""),
-      amount: contract.ContractAmount ?? prev.amount,
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      // Payee/Party was never set here before — the field stayed on
+      // whatever (or nothing) was previously selected.
+      partyId: contract.ContactPartyId ?? prev.partyId,
+      paidTo: contract.ContactPerson || prev.paidTo,
+      // Default to what's still outstanding on the contract, not its full
+      // value — most payments against an already-active contract are
+      // another advance/installment, not the whole thing at once. Falls
+      // back to the full contract amount only for a brand-new contract
+      // with nothing paid yet (PendingAmount === ContractAmount then
+      // anyway, so this is really just a null/undefined guard).
+      amount:
+        contract.PendingAmount != null
+          ? Math.max(Number(contract.PendingAmount), 0)
+          : (contract.ContractAmount ?? prev.amount),
     }));
   };
   const clearContractLink = () => {
@@ -736,6 +804,8 @@ const Payment: React.FC = () => {
       company: "",
       project: "",
       projectSite: "",
+      partyId: null,
+      paidTo: "",
       amount: null,
     }));
   };
@@ -2196,11 +2266,32 @@ const Payment: React.FC = () => {
                 const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
                 if (!opt || opt.type === "emi") return null;
                 // opt.amount is the stored ENetAmount (GST + billing terms
-                // already applied server-side). The GRN item-level breakdown
-                // total is GST-inclusive but never includes billing terms —
-                // preferring it here understated/overstated the invoice
-                // total for every billing-terms-adjusted booking.
-                const netAmt = opt.amount ?? 0;
+                // already applied server-side) — normally correct, but a
+                // handful of GRN-linked bookings have it stuck at the base
+                // (pre-GST) amount from before ENetAmount was computed
+                // correctly at save time. When there are no active billing
+                // terms on this invoice, the live GST-inclusive GRN total is
+                // exactly what ENetAmount should equal, so prefer it when it
+                // disagrees — self-heals the stale-data case without
+                // touching billing-terms-adjusted invoices, where opt.amount
+                // legitimately differs from the raw GST-inclusive total.
+                let hasActiveBillingTerms = false;
+                try {
+                  const bt = form.billingTermsData
+                    ? JSON.parse(form.billingTermsData)
+                    : [];
+                  hasActiveBillingTerms =
+                    Array.isArray(bt) && bt.some((t: any) => t?.applicable);
+                } catch {
+                  /* malformed/legacy data — treat as no active terms */
+                }
+                const grnInclTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+                const netAmt =
+                  !hasActiveBillingTerms &&
+                  grnInclTotal > 0 &&
+                  Math.abs(grnInclTotal - (opt.amount ?? 0)) > 0.01
+                    ? grnInclTotal
+                    : (opt.amount ?? 0);
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
                 // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
                 const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
@@ -2415,9 +2506,11 @@ const Payment: React.FC = () => {
                     hint={
                       grnGstBreakdown
                         ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
-                        : form.expenseRef
-                          ? "Net amount from expense booking — editable if needed."
-                          : undefined
+                        : selectedContract
+                          ? "Defaults to the contract's pending balance — lower this for a partial advance."
+                          : form.expenseRef
+                            ? "Net amount from expense booking — editable if needed."
+                            : undefined
                     }
                   >
                     <div className="relative">
@@ -2958,9 +3051,16 @@ const Payment: React.FC = () => {
                     <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                       <History size={9} /> Payment Chain
                     </p>
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      {selectedContract && selectedContract.PendingAmount != null && (
+                        <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          Pending {formatINR(Math.max(selectedContract.PendingAmount, 0))}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
                   </div>
                   <div className="px-4 py-3 space-y-2">
                     {loadingFormChain ? (
@@ -4663,39 +4763,10 @@ const Payment: React.FC = () => {
                                     ✓ {entry.jvNo}
                                   </span>
                                 ) : (
-                                  <button
-                                    onClick={async () => {
-                                      const url = isBounce
-                                        ? `/api/new-payment/${entry.pmtId}/post-bounce-charge-to-gl`
-                                        : `/api/new-payment/${entry.pmtId}/post-to-gl`;
-                                      setPmtPosting(true);
-                                      try {
-                                        const r = await fetchWithAuth(url, { method: "POST" });
-                                        const body = await r.json();
-                                        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-                                        setPmtPostingData((prev: any) => ({
-                                          ...prev,
-                                          entries: prev.entries.map((e: ChainEntry) =>
-                                            e.pmtId === entry.pmtId && e.type === entry.type
-                                              ? { ...e, isPosted: true, jvNo: body.jvNo }
-                                              : e
-                                          ),
-                                        }));
-                                      } catch (err: any) {
-                                        alert(err.message ?? "Posting failed");
-                                      } finally {
-                                        setPmtPosting(false);
-                                      }
-                                    }}
-                                    disabled={pmtPosting}
-                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold disabled:opacity-50 transition-colors whitespace-nowrap ${
-                                      isBounce
-                                        ? "bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 border border-rose-500/30"
-                                        : "bg-primary text-primary-foreground hover:bg-primary/90"
-                                    }`}
-                                  >
-                                    <BookOpen size={10} /> Post to GL
-                                  </button>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                    <span className="w-2.5 h-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                    Posting…
+                                  </span>
                                 )}
                               </div>
 
@@ -4735,6 +4806,14 @@ const Payment: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {pmtPostingError && (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 mt-2">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Auto-posting failed: {pmtPostingError}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertTriangle, X } from "lucide-react";
@@ -40,7 +41,7 @@ export function RaiseDebitNoteModal({
   const overLimit = qtyNum > receivedQty + 1e-6;
   const percentBad = receivedQty > 0 ? Math.round((qtyNum / receivedQty) * 10000) / 100 : 0;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
       <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -115,6 +116,7 @@ export function RaiseDebitNoteModal({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -272,6 +272,22 @@ router.get("/next-number", async (req, res) => {
   }
 });
 
+// ── GET /po-ids-with-vio — distinct PO ids that have at least one Vehicle
+// In/Out record logged against them. Used by GRN.tsx to only offer POs in
+// its picker that have actually had a vehicle bring goods in, rather than
+// every Approved PO regardless of whether anything's arrived yet.
+router.get("/po-ids-with-vio", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT DISTINCT POID FROM dbo.VehicleInOut WHERE POID IS NOT NULL
+    `);
+    res.json(result.recordset.map((r) => r.POID));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — paginated list ────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -358,6 +374,88 @@ router.get("/", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── GET /pending-summary — POs with goods still outstanding after partial
+// Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
+// PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
+// aggregated across all line items on the PO. LastVehicleInOutID points at
+// the most recent lot already logged against that PO (if any), so clicking
+// a widget row can jump straight to what's already come in.
+// Must be registered before "/:id" — otherwise Express matches "/:id" first
+// with id=NaN, the lookup finds nothing, and this 404s as "Not found".
+router.get("/pending-summary", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      ;WITH ItemReceived AS (
+        SELECT
+          poi.PurchaseOrderID,
+          poi.Quantity AS OrderedQty,
+          ISNULL((
+            SELECT SUM(vi.ReceivedQty)
+            FROM dbo.VehicleInOutItems vi
+            JOIN dbo.VehicleInOut v ON v.VehicleInOutID = vi.VehicleInOutID
+            WHERE vi.POItemId = poi.Id AND v.Status NOT IN ('Rejected', 'Deleted')
+          ), 0) AS ReceivedQty
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = poi.ItemId
+        WHERE im.M_Type = 'Goods'
+      ),
+      ItemAgg AS (
+        SELECT
+          PurchaseOrderID,
+          SUM(OrderedQty) AS TotalOrdered,
+          SUM(ReceivedQty) AS TotalReceived
+        FROM ItemReceived
+        GROUP BY PurchaseOrderID
+      )
+      SELECT
+        po.PurchaseOrderID,
+        po.PurchaseOrderNo,
+        po.DocNo,
+        po.SupplierID,
+        ahm.LHeadName AS SupplierName,
+        po.CompanyId,
+        po.ProjectId,
+        ia.TotalOrdered,
+        ia.TotalReceived,
+        (ia.TotalOrdered - ia.TotalReceived) AS PendingQty,
+        lastVeh.VehicleInOutID AS LastVehicleInOutID,
+        lastVeh.DocNo AS LastVehicleInOutDocNo,
+        lastVeh.VehicleNo AS LastVehicleNo
+      FROM ItemAgg ia
+      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = ia.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
+      OUTER APPLY (
+        SELECT TOP 1 v.VehicleInOutID, v.DocNo, v.VehicleNo
+        FROM dbo.VehicleInOut v
+        WHERE v.POID = po.PurchaseOrderID AND v.Status NOT IN ('Rejected', 'Deleted')
+        ORDER BY v.VehicleInOutID DESC
+      ) lastVeh
+      WHERE po.Status IN ('Approved', 'Received')
+        AND (ia.TotalOrdered - ia.TotalReceived) > 0
+      ORDER BY po.PurchaseOrderID DESC
+    `);
+
+    res.json(
+      result.recordset.map((r) => ({
+        poId: r.PurchaseOrderID,
+        poNumber: r.DocNo || r.PurchaseOrderNo,
+        supplierName: r.SupplierName,
+        companyId: r.CompanyId,
+        projectId: r.ProjectId,
+        totalOrdered: Number(r.TotalOrdered) || 0,
+        totalReceived: Number(r.TotalReceived) || 0,
+        pendingQty: Number(r.PendingQty) || 0,
+        lastVehicleInOutId: r.LastVehicleInOutID ?? null,
+        lastVehicleInOutDocNo: r.LastVehicleInOutDocNo ?? null,
+        lastVehicleNo: r.LastVehicleNo ?? null,
+      })),
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -476,84 +574,6 @@ router.get("/:id/items-enriched", async (req, res) => {
   }
 });
 
-// ── GET /pending-summary — POs with goods still outstanding after partial
-// Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
-// PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
-// aggregated across all line items on the PO. LastVehicleInOutID points at
-// the most recent lot already logged against that PO (if any), so clicking
-// a widget row can jump straight to what's already come in.
-router.get("/pending-summary", async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      ;WITH ItemReceived AS (
-        SELECT
-          poi.PurchaseOrderID,
-          poi.Quantity AS OrderedQty,
-          ISNULL((
-            SELECT SUM(vi.ReceivedQty)
-            FROM dbo.VehicleInOutItems vi
-            JOIN dbo.VehicleInOut v ON v.VehicleInOutID = vi.VehicleInOutID
-            WHERE vi.POItemId = poi.Id AND v.Status NOT IN ('Rejected', 'Deleted')
-          ), 0) AS ReceivedQty
-        FROM dbo.PurchaseOrderItems poi
-      ),
-      ItemAgg AS (
-        SELECT
-          PurchaseOrderID,
-          SUM(OrderedQty) AS TotalOrdered,
-          SUM(ReceivedQty) AS TotalReceived
-        FROM ItemReceived
-        GROUP BY PurchaseOrderID
-      )
-      SELECT
-        po.PurchaseOrderID,
-        po.PurchaseOrderNo,
-        po.DocNo,
-        po.SupplierID,
-        ahm.LHeadName AS SupplierName,
-        po.CompanyId,
-        po.ProjectId,
-        ia.TotalOrdered,
-        ia.TotalReceived,
-        (ia.TotalOrdered - ia.TotalReceived) AS PendingQty,
-        lastVeh.VehicleInOutID AS LastVehicleInOutID,
-        lastVeh.DocNo AS LastVehicleInOutDocNo,
-        lastVeh.VehicleNo AS LastVehicleNo
-      FROM ItemAgg ia
-      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = ia.PurchaseOrderID
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
-      OUTER APPLY (
-        SELECT TOP 1 v.VehicleInOutID, v.DocNo, v.VehicleNo
-        FROM dbo.VehicleInOut v
-        WHERE v.POID = po.PurchaseOrderID AND v.Status NOT IN ('Rejected', 'Deleted')
-        ORDER BY v.VehicleInOutID DESC
-      ) lastVeh
-      WHERE po.Status IN ('Approved', 'Received')
-        AND (ia.TotalOrdered - ia.TotalReceived) > 0
-      ORDER BY po.PurchaseOrderID DESC
-    `);
-
-    res.json(
-      result.recordset.map((r) => ({
-        poId: r.PurchaseOrderID,
-        poNumber: r.DocNo || r.PurchaseOrderNo,
-        supplierName: r.SupplierName,
-        companyId: r.CompanyId,
-        projectId: r.ProjectId,
-        totalOrdered: Number(r.TotalOrdered) || 0,
-        totalReceived: Number(r.TotalReceived) || 0,
-        pendingQty: Number(r.PendingQty) || 0,
-        lastVehicleInOutId: r.LastVehicleInOutID ?? null,
-        lastVehicleInOutDocNo: r.LastVehicleInOutDocNo ?? null,
-        lastVehicleNo: r.LastVehicleNo ?? null,
-      })),
-    );
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── GET /po-items/:poId — PO line items with remaining-to-receive quantity ───
 // Used both when picking a PO on a new record (no excludeVehicleInOutId) and
 // when editing an existing one (excludeVehicleInOutId=<this record's id>, so
@@ -620,7 +640,21 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
   let recordId = null;
 
   try {
-    // ── 0. Validate received quantities against what's left on the PO ───────
+    // ── 0a. A Short Closed PO is permanently retired — no further receipts ──
+    if (poId) {
+      const poStatusCheck = await pool
+        .request()
+        .input("POID", sql.Int, parseInt(poId, 10))
+        .query("SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID");
+      const poStatus = poStatusCheck.recordset[0]?.Status;
+      if (poStatus === "Short Closed") {
+        return res.status(400).json({
+          error: "This Purchase Order has been Short Closed — no further transactions are permitted.",
+        });
+      }
+    }
+
+    // ── 0b. Validate received quantities against what's left on the PO ──────
     // before touching the header row, so a rejected submission never
     // creates an orphaned Vehicle In/Out record.
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, null);

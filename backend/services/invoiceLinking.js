@@ -58,9 +58,11 @@ async function getServicePurchaseOrders(pool) {
         po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate,
         po.Status, po.TotalAmount, po.SupplierID, ahm.LHeadName AS SupplierName,
         po.CompanyId, po.ProjectId, po.POType,
-        po.SourceWODocNo, po.SourceWDDocNo, po.POItems
+        po.SourceWODocNo, po.SourceWDDocNo, po.POItems,
+        po.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
       FROM dbo.PurchaseOrders po
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId
       WHERE po.Status IN ('Approved', 'Received')
         AND EXISTS (
           SELECT 1 FROM dbo.PurchaseOrderItems poi
