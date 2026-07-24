@@ -27,6 +27,14 @@ import { fonts } from "@/theme/fonts";
 
 const ACCENT = "#8b5cf6";
 
+// A stable reference for "no data yet" — `data: x = []` in a destructure
+// evaluates a brand-new array literal every render while `data` is still
+// undefined (query pending, or perpetually failing on a flaky connection),
+// which breaks referential equality for any effect/memo depending on that
+// value and can loop it forever. Reusing one module-level empty array
+// keeps the reference stable regardless of how long the query takes.
+const EMPTY_LIST: any[] = [];
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -215,8 +223,8 @@ export default function NewContractScreen() {
   const [partyTab, setPartyTab] = useState<"S" | "C" | "A">("S");
   const [partySearch, setPartySearch] = useState("");
 
-  const { data: companies = [] } = useQuery({ queryKey: ["contract-companies"], queryFn: fetchCompanyOptions });
-  const { data: allProjects = [] } = useQuery({ queryKey: ["contract-projects"], queryFn: fetchProjectOptions });
+  const { data: companies = EMPTY_LIST } = useQuery({ queryKey: ["contract-companies"], queryFn: fetchCompanyOptions });
+  const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["contract-projects"], queryFn: fetchProjectOptions });
   const { data: finYears = [] } = useQuery({ queryKey: ["contract-finyears"], queryFn: fetchFinYearOptions });
   const { data: contactPersons = [] } = useQuery({ queryKey: ["contract-contact-persons"], queryFn: fetchContactPersons });
   const { data: tcRecords = [] } = useQuery({ queryKey: ["tc-master"], queryFn: fetchTCRecords });
