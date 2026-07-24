@@ -194,9 +194,22 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 router.get("/application/:applicationId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().input("aid", sql.Int, parseInt(req.params.applicationId))
+    const aid = parseInt(req.params.applicationId);
+    const result = await pool.request().input("aid", sql.Int, aid)
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
-    res.json(result.recordset[0] || null);
+    if (result.recordset.length) return res.json(result.recordset[0]);
+
+    // No bank-detail row saved yet — same PAN/account-holder pre-fill as the
+    // BookingId-keyed route above, so staff never have to retype a PAN the
+    // system already captured at Customer intake (dbo.CrmCustomer).
+    const prefill = await pool.request().input("aid", sql.Int, aid).query(`
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName
+      FROM dbo.CrmApplication a
+      JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      WHERE a.Id = @aid
+    `);
+    if (!prefill.recordset.length) return res.json(null);
+    res.json({ PanNo: prefill.recordset[0].PanNo || null, AccountHolderName: prefill.recordset[0].AccountHolderName || null });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET /application error:", e.message);
     res.status(500).json({ error: e.message });
@@ -246,6 +259,7 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (existing.recordset.length) {
       await pool.request()
         .input("aid", sql.Int, aid)
+        .input("bid", sql.Int, linkedBookingId)
         .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
         .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
         .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
@@ -258,6 +272,12 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
         .query(`
           UPDATE dbo.CrmCustomerBankDetail SET
+            -- Backfill BookingId if a Booking now exists but this row still
+            -- predates it (createCrmBookingRecord only backfills once, at
+            -- booking-creation time — this covers every save afterward, so
+            -- the Booking-side "Bank Details" tab, which reads by BookingId,
+            -- can actually find data saved from the Application side later).
+            BookingId = ISNULL(BookingId, @bid),
             BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
             AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
             AccountHolderName = ISNULL(@holder, AccountHolderName),
@@ -274,6 +294,7 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     } else {
       await pool.request()
         .input("aid", sql.Int, aid)
+        .input("bid", sql.Int, linkedBookingId)
         .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
         .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
         .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
@@ -286,10 +307,10 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
         .query(`
           INSERT INTO dbo.CrmCustomerBankDetail
-            (ApplicationId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
+            (ApplicationId, BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
              NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
              PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
-          VALUES (@aid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
+          VALUES (@aid, @bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
         `);
     }
 

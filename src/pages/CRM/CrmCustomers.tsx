@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil, BookUser } from "lucide-react";
+import {
+  Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil, BookUser,
+  User, MapPin, Briefcase, FileText,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -13,7 +16,10 @@ const SA_LEADS_API = "/api/sa/leads";
 
 const EMPTY_FORM = {
   LeadId: "", CustomerName: "", Mobile: "", AltMobile: "", Email: "",
-  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Address: "", City: "", State: "", Pincode: "", DateOfBirth: "",
+  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", DateOfBirth: "",
+  PermanentAddress: "", PermanentCity: "", PermanentState: "", PermanentPincode: "",
+  IsCurrentSameAsPermanent: true,
+  CurrentAddress: "", CurrentCity: "", CurrentState: "", CurrentPincode: "",
   CoApplicantName: "", CoApplicantMobile: "", CoApplicantPanNo: "", CoApplicantRelation: "",
   Notes: "",
 };
@@ -34,14 +40,90 @@ async function fetchLeadOptions(): Promise<any[]> {
   } catch { return []; }
 }
 
+// Shared block: Permanent Address (always required + visible) followed by a
+// "Current address same as permanent" toggle that reveals a second,
+// independent set of fields only when unchecked. Used identically by both
+// the New Customer dialog and the Edit dialog so the two never drift.
+function AddressFields({
+  form, setForm, readOnly, inputCls,
+}: {
+  form: any;
+  setForm: (updater: (f: any) => any) => void;
+  readOnly: boolean;
+  inputCls: string;
+}) {
+  return (
+    <>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Permanent Address *</label>
+        <textarea value={form.PermanentAddress} readOnly={readOnly}
+          onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
+          rows={2} className={`${inputCls} resize-none`} />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {([
+          { key: "PermanentCity", label: "City" },
+          { key: "PermanentState", label: "State" },
+          { key: "PermanentPincode", label: "Pincode" },
+        ] as const).map(({ key, label }) => (
+          <div key={key}>
+            <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+            <input type="text" value={form[key]} readOnly={readOnly}
+              onChange={(e) => setForm((f: any) => ({ ...f, [key]: e.target.value }))}
+              className={inputCls} />
+          </div>
+        ))}
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={form.IsCurrentSameAsPermanent}
+          disabled={readOnly}
+          onChange={(e) => setForm((f: any) => ({ ...f, IsCurrentSameAsPermanent: e.target.checked }))}
+        />
+        Current address same as permanent
+      </label>
+
+      {!form.IsCurrentSameAsPermanent && (
+        <>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Current Address</label>
+            <textarea value={form.CurrentAddress} readOnly={readOnly}
+              onChange={(e) => setForm((f: any) => ({ ...f, CurrentAddress: e.target.value }))}
+              rows={2} className={`${inputCls} resize-none`} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { key: "CurrentCity", label: "City" },
+              { key: "CurrentState", label: "State" },
+              { key: "CurrentPincode", label: "Pincode" },
+            ] as const).map(({ key, label }) => (
+              <div key={key}>
+                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                <input type="text" value={form[key]} readOnly={readOnly}
+                  onChange={(e) => setForm((f: any) => ({ ...f, [key]: e.target.value }))}
+                  className={inputCls} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
     PanNo: customer.PanNo || "", AadhaarNo: customer.AadhaarNo || "",
     Occupation: customer.Occupation || "", AnnualIncome: customer.AnnualIncome != null ? String(customer.AnnualIncome) : "",
-    Address: customer.Address || "",
-    City: customer.City || "", State: customer.State || "", Pincode: customer.Pincode || "",
+    PermanentAddress: customer.PermanentAddress || "",
+    PermanentCity: customer.PermanentCity || "", PermanentState: customer.PermanentState || "", PermanentPincode: customer.PermanentPincode || "",
+    IsCurrentSameAsPermanent: customer.IsCurrentSameAsPermanent !== false,
+    CurrentAddress: customer.CurrentAddress || "",
+    CurrentCity: customer.CurrentCity || "", CurrentState: customer.CurrentState || "", CurrentPincode: customer.CurrentPincode || "",
     DateOfBirth: customer.DateOfBirth ? String(customer.DateOfBirth).slice(0, 10) : "",
     CoApplicantName: customer.CoApplicantName || "", CoApplicantMobile: customer.CoApplicantMobile || "",
     CoApplicantPanNo: customer.CoApplicantPanNo || "", CoApplicantRelation: customer.CoApplicantRelation || "",
@@ -79,7 +161,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
@@ -105,57 +187,52 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
         )}
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: "CustomerName", label: "Customer Name *", type: "text" },
-              { key: "Mobile", label: "Mobile *", type: "text" },
-              { key: "AltMobile", label: "Alternate Mobile", type: "text" },
-              { key: "Email", label: "Email", type: "email" },
-              { key: "PanNo", label: "PAN Number *", type: "text" },
-              { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
-              { key: "DateOfBirth", label: "Date of Birth", type: "date" },
-            ].map(({ key, label, type }) => (
-              <div key={key}>
-                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type={type} value={(form as any)[key]} readOnly={locked}
-                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            ))}
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><User size={14} className="text-primary" /> Personal Details</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: "CustomerName", label: "Customer Name *", type: "text" },
+                { key: "Mobile", label: "Mobile *", type: "text" },
+                { key: "AltMobile", label: "Alternate Mobile", type: "text" },
+                { key: "Email", label: "Email", type: "email" },
+                { key: "PanNo", label: "PAN Number *", type: "text" },
+                { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
+                { key: "DateOfBirth", label: "Date of Birth", type: "date" },
+              ].map(({ key, label, type }) => (
+                <div key={key}>
+                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <input type={type} value={(form as any)[key]} readOnly={locked}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                    className={inputCls} />
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: "Occupation", label: "Occupation", type: "text" },
-              { key: "AnnualIncome", label: "Annual Income", type: "number" },
-            ].map(({ key, label, type }) => (
-              <div key={key}>
-                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type={type} value={(form as any)[key]} readOnly={locked}
-                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            ))}
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Briefcase size={14} className="text-primary" /> Financial Profile</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: "Occupation", label: "Occupation", type: "text" },
+                { key: "AnnualIncome", label: "Annual Income", type: "number" },
+              ].map(({ key, label, type }) => (
+                <div key={key}>
+                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <input type={type} value={(form as any)[key]} readOnly={locked}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                    className={inputCls} />
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Address *</label>
-            <textarea value={form.Address} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))}
-              rows={2} className={`${inputCls} resize-none`} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {["City", "State", "Pincode"].map((key) => (
-              <div key={key}>
-                <label className="text-xs text-muted-foreground block mb-1">{key}</label>
-                <input type="text" value={(form as any)[key]} readOnly={locked}
-                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            ))}
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><MapPin size={14} className="text-primary" /> Address</h3>
+            <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
           </div>
 
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicant (optional)</label>
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users2 size={14} className="text-primary" /> Co-Applicant (optional)</h3>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { key: "CoApplicantName", label: "Name" },
@@ -173,15 +250,15 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Notes</h3>
             <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
               rows={2} className={`${inputCls} resize-none`} />
           </div>
 
           {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <h3 className="text-xs font-semibold text-amber-800 flex items-center gap-1.5 mb-2"><IndianRupee size={12} /> Outstanding — across every booking</h3>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 space-y-2">
+              <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><IndianRupee size={14} /> Outstanding — across every booking</h3>
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
                 <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
@@ -191,8 +268,8 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
           )}
 
           {customer.applications?.length > 0 && (
-            <div className="rounded-lg border border-border p-3">
-              <h3 className="text-xs font-semibold text-muted-foreground mb-2">Applications filed by this customer ({customer.applications.length})</h3>
+            <div className="rounded-xl border border-border p-4 space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><IdCard size={14} className="text-primary" /> Applications filed by this customer ({customer.applications.length})</h3>
               <div className="space-y-1.5">
                 {customer.applications.map((a: any) => (
                   <div key={a.Id} className="flex items-center justify-between text-xs">
@@ -267,8 +344,8 @@ const CrmCustomers: React.FC = () => {
   };
 
   const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.Address.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Address are required");
+    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
+      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
       return;
     }
     setSaving(true);
@@ -325,7 +402,7 @@ const CrmCustomers: React.FC = () => {
     { id: "location", header: "Address", size: 130, enableSorting: false,
       cell: (i) => (
         <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
-          {[i.row.original.CustomerCity ?? i.row.original.City, i.row.original.CustomerState ?? i.row.original.State].filter(Boolean).join(", ") || "—"}
+          {[i.row.original.PermanentCity, i.row.original.PermanentState].filter(Boolean).join(", ") || "—"}
         </div>
       ) },
     { accessorKey: "CoApplicantName", header: "Co-Applicant", size: 120,
@@ -362,7 +439,7 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate("/crm/setup/customer-master")}
+          <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
             className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors">
             <BookUser size={14} /> Customer Ledger (Master)
@@ -443,21 +520,12 @@ const CrmCustomers: React.FC = () => {
               ))}
             </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Address *</label>
-              <textarea value={form.Address} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {["City", "State", "Pincode"].map((key) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{key}</label>
-                  <input type="text" value={(form as any)[key]}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              ))}
-            </div>
+            <AddressFields
+              form={form}
+              setForm={setForm}
+              readOnly={false}
+              inputCls="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+            />
 
             <div className="rounded-lg border border-border p-3 space-y-3">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicant (optional)</label>
@@ -485,7 +553,7 @@ const CrmCustomers: React.FC = () => {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Name, Mobile, PAN and Address are required — every Application will auto-fetch its details from this record.
+              Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
             </p>
           </div>
 

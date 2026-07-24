@@ -11,7 +11,7 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, validatePaymentPlanScope } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
@@ -39,7 +39,7 @@ const APP_SELECT = `
     plat.Name AS PlatformName, camp.Name AS CampaignName, ad.Name AS AdName,
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
-    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName,
+    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName, um.BlockId AS BlockId,
     -- Customer-master fields, auto-fetched here so the Application page
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
@@ -92,10 +92,19 @@ const APP_SELECT = `
 // booking. The Applications management page itself passes
 // ?includeConverted=1 (or an explicit ?stage=/?status=) to see everything,
 // which is how its own Converted/In Process/Not Converted tabs work.
+//
+// ?forBooking=1 — the New Booking dropdown's own dedicated filter (see
+// CrmBooking.tsx). "Open for booking" means both: not yet Converted (no
+// booking exists for it yet — one Application maps to at most one Booking,
+// ever) AND Status = 'Approved' (a Draft/Pending application hasn't cleared
+// the admin approval gate yet, so there's nothing complete enough to book;
+// Rejected/Cancelled are dead ends). This is deliberately independent of
+// the status/stage/includeConverted params above so it can't be silently
+// widened by combining with them.
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, stage, includeConverted } = req.query;
+    const { status, search, stage, includeConverted, forBooking } = req.query;
     const req0 = pool.request();
     const conds = ["a.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
@@ -106,7 +115,9 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     const where = "WHERE " + conds.join(" AND ");
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
     let rows = result.recordset;
-    if (stage) {
+    if (forBooking) {
+      rows = rows.filter((r) => r.Status === "Approved" && r.Stage !== "Converted");
+    } else if (stage) {
       rows = rows.filter((r) => r.Stage === stage);
     } else if (!status && !includeConverted) {
       rows = rows.filter((r) => r.Stage !== "Converted");
@@ -217,11 +228,31 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       companyId = companyId || proj.recordset[0].company_id || null;
     }
     let unitName = b.InterestedUnit || null;
+    let unitDefaultPaymentPlanId = null;
+    let unitBlockId = null;
     if (b.PreferredUnitId) {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+        .query("SELECT UnitName, BlockId, DefaultPaymentPlanId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-      unitName = unit.recordset[0].UnitName;
+      const unitRow = unit.recordset[0];
+      unitName = unitRow.UnitName;
+      unitBlockId = unitRow.BlockId || null;
+      unitDefaultPaymentPlanId = unitRow.DefaultPaymentPlanId || null;
+    }
+    const effectivePaymentPlanId = b.PaymentPlanId
+      ? parseInt(b.PaymentPlanId)
+      : (b.PreferredUnitId ? unitDefaultPaymentPlanId : null);
+    if (effectivePaymentPlanId) {
+      try {
+        await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
+          companyId,
+          projectId: b.ProjectId ? parseInt(b.ProjectId) : null,
+          blockId: unitBlockId,
+          unitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
+        });
+      } catch (scopeErr) {
+        return res.status(400).json({ error: scopeErr.message });
+      }
     }
 
     await pool.request()
@@ -244,7 +275,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("cpid",   sql.Int, b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null)
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
-      .input("ppid", sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+      .input("ppid", sql.Int,           effectivePaymentPlanId)
+      .input("pptouched", sql.Bit,      (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
@@ -266,7 +298,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           PlatformId = ISNULL(@platid, PlatformId), CampaignId = ISNULL(@campid, CampaignId),
           AdId = ISNULL(@adid, AdId), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
           RatePerSqFt = ISNULL(@rate, RatePerSqFt), DateOfApply = ISNULL(@doa, DateOfApply),
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId), TokenType = ISNULL(@ttype, TokenType),
+          PaymentPlanId = CASE WHEN @pptouched = 1 THEN @ppid ELSE PaymentPlanId END,
+          TokenType = ISNULL(@ttype, TokenType),
           TokenValue = ISNULL(@tval, TokenValue), BookingAmount = ISNULL(@bamt, BookingAmount),
           PaymentMode = ISNULL(@pmode, PaymentMode),
           BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),
@@ -396,33 +429,19 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
             // caller of it goes through, so it can't be missed by a future
             // second caller the way a route-local backfill here would be.
 
-            // createCrmBookingRecord always inserts Status='Pending' — correct
-            // for its OTHER caller (crmBookings.js's manual POST /, the
-            // documented fallback for when auto-booking fails, which has no
-            // upstream approval of its own and genuinely needs its own gate).
-            // A booking created HERE is different in kind, not just timing: it
-            // is a direct, same-request consequence of the Application
-            // approval that just happened, by the SAME actor, under the SAME
-            // role check — crm-bookings approve is gated to the identical
-            // CRM_APPROVER_ROLES (admin/super_admin/marketing_head) as
-            // crm-applications approve (see approvalService.js
-            // MODULE_APPROVER_ROLE_OVERRIDES), so this grants no authority the
-            // caller doesn't already hold. This is NOT the class of bug fixed
-            // in the SA promote-to-booking bypass (saHandoff.js) — that let a
-            // non-admin salesperson (only "sa-leads" edit rights) create and
-            // implicitly approve a booking with zero admin review. Here an
-            // admin has already reviewed and approved the Application; going
-            // through the real, audited approvalTransition (not a raw UPDATE)
-            // just reflects that same decision onto its direct byproduct,
-            // instead of leaving the booking stuck "Pending" its own
-            // rubber-stamp and silently blocking every downstream stage that
-            // gates on Booking.Status='Approved' (agreement prep, sales deed,
-            // etc.) until someone notices a second approval is waiting.
-            try {
-              await approvalTransition("crm-bookings", created.id, "Approved", userEmail, req.user?.role);
-            } catch (bookingApproveErr) {
-              console.error("[crm-applications] auto-booking approval failed:", bookingApproveErr.message);
-            }
+            // createCrmBookingRecord always inserts Status='Pending' — and it
+            // STAYS Pending here. Auto-approving it the moment it's created
+            // used to happen in this same block, on the reasoning that
+            // Application-approval and Booking-approval were gated to the
+            // same admin roles anyway — but that predates the Booking review
+            // checklist (UnitReviewConfirmed/PlanReviewConfirmed), the staff
+            // "Book / Send for Approval" action, and ReadyForApprovalAt now
+            // gating the Admin Approval Inbox (see crmBookings.js). Silently
+            // auto-approving here bypassed all of that: no unit/plan review,
+            // no booking-amount payment, straight to Approved with nothing
+            // ever surfaced in the inbox. A Booking's own approval must go
+            // through that real workflow, not be a byproduct of Application
+            // approval.
 
             // If this Application originated from a Sales Automation lead
             // (promoteLeadToFollowup in saHandoff.js stamps LeadId at

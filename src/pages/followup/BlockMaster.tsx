@@ -56,13 +56,13 @@ const fields: FieldDef[] = [
 const columns = [
   { key: "projectName", label: "Project" },
   { key: "blockName", label: "Block Name" },
-  { key: "isActive", label: "Status" },
+  { key: "status", label: "Status" },
 ];
 
 const exportColumns: ExportColumn[] = [
   { header: "Project", accessor: "projectName" },
   { header: "Block Name", accessor: "blockName" },
-  { header: "Status", accessor: "isActive" },
+  { header: "Status", accessor: "status" },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -87,6 +87,12 @@ const BlockMaster: React.FC = () => {
       projectName: item.ProjectName ?? "",
       blockName: item.BlockName ?? "",
       isActive: Boolean(item.IsActive),
+      // MasterPage's built-in Active/Inactive pill only kicks in for a
+      // column keyed "status" — alias it here instead of showing the raw
+      // isActive boolean as literal "true"/"false" text.
+      status: Boolean(item.IsActive),
+      lockBookingNo: item.LockBookingNo ?? null,
+      lockHoldId: item.LockHoldId ?? null,
     }));
   }, [blocks]);
 
@@ -97,39 +103,35 @@ const BlockMaster: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to add block");
-        toast.success("Block added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to update block");
-        toast.success("Block updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "DELETE",
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to delete block");
-        toast.success("Block deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["block-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to add block");
+      toast.success("Block added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to update block");
+      toast.success("Block updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to delete block");
+      toast.success("Block deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["block-master"] });
   };
 
   if (isLoading)
@@ -149,6 +151,17 @@ const BlockMaster: React.FC = () => {
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        // A Block with a Booked or OnHold Unit under it can't be deleted —
+        // matches the server-side guard in blockMaster.js exactly. Editing
+        // stays open (unlike Unit Master) since a rename/reassign here is
+        // live-joined project-wide rather than locked to this one row.
+        isDeleteLocked={(row) =>
+          row.lockBookingNo
+            ? `Has a Unit booked (${row.lockBookingNo as string})`
+            : row.lockHoldId
+              ? "Has a Unit on hold"
+              : null
+        }
         exportConfig={{
           title: "Block Master",
           filename: "block-master",
@@ -159,7 +172,7 @@ const BlockMaster: React.FC = () => {
           fields: [
             { key: "projectName", label: "Project" },
             { key: "blockName", label: "Block Name" },
-            { key: "isActive", label: "Status" },
+            { key: "status", label: "Status" },
           ],
         }}
         onPrint={(row) => {
@@ -171,7 +184,7 @@ const BlockMaster: React.FC = () => {
             </head><body><h2>Block Card</h2><table>
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+              <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
             </table></body></html>
           `);
           win.document.close();

@@ -580,7 +580,7 @@ const PaymentPlanMaster: React.FC = () => {
         </div>
 
         {/* ── Desktop table (>= sm) ─────────────────────────────────────────── */}
-        <div className="hidden sm:block overflow-x-auto">
+        <div className="hidden sm:block overflow-x-auto thin-scroll">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">

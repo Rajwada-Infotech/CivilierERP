@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -78,7 +79,7 @@ const columns = [
   { key: "blockName", label: "Block" },
   { key: "slotNo", label: "Slot No." },
   { key: "parkingType", label: "Type" },
-  { key: "isActive", label: "Status" },
+  { key: "status", label: "Status", sortable: false },
 ];
 
 const exportColumns: ExportColumn[] = [
@@ -86,8 +87,22 @@ const exportColumns: ExportColumn[] = [
   { header: "Block", accessor: "blockName" },
   { header: "Slot No.", accessor: "slotNo" },
   { header: "Type", accessor: "parkingType" },
-  { header: "Status", accessor: "isActive" },
+  { header: "Status", accessor: "status" },
 ];
+
+// Same precedence parkingMatrix.js uses server-side (Blocked > Booked >
+// OnHold > Available), computed from the exact lock fields the GET route
+// now returns — so this can never drift from what the matrix shows.
+function computeStatus(item: {
+  isActive: boolean;
+  lockAllotmentId: number | null;
+  lockHoldId: number | null;
+}): string {
+  if (!item.isActive) return "Blocked";
+  if (item.lockAllotmentId) return "Booked";
+  if (item.lockHoldId) return "On Hold";
+  return "Available";
+}
 
 const ParkingSlotMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -110,16 +125,26 @@ const ParkingSlotMaster: React.FC = () => {
 
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(slots)) return [];
-    return slots.map((item) => ({
-      _id: String(item.Id),
-      projectId: String(item.ProjectId),
-      projectName: item.ProjectName ?? "",
-      blockId: item.BlockId ? String(item.BlockId) : "",
-      blockName: item.BlockName ?? "",
-      slotNo: item.SlotNo ?? "",
-      parkingType: item.ParkingType ?? "Open",
-      isActive: Boolean(item.IsActive),
-    }));
+    return slots.map((item) => {
+      const isActive = Boolean(item.IsActive);
+      const lockAllotmentId = item.LockAllotmentId ?? null;
+      const lockBookingNo = item.LockBookingNo ?? null;
+      const lockHoldId = item.LockHoldId ?? null;
+      return {
+        _id: String(item.Id),
+        projectId: String(item.ProjectId),
+        projectName: item.ProjectName ?? "",
+        blockId: item.BlockId ? String(item.BlockId) : "",
+        blockName: item.BlockName ?? "",
+        slotNo: item.SlotNo ?? "",
+        parkingType: item.ParkingType ?? "Open",
+        isActive,
+        lockAllotmentId,
+        lockBookingNo,
+        lockHoldId,
+        status: computeStatus({ isActive, lockAllotmentId, lockHoldId }),
+      };
+    });
   }, [slots]);
 
   const blocksPatch = React.useMemo(() => ({ __blocks: allBlocks }), [allBlocks]);
@@ -132,35 +157,35 @@ const ParkingSlotMaster: React.FC = () => {
     IsActive: r.isActive !== false,
   });
 
+  // No internal try/catch here — a thrown error must propagate up to
+  // MasterPage's own handleSave/handleDelete catch, or a server-side
+  // rejection (409 duplicate, 409 locked) gets reported as a success and
+  // leaves a phantom row in the table.
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking slot");
-        toast.success("Parking slot added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking slot");
-        toast.success("Parking slot updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking slot");
-        toast.success("Parking slot deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["parking-slot-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking slot");
+      toast.success("Parking slot added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking slot");
+      toast.success("Parking slot updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking slot");
+      toast.success("Parking slot deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["parking-slot-master"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading parking slots...</div>;
@@ -174,6 +199,9 @@ const ParkingSlotMaster: React.FC = () => {
           title="Parking Slot"
           fields={fields}
           columns={columns}
+          columnRenderers={{
+            status: (value) => <StatusBadge status={value as string} />,
+          }}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           externalFormPatch={blocksPatch}
@@ -184,6 +212,17 @@ const ParkingSlotMaster: React.FC = () => {
             }
             return form;
           }}
+          // A Booked or OnHold slot can't be edited OR deleted — it's an
+          // individual inventory item, same treatment as Unit Master.
+          isRowLocked={(row) =>
+            row.lockAllotmentId
+              ? row.lockBookingNo
+                ? `Booked (${row.lockBookingNo as string})`
+                : "Currently allotted"
+              : row.lockHoldId
+                ? "Currently on hold"
+                : null
+          }
           exportConfig={{
             title: "Parking Slot Master",
             filename: "parking-slot-master",
@@ -196,7 +235,7 @@ const ParkingSlotMaster: React.FC = () => {
               { key: "blockName", label: "Block" },
               { key: "slotNo", label: "Slot No." },
               { key: "parkingType", label: "Type" },
-              { key: "isActive", label: "Status" },
+              { key: "status", label: "Status" },
             ],
           }}
           onPrint={(row) => {
@@ -210,7 +249,7 @@ const ParkingSlotMaster: React.FC = () => {
                 <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
                 <tr><td>Slot No.</td><td>${row.slotNo || "—"}</td></tr>
                 <tr><td>Type</td><td>${row.parkingType || "—"}</td></tr>
-                <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+                <tr><td>Status</td><td>${row.status}</td></tr>
               </table></body></html>
             `);
             win.document.close();

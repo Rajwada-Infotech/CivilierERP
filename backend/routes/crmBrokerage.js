@@ -17,11 +17,13 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 
 const BROKERAGE_SELECT = `
   SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
-         ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone
+         ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone,
+         m.MilestoneName
   FROM dbo.CrmBrokerageMaster br
   JOIN dbo.CrmBooking b ON b.Id = br.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
+  LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = br.MilestoneId
 `;
 
 // GET / — all brokerage records. Staff/internal only — never exposed to crm-portal.
@@ -197,14 +199,14 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    // Split-payout "After Agreement" tranche stays locked until the
-    // Agreement is actually Executed (see maybeUnlockBrokerageTranche) —
-    // can't be approved (or, by extension, paid) before then.
+    // Each tranche stays locked until its own milestone is Paid/Waived (see
+    // maybeUnlockBrokerageMilestoneTranche) — can't be approved (or, by
+    // extension, paid) before then.
     const pool = getPool();
     const locked = await pool.request().input("id", sql.Int, id)
-      .query("SELECT IsLocked, TrancheLabel FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+      .query("SELECT IsLocked, MilestoneNo FROM dbo.CrmBrokerageMaster WHERE Id = @id");
     if (locked.recordset[0]?.IsLocked) {
-      return res.status(400).json({ error: "This tranche unlocks once the Agreement is Executed" });
+      return res.status(400).json({ error: `This tranche unlocks once Milestone #${locked.recordset[0].MilestoneNo ?? "?"} is paid` });
     }
 
     const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);
@@ -241,7 +243,7 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
 
     const br = await pool.request().input("id", sql.Int, brokerageId).query(`
-      SELECT br.Status, br.ComputedAmount, br.IsLocked,
+      SELECT br.Status, br.ComputedAmount, br.IsLocked, br.MilestoneNo,
              (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) AS TotalPaid
       FROM dbo.CrmBrokerageMaster br WHERE br.Id = @id
     `);
@@ -249,7 +251,7 @@ router.post("/:id/payments", requirePageRight("crm-brokerage", "edit"), async (r
     const row = br.recordset[0];
 
     if (row.IsLocked) {
-      return res.status(400).json({ error: "This tranche unlocks once the Agreement is Executed" });
+      return res.status(400).json({ error: `This tranche unlocks once Milestone #${row.MilestoneNo ?? "?"} is paid` });
     }
 
     if (row.Status !== "Approved") {

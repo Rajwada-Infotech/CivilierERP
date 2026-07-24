@@ -164,6 +164,23 @@ interface MasterPageProps {
   canExport?: boolean;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * Optional per-row lock check. Return a short reason string to grey out
+   * and disable that row's Edit AND Delete buttons (shown as a tooltip),
+   * or null/undefined to leave the row unlocked. Omit entirely for pages
+   * with no row-level locking — existing behavior is unchanged when this
+   * prop isn't passed.
+   */
+  isRowLocked?: (row: RecordWithId) => string | null | undefined;
+  /**
+   * Optional per-row check that greys out and disables only the Delete
+   * button (Edit stays enabled) — for masters like Block Master where a
+   * record can still be renamed/reassigned while locked, but can't be
+   * removed while it has dependent child records (e.g. a Block with
+   * Booked/OnHold Units under it). Combines with isRowLocked if both are
+   * passed; has no effect on its own on the Edit button.
+   */
+  isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -208,6 +225,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   canDelete = true,
   canExport = true,
   gridCols = 2,
+  isRowLocked,
+  isDeleteLocked,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -343,35 +362,48 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
-    try {
-      if (editingId !== null) {
-        const next = data.map((row) =>
-          row._id === editingId ? { ...finalData, _id: editingId } : row,
-        );
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        setData(next);
-        onDataChange?.(stripped);
+    if (editingId !== null) {
+      const next = data.map((row) =>
+        row._id === editingId ? { ...finalData, _id: editingId } : row,
+      );
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      try {
+        // Await the server first — committing `next` to local state before
+        // this resolved meant a rejected save (e.g. a 409 duplicate/lock)
+        // still left the edited row showing in the table with no visible
+        // failure, because nothing here checked for a rejection either way.
         await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
         });
+        setData(next);
+        onDataChange?.(stripped);
         setEditingId(null);
         toast.success("Record updated successfully ✓");
         setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
-      } else {
-        const newId = `record-${Date.now()}`;
-        const newRecord: RecordWithId = { ...finalData, _id: newId };
-        const next = [...data, newRecord];
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        setData(next);
-        onDataChange?.(stripped);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save. Please try again.",
+        );
+      }
+    } else {
+      const newId = `record-${Date.now()}`;
+      const newRecord: RecordWithId = { ...finalData, _id: newId };
+      const next = [...data, newRecord];
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      try {
+        // Same fix as the update branch above — a rejected add (e.g. the
+        // Block/Unit duplicate guard returning 409) must not land in local
+        // state or show a success toast just because nothing threw yet.
         const result = await onDataEvent?.({
           action: "add",
           record: finalData,
           records: stripped,
         });
+        setData(next);
+        onDataChange?.(stripped);
         toast.success("Record saved successfully ✓");
         setForm({
           ...getDefaults(fields),
@@ -380,19 +412,26 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             ? result
             : {}),
         });
-        return;
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save. Please try again.",
+        );
       }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to save. Please try again.",
-      );
     }
   };
 
   const handleEdit = (id: string) => {
     const row = data.find((r) => r._id === id);
     if (!row) return;
-    setForm({ ...row });
+    // Re-apply externalFormPatch (e.g. __blocks/__paymentPlans) on top of the
+    // row data. Without this, entering edit mode replaces the whole form
+    // with just the row's own fields, wiping out any lookup data a page
+    // injected via externalFormPatch — which is only ever applied once, on
+    // mount, via a separate effect keyed on externalFormPatchKey. That left
+    // any optionsProvider depending on it (e.g. Block filtered by Project)
+    // with nothing to read and rendering as an empty "Select..." dropdown
+    // as soon as Edit was clicked.
+    setForm({ ...row, ...(externalFormPatch ?? {}) });
     setEditingId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -727,7 +766,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto overflow-y-hidden rounded-b-xl">
+          <div className="overflow-x-auto overflow-y-hidden rounded-b-xl thin-scroll">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
@@ -775,7 +814,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  sorted.map((row) => (
+                  sorted.map((row) => {
+                    const lockReason = isRowLocked?.(row) || null;
+                    const deleteOnlyLockReason = isDeleteLocked?.(row) || null;
+                    return (
                     <tr
                       key={row._id}
                       className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
@@ -851,29 +893,50 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               )}
                               {rowActions?.(row, data)}
                               {canEdit && (
-                              <button
-                                onClick={() => handleEdit(row._id)}
-                                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
-                                title="Edit"
-                              >
-                                <Edit2 size={13} />
-                              </button>
+                                lockReason ? (
+                                  <button
+                                    disabled
+                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    title={lockReason}
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleEdit(row._id)}
+                                    className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                )
                               )}
                               {canDelete && (
-                              <button
-                                onClick={() => setDeleteConfirmId(row._id)}
-                                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                                (lockReason || deleteOnlyLockReason) ? (
+                                  <button
+                                    disabled
+                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    title={lockReason || deleteOnlyLockReason || undefined}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setDeleteConfirmId(row._id)}
+                                    className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )
                               )}
                             </>
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>

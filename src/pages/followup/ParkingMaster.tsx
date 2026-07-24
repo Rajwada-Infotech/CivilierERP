@@ -85,7 +85,7 @@ const columns = [
   { key: "parkingType", label: "Type" },
   { key: "charge", label: "Charge (₹)" },
   { key: "gstRate", label: "GST %" },
-  { key: "isActive", label: "Status" },
+  { key: "status", label: "Status" },
 ];
 
 const exportColumns: ExportColumn[] = [
@@ -94,7 +94,7 @@ const exportColumns: ExportColumn[] = [
   { header: "Type", accessor: "parkingType" },
   { header: "Charge", accessor: "charge" },
   { header: "GST %", accessor: "gstRate" },
-  { header: "Status", accessor: "isActive" },
+  { header: "Status", accessor: "status" },
 ];
 
 const ParkingMaster: React.FC = () => {
@@ -128,6 +128,12 @@ const ParkingMaster: React.FC = () => {
       charge: item.Charge != null ? String(item.Charge) : "",
       gstRate: item.GstRate != null ? String(item.GstRate) : "18",
       isActive: Boolean(item.IsActive),
+      // MasterPage's built-in Active/Inactive pill only kicks in for a
+      // column keyed "status" — alias it here instead of showing the raw
+      // isActive boolean as literal "true"/"false" text (same fix already
+      // applied in BlockMaster.tsx).
+      status: Boolean(item.IsActive),
+      inUse: Boolean(item.InUse),
     }));
   }, [rates]);
 
@@ -142,35 +148,34 @@ const ParkingMaster: React.FC = () => {
     IsActive: r.isActive !== false,
   });
 
+  // No internal try/catch here — same fix as Block/Unit Master: swallowing
+  // the error here would let a 409 (duplicate rate, or in-use on delete)
+  // get reported to the user as a success.
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking rate");
-        toast.success("Parking rate added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking rate");
-        toast.success("Parking rate updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking rate");
-        toast.success("Parking rate deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["parking-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking rate");
+      toast.success("Parking rate added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking rate");
+      toast.success("Parking rate updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking rate");
+      toast.success("Parking rate deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["parking-master"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading parking rates...</div>;
@@ -194,6 +199,13 @@ const ParkingMaster: React.FC = () => {
             }
             return form;
           }}
+          // A rate that's ever been allotted to a booking can't be
+          // deleted — matches the server-side guard in parkingMaster.js
+          // exactly. Editing stays open (same as Block Master) since a
+          // correction here is looked up live, not snapshotted.
+          isDeleteLocked={(row) =>
+            row.inUse ? "Already allotted to one or more bookings" : null
+          }
           exportConfig={{
             title: "Parking Master",
             filename: "parking-master",
@@ -207,7 +219,7 @@ const ParkingMaster: React.FC = () => {
               { key: "parkingType", label: "Type" },
               { key: "charge", label: "Charge (₹)" },
               { key: "gstRate", label: "GST %" },
-              { key: "isActive", label: "Status" },
+              { key: "status", label: "Status" },
             ],
           }}
           onPrint={(row) => {

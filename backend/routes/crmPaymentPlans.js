@@ -11,24 +11,44 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 
 const PLAN_SELECT = `
   SELECT p.Id, p.PlanName, p.Description, p.IsActive, p.CreatedAt,
-         p.CompanyId, p.ProjectId, p.BlockId, p.UnitId,
-         comp.name AS CompanyName, proj.name AS ProjectName, blk.BlockName, um.UnitName,
+         p.CompanyId, p.BlockId, p.UnitId,
+         comp.name AS CompanyName, blk.BlockName, um.UnitName,
          (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
          (SELECT SUM([Percent]) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS TotalPercent
   FROM dbo.CrmPaymentPlanTemplate p
   LEFT JOIN dbo.enterprise comp ON comp.id = p.CompanyId AND comp.business_type = 'C'
-  LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
   LEFT JOIN dbo.UnitMaster um ON um.Id = p.UnitId
 `;
 
+// A plan's Project scope is many-to-many (dbo.CrmPaymentPlanProject) — a plan
+// with zero linked rows applies everywhere, one with 1+ rows only applies to
+// those specific projects. Attaches `Projects: [{Id, Name}]` to each plan.
+async function attachProjectLinks(pool, plans) {
+  if (!plans.length) return plans;
+  const ids = plans.map(p => p.Id);
+  const result = await pool.request().query(`
+    SELECT lp.PlanId, lp.ProjectId, proj.name AS ProjectName
+    FROM dbo.CrmPaymentPlanProject lp
+    LEFT JOIN dbo.enterprise proj ON proj.id = lp.ProjectId AND proj.business_type = 'P'
+    WHERE lp.IsActive = 1 AND lp.PlanId IN (${ids.join(",")})
+  `);
+  const byPlan = new Map();
+  for (const row of result.recordset) {
+    if (!byPlan.has(row.PlanId)) byPlan.set(row.PlanId, []);
+    byPlan.get(row.PlanId).push({ Id: row.ProjectId, Name: row.ProjectName });
+  }
+  for (const p of plans) p.Projects = byPlan.get(p.Id) || [];
+  return plans;
+}
+
 // GET / — every plan (management page), or the plans applicable to a given
 // Company/Project/Block/Unit scope when those query params are supplied
 // (used by the Booking page's plan picker). A plan matches a scope filter if
-// its own scope column is either NULL (a wildcard/default plan available
-// everywhere) or an exact match — so a Project-specific plan only shows for
-// that project, a Unit-specific plan only for that exact unit, while a
-// global plan always shows alongside them.
+// its own scope column/link-set is either empty (a wildcard/default plan
+// available everywhere) or an exact match — so a Project-scoped plan only
+// shows for its linked projects, a Unit-specific plan only for that exact
+// unit, while a global plan always shows alongside them.
 router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -36,13 +56,19 @@ router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) 
     const req0 = pool.request();
     const conds = [];
     if (companyId) { req0.input("cid", sql.Int, parseInt(companyId)); conds.push("(p.CompanyId IS NULL OR p.CompanyId = @cid)"); }
-    if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("(p.ProjectId IS NULL OR p.ProjectId = @pid)"); }
+    if (projectId) {
+      req0.input("pid", sql.Int, parseInt(projectId));
+      conds.push(`(
+        NOT EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject lp WHERE lp.PlanId = p.Id AND lp.IsActive = 1)
+        OR EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject lp WHERE lp.PlanId = p.Id AND lp.IsActive = 1 AND lp.ProjectId = @pid)
+      )`);
+    }
     if (blockId)   { req0.input("bid", sql.Int, parseInt(blockId));   conds.push("(p.BlockId IS NULL OR p.BlockId = @bid)"); }
     if (unitId)    { req0.input("uid", sql.Int, parseInt(unitId));    conds.push("(p.UnitId IS NULL OR p.UnitId = @uid)"); }
     if (companyId || projectId || blockId || unitId) conds.push("p.IsActive = 1");
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
-    res.json(result.recordset);
+    res.json(await attachProjectLinks(pool, result.recordset));
   } catch (e) {
     console.error("[crm-payment-plans] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -58,7 +84,8 @@ router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, re
       pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id ORDER BY MilestoneNo"),
     ]);
     if (!planRes.recordset[0]) return res.status(404).json({ error: "Payment plan not found" });
-    res.json({ plan: planRes.recordset[0], items: itemsRes.recordset });
+    const [plan] = await attachProjectLinks(pool, [planRes.recordset[0]]);
+    res.json({ plan, items: itemsRes.recordset });
   } catch (e) {
     console.error("[crm-payment-plans] GET /:id error:", e.message);
     res.status(500).json({ error: e.message });
@@ -79,22 +106,30 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     if (!items.length) return res.status(400).json({ error: "At least one milestone item is required" });
     const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
     if (Math.round(totalPct * 100) !== 10000) return res.status(400).json({ error: `Milestone percentages must sum to 100 (currently ${totalPct})` });
+    const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map(x => parseInt(x)).filter(Boolean)
+      : (b.ProjectId ? [parseInt(b.ProjectId)] : []);
 
     await tx.begin();
     const planResult = await tx.request()
       .input("name", sql.NVarChar(200), b.PlanName.trim())
       .input("desc", sql.NVarChar(500), b.Description || null)
       .input("cid",  sql.Int,           b.CompanyId ? parseInt(b.CompanyId) : null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
       .input("bid",  sql.Int,           b.BlockId   ? parseInt(b.BlockId)   : null)
       .input("uid",  sql.Int,           b.UnitId    ? parseInt(b.UnitId)    : null)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, CompanyId, ProjectId, BlockId, UnitId, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentPlanTemplate (PlanName, Description, CompanyId, BlockId, UnitId, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@name, @desc, @cid, @pid, @bid, @uid, 1, @cb, SYSDATETIME())
+        VALUES (@name, @desc, @cid, @bid, @uid, 1, @cb, SYSDATETIME())
       `);
     const planId = planResult.recordset[0].Id;
+
+    for (const pid of projectIds) {
+      await tx.request()
+        .input("plid", sql.Int, planId)
+        .input("pid",  sql.Int, pid)
+        .query(`INSERT INTO dbo.CrmPaymentPlanProject (PlanId, ProjectId, IsActive, CreatedAt) VALUES (@plid, @pid, 1, SYSDATETIME())`);
+    }
 
     for (let idx = 0; idx < items.length; idx++) {
       await tx.request()
@@ -141,6 +176,9 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
     if (Math.round(totalPct * 100) !== 10000) return res.status(400).json({ error: `Milestone percentages must sum to 100 (currently ${totalPct})` });
   }
 
+  const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map(x => parseInt(x)).filter(Boolean)
+    : (b.ProjectId !== undefined ? (b.ProjectId ? [parseInt(b.ProjectId)] : []) : null);
+
   const tx = pool.transaction();
   try {
     await tx.begin();
@@ -149,15 +187,31 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       .input("desc", sql.NVarChar(500), b.Description || null)
       .input("active", sql.Bit, b.IsActive !== false ? 1 : 0)
       .input("cid",  sql.Int,  b.CompanyId ? parseInt(b.CompanyId) : null)
-      .input("pid",  sql.Int,  b.ProjectId ? parseInt(b.ProjectId) : null)
       .input("bid",  sql.Int,  b.BlockId   ? parseInt(b.BlockId)   : null)
       .input("uid",  sql.Int,  b.UnitId    ? parseInt(b.UnitId)    : null)
       .query(`
         UPDATE dbo.CrmPaymentPlanTemplate SET
           Description = @desc, IsActive = @active,
-          CompanyId = @cid, ProjectId = @pid, BlockId = @bid, UnitId = @uid
+          CompanyId = @cid, BlockId = @bid, UnitId = @uid
         WHERE Id = @id
       `);
+
+    if (projectIds !== null) {
+      await tx.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @id");
+      for (const pid of projectIds) {
+        await tx.request()
+          .input("plid", sql.Int, id)
+          .input("pid",  sql.Int, pid)
+          .query(`
+            MERGE dbo.CrmPaymentPlanProject AS tgt
+            USING (SELECT @plid AS PlanId, @pid AS ProjectId) AS src
+            ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
+            WHEN MATCHED THEN UPDATE SET IsActive = 1
+            WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
+          `);
+      }
+    }
 
     if (items) {
       await tx.request().input("id", sql.Int, id)
