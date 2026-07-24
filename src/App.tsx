@@ -285,6 +285,9 @@ const GeneralLedgerMaster = lazy(
 const CostCenterMaster = lazy(
   () => import("./pages/masters/CostCenterMaster"),
 );
+const PaymentTermMaster = lazy(
+  () => import("./pages/masters/PaymentTermMaster"),
+);
 const ProfitCenterMaster = lazy(
   () => import("./pages/masters/ProfitCenterMaster"),
 );
@@ -1629,6 +1632,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="cost-center">
             <CostCenterMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/payment-terms"
+        element={
+          <ProtectedRoute pageKey="payment-terms">
+            <PaymentTermMaster />
           </ProtectedRoute>
         }
       />

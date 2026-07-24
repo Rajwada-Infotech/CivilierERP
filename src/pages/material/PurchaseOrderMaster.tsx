@@ -200,6 +200,7 @@ interface POForm {
   docNo: string;
   status: string;
   costCenterId: string;
+  paymentTermId: string;
 }
 
 interface DropdownOption {
@@ -290,6 +291,7 @@ const EMPTY_FORM = (): POForm => ({
   docNo: "",
   status: "Draft",
   costCenterId: "",
+  paymentTermId: "",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -670,6 +672,14 @@ const PurchaseOrderMaster: React.FC = () => {
     queryKey: ["cost-centers-po"],
     queryFn: () =>
       fetchWithAuth("/api/cost-center/options").then((r) =>
+        r.json().catch(() => ({})),
+      ),
+  });
+
+  const { data: paymentTerms = [] } = useQuery<{ id: number; label: string; days: number }[]>({
+    queryKey: ["payment-terms-po"],
+    queryFn: () =>
+      fetchWithAuth("/api/payment-terms/options").then((r) =>
         r.json().catch(() => ({})),
       ),
   });
@@ -1674,6 +1684,7 @@ const PurchaseOrderMaster: React.FC = () => {
           : "Pending", // creation always auto-submits; backend ignores this field on create anyway
       Remarks: form.remarks || null,
       CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
+      PaymentTermId: form.paymentTermId ? parseInt(form.paymentTermId, 10) : null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
         ? null
@@ -2152,6 +2163,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
       docNo,
       status: raw.Status ?? "Draft",
       costCenterId: String(raw.CostCenterId ?? ""),
+      paymentTermId: String(raw.PaymentTermId ?? ""),
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2953,6 +2965,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             viewingPO.CostCenterName ??
                             viewingPO.costCenterName ??
                             "—",
+                        },
+                        {
+                          label: "Payment Terms",
+                          value: viewingPO.PaymentTermDescription
+                            ? `${viewingPO.PaymentTermDescription} (${viewingPO.PaymentTermDays} days)`
+                            : "—",
                         },
                         {
                           label: "Total Amount",
@@ -4028,6 +4046,25 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     Cost Center is required
                   </p>
                 )}
+              </div>
+
+              {/* Payment Terms — Invoice computes its Due Date from Vendor
+                  Invoice Date + this term's Days once the PO/GRN is linked. */}
+              <div>
+                <FieldLabel>Payment Terms</FieldLabel>
+                <select
+                  value={form.paymentTermId}
+                  onChange={(e) => setField("paymentTermId", e.target.value)}
+                  disabled={isReadOnly}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                >
+                  <option value="">— Select Payment Term —</option>
+                  {paymentTerms.map((pt) => (
+                    <option key={pt.id} value={pt.id}>
+                      {pt.label} ({pt.days} days)
+                    </option>
+                  ))}
+                </select>
               </div>
 
             </div>

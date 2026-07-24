@@ -43,6 +43,7 @@ import {
   Car,
   PlusCircle,
   Wallet,
+  CalendarClock,
 } from "lucide-react";
 import {
   Crown,
@@ -294,6 +295,13 @@ const materialSetupItems = [
     path: "/material/t-c-master",
     color: "text-purple-500",
     pageKey: "t-c-master",
+  },
+  {
+    icon: CalendarClock,
+    label: "Payment Terms",
+    path: "/masters/payment-terms",
+    color: "text-sky-500",
+    pageKey: "payment-terms",
   },
   {
     icon: ClipboardList,

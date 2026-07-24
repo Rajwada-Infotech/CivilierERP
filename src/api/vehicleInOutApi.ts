@@ -28,6 +28,8 @@ export interface VehicleInOutLineItem {
   ItemName: string | null;
   UomName: string | null;
   ReceivedQty: number;
+  /** Real-time photo captured beside "Qty This Lot" at entry time, base64 data URL. */
+  PhotoBase64: string | null;
 }
 
 /** A PO line item together with how much has already been received across
@@ -92,7 +94,7 @@ export interface VehicleInOutPayload {
   remarks: string;
   /** Quantity received against each PO line item in THIS lot — validated
    *  server-side against what's left to receive on the PO before saving. */
-  items: { poItemId: number; receivedQty: number }[];
+  items: { poItemId: number; receivedQty: number; photoBase64?: string | null }[];
 }
 
 export interface VehicleInOutListResponse {
