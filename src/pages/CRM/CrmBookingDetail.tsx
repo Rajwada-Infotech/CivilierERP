@@ -5,8 +5,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
-  Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
-  ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
+  Trash2, Wallet, Car,
+  ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";

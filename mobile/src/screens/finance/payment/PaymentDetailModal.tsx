@@ -13,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import {
-  X, Receipt, ArrowRight, AlertTriangle, RefreshCw, ArrowLeft, BookOpen, Pencil, Trash2, Check, Send, Printer,
+  X, Receipt, AlertTriangle, RefreshCw, ArrowLeft, BookOpen, Pencil, Trash2, Check, Send, Printer,
 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
