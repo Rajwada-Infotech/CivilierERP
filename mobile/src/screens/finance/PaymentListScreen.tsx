@@ -1,15 +1,18 @@
 // RN port of src/pages/finance/Payment.tsx (web). Web's mobile-collapsed
 // card list (Payment.tsx, the `sm:hidden divide-y` block) is the direct
 // template for PaymentCard below, since the desktop <table> has no native-
-// screen equivalent. List/detail/create are supported; editing an existing
-// payment, deleting, and GL posting stay web-only — see
-// PaymentDetailModal.tsx's and PaymentFormModal.tsx's header comments.
+// screen equivalent. Summary stat tiles (Total Paid / By Cheque / By Cash)
+// mirror web's client-side reduce over the loaded records. List/detail/
+// create/edit/delete/approve/reject, GL-posting, and Print are all
+// supported now — see PaymentDetailModal.tsx's and PaymentFormModal.tsx's
+// header comments for what's still deferred (Contract-linking, on-account
+// auto-apply, GST/partial-payment breakdown preview, and list export).
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Wallet, SlidersHorizontal, AlertCircle, Search, X, ShieldOff, Plus } from "lucide-react-native";
+import { Wallet, SlidersHorizontal, AlertCircle, Search, X, ShieldOff, Plus, Banknote, Clock, CheckCircle2 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
@@ -19,12 +22,31 @@ import type { MainStackParamList } from "@/navigation/MainStack";
 import { StatusBadge, ModeBadge } from "./payment/PaymentBadges";
 import { FilterSheet, BLANK_FILTERS, type PaymentFilters } from "./payment/FilterSheet";
 import { PaymentDetailModal } from "./payment/PaymentDetailModal";
-import { PaymentFormModal } from "./payment/PaymentFormModal";
+import { PaymentFormModal, type ReissueContext } from "./payment/PaymentFormModal";
 
 const PAGE_SIZE = 20;
 
 function activeFilterCount(f: PaymentFilters) {
   return Object.values(f).filter(Boolean).length;
+}
+
+function StatTile({ label, value, icon: Icon, accent }: {
+  label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string;
+}) {
+  return (
+    <View style={{ width: "32%" }} className="rounded-xl overflow-hidden">
+      <View
+        className="items-start gap-1.5 px-3 py-2.5"
+        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}
+      >
+        <View className="w-7 h-7 rounded-lg items-center justify-center" style={{ backgroundColor: `${accent}26`, borderWidth: 1, borderColor: `${accent}4d` }}>
+          <Icon size={13} color={accent} />
+        </View>
+        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 13, marginTop: 2 }}>{value}</Text>
+        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular }}>{label}</Text>
+      </View>
+    </View>
+  );
 }
 
 function refBadge(rec: PaymentRecord) {
@@ -99,6 +121,8 @@ export default function PaymentListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingRec, setEditingRec] = useState<PaymentRecord | null>(null);
+  const [reissueCtx, setReissueCtx] = useState<ReissueContext | null>(null);
 
   // Lets FinanceDashboardScreen's "New Payment" quick action jump straight
   // into the form instead of just landing on the list.
@@ -106,6 +130,13 @@ export default function PaymentListScreen() {
     if (route.params?.openForm && rights.canCreate) setFormOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.openForm]);
+
+  // Lets BrsScreen's "Re-issue" action on a bounced entry jump straight
+  // into a prefilled New Payment form, mirroring web's location.state flow.
+  useEffect(() => {
+    if (route.params?.reissue && rights.canCreate) setReissueCtx(route.params.reissue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.reissue]);
 
   const effectiveFilters = useMemo(() => ({ ...filters, docNumber: docSearch || filters.docNumber }), [filters, docSearch]);
 
@@ -135,6 +166,13 @@ export default function PaymentListScreen() {
     const items: DbPayment[] = (data?.pages ?? []).flatMap((p) => (Array.isArray(p?.data) ? p.data : []));
     return items.map(dbToRecord);
   }, [data]);
+
+  // Client-side over the currently loaded records, matching web's totalAmount/
+  // chequeCount/cashCount (Payment.tsx:815-819) — both sides compute over
+  // whatever page(s) of data are in memory, not a separate server aggregate.
+  const totalAmount = useMemo(() => records.reduce((s, r) => s + (r.amount ?? 0), 0), [records]);
+  const chequeCount = useMemo(() => records.filter((r) => r.mode === "Cheque" || r.mode === "Post-Dated Cheque").length, [records]);
+  const cashCount = useMemo(() => records.filter((r) => r.mode === "Cash").length, [records]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -172,6 +210,12 @@ export default function PaymentListScreen() {
               <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>New Payment</Text>
             </Pressable>
           )}
+        </View>
+
+        <View className="flex-row justify-between mb-3">
+          <StatTile label="Total Paid" value={formatINR(totalAmount)} icon={Banknote} accent={colors.primary} />
+          <StatTile label="By Cheque" value={String(chequeCount)} icon={Clock} accent="#f59e0b" />
+          <StatTile label="By Cash" value={String(cashCount)} icon={CheckCircle2} accent="#10b981" />
         </View>
 
         <View className="flex-row items-center gap-2">
@@ -241,8 +285,19 @@ export default function PaymentListScreen() {
       )}
 
       <FilterSheet visible={filterOpen} onClose={() => setFilterOpen(false)} filters={filters} onApply={setFilters} />
-      <PaymentDetailModal record={viewingRec} onClose={() => setViewingRec(null)} />
-      <PaymentFormModal visible={formOpen} onClose={() => setFormOpen(false)} />
+      <PaymentDetailModal
+        record={viewingRec}
+        onClose={() => setViewingRec(null)}
+        onEdit={rights.canEdit ? (rec) => { setViewingRec(null); setEditingRec(rec); } : undefined}
+        onDeleted={() => setViewingRec(null)}
+        canDelete={rights.canDelete}
+      />
+      <PaymentFormModal
+        visible={formOpen || !!editingRec || !!reissueCtx}
+        onClose={() => { setFormOpen(false); setEditingRec(null); setReissueCtx(null); }}
+        editingRecord={editingRec}
+        reissueContext={reissueCtx}
+      />
     </View>
   );
 }

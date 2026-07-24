@@ -18,6 +18,12 @@ export async function getOABalance(partyId: number): Promise<OABalance> {
   return r.json();
 }
 
+export async function getOABalanceByRef(expenseRef: string): Promise<OABalance> {
+  const r = await fetchWithAuth(`${BASE}/balance-by-ref/${encodeURIComponent(expenseRef)}`);
+  if (!r.ok) return { partyId: null, partyType: null, partyLabel: null, balance: 0 };
+  return r.json();
+}
+
 export interface OAInvoice {
   docNo: string;
   invoiceAmount: number;

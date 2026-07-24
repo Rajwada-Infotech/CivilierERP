@@ -181,6 +181,23 @@ interface MasterPageProps {
   isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * Optional per-row lock check. Return a short reason string to grey out
+   * and disable that row's Edit AND Delete buttons (shown as a tooltip),
+   * or null/undefined to leave the row unlocked. Omit entirely for pages
+   * with no row-level locking — existing behavior is unchanged when this
+   * prop isn't passed.
+   */
+  isRowLocked?: (row: RecordWithId) => string | null | undefined;
+  /**
+   * Optional per-row check that greys out and disables only the Delete
+   * button (Edit stays enabled) — for masters like Block Master where a
+   * record can still be renamed/reassigned while locked, but can't be
+   * removed while it has dependent child records (e.g. a Block with
+   * Booked/OnHold Units under it). Combines with isRowLocked if both are
+   * passed; has no effect on its own on the Edit button.
+   */
+  isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -227,6 +244,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   isRowLocked,
   isDeleteLocked,
   gridCols = 2,
+  isRowLocked,
+  isDeleteLocked,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),

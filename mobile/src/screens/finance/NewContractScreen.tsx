@@ -2,18 +2,20 @@
 // edit (route param `id` switches modes). Document Info (doc type + auto
 // doc-number preview, dates, fin year), Contract Details (contact-person
 // picker with Supplier/Contractor/Applicant tabs + search, purpose, type,
-// amount, period), Attachments (images only, via expo-image-picker's
-// base64 option — expo-file-system isn't installed, so arbitrary
-// PDFs/docs like web's file input handles aren't supported, just photos),
-// and Terms & Conditions (multi-select from TC master).
+// amount, period), Attachments (photos via expo-image-picker, or any file
+// type — PDFs, docs, etc — via expo-document-picker + expo-file-system's
+// base64 read, matching web's arbitrary file input), and Terms &
+// Conditions (multi-select from TC master).
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Image } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import {
-  ArrowLeft, Check, ChevronDown, Plus, RefreshCw, Search, X, Paperclip, Camera,
+  ArrowLeft, Check, ChevronDown, Plus, RefreshCw, Search, X, Paperclip, Camera, FileText,
 } from "lucide-react-native";
 import {
   fetchDocTypes, fetchNextDocNumber, fetchContactPersons, fetchTCRecords,
@@ -325,6 +327,22 @@ export default function NewContractScreen() {
     }
   };
 
+  const pickDocument = async () => {
+    const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true, multiple: false });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setUploading(true);
+    try {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" });
+      const mime = asset.mimeType || "application/octet-stream";
+      setAttachments((prev) => [...prev, { name: asset.name, url: `data:${mime};base64,${base64}`, type: mime, size: asset.size ?? undefined }]);
+    } catch {
+      Alert.alert("Attach failed", "Couldn't read the selected file.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!docTypeId && !isEditing) throw new Error("Document type not loaded yet.");
@@ -495,20 +513,26 @@ export default function NewContractScreen() {
             </Pressable>
           </View>
         ))}
-        <Pressable
-          onPress={pickAttachment}
-          disabled={uploading}
-          className="items-center py-6 rounded-xl"
-          style={{ borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, opacity: uploading ? 0.6 : 1 }}
-        >
-          {uploading ? <ActivityIndicator color={colors.mutedForeground} /> : <Camera size={20} color={`${colors.mutedForeground}80`} />}
-          <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 11.5, fontFamily: fonts.body.regular, marginTop: 8 }}>
-            {uploading ? "Uploading…" : "Tap to attach a photo"}
-          </Text>
-          <Text style={{ color: `${colors.mutedForeground}66`, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 2 }}>
-            Images only — PDFs/docs aren't supported on mobile yet
-          </Text>
-        </Pressable>
+        <View className="flex-row gap-2.5">
+          <Pressable
+            onPress={pickAttachment}
+            disabled={uploading}
+            className="flex-1 items-center py-5 rounded-xl"
+            style={{ borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, opacity: uploading ? 0.6 : 1 }}
+          >
+            {uploading ? <ActivityIndicator color={colors.mutedForeground} /> : <Camera size={18} color={`${colors.mutedForeground}80`} />}
+            <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 6 }}>Photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={pickDocument}
+            disabled={uploading}
+            className="flex-1 items-center py-5 rounded-xl"
+            style={{ borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, opacity: uploading ? 0.6 : 1 }}
+          >
+            {uploading ? <ActivityIndicator color={colors.mutedForeground} /> : <FileText size={18} color={`${colors.mutedForeground}80`} />}
+            <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 6 }}>File</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Terms & Conditions */}

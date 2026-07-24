@@ -1,14 +1,17 @@
 // RN port of ReceivedPayment.tsx's viewingPayment detail overlay. Simpler
 // than PaymentDetailModal — web's Received Payment page has no GL-posting
 // or payment-chain feature at all, so there are no tabs here, just the
-// amount highlight + fields grid + remarks.
-import { View, Text, Modal, Pressable, ScrollView } from "react-native";
+// amount highlight + fields grid + remarks. Edit/Delete/Approve/Reject are
+// supported, following the same confirm-before-destructive-action pattern
+// used for outbound Payment.
+import { View, Text, Modal, Pressable, ScrollView, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X, ArrowDownCircle } from "lucide-react-native";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { X, ArrowDownCircle, Pencil, Trash2, Check } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
-import type { ReceivedPayment } from "@/api/receivedPaymentApi";
+import { deleteReceivedPayment, approveReceivedPayment, rejectReceivedPayment, type ReceivedPayment } from "@/api/receivedPaymentApi";
 import { StatusBadge } from "../payment/PaymentBadges";
 import { ModeBadge } from "./ReceivedPaymentBadges";
 
@@ -25,8 +28,44 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ReceivedPaymentDetailModal({ record, onClose }: { record: ReceivedPayment | null; onClose: () => void }) {
+export function ReceivedPaymentDetailModal({
+  record, onClose, onEdit, onDeleted, canDelete,
+}: {
+  record: ReceivedPayment | null;
+  onClose: () => void;
+  onEdit?: (rec: ReceivedPayment) => void;
+  onDeleted?: () => void;
+  canDelete?: boolean;
+}) {
   const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteReceivedPayment(record!.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false });
+      onDeleted?.();
+    },
+    onError: (err: any) => Alert.alert("Delete failed", err.message ?? "Something went wrong."),
+  });
+  const approveMutation = useMutation({
+    mutationFn: () => approveReceivedPayment(record!.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false }),
+    onError: (err: any) => Alert.alert("Approve failed", err.message ?? "Something went wrong."),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: () => rejectReceivedPayment(record!.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false }),
+    onError: (err: any) => Alert.alert("Reject failed", err.message ?? "Something went wrong."),
+  });
+
+  const confirmDelete = () => {
+    Alert.alert("Delete received payment?", "This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate() },
+    ]);
+  };
+
   if (!record) return null;
 
   return (
@@ -49,6 +88,48 @@ export function ReceivedPaymentDetailModal({ record, onClose }: { record: Receiv
           <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
             <X size={15} color={colors.mutedForeground} />
           </Pressable>
+        </View>
+
+        <View className="flex-row items-center gap-1.5 px-4 pb-3">
+          {onEdit && (
+            <Pressable onPress={() => onEdit(record)} className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
+              <Pencil size={12} color={colors.mutedForeground} />
+              <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.medium }}>Edit</Text>
+            </Pressable>
+          )}
+          {record.status === "Pending" && (
+            <>
+              <Pressable
+                onPress={() => approveMutation.mutate()}
+                disabled={approveMutation.isPending}
+                className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg"
+                style={{ borderWidth: 1, borderColor: "#05966933", backgroundColor: "#0596690d" }}
+              >
+                <Check size={12} color="#059669" />
+                <Text style={{ color: "#059669", fontSize: 11.5, fontFamily: fonts.heading.medium }}>Approve</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => rejectMutation.mutate()}
+                disabled={rejectMutation.isPending}
+                className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg"
+                style={{ borderWidth: 1, borderColor: colors.border }}
+              >
+                <X size={12} color={colors.destructive} />
+                <Text style={{ color: colors.destructive, fontSize: 11.5, fontFamily: fonts.heading.medium }}>Reject</Text>
+              </Pressable>
+            </>
+          )}
+          {canDelete && (
+            <Pressable
+              onPress={confirmDelete}
+              disabled={deleteMutation.isPending}
+              className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg ml-auto"
+              style={{ borderWidth: 1, borderColor: colors.border }}
+            >
+              <Trash2 size={12} color={colors.destructive} />
+              <Text style={{ color: colors.destructive, fontSize: 11.5, fontFamily: fonts.heading.medium }}>Delete</Text>
+            </Pressable>
+          )}
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>

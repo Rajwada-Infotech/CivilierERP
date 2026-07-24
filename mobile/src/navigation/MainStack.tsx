@@ -24,8 +24,20 @@ export type MainStackParamList = {
   Profile: undefined;
   FinanceDashboard: undefined;
   // openForm: true jumps straight into the New Payment form on mount —
-  // used by FinanceDashboardScreen's "New Payment" quick action.
-  Payment: { openForm?: boolean } | undefined;
+  // used by FinanceDashboardScreen's "New Payment" quick action. reissue
+  // is set by BrsScreen's "Re-issue" action on a bounced entry, mirroring
+  // web's navigate("/payments", { state: { reissue } }).
+  Payment: {
+    openForm?: boolean;
+    reissue?: {
+      replacesPaymentId: number;
+      replacesDocNo: string;
+      amount: number;
+      paymentName: string;
+      companyName: string;
+      bounceReason?: string | null;
+    };
+  } | undefined;
   OnAccountAdjustment: undefined;
   ReceivedPayment: { openForm?: boolean } | undefined;
   Brs: undefined;

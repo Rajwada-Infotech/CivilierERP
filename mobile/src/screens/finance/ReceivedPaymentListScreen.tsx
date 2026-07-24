@@ -3,8 +3,8 @@
 // below. Filters (search/mode/status) are client-side over whatever pages
 // have been loaded so far, matching web's own `filtered` array (web filters
 // only the current page too — getReceivedPayments has no filter params on
-// either side). List/detail/create are supported; editing, deleting,
-// print, and submit-for-approval stay web-only — see
+// either side). List/detail/create/edit/delete/approve/reject are all
+// supported now — print stays web-only, see
 // ReceivedPaymentFormModal.tsx's header comment.
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput } from "react-native";
@@ -88,6 +88,7 @@ export default function ReceivedPaymentListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [viewingRec, setViewingRec] = useState<ReceivedPayment | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingRec, setEditingRec] = useState<ReceivedPayment | null>(null);
 
   // Lets FinanceDashboardScreen's "New Received" quick action jump straight
   // into the form instead of just landing on the list.
@@ -247,8 +248,18 @@ export default function ReceivedPaymentListScreen() {
       <OptionPickerModal visible={picker === "mode"} title="Filter by Mode" options={modeOptions} selectedKey={modeFilter} onSelect={(k) => { setModeFilter(k); setPicker(null); }} onClose={() => setPicker(null)} />
       <OptionPickerModal visible={picker === "status"} title="Filter by Status" options={statusOptions} selectedKey={statusFilter} onSelect={(k) => { setStatusFilter(k); setPicker(null); }} onClose={() => setPicker(null)} />
 
-      <ReceivedPaymentDetailModal record={viewingRec} onClose={() => setViewingRec(null)} />
-      <ReceivedPaymentFormModal visible={formOpen} onClose={() => setFormOpen(false)} />
+      <ReceivedPaymentDetailModal
+        record={viewingRec}
+        onClose={() => setViewingRec(null)}
+        onEdit={rights.canEdit ? (rec) => { setViewingRec(null); setEditingRec(rec); } : undefined}
+        onDeleted={() => setViewingRec(null)}
+        canDelete={rights.canDelete}
+      />
+      <ReceivedPaymentFormModal
+        visible={formOpen || !!editingRec}
+        onClose={() => { setFormOpen(false); setEditingRec(null); }}
+        editingRecord={editingRec}
+      />
     </View>
   );
 }
