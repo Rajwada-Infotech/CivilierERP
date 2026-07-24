@@ -366,6 +366,9 @@ export interface SelectedDoc {
   /** Cost centre inherited from the linked PO's own CostCenterId — takes
    *  priority over guessing one from the project. */
   costCenterLabel?: string | null;
+  /** Payment Term inherited from the linked PO's own PaymentTermId — drives
+   *  the invoice's live due-date calc (Vendor Invoice Date + Days). */
+  paymentTermId?: number | null;
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
@@ -442,6 +445,10 @@ export interface DocSelectorProps {
   filterProjectId?: number | null;
   filterFinYear?: string | null;
   filterSupplier?: string | null;
+  /** Set by a standalone "Filter by PO" dropdown outside this panel (beside
+   *  Supplier) — narrows the GRN tab to only that PO's own GRNs and jumps
+   *  the panel to the GRN tab. Doesn't affect the PO/Work Done/TOD tabs. */
+  filterPOId?: number | null;
   /** IDs already booked — excludes them from picker (except the one being edited) */
   bookedPOIds?: Set<number>;
   bookedWorkDoneIds?: Set<number>;

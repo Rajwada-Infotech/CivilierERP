@@ -5,6 +5,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import * as mrApi from "@/api/materialRequestApi";
 import {
@@ -52,7 +53,7 @@ import { toShortFinYear } from "@/utils/finYear";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
 import {
   alternatesForItem,
@@ -173,6 +174,18 @@ const fmtDate = (d?: string | null) =>
         year: "numeric",
       })
     : "—";
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Priority", accessor: "Priority" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Item Count", accessor: (r) => Number(r.ItemCount) || 0 },
+  { header: "Total Qty", accessor: (r) => Number(r.TotalQty) || 0 },
+  { header: "Requested", accessor: (r) => fmtDate(r.RequestDate as string) },
+  { header: "Required By", accessor: (r) => fmtDate(r.RequiredByDate as string) },
+  { header: "Status", accessor: "Status" },
+];
 
 // ─── Linked Purchase Orders ─────────────────────────────────────────────────────
 // Every PO raised against this MR, newest first, with a running "what's left"
@@ -1864,6 +1877,13 @@ export default function MaterialRequest() {
         action={
           viewMode === "list" ? (
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={(listData?.data || []) as unknown as Record<string, unknown>[]}
+                columns={EXPORT_COLUMNS}
+                title="Material Requests"
+                filename="material-requests"
+                disabled={loadingList || !listData?.data?.length || !rights.canExport}
+              />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}

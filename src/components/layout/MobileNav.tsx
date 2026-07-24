@@ -41,6 +41,7 @@ import {
   SlidersHorizontal,
   UsersRound,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
 import {
   Bank,
@@ -340,6 +341,13 @@ const materialSetupItems: SetupItem[] = [
     label: "T&C",
     path: "/material/t-c-master",
     color: "text-purple-500",
+  },
+  {
+    icon: CalendarClock,
+    label: "Payment Terms",
+    path: "/masters/payment-terms",
+    color: "text-sky-500",
+    pageKey: "payment-terms",
   },
   {
     icon: ClipboardList,

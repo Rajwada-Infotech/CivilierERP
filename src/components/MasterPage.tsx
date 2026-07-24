@@ -639,7 +639,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     />
                   ) : field.type === "toggle" ? (
-                    <div className="flex items-center gap-3 pt-1">
+                    <div className="flex items-center gap-3 pt-7">
                       <button
                         type="button"
                         onClick={() =>

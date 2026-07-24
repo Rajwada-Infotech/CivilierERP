@@ -56,6 +56,7 @@ import {
   FolderKanban,
   SlidersHorizontal,
   Clock,
+  ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv, parseCsv } from "@/lib/export";
@@ -106,7 +107,7 @@ import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
-import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { aggregateGRNsForInvoice, filterServicePOs } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import type {
   CompanyOption,
@@ -137,7 +138,8 @@ export default function MaterialExpenseBooking() {
     tod: TodItem[] | null;
     grn: GRNItem[] | null;
     workDone: WorkDoneItem[] | null;
-  }>({ po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null });
+    allPO: POItem[] | null;
+  }>({ po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null, allPO: null });
   const _mastersCache = mastersCacheRef.current;
   const [importing, setImporting] = useState(false);
   const rights = usePageRights("expense-booking");
@@ -160,6 +162,13 @@ export default function MaterialExpenseBooking() {
   const [loadingWOPO, setLoadingWOPO] = useState(false);
   const [loadingTOD, setLoadingTOD] = useState(false);
   const [loadingGRN, setLoadingGRN] = useState(false);
+  // "Filter by PO" dropdown beside Supplier — a standalone PO picker (ALL
+  // POs, not just the Service-eligible ones the "PO" tab itself offers)
+  // whose only job is to narrow the existing DocSelectorPanel's GRN tab
+  // down to that PO's own GRNs, instead of building a separate GRN picker.
+  const [allPOList, setAllPOList] = useState<POItem[]>([]);
+  const [loadingAllPOs, setLoadingAllPOs] = useState(false);
+  const [filterPOId, setFilterPOId] = useState<number | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
   const [grnItemsLoading, setGrnItemsLoading] = useState(false);
   const [gstBreakdown, setGstBreakdown] = useState<{
@@ -308,6 +317,8 @@ export default function MaterialExpenseBooking() {
     // goods always have to be received via a GRN first. Filtering happens
     // server-side (see backend/services/invoiceLinking.js).
     load("po", "/api/purchase-orders/service-eligible", setPoList, setLoadingPO);
+    _mastersCache.allPO = null;
+    load("allPO", "/api/purchase-orders?limit=500", setAllPOList, setLoadingAllPOs);
     _mastersCache.workDone = null;
     setLoadingWorkDone(true);
     apiFetch("/api/engineering/work-done?status=Approved&limit=500")
@@ -447,8 +458,17 @@ export default function MaterialExpenseBooking() {
         setCostCenterOptions(Array.isArray(list) ? list : []),
       )
       .catch(() => {});
-    apiFetch("/api/payment-plan-master")
-      .then((list: any) => setPaymentTermOptions(Array.isArray(list) ? list : []))
+    // Finance Setup's Payment Terms master (Description/Days) — mapped into
+    // the {Id, TermName, CreditDays} shape this file already expects so the
+    // existing supplier-auto-match/dropdown logic below needs no changes.
+    apiFetch("/api/payment-terms/options")
+      .then((list: any) =>
+        setPaymentTermOptions(
+          Array.isArray(list)
+            ? list.map((t: any) => ({ Id: t.id, TermName: t.label, CreditDays: t.days }))
+            : [],
+        ),
+      )
       .catch(() => {});
   }, [fetchRecords]);
 
@@ -456,6 +476,21 @@ export default function MaterialExpenseBooking() {
     field: K,
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  // Due Date tracks Vendor Invoice Date + the selected Payment Term's Days,
+  // recomputed live any time either changes — not just at the moment a
+  // supplier/term is first picked. Single source of truth for dueDate so
+  // editing the invoice date after the fact keeps it correct in real time.
+  useEffect(() => {
+    if (!form.paymentTermId || !form.vendorInvoiceDate) return;
+    const term = paymentTermOptions.find((t) => t.Id === form.paymentTermId);
+    if (!term || term.CreditDays == null) return;
+    const base = new Date(form.vendorInvoiceDate);
+    if (isNaN(base.getTime())) return;
+    base.setDate(base.getDate() + term.CreditDays);
+    const next = base.toISOString().split("T")[0];
+    setForm((prev) => (prev.dueDate === next ? prev : { ...prev, dueDate: next }));
+  }, [form.paymentTermId, form.vendorInvoiceDate, paymentTermOptions]);
 
   const resolveCostCenterForProject = useCallback(
     (projectId?: number | null) => {
@@ -525,6 +560,7 @@ export default function MaterialExpenseBooking() {
           projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
           ...linkedSupplier,
           costCenter: mAutoCostCenter || prev.costCenter,
+          paymentTermId: doc.paymentTermId ?? prev.paymentTermId,
           materialCategory: "GRN",
         };
       });
@@ -567,6 +603,35 @@ export default function MaterialExpenseBooking() {
           );
           if (items.length === 0)
             toast.info("This GRN has no item lines recorded against it.");
+
+          // The linked PO's own CostCenterId/PaymentTermId are the
+          // authoritative source for a single-GRN pick too — this branch
+          // used to skip Cost Centre entirely (only applyMultiGRNDoc
+          // fetched it) and never touched Payment Term at all. Cost Centre
+          // falls back to a project-name match, same as the multi-GRN path;
+          // Payment Term has no fallback — left blank if the PO has none.
+          const applyCostCenterAndTerm = async () => {
+            let poCostCenterLabel: string | null = null;
+            let poPaymentTermId: number | null = null;
+            if (r.POID) {
+              try {
+                const po = await apiFetch(`/api/purchase-orders/${r.POID}`);
+                if (po?.CostCenterId) poCostCenterLabel = po.CostCenterName ?? null;
+                if (po?.PaymentTermId) poPaymentTermId = po.PaymentTermId;
+              } catch {
+                /* non-fatal: keep the project-match fallback */
+              }
+            }
+            setForm((prev) => ({
+              ...prev,
+              costCenter:
+                poCostCenterLabel ||
+                resolveCostCenterForProject(doc.projectId) ||
+                prev.costCenter,
+              paymentTermId: poPaymentTermId ?? prev.paymentTermId,
+            }));
+          };
+          applyCostCenterAndTerm();
 
           // Fetch GST breakdown — back-calculates base/tax per item using Item_Master_Group HSN rates
           return apiFetch(`/api/grns/${doc.sourceId}/gst-breakdown`)
@@ -639,6 +704,11 @@ export default function MaterialExpenseBooking() {
         projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
         ...linkedSupplier,
         costCenter: autoCostCenter || prev.costCenter,
+        // TOD/Other Expense bookings have no PO to inherit a term from —
+        // doc.paymentTermId is only ever set for PO/GRN-linked docs, so
+        // this keeps whatever the user already picked in the Payment Term
+        // dropdown instead of silently clearing it when switching sources.
+        paymentTermId: doc.paymentTermId ?? prev.paymentTermId,
         materialCategory:
           doc.kind === "PO"
             ? "PO"
@@ -682,6 +752,7 @@ export default function MaterialExpenseBooking() {
     let sgstRate = agg.sgstRate;
     let igstRate = 0;
     let poCostCenterLabel: string | null = null;
+    let poPaymentTermId: number | null = null;
     if (agg.poId) {
       try {
         const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
@@ -699,8 +770,12 @@ export default function MaterialExpenseBooking() {
           sgstRate = poSgst;
         }
         if (po?.CostCenterId) poCostCenterLabel = po.CostCenterName ?? null;
-      } catch {
-        /* non-fatal: keep the GRN-derived fallback rate */
+        if (po?.PaymentTermId) poPaymentTermId = po.PaymentTermId;
+      } catch (err) {
+        // Non-fatal: keep the GRN-derived fallback rate — but this used to
+        // fail silently, making a broken PO cost-centre fetch look like
+        // "the PO just has no cost centre" instead of a real error.
+        console.warn("Failed to fetch PO for cost centre/GST:", err);
       }
     }
 
@@ -719,6 +794,7 @@ export default function MaterialExpenseBooking() {
       derivedSgstRate: sgstRate,
       derivedIgstRate: igstRate,
       costCenterLabel: poCostCenterLabel,
+      paymentTermId: poPaymentTermId,
       projectId: primary.ProjectId,
       companyId: primary.CompanyId,
       gst:
@@ -1109,6 +1185,30 @@ export default function MaterialExpenseBooking() {
 
   const showDocSection = !!form.companyId;
 
+  // "Filter by PO" dropdown options — ALL POs (goods + services, unlike the
+  // Service-only "PO" tab inside DocSelectorPanel), narrowed by the same
+  // company/project/finYear filters already driving the rest of Document
+  // Selection. Picking one here doesn't book anything itself — it just
+  // narrows DocSelectorPanel's own GRN tab down to that PO's GRNs.
+  const filteredAllPOs = useMemo(
+    () =>
+      filterServicePOs(allPOList, {
+        companyId: form.companyId ?? null,
+        projectId: form.projectSite ? parseInt(form.projectSite, 10) : null,
+        finYear: form.financialYear || null,
+      }),
+    [allPOList, form.companyId, form.projectSite, form.financialYear],
+  );
+
+  // Drop a stale PO filter selection once it no longer matches the current
+  // company/project/finYear filters, instead of silently continuing to
+  // filter the GRN tab by a PO the dropdown no longer shows as selected.
+  useEffect(() => {
+    if (filterPOId != null && !filteredAllPOs.some((po: any) => po.PurchaseOrderID === filterPOId)) {
+      setFilterPOId(null);
+    }
+  }, [filterPOId, filteredAllPOs]);
+
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
     exportToCsv([], INVOICE_TEMPLATE_COLUMNS, "invoice-template");
@@ -1369,14 +1469,9 @@ export default function MaterialExpenseBooking() {
                             const match = paymentTermOptions.find(
                               (t) => t.TermName.trim().toLowerCase() === termStr,
                             );
-                            if (match) {
-                              set("paymentTermId", match.Id);
-                              if (form.bookingDate && match.CreditDays != null) {
-                                const base = new Date(form.bookingDate);
-                                base.setDate(base.getDate() + match.CreditDays);
-                                set("dueDate", base.toISOString().split("T")[0]);
-                              }
-                            }
+                            // Due Date is derived by the live effect above
+                            // (Vendor Invoice Date + Days) — just set the term here.
+                            if (match) set("paymentTermId", match.Id);
                           }
                           if (!form.vendorInvoiceDate) {
                             set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
@@ -1396,6 +1491,34 @@ export default function MaterialExpenseBooking() {
                       {selectedDoc?.vendorLabel && (
                         <p className="text-[10px] text-muted-foreground">
                           {`Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <ShoppingCart size={11} className="shrink-0" />
+                        Filter by PO
+                      </p>
+                      <Select
+                        value={filterPOId != null ? String(filterPOId) : "__none__"}
+                        onValueChange={(val) => setFilterPOId(val === "__none__" ? null : parseInt(val, 10))}
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder={loadingAllPOs ? "Loading…" : "All POs"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— All POs —</SelectItem>
+                          {filteredAllPOs.map((po: any) => (
+                            <SelectItem key={po.PurchaseOrderID} value={String(po.PurchaseOrderID)}>
+                              {po.DocNo || po.PurchaseOrderNo}
+                              {po.SupplierName ? ` — ${po.SupplierName}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {filterPOId != null && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Showing this PO's GRNs in the GRN tab below
                         </p>
                       )}
                     </div>
@@ -1434,6 +1557,7 @@ export default function MaterialExpenseBooking() {
                       }
                       filterFinYear={form.financialYear || null}
                       filterSupplier={form.supplier || null}
+                      filterPOId={filterPOId}
                       bookedPOIds={bookedPOIds}
                       bookedWorkDoneIds={bookedWorkDoneIds}
                       bookedWOPOIds={bookedWOPOIds}
@@ -1540,16 +1664,10 @@ export default function MaterialExpenseBooking() {
                         className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
                         value={form.paymentTermId ?? ""}
                         onChange={(e) => {
+                          // Due Date is derived by the live effect above
+                          // (Vendor Invoice Date + Days) the moment this changes.
                           const termId = e.target.value ? parseInt(e.target.value, 10) : null;
                           set("paymentTermId", termId);
-                          if (termId && form.bookingDate) {
-                            const term = paymentTermOptions.find((t) => t.Id === termId);
-                            if (term && term.CreditDays != null) {
-                              const base = new Date(form.bookingDate);
-                              base.setDate(base.getDate() + term.CreditDays);
-                              set("dueDate", base.toISOString().split("T")[0]);
-                            }
-                          }
                         }}
                       >
                         <option value="">— Select Payment Term —</option>
