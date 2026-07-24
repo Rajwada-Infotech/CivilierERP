@@ -185,6 +185,12 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     await bumpCacheVersion("block-master");
     res.json({ message: "Block added successfully" });
   } catch (err) {
+    // Backstop for the race-condition case the pre-check above can't catch
+    // (two concurrent requests both passing it before either commits) —
+    // UX_BlockMaster_Project_BlockName is the actual guarantee.
+    if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
+      return res.status(409).json({ error: `Block "${BlockName}" already exists in this Project.` });
+    }
     console.error("[block-master] POST error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -234,6 +240,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     await bumpCacheVersion("block-master");
     res.json({ message: "Block updated successfully" });
   } catch (err) {
+    if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
+      return res.status(409).json({ error: `Block "${BlockName}" already exists in this Project.` });
+    }
     console.error("[block-master] PUT error:", err.message);
     res.status(500).json({ error: err.message });
   }

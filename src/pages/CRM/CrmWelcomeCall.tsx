@@ -4,10 +4,11 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -31,6 +32,14 @@ const EMPTY_FORM = {
   Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "", PaymentPlanConfirmed: false,
 };
 const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+// datetime-local input value for "right now" — pre-filling this is the
+// common case (logging the call as it happens); staff can still change it
+// for a call being logged after the fact.
+const nowLocal = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+};
 
 async function fetchQueue(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/queue`); return r.ok ? r.json() : []; } catch { return []; }
@@ -131,7 +140,14 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
 const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const { currentUser } = useAuth();
+  // Auto-fetched, locked by default: the call is almost always logged by
+  // whoever is on this screen right now, and the moment it happens — not
+  // something staff should have to re-pick/re-type every single time.
+  // "Change" unlocks both for the (rarer) case someone is logging a call on
+  // a colleague's behalf, or after the fact.
+  const [form, setForm] = useState({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
+  const [calledByLocked, setCalledByLocked] = useState(true);
   const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [docType, setDocType] = useState("");
@@ -139,6 +155,20 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const [uploading, setUploading] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Live call-duration timer — a real "dynamic" touch for a page whose whole
+  // job is timing/logging a phone call: start it when the call begins, and
+  // Duration auto-fills from the elapsed time when stopped (still editable
+  // afterward, in case it needs correcting).
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  useEffect(() => {
+    if (!timerRunning) return;
+    const start = Date.now() - timerSeconds * 1000;
+    const id = setInterval(() => setTimerSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerRunning]);
+  const fmtTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
   const [onAccountDialog, setOnAccountDialog] = useState(false);
@@ -166,6 +196,12 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const invalidateQueue = () => qc.invalidateQueries({ queryKey: ["crm-welcome-queue"] });
 
   const handleLogCall = async () => {
+    // Without this, "Log Call" happily saves a row with nothing but who
+    // called and when — Outcome is the one field every other screen
+    // (queue, history, checklist) actually reads to know what happened on
+    // the call, so a blank one is a useless log entry masquerading as a
+    // real one.
+    if (!form.Outcome) { toast.error("Select an outcome before logging the call"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -175,7 +211,10 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
           BookingId: booking.BookingId,
           CalledBy: form.CalledBy || null,
           CallDate: form.CallDate || null,
-          DurationSeconds: form.DurationSeconds || null,
+          // The live timer wins if it was used and nobody typed a manual
+          // override — matches what actually happened on the call instead
+          // of staff having to copy the number across by hand.
+          DurationSeconds: form.DurationSeconds || (timerSeconds > 0 ? String(timerSeconds) : null),
           Outcome: form.Outcome || null,
           NextCallDate: form.NextCallDate || null,
           Notes: form.Notes || null,
@@ -186,8 +225,10 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to log call");
-      setForm({ ...EMPTY_FORM });
+      setForm({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
       setCustomFields([]);
+      setTimerRunning(false);
+      setTimerSeconds(0);
       refetchChecklist();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
@@ -329,9 +370,10 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-heading">
+          <DialogTitle className="font-heading flex items-center gap-2">
+            <PhoneCall size={18} className="text-primary" />
             Welcome Call — {booking.ApplicantName} <span className="text-muted-foreground font-normal text-sm">({booking.BookingNo})</span>
           </DialogTitle>
         </DialogHeader>
@@ -352,22 +394,22 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div className="rounded-lg border border-border bg-background p-2.5">
-                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Total Value</div>
-                <div className="font-bold">{fmt(callContext.booking?.GrandTotal ?? callContext.booking?.TotalValue)}</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg border border-border bg-background p-3">
+                <div className="flex items-center gap-1 text-muted-foreground mb-1"><IndianRupee size={12} /> Total Value</div>
+                <div className="font-bold text-sm">{fmt(callContext.booking?.GrandTotal ?? callContext.booking?.TotalValue)}</div>
               </div>
-              <div className={`rounded-lg border p-2.5 ${callContext.outstanding?.balance > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
-                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Outstanding</div>
-                <div className={`font-bold ${callContext.outstanding?.balance > 0 ? "text-amber-700" : ""}`}>{fmt(callContext.outstanding?.balance)}</div>
+              <div className={`rounded-lg border p-3 ${callContext.outstanding?.balance > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
+                <div className="flex items-center gap-1 text-muted-foreground mb-1"><IndianRupee size={12} /> Outstanding</div>
+                <div className={`font-bold text-sm ${callContext.outstanding?.balance > 0 ? "text-amber-700" : ""}`}>{fmt(callContext.outstanding?.balance)}</div>
               </div>
-              <div className="rounded-lg border border-border bg-background p-2.5">
-                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><ClipboardCheck size={11} /> Payment Plan</div>
-                <div className="font-medium truncate" title={callContext.booking?.PaymentPlanName}>{callContext.booking?.PaymentPlanName || "7-stage default"}</div>
+              <div className="rounded-lg border border-border bg-background p-3">
+                <div className="flex items-center gap-1 text-muted-foreground mb-1"><ClipboardCheck size={12} /> Payment Plan</div>
+                <div className="font-medium text-sm truncate" title={callContext.booking?.PaymentPlanName}>{callContext.booking?.PaymentPlanName || "7-stage default"}</div>
               </div>
-              <div className="rounded-lg border border-border bg-background p-2.5">
-                <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><Landmark size={11} /> Bank Preference</div>
-                <div className="font-medium truncate" title={callContext.loan?.BankName}>{callContext.loan?.BankName || "Not on file"}</div>
+              <div className="rounded-lg border border-border bg-background p-3">
+                <div className="flex items-center gap-1 text-muted-foreground mb-1"><Landmark size={12} /> Bank Preference</div>
+                <div className="font-medium text-sm truncate" title={callContext.loan?.BankName}>{callContext.loan?.BankName || "Not on file"}</div>
               </div>
             </div>
 
@@ -406,24 +448,38 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         )}
 
         {/* ── Log Call ── */}
-        <div className="rounded-xl border border-border p-4 space-y-3">
-          <h3 className="text-sm font-semibold">Log This Call</h3>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-border p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-primary" /> Log This Call</h3>
+            {/* Live duration timer — a genuinely dynamic touch: start it the
+                moment the call connects, it counts up on-screen, and Duration
+                below auto-fills from it when stopped. */}
+            <div className="flex items-center gap-2">
+              {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
+              <button type="button" onClick={() => setTimerRunning((r) => !r)}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
+                  timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                }`}>
+                <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-              <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Self —</option>
-                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
-              <select value={form.Outcome} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select outcome</option>
-                {OUTCOMES.map((o) => <option key={o}>{o}</option>)}
-              </select>
+              {calledByLocked ? (
+                <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
+                  <span className="text-sm text-foreground truncate">{currentUser?.name || "Self"} <span className="text-xs text-muted-foreground">(you)</span></span>
+                  <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
+                </div>
+              ) : (
+                <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Self —</option>
+                  {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
@@ -432,41 +488,67 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Duration (seconds)</label>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Duration (seconds) {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer)</span> : ""}
+              </label>
               <input type="number" value={form.DurationSeconds}
                 onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="e.g. 180" />
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder={timerSeconds > 0 ? String(timerSeconds) : "e.g. 180"} />
             </div>
+          </div>
+
+          {/* Quick-pick outcome chips — one tap instead of a dropdown, colored
+              to match the same outcomeColor scheme used everywhere else this
+              value is shown (queue, history, edit dialog). */}
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1.5">Outcome</label>
+            <div className="flex flex-wrap gap-1.5">
+              {OUTCOMES.map((o) => (
+                <button key={o} type="button" onClick={() => setForm((f) => ({ ...f, Outcome: o }))}
+                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+                    form.Outcome === o ? outcomeColor[o] : "border-border text-muted-foreground hover:bg-muted/40"
+                  }`}>
+                  {form.Outcome === o && <Check size={11} className="inline mr-1 -mt-0.5" />}{o}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Schedule Follow-up Call</label>
+              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Schedule Follow-up Call</label>
               <input type="date" value={form.NextCallDate}
                 onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Preferred Agreement Date</label>
+              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Preferred Agreement Date</label>
               <input type="date" value={form.PreferredAgreementDate}
                 onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
-            <div className="col-span-2">
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-            <label className="col-span-2 flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
-              <input type="checkbox" checked={form.PaymentPlanConfirmed}
-                onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
-                className="rounded border-border" />
-              <ClipboardCheck size={13} className="text-muted-foreground" />
-              Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
-            </label>
           </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><StickyNote size={11} /> Notes</label>
+            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+              rows={3} placeholder="What was discussed on this call..."
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+          </div>
+
+          <label className="flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
+            <input type="checkbox" checked={form.PaymentPlanConfirmed}
+              onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
+              className="rounded border-border" />
+            <ClipboardCheck size={13} className="text-muted-foreground" />
+            Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
+          </label>
 
           {/* Dynamic custom fields */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-muted-foreground">Additional Fields</label>
+              <label className="text-xs text-muted-foreground flex items-center gap-1"><ListPlus size={11} /> Additional Fields</label>
               <button onClick={() => setCustomFields((f) => [...f, { key: "", value: "" }])}
                 className="text-xs text-primary hover:underline flex items-center gap-0.5">
                 <Plus size={11} /> Add Field
@@ -488,7 +570,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             ))}
           </div>
 
-          <button onClick={handleLogCall} disabled={saving}
+          <button onClick={handleLogCall} disabled={saving || !form.Outcome}
+            title={!form.Outcome ? "Select an outcome above first" : undefined}
             className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
             {saving ? "Logging..." : "Log Call"}
           </button>
@@ -732,7 +815,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
