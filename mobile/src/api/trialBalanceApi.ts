@@ -1,7 +1,5 @@
 // RN port of the data layer of src/pages/finance/TrialBalance.tsx — same
-// endpoints/types. Only the FY period mode is ported (web also has Range
-// and As On tabs); FY covers the common case and this app already leans on
-// FY-scoped fetches elsewhere (Invoice, Payment).
+// endpoints/types, all three period modes (FY / Range / As On).
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 export interface BalancePair {
@@ -46,6 +44,9 @@ export interface TBTransaction {
   sourceId: number | null;
   invoiceNo: string | null;
   costCenter: { id: number; code: string | null; name: string | null } | null;
+  // Present when sourceType is a payment — lets the drill-down list open
+  // that payment's own detail (payment-detail drill-through).
+  payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
 }
 
 export interface TBTransactionsResponse {

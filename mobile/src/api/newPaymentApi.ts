@@ -252,6 +252,16 @@ export const getPayments = async (
   return res.json().catch(() => ({}));
 };
 
+// Single-payment fetch — used by Trial Balance's drill-down transaction
+// list to show a payment's full detail inline (same data web's
+// ExpenseBookingPreviewModal-adjacent flow shows via GET /api/new-payment/:id).
+export const getPaymentById = async (id: number): Promise<PaymentRecord> => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`);
+  if (!res.ok) throw new Error(await parseError(res, "Failed to fetch payment"));
+  const row: DbPayment = await res.json();
+  return dbToRecord(row);
+};
+
 export const getPaymentChain = async (expenseRef: string): Promise<PaymentChainResponse> => {
   const res = await fetchWithAuth(`${BASE_URL}/chain/${encodeURIComponent(expenseRef)}`);
   if (!res.ok) throw new Error(await parseError(res, "Failed to fetch payment chain"));
@@ -315,6 +325,10 @@ export interface PaymentFormPayload {
   impsReference: string | null;
   cardReference: string | null;
   cardId: number | null;
+  ReplacesPaymentId?: number;
+  BounceCharge?: number | null;
+  ContractId?: number | null;
+  oaSkipAutoApply?: boolean;
 }
 
 export const addPayment = async (data: PaymentFormPayload) => {
@@ -324,6 +338,48 @@ export const addPayment = async (data: PaymentFormPayload) => {
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(await parseError(res, "Failed to save payment"));
+  return res.json().catch(() => ({}));
+};
+
+export const updatePayment = async (id: string, data: PaymentFormPayload) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to update payment"));
+  return res.json().catch(() => ({}));
+};
+
+export const deletePayment = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to delete payment"));
+};
+
+export const approvePayment = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/approve`, { method: "PUT" });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to approve payment"));
+};
+
+export const rejectPayment = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/reject`, { method: "PUT" });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to reject payment"));
+};
+
+// GL-posting — a genuine side-effecting money write (creates a journal
+// entry), same as web's Posting tab auto-post. Kept explicit/user-triggered
+// here (a button + confirm), not auto-fired on tab open like web, since an
+// unprompted background GL write on mobile would be an easy way to post
+// something the user hasn't actually reviewed yet.
+export const postPaymentToGL = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/post-to-gl`, { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to post to GL"));
+  return res.json().catch(() => ({}));
+};
+
+export const postBounceChargeToGL = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/post-bounce-charge-to-gl`, { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to post bounce charge to GL"));
   return res.json().catch(() => ({}));
 };
 
@@ -529,4 +585,13 @@ export function computePaymentStatus(netAmount: number, payments: ChainPaymentLi
   );
   const remaining = Math.max(0, Math.round((netAmount - totalPaid) * 100) / 100);
   return { totalPaid, bounceChargeTotal, remaining };
+}
+
+// RN port of partialPayment.ts's resolveOutstanding — prefers live per-payment
+// chain data (excludes bounced, subtracts bounce charges) and falls back to a
+// known/DB-persisted totalPaid snapshot only when the live chain hasn't
+// loaded yet.
+export function resolveOutstanding(netAmount: number, liveRemaining: number | null | undefined, knownTotalPaid: number | null | undefined): number {
+  if (liveRemaining != null) return liveRemaining;
+  return Math.max(0, netAmount - (knownTotalPaid ?? 0));
 }

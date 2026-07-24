@@ -78,6 +78,23 @@ export async function getContracts(): Promise<ContractListItem[]> {
   return Array.isArray(raw) ? raw.filter((c: ContractListItem) => c.Status !== "Deleted") : [];
 }
 
+// Extra fields the list endpoint returns beyond ContractListItem, used by
+// PaymentFormModal's Contract-link picker (mirrors Payment.tsx's
+// contractOptions query — status=Approved, plus ContactPartyId/Reason/
+// PendingAmount for prefill).
+export interface ContractLinkOption extends ContractListItem {
+  ContactPartyId: number | null;
+  Reason: string | null;
+  PendingAmount: number | null;
+}
+
+export async function getApprovedContractsForLinking(): Promise<ContractLinkOption[]> {
+  const res = await fetchWithAuth(`${BASE}?status=Approved`);
+  if (!res.ok) return [];
+  const raw = await res.json().catch(() => []);
+  return Array.isArray(raw) ? raw : [];
+}
+
 export async function getContract(id: number): Promise<ContractDetail> {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) await handleError(res, "Failed to fetch contract");
