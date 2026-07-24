@@ -279,10 +279,22 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
 
-    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmWelcomeCall WHERE Id = @id");
+    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id, BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Call log not found" });
 
-    let customFieldsJson;
+    // Distinguish "field genuinely absent from this request" (preserve the
+    // existing value) from "field explicitly sent, even as empty/null"
+    // (apply it — including clearing it on purpose). A partial-body edit
+    // (e.g. a caller that only sends { Outcome: "Welcomed" } to correct a
+    // mis-entry) must never silently wipe DurationSeconds/NextCallDate/
+    // Notes/CustomFields/PreferredAgreementDate just because it didn't
+    // mention them — while a caller that DOES want to clear one of these
+    // (e.g. NextCallDate: null, once no callback is needed anymore) must
+    // still be able to. CalledBy/CallDate/Outcome/PaymentPlanConfirmed
+    // already got this right via ISNULL and are unchanged below.
+    const has = (key) => Object.prototype.hasOwnProperty.call(b, key);
+
+    let customFieldsJson = null;
     if (Array.isArray(b.CustomFields)) {
       const cleaned = b.CustomFields
         .filter((f) => f && String(f.key || "").trim())
@@ -295,26 +307,42 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
       .input("cb",   sql.Int, b.CalledBy ? parseInt(b.CalledBy) : null)
       .input("dt",   sql.DateTime2(3), b.CallDate || null)
       .input("dur",  sql.Int, b.DurationSeconds != null ? parseInt(b.DurationSeconds) : null)
+      .input("durP", sql.Bit, has("DurationSeconds") ? 1 : 0)
       .input("out",  sql.NVarChar(50), b.Outcome || null)
       .input("ncd",  sql.Date, b.NextCallDate || null)
+      .input("ncdP", sql.Bit, has("NextCallDate") ? 1 : 0)
       .input("note", sql.NVarChar(sql.MAX), b.Notes ?? null)
-      .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson ?? null)
+      .input("noteP",sql.Bit, has("Notes") ? 1 : 0)
+      .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
+      .input("cfP",  sql.Bit, has("CustomFields") ? 1 : 0)
       .input("pad",  sql.Date, b.PreferredAgreementDate || null)
+      .input("padP", sql.Bit, has("PreferredAgreementDate") ? 1 : 0)
       .input("ppc",  sql.Bit,  b.PaymentPlanConfirmed != null ? (b.PaymentPlanConfirmed ? 1 : 0) : null)
       .query(`
         UPDATE dbo.CrmWelcomeCall SET
           CalledBy = ISNULL(@cb, CalledBy),
           CallDate = ISNULL(@dt, CallDate),
-          DurationSeconds = @dur,
+          DurationSeconds = CASE WHEN @durP = 1 THEN @dur ELSE DurationSeconds END,
           Outcome = ISNULL(@out, Outcome),
-          NextCallDate = @ncd,
-          Notes = @note,
-          CustomFields = @cf,
-          PreferredAgreementDate = @pad,
+          NextCallDate = CASE WHEN @ncdP = 1 THEN @ncd ELSE NextCallDate END,
+          Notes = CASE WHEN @noteP = 1 THEN @note ELSE Notes END,
+          CustomFields = CASE WHEN @cfP = 1 THEN @cf ELSE CustomFields END,
+          PreferredAgreementDate = CASE WHEN @padP = 1 THEN @pad ELSE PreferredAgreementDate END,
           PaymentPlanConfirmed = ISNULL(@ppc, PaymentPlanConfirmed),
           PaymentPlanConfirmedAt = CASE WHEN @ppc = 1 THEN ISNULL(PaymentPlanConfirmedAt, SYSDATETIME()) ELSE PaymentPlanConfirmedAt END
         WHERE Id = @id
       `);
+    // Same auto-flow POST / fires — a welcome call can be logged with one
+    // outcome and later corrected to Welcomed (e.g. a mis-entry), and that
+    // correction is just as real a "prerequisite met" event as getting it
+    // right the first time. maybeAutoCreateAgreement re-derives the
+    // booking's actual latest-call outcome itself (not just this row), so
+    // this is a safe no-op if some other, more recent call for the booking
+    // still isn't Welcomed, or if the bank-detail prerequisite isn't in yet.
+    if (b.Outcome === "Welcomed" && existing.recordset[0].BookingId) {
+      await maybeAutoCreateAgreement(pool, existing.recordset[0].BookingId, actorId(req));
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-welcome-calls] PUT error:", e.message);

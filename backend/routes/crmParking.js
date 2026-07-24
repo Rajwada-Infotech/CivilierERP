@@ -6,7 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { guardAndConvertHold } = require("../services/crmHoldService");
+const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
@@ -68,6 +68,26 @@ function parkingError(message, status = 400) {
   return err;
 }
 
+// Resolves the rate card row a given (already-picked) slot belongs to —
+// ParkingMaster is unique per (ProjectId, BlockId, ParkingType), so this is
+// deterministic. Used when converting an Application-stage hold into a real
+// allotment, where the caller only has the slot (not the ParkingMasterId the
+// original picker sent, since a hold row carries no such field).
+async function resolveParkingRateForSlot(pool, parkingSlotId) {
+  const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
+    .query("SELECT ProjectId, BlockId, ParkingType FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+  if (!slot.recordset.length) return null;
+  const { ProjectId, BlockId, ParkingType } = slot.recordset[0];
+  const rate = await pool.request()
+    .input("pid", sql.Int, ProjectId).input("bid", sql.Int, BlockId).input("pt", sql.NVarChar(50), ParkingType)
+    .query(`
+      SELECT TOP 1 Id, Charge, GstRate FROM dbo.ParkingMaster
+      WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1 AND (BlockId = @bid OR BlockId IS NULL)
+      ORDER BY CASE WHEN BlockId = @bid THEN 0 ELSE 1 END
+    `);
+  return rate.recordset[0] || null;
+}
+
 const ALLOTMENT_SELECT = `
   SELECT pa.*, p.ParkingType AS CurrentParkingType, p.ProjectId, p.BlockId,
          s.SlotNo, a.ApplicantName, a.Mobile, b.BookingNo
@@ -92,13 +112,23 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   if (activeErr) throw parkingError(activeErr);
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id, BookingNo, ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw parkingError("Booking not found", 404);
 
   const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-    .query("SELECT Charge, GstRate, ParkingType FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+    .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
   if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
   const { Charge, GstRate, ParkingType } = rate.recordset[0];
+
+  // Same rule already enforced for standalone parking sales (POST
+  // /standalone below) and hold placement (crmHoldService.js placeHold) —
+  // without it, parking from one Project's rate card could get sold onto a
+  // Booking for a different Project entirely, a nonsensical record that'd
+  // never reconcile against real inventory. This unit-linked path was
+  // missing the check both of its siblings already have.
+  if (rate.recordset[0].ProjectId !== booking.recordset[0].ProjectId) {
+    throw parkingError("This booking is for a different project than the selected parking rate/slot");
+  }
 
   const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
   await assertSlotAvailable(pool, parkingSlotId);
@@ -303,15 +333,40 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 });
 
 // GET /application/:applicationId — every parking allotment a customer
-// holds, whether sold alongside a unit booking or bought standalone. This
-// is the "one customer, unit + parking together" view.
+// holds, whether sold alongside a unit booking or bought standalone, PLUS
+// any still-Active Application-stage holds on a specific slot that haven't
+// converted into a real allotment yet (see POST /standalone below). Both
+// shapes are merged into one array — real rows carry Kind: 'Allotment',
+// pending picks carry Kind: 'Hold' — so this stays the single "one
+// customer, unit + parking together" view the Application wizard's Parking
+// step (and takenSlotIds availability check) reads from.
 router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const applicationId = parseInt(req.params.applicationId);
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`${ALLOTMENT_SELECT} WHERE pa.ApplicationId = @aid AND pa.IsActive = 1 ORDER BY pa.CreatedAt DESC`);
-    res.json(result.recordset);
+    const allotments = result.recordset.map((r) => ({ ...r, Kind: "Allotment" }));
+
+    const holdRows = await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT h.Id, h.EntityId AS ParkingSlotId, h.HoldUntil, s.SlotNo, s.ParkingType, s.ProjectId, s.BlockId
+      FROM dbo.CrmInventoryHold h
+      JOIN dbo.ParkingSlot s ON s.Id = h.EntityId
+      WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+    `);
+    const holds = [];
+    for (const h of holdRows.recordset) {
+      const rate = await resolveParkingRateForSlot(pool, h.ParkingSlotId);
+      const lineAmount = rate ? rate.Charge : 0;
+      const gstAmount = rate ? Math.round((lineAmount * rate.GstRate) / 100 * 100) / 100 : 0;
+      holds.push({
+        Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
+        CurrentParkingType: h.ParkingType, Quantity: 1,
+        TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
+      });
+    }
+
+    res.json([...allotments, ...holds]);
   } catch (e) {
     console.error("[crm-parking] GET /application error:", e.message);
     res.status(500).json({ error: e.message });
@@ -358,19 +413,53 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     }
 
     const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
-    await assertSlotAvailable(pool, parkingSlotId);
-    if (parkingSlotId) await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
-    let slotNo = b.ParkingSlotNo || null;
+
+    const lineAmount = Charge * qty;
+    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
+    const totalAmount = lineAmount + gstAmount;
+
+    // A specific slot is real, exclusive inventory — same as a Unit, picking
+    // it here must only place a temporary hold (placeHoldIfNeeded, same 3-day
+    // window Units get on submit), not a permanent sale, UNLESS the caller
+    // explicitly says this is a genuinely standalone sale with `Immediate:
+    // true` (see CrmParkingBooking.tsx — a dedicated "sell parking with no
+    // unit" page where no Booking will ever exist later to convert a hold
+    // into a real allotment, so holding first would leave the "sale" stuck
+    // as a hold that just expires in 3 days). The Application wizard's
+    // Parking step is the default (hold-first) caller — the real allotment
+    // there only gets created once the Application's Booking actually
+    // exists, via the hold-conversion loop in crmEntityCreation.js's
+    // createCrmBookingRecord.
+    //
+    // A quantity-only pick (no ParkingSlotId — "Open" parking sold by count,
+    // not tied to one physical slot) has no specific inventory item to
+    // reserve, so it's always recorded directly below regardless of mode.
+    let slotNo = null;
     if (parkingSlotId) {
       const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
         .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
       if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
       slotNo = slot.recordset[0].SlotNo;
-    }
 
-    const lineAmount = Charge * qty;
-    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-    const totalAmount = lineAmount + gstAmount;
+      if (!b.Immediate) {
+        const hold = await placeHoldIfNeeded(pool, {
+          entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
+          holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
+        });
+
+        await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
+          { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },
+        ]);
+
+        return res.status(201).json({
+          success: true, hold: true, id: hold.id, holdUntil: hold.holdUntil,
+          SlotNo: slotNo, TotalAmount: totalAmount,
+        });
+      }
+
+      await assertSlotAvailable(pool, parkingSlotId);
+      await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
+    }
 
     const result = await pool.request()
       .input("aid",  sql.Int, parseInt(b.ApplicationId))
@@ -398,6 +487,31 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     res.status(201).json({ success: true, id: result.recordset[0].Id, TotalAmount: totalAmount });
   } catch (e) {
     console.error("[crm-parking] POST /standalone error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// DELETE /hold/:holdId — release an Application-stage parking hold (a slot
+// picked in the wizard but not yet converted into a real allotment). Same
+// broad permission set as the rest of this file, unlike the stricter
+// "crm-bookings"-only crmHolds.js generic release route — staff who only
+// have crm-parking-booking rights can already add/remove parking here, so
+// removing a not-yet-converted hold must stay in that same permission
+// bracket. Scoped to EntityType='Parking' so this can't be pointed at a
+// Unit hold by mistake.
+router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const holdId = parseInt(req.params.holdId);
+    const row = await pool.request().input("id", sql.Int, holdId)
+      .query("SELECT EntityType FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
+    if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
+      return res.status(404).json({ error: "Active parking hold not found" });
+    }
+    await releaseHold(pool, holdId, actorId(req));
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-parking] DELETE /hold error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
   }
 });

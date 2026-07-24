@@ -69,8 +69,11 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
         u.AreaSqFt,
-        bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate,
+        bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate, bk.ConfirmDeadline,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+        ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
@@ -78,7 +81,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
@@ -88,35 +91,55 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       ORDER BY u.FloorNo, blk.BlockName, u.UnitName
     `);
 
-    const units = result.recordset.map((r) => ({
-      Id: r.Id,
-      UnitName: r.UnitName,
-      FloorNo: r.FloorNo,
-      BlockId: r.BlockId,
-      BlockName: r.BlockName,
-      Status: !r.UnitIsActive ? "Blocked" : r.BookingId ? "Booked" : r.HoldId ? "OnHold" : "Available",
-      AreaSqFt: r.AreaSqFt || null,
-      BookingId: r.BookingId || null,
-      BookingNo: r.BookingNo || null,
-      BookingDate: r.BookingDate || null,
-      TotalValue: r.TotalValue ?? null,
-      GrandTotal: r.GrandTotal ?? null,
-      BookingAmount: r.BookingAmount ?? null,
-      ApplicationId: r.ApplicationId || null,
-      ApplicationNo: r.ApplicationNo || null,
-      ApplicantName: r.ApplicantName || null,
-      Mobile: r.Mobile || null,
-      AssignedToName: r.AssignedToName || null,
-      AssignedToEmail: r.AssignedToEmail || null,
-      HoldId: r.HoldId || null,
-      HoldUntil: r.HoldUntil || null,
-      HoldApplicationId: r.HoldApplicationId || null,
-      HoldApplicationNo: r.HoldApplicationNo || null,
-      HoldApplicantName: r.HoldApplicantName || null,
-      HoldMobile: r.HoldMobile || null,
-      HoldAssignedToName: r.HoldAssignedToName || null,
-      HoldAssignedToEmail: r.HoldAssignedToEmail || null,
-    }));
+    const units = result.recordset.map((r) => {
+      // A Booking existing is no longer enough to call a unit "Booked" — it
+      // must have actually cleared its own approval gate AND had its
+      // booking-amount milestone paid (checkBookingApprovalReadiness in
+      // crmBookings.js already requires both before allowing Approve, so
+      // checking both here is belt-and-braces, not redundant guesswork).
+      // Until then a real Booking sits in the SAME "OnHold" bucket a bare
+      // pick does — TileInfoDialog on the frontend already branches on
+      // BookingId to show "Booked — Payment Pending" instead of a plain
+      // hold, so no frontend change was needed for this.
+      const confirmed = r.BookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
+      const isBooked = !!confirmed;
+      const isOnHold = !isBooked && (r.BookingId || r.HoldId);
+      return {
+        Id: r.Id,
+        UnitName: r.UnitName,
+        FloorNo: r.FloorNo,
+        BlockId: r.BlockId,
+        BlockName: r.BlockName,
+        Status: !r.UnitIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
+        AreaSqFt: r.AreaSqFt || null,
+        BookingId: r.BookingId || null,
+        BookingNo: r.BookingNo || null,
+        BookingStatus: r.BookingStatus || null,
+        BookingDate: r.BookingDate || null,
+        TotalValue: r.TotalValue ?? null,
+        GrandTotal: r.GrandTotal ?? null,
+        BookingAmount: r.BookingAmount ?? null,
+        ApplicationId: r.ApplicationId || null,
+        ApplicationNo: r.ApplicationNo || null,
+        ApplicantName: r.ApplicantName || null,
+        Mobile: r.Mobile || null,
+        AssignedToName: r.AssignedToName || null,
+        AssignedToEmail: r.AssignedToEmail || null,
+        HoldId: r.HoldId || null,
+        // A still-unconfirmed Booking's countdown comes from its own
+        // ConfirmDeadline snapshot (the raw Hold row gets marked
+        // 'Converted' the instant the Booking was created, so it can't be
+        // relied on afterwards) — a bare pre-Booking hold uses the live
+        // hold's HoldUntil as before.
+        HoldUntil: r.BookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
+        HoldApplicationId: r.HoldApplicationId || null,
+        HoldApplicationNo: r.HoldApplicationNo || null,
+        HoldApplicantName: r.HoldApplicantName || null,
+        HoldMobile: r.HoldMobile || null,
+        HoldAssignedToName: r.HoldAssignedToName || null,
+        HoldAssignedToEmail: r.HoldAssignedToEmail || null,
+      };
+    });
 
     res.json(units);
   } catch (err) {

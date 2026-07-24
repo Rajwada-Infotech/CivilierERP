@@ -170,10 +170,22 @@ router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), 
   const id = parseInt(req.params.id, 10);
   try {
     const pool0 = getPool();
-    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId, CustomerApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
     if (!deedBooking.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
     const activeErr0 = await requireActiveBooking(pool0, deedBooking.recordset[0].BookingId);
     if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    // The stated sequence is Agreement Executed -> Customer Approval ->
+    // Director Approval ("the third and final sign-off gate") -- enforced
+    // here, not just described in a comment, the same way CrmBooking.tsx's
+    // getNextStep() requires both SeniorApprovalStatus and
+    // CustomerApprovalStatus to be 'Approved' before the Agreement step is
+    // considered done. Without this, a director could approve (and trigger
+    // the handover-ready notification below) a deed the customer hasn't
+    // approved yet -- or hasn't even been sent to.
+    if (deedBooking.recordset[0].CustomerApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: `Customer must approve the sales deed before director approval (current status: ${deedBooking.recordset[0].CustomerApprovalStatus || "not sent"})` });
+    }
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

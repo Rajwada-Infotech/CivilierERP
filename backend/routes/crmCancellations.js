@@ -16,6 +16,7 @@ const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
 const { findActiveHold, releaseHold } = require("../services/crmHoldService");
+const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -233,6 +234,13 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
 
     await pool.request().input("bid", sql.Int, bookingId)
       .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+
+    // The Application was force-advanced to 'Approved' the instant this
+    // Booking was created and nothing has touched it since — without this,
+    // it would sit at 'Approved' forever with a Cancelled Booking
+    // underneath, indistinguishable from a genuinely active sale.
+    await syncApplicationOnBookingTerminal(pool, bookingId, "Cancelled", "BookingCancelled",
+      "Application cancelled — its booking was cancelled", actorId(req));
 
     await releaseAllParkingForBooking(pool, bookingId);
 

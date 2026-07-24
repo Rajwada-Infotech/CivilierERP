@@ -817,6 +817,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   sorted.map((row) => {
                     const lockReason = isRowLocked?.(row) || null;
                     const deleteOnlyLockReason = isDeleteLocked?.(row) || null;
+                    // None of the backends these pages call return the
+                    // inserted row's real ID on POST — so a freshly-added
+                    // row sits on this client-side placeholder ID until the
+                    // page's invalidateQueries refetch replaces it with the
+                    // real one. Editing/deleting during that brief window
+                    // would PUT/DELETE to a NaN id (parseInt on
+                    // "record-<timestamp>") and fail. Lock the row instead
+                    // of letting that be the user's first sign anything was
+                    // wrong.
+                    const pendingLockReason = row._id.startsWith("record-")
+                      ? "Still saving — try again in a moment"
+                      : null;
                     return (
                     <tr
                       key={row._id}
@@ -893,11 +905,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               )}
                               {rowActions?.(row, data)}
                               {canEdit && (
-                                lockReason ? (
+                                (lockReason || pendingLockReason) ? (
                                   <button
                                     disabled
                                     className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
-                                    title={lockReason}
+                                    title={lockReason || pendingLockReason || undefined}
                                   >
                                     <Edit2 size={13} />
                                   </button>
@@ -912,11 +924,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 )
                               )}
                               {canDelete && (
-                                (lockReason || deleteOnlyLockReason) ? (
+                                (lockReason || deleteOnlyLockReason || pendingLockReason) ? (
                                   <button
                                     disabled
                                     className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
-                                    title={lockReason || deleteOnlyLockReason || undefined}
+                                    title={lockReason || deleteOnlyLockReason || pendingLockReason || undefined}
                                   >
                                     <Trash2 size={13} />
                                   </button>

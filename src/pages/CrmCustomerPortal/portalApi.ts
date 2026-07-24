@@ -12,6 +12,10 @@ export function authHeaders() {
 async function get(path: string) {
   const res = await fetch(`${API}${path}`, { headers: authHeaders() });
   if (res.status === 401) throw new Error("unauthorized");
+  if (res.status === 403) {
+    const body = await res.json().catch(() => ({}));
+    if (body.mustChangePassword) throw new Error("password_change_required");
+  }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Request failed");
   return res.json();
 }

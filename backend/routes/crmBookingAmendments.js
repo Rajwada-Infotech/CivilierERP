@@ -93,10 +93,17 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(pool, reqRow.BookingId, proposedChange, actor);
       else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(pool, reqRow.TargetId, proposedChange, actor);
       else if (reqRow.Action === "Release") applyResult = await extraChargesRouter.applyReleaseExtraCharge(pool, reqRow.TargetId);
+      // Unrecognized Action on a known ChangeType — reject rather than fall
+      // through to marking this Approved with nothing actually applied.
+      // (Guards against bad/legacy data or a future Action value added on
+      // the request-creation side — crmExtraCharges.js/crmParking.js —
+      // without a matching branch here.)
+      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ExtraCharge` });
     } else if (reqRow.ChangeType === "ParkingAllotment") {
       if (reqRow.Action === "Add") applyResult = await parkingRouter.applyAddParking(pool, reqRow.BookingId, proposedChange, actor);
       else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(pool, reqRow.TargetId, proposedChange);
       else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(pool, reqRow.TargetId);
+      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` });
     } else {
       return res.status(400).json({ error: `Unknown ChangeType: ${reqRow.ChangeType}` });
     }
