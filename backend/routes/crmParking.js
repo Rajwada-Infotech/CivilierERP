@@ -340,13 +340,22 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-      .query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      .query("SELECT Id, ProjectId FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
 
     const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .query("SELECT Charge, GstRate, ParkingType FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+      .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
     if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
     const { Charge, GstRate, ParkingType } = rate.recordset[0];
+
+    // The matrix's own dropdown lists every Application system-wide with no
+    // project filter — without this, parking in one Project could get sold
+    // to a customer whose actual Application is for a different Project
+    // entirely, a nonsensical record that'd never reconcile against real
+    // inventory. Same rule enforced for hold placement (crmHoldService.js).
+    if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
+      return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
+    }
 
     const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
     await assertSlotAvailable(pool, parkingSlotId);

@@ -42,8 +42,24 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   }
 
   const app = await pool.request().input("aid", sql.Int, applicationId)
-    .query("SELECT Id, ApplicantName FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+    .query("SELECT Id, ApplicantName, ProjectId FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
   if (!app.recordset.length) { const e = new Error("Application not found"); e.status = 404; throw e; }
+
+  // The Unit/Parking Matrix's own "Place Hold" dropdown lists every
+  // Application system-wide with no project filter — without this check, a
+  // hold placed for the wrong customer's Application (a different project
+  // entirely) would sail through silently: a genuinely nonsensical, unsynced
+  // record where the "who's holding this" data doesn't even belong to the
+  // same building the entity is in.
+  const entityProject = entityType === "Unit"
+    ? await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @eid")
+    : await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.ParkingSlot WHERE Id = @eid");
+  if (!entityProject.recordset.length) { const e = new Error(`${entityType} not found`); e.status = 404; throw e; }
+  if (entityProject.recordset[0].ProjectId !== app.recordset[0].ProjectId) {
+    const e = new Error(`This Application is for a different project than the ${entityType.toLowerCase()} being held`);
+    e.status = 400;
+    throw e;
+  }
 
   await assertEntityNotTaken(pool, entityType, entityId);
 

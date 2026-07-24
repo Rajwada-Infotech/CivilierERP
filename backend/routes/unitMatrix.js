@@ -68,7 +68,9 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const result = await request.query(`
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
+        u.AreaSqFt,
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate,
+        bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
@@ -93,9 +95,13 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       BlockId: r.BlockId,
       BlockName: r.BlockName,
       Status: !r.UnitIsActive ? "Blocked" : r.BookingId ? "Booked" : r.HoldId ? "OnHold" : "Available",
+      AreaSqFt: r.AreaSqFt || null,
       BookingId: r.BookingId || null,
       BookingNo: r.BookingNo || null,
       BookingDate: r.BookingDate || null,
+      TotalValue: r.TotalValue ?? null,
+      GrandTotal: r.GrandTotal ?? null,
+      BookingAmount: r.BookingAmount ?? null,
       ApplicationId: r.ApplicationId || null,
       ApplicationNo: r.ApplicationNo || null,
       ApplicantName: r.ApplicantName || null,

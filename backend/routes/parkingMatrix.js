@@ -70,6 +70,7 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       SELECT
         s.Id, s.SlotNo, s.ParkingType, s.BlockId, blk.BlockName, s.IsActive AS SlotIsActive,
         pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo,
+        pa.TotalAmount, pa.PaymentStatus AS AllotmentPaymentStatus, pa.Quantity,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
         h.Id AS HoldId, h.HoldUntil, h.ApplicationId AS HoldApplicationId,
@@ -99,6 +100,9 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       BookingId: r.BookingId || null,
       BookingNo: r.BookingNo || null,
       AllotmentDate: r.AllotmentDate || null,
+      TotalAmount: r.TotalAmount ?? null,
+      AllotmentPaymentStatus: r.AllotmentPaymentStatus || null,
+      Quantity: r.Quantity ?? null,
       ApplicationId: r.ApplicationId || null,
       ApplicationNo: r.ApplicationNo || null,
       ApplicantName: r.ApplicantName || null,

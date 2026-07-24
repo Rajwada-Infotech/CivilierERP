@@ -136,6 +136,9 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: "Parking slot added successfully" });
   } catch (err) {
+    if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
+      return res.status(409).json({ error: `Parking slot "${SlotNo}" already exists in this Block.` });
+    }
     console.error("[parking-slot-master] POST error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -200,6 +203,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: "Parking slot updated successfully" });
   } catch (err) {
+    if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
+      return res.status(409).json({ error: `Parking slot "${SlotNo}" already exists in this Block.` });
+    }
     console.error("[parking-slot-master] PUT error:", err.message);
     res.status(500).json({ error: err.message });
   }

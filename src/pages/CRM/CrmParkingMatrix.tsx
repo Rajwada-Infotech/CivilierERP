@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Car, Clock, User, FileText } from "lucide-react";
+import { Car, Clock, User, FileText, IndianRupee, CalendarClock, CheckCircle2 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -37,6 +37,9 @@ interface MatrixSlot {
   BookingId: number | null;
   BookingNo: string | null;
   AllotmentDate: string | null;
+  TotalAmount: number | null;
+  AllotmentPaymentStatus: string | null;
+  Quantity: number | null;
   ApplicationId: number | null;
   ApplicationNo: string | null;
   ApplicantName: string | null;
@@ -59,6 +62,11 @@ const STATUS_STYLE: Record<string, string> = {
   OnHold: "bg-amber-500/15 text-amber-600 border border-amber-400/30",
   Blocked: "bg-muted text-muted-foreground border border-border",
 };
+const PAYMENT_STATUS_STYLE: Record<string, string> = {
+  Paid: "text-emerald-600 bg-emerald-50 border-emerald-200",
+  Pending: "text-amber-600 bg-amber-50 border-amber-200",
+};
+const fmtMoney = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
 async function fetchOptions<T>(url: string): Promise<T[]> {
   const res = await fetchWithAuth(url);
@@ -130,10 +138,18 @@ function BookParkingDialog({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: apps = [] } = useQuery({
+  const { data: allApps = [] } = useQuery({
     queryKey: ["crm-applications-for-parking"],
     queryFn: () => fetchOptions<any>(APP_API),
   });
+  // Scoped to this slot's own Project — the backend now rejects a
+  // cross-project sale outright (see crmParking.js POST /standalone), but
+  // showing every Application system-wide here made that mismatch trivial
+  // to create by accident in the first place.
+  const apps = useMemo(
+    () => (allApps as any[]).filter((a: any) => String(a.ProjectId) === projectId),
+    [allApps, projectId]
+  );
 
   const { data: rate } = useQuery({
     queryKey: ["parking-rate", projectId, slot.BlockId, slot.ParkingType],
@@ -189,11 +205,11 @@ function BookParkingDialog({
             <select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select customer</option>
-              {(apps as any[]).map((a: any) => (
+              {apps.map((a: any) => (
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
             </select>
-            <p className="text-[11px] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own.</p>
+            <p className="text-[11px] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own. Only Applications for this same Project are shown.</p>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Quantity</label>
@@ -218,17 +234,21 @@ function BookParkingDialog({
   );
 }
 
-function PlaceHoldDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
+function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
   const [holdDays, setHoldDays] = useState("3");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: apps = [] } = useQuery({
+  const { data: allApps = [] } = useQuery({
     queryKey: ["crm-applications-for-parking"],
     queryFn: () => fetchOptions<any>(APP_API),
   });
+  const apps = useMemo(
+    () => (allApps as any[]).filter((a: any) => String(a.ProjectId) === projectId),
+    [allApps, projectId]
+  );
 
   const handlePlace = async () => {
     if (!applicationId) { toast.error("Select a customer"); return; }
@@ -263,10 +283,13 @@ function PlaceHoldDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => v
             <select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select customer</option>
-              {(apps as any[]).map((a: any) => (
+              {apps.map((a: any) => (
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
             </select>
+            {apps.length === 0 && (
+              <p className="text-[11px] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this slot can hold it.</p>
+            )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
@@ -359,43 +382,79 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-heading">
-            Slot {slot.SlotNo} — {isHold ? (hasUnpaidAllotment ? "Booked, Payment Pending" : "On Hold") : "Booked"}
+          <DialogTitle className="font-heading flex items-center gap-2">
+            <Car size={18} className="text-primary" />
+            Slot {slot.SlotNo}
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${overdue ? "bg-rose-500/15 text-rose-600 border-rose-400/30" : STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
+              {isHold ? (hasUnpaidAllotment ? "Booked — Payment Pending" : overdue ? "Hold Overdue" : "On Hold") : "Booked"}
+            </span>
           </DialogTitle>
         </DialogHeader>
-        <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground flex items-center gap-1"><FileText size={12} /> Application</span>
-            <span className="font-medium">{appNo || "—"}</span>
-          </div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Applicant</span><span className="font-medium">{applicantName || "—"}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground flex items-center gap-1"><User size={12} /> Salesperson</span>
-            <span className="font-medium text-right">{assignedName || "—"}{assignedEmail ? <span className="block text-[11px] text-muted-foreground font-normal">{assignedEmail}</span> : null}</span>
-          </div>
-          {hasUnpaidAllotment && (
-            <div className="flex justify-between"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{slot.BookingNo || "Standalone parking sale"}</span></div>
-          )}
-          {isHold ? (
-            <div className="flex justify-between items-center pt-1 border-t border-border/60">
-              <span className="text-muted-foreground">{overdue ? "Hold" : "Expires in"}</span>
-              <span className={`font-medium ${overdue ? "text-rose-600" : "text-amber-600"}`}>{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span>
+
+        {(slot.BlockName || slot.ParkingType) && (
+          <p className="text-xs text-muted-foreground -mt-2">{slot.ParkingType}{slot.BlockName ? ` · ${slot.BlockName}` : ""}{slot.Quantity ? ` · Qty ${slot.Quantity}` : ""}</p>
+        )}
+
+        <div className="rounded-xl border border-border p-4 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Application & Customer</h3>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div><span className="text-muted-foreground block">Application No</span><span className="font-semibold text-sm">{appNo || "—"}</span></div>
+            <div><span className="text-muted-foreground block">Applicant</span><span className="font-semibold text-sm">{applicantName || "—"}</span></div>
+            <div><span className="text-muted-foreground block">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
+            <div>
+              <span className="text-muted-foreground flex items-center gap-1"><User size={11} /> Salesperson</span>
+              <span className="font-medium">{assignedName || "—"}</span>
+              {assignedEmail && <span className="block text-[11px] text-muted-foreground">{assignedEmail}</span>}
             </div>
-          ) : (
-            <>
-              <div className="flex justify-between pt-1 border-t border-border/60"><span className="text-muted-foreground">Booking No</span><span className="font-medium">{slot.BookingNo || "Standalone parking sale"}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Sold on</span><span className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</span></div>
-            </>
-          )}
-          {hasUnpaidAllotment && (
-            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
-              Parking charge not yet paid — this tile flips to Booked automatically once it's received.
-            </p>
-          )}
+          </div>
         </div>
+
+        {isHold ? (
+          <div className={`rounded-xl border p-4 space-y-2 ${overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`}>
+            <h3 className={`text-sm font-semibold flex items-center gap-1.5 ${overdue ? "text-rose-800" : "text-amber-800"}`}>
+              <Clock size={14} /> Hold Status
+            </h3>
+            <div className="flex items-center justify-between text-xs">
+              <span className={overdue ? "text-rose-700" : "text-amber-700"}>{overdue ? "Overdue since" : "Expires in"}</span>
+              <span className={`font-bold text-sm ${overdue ? "text-rose-700" : "text-amber-700"}`}>{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span>
+            </div>
+            {hasUnpaidAllotment && (
+              <div className="text-xs pt-1 border-t border-current/10">
+                <span className="text-muted-foreground block">Booking</span>
+                <span className="font-semibold">{slot.BookingNo || "Standalone parking sale"}</span>
+              </div>
+            )}
+            {hasUnpaidAllotment && (
+              <p className="text-[11px] text-amber-700 bg-amber-100/60 border border-amber-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+                <CheckCircle2 size={12} className="shrink-0" /> Parking charge not yet paid — this tile flips to Booked automatically once it's received.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-600" /> Sale</h3>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><span className="text-muted-foreground block">Booking</span><span className="font-semibold text-sm">{slot.BookingNo || "Standalone parking sale"}</span></div>
+              <div>
+                <span className="text-muted-foreground block">Payment Status</span>
+                <span className={`inline-block text-[11px] px-1.5 py-0.5 rounded-full border font-medium ${PAYMENT_STATUS_STYLE[slot.AllotmentPaymentStatus || ""] || ""}`}>
+                  {slot.AllotmentPaymentStatus || "—"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1"><CalendarClock size={11} className="text-muted-foreground" /><span className="text-muted-foreground">Sold on</span></div>
+              <div className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</div>
+            </div>
+          </div>
+        )}
+
+        {slot.TotalAmount != null && (
+          <div className="rounded-xl border border-border p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Charge</h3>
+            <div className="text-sm font-bold">{fmtMoney(slot.TotalAmount)}</div>
+          </div>
+        )}
 
         {showExtend && (
           <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
@@ -620,7 +679,7 @@ export function ParkingMatrixPage() {
         />
       )}
       {sellSlot && <BookParkingDialog slot={sellSlot} projectId={projectId} onClose={() => setSellSlot(null)} />}
-      {holdSlot && <PlaceHoldDialog slot={holdSlot} onClose={() => setHoldSlot(null)} />}
+      {holdSlot && <PlaceHoldDialog slot={holdSlot} projectId={projectId} onClose={() => setHoldSlot(null)} />}
       {infoSlot && <TileInfoDialog slot={infoSlot} onClose={() => setInfoSlot(null)} />}
     </>
   );
