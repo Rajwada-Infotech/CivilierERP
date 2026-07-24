@@ -401,7 +401,7 @@ export default function NewInvoiceScreen() {
         EEmiStartDate: emiEnabled ? emiStartDate : null,
         EReminder: dueDate || null,
         ERemarks: remarks || null,
-        ECompanyId: companyId ? Number(companyId) : null,
+        ECompanyId: Number(companyId), // validated non-empty above (line 370 throws if falsy)
         ECostCenter: costCenterLabel || null,
         ESourceType: (selectedPO ? "PO" : selectedWD ? "WORK_DONE" : grnMerged ? "GRN" : sourceKind === "TOD" ? "TOD" : null) as any,
         ESourceId: selectedPO?.PurchaseOrderID ?? selectedWD?.ID ?? selectedGRNIds[0] ?? null,
