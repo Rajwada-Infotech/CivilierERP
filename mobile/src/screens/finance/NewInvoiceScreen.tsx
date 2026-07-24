@@ -172,7 +172,6 @@ export default function NewInvoiceScreen() {
   const [sgstRate, setSgstRate] = useState("0");
   const [igstRate, setIgstRate] = useState("0");
   const [remarks, setRemarks] = useState("");
-  const [costCenterId, setCostCenterId] = useState<number | null>(null);
   const [costCenterLabel, setCostCenterLabel] = useState("");
 
   const [emiEnabled, setEmiEnabled] = useState(false);
@@ -643,7 +642,6 @@ export default function NewInvoiceScreen() {
         onClose={() => setCostCenterPickerOpen(false)}
         onSelect={(id) => {
           setCostCenterLabel(costCenters.find((c) => String(c.id) === id)?.label ?? "");
-          setCostCenterId(Number(id));
           setCostCenterPickerOpen(false);
         }}
       />

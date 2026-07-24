@@ -147,7 +147,6 @@ export default function ReceivedPaymentListScreen() {
 
   const modeOptions: PickerOption[] = [{ key: "All", label: "All Modes" }, ...PAYMENT_MODES.map((m) => ({ key: m, label: m }))];
   const statusOptions: PickerOption[] = [{ key: "All", label: "All Statuses" }, ...STATUSES.map((s) => ({ key: s, label: s }))];
-  const activeFilterCount = (modeFilter !== "All" ? 1 : 0) + (statusFilter !== "All" ? 1 : 0);
 
   const ListHeader = (
     <View>
