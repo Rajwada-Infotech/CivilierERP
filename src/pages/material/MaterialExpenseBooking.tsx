@@ -1185,20 +1185,41 @@ export default function MaterialExpenseBooking() {
 
   const showDocSection = !!form.companyId;
 
-  // "Filter by PO" dropdown options — ALL POs (goods + services, unlike the
-  // Service-only "PO" tab inside DocSelectorPanel), narrowed by the same
-  // company/project/finYear filters already driving the rest of Document
-  // Selection. Picking one here doesn't book anything itself — it just
-  // narrows DocSelectorPanel's own GRN tab down to that PO's GRNs.
-  const filteredAllPOs = useMemo(
-    () =>
-      filterServicePOs(allPOList, {
-        companyId: form.companyId ?? null,
-        projectId: form.projectSite ? parseInt(form.projectSite, 10) : null,
-        finYear: form.financialYear || null,
-      }),
-    [allPOList, form.companyId, form.projectSite, form.financialYear],
-  );
+  // "Filter by PO" dropdown — all Approved/Received POs (goods + services),
+  // narrowed to match whatever company/project/finYear/supplier the user has
+  // already selected. Does NOT restrict to service-eligible only (that is
+  // the job of the "PO" tab inside DocSelectorPanel).
+  const filteredAllPOs = useMemo(() => {
+    const companyId   = form.companyId   ? Number(form.companyId)   : null;
+    const projectId   = form.projectSite ? Number(form.projectSite) : null;
+    // Derive year tokens from selected finYear label, e.g. "FY 2026-27" → ["26","27"]
+    const fyTokens    = form.financialYear
+      ? (form.financialYear.match(/\d{2,4}/g) || []).map((s: string) => s.slice(-2))
+      : null;
+
+    return allPOList.filter((po: any) => {
+      // Must be Approved or Received
+      if (po.Status !== "Approved" && po.Status !== "Received") return false;
+      // Company match
+      if (companyId && po.CompanyId && Number(po.CompanyId) !== companyId) return false;
+      // Project match
+      if (projectId && po.ProjectId && Number(po.ProjectId) !== projectId) return false;
+      // Financial year — match any year token against the PO's DocNo tokens
+      if (fyTokens?.length) {
+        const docTokens = ((po.DocNo || po.PurchaseOrderNo || "").match(/\d{2,4}/g) || []).map(
+          (s: string) => s.slice(-2)
+        );
+        if (!docTokens.some((t: string) => fyTokens.includes(t))) return false;
+      }
+      // Supplier — match by ID (supplierLHeadId ↔ po.SupplierID) so name
+      // string differences between the two data sources don't break the filter
+      const supplierHeadId = (form as any).supplierLHeadId
+        ? Number((form as any).supplierLHeadId)
+        : null;
+      if (supplierHeadId && po.SupplierID && Number(po.SupplierID) !== supplierHeadId) return false;
+      return true;
+    });
+  }, [allPOList, form.companyId, form.projectSite, form.financialYear, (form as any).supplierLHeadId]);
 
   // Drop a stale PO filter selection once it no longer matches the current
   // company/project/finYear filters, instead of silently continuing to
@@ -1501,7 +1522,56 @@ export default function MaterialExpenseBooking() {
                       </p>
                       <Select
                         value={filterPOId != null ? String(filterPOId) : "__none__"}
-                        onValueChange={(val) => setFilterPOId(val === "__none__" ? null : parseInt(val, 10))}
+                        onValueChange={(val) => {
+                          const id = val === "__none__" ? null : parseInt(val, 10);
+                          setFilterPOId(id);
+                          // Auto-fill company / project / finYear / supplier
+                          // from the selected PO when those fields are empty
+                          if (!id) return;
+                          const po = allPOList.find((p) => p.PurchaseOrderID === id);
+                          if (!po) return;
+                          setForm((prev) => {
+                            const updates: Partial<typeof prev> = {};
+                            // Company
+                            if (!prev.companyId && po.CompanyId) {
+                              updates.companyId = po.CompanyId;
+                              updates.projectSite = ""; // reset project when company changes
+                            }
+                            // Project — only set if company matches or wasn't set
+                            if (!prev.projectSite && po.ProjectId) {
+                              updates.projectSite = String(po.ProjectId);
+                            }
+                            // Financial year — derive from PO DocNo
+                            if (!prev.financialYear && po.DocNo) {
+                              const m = po.DocNo.match(/(\d{4})-(\d{2})/); // e.g. PO-2026-00014
+                              if (m) {
+                                const yr = parseInt(m[1], 10);
+                                // Indian FY: DocNo year = start year of FY
+                                const fyStr = `FY ${yr}-${String(yr + 1).slice(-2)}`;
+                                const found = activeFinYears.find((fy) =>
+                                  fy.year === fyStr || fy.year.includes(String(yr))
+                                );
+                                if (found) updates.financialYear = found.year;
+                              }
+                            }
+                            // Supplier — find by SupplierID (reliable) rather
+                            // than by name string (brittle across data sources)
+                            if (!prev.supplier && (po as any).SupplierID) {
+                              const head = supplierHeads.find(
+                                (s) => s.id === Number((po as any).SupplierID)
+                              );
+                              if (head) {
+                                updates.supplier = head.label;
+                                updates.supplierLHeadId = head.id;
+                              } else if (po.SupplierName) {
+                                // Fallback: set name so field isn't blank even
+                                // if supplierHeads hasn't loaded yet
+                                updates.supplier = po.SupplierName;
+                              }
+                            }
+                            return Object.keys(updates).length ? { ...prev, ...updates } : prev;
+                          });
+                        }}
                       >
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue placeholder={loadingAllPOs ? "Loading…" : "All POs"} />

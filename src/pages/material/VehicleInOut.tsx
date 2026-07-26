@@ -11,6 +11,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +21,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+
+const VIO_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Entry Time", accessor: (r) => r.EntryTime ? new Date(r.EntryTime as string).toLocaleString("en-IN") : "" },
+  { header: "Vehicle No", accessor: "VehicleNo" },
+  { header: "Supplier", accessor: "SupplierName" },
+  { header: "PO Number", accessor: "PONumber" },
+  { header: "Status", accessor: "Status" },
+];
+
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -1299,6 +1311,13 @@ export default function VehicleInOut() {
         action={
           !showForm ? (
             <div className="flex items-center gap-2 flex-wrap">
+              <ExportMenu
+                data={records as unknown as Record<string, unknown>[]}
+                columns={VIO_EXPORT_COLUMNS}
+                title="Vehicle In/Out"
+                filename="vehicle-in-out"
+                disabled={!records.length || !rights.canExport}
+              />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}

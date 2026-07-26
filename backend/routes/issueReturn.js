@@ -74,9 +74,17 @@ router.get("/issues/:id/items", requirePageRight("material-issue-return", "view"
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("IssueId", sql.Int, id).query(`
-      SELECT ii.ItemId, ii.M_Id, ii.ItemName, ii.Quantity, ii.UOMSymbol
-      FROM dbo.MaterialIssueItems ii
-      WHERE ii.IssueId = @IssueId
+      SELECT
+        mii.IssueItemId AS ItemId,
+        mii.ItemId      AS M_Id,
+        img.M_Name      AS ItemName,
+        mii.Quantity,
+        uom.Symbol      AS UOMSymbol
+      FROM dbo.MaterialIssueItems mii
+      LEFT JOIN dbo.Item_Master_Group img
+        ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
+      WHERE mii.IssueId = @IssueId
     `);
     res.json(result.recordset);
   } catch (err) {

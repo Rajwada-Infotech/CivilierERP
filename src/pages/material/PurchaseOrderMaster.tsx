@@ -99,7 +99,8 @@ import {
   MessageCircle,
   Lock,
 } from "lucide-react";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { relevantUOMs, convertRate } from "@/lib/uomConversion";
 import {
   alternatesForItem,
@@ -228,6 +229,18 @@ interface POListItem {
   poType: string;
   sourceWODocNo: string | null;
 }
+
+const PO_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "docNo" },
+  { header: "PO Number", accessor: "poNumber" },
+  { header: "Date", accessor: (r) => r.poDate ? new Date(r.poDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Supplier", accessor: "supplierName" },
+  { header: "Company", accessor: "companyName" },
+  { header: "Project", accessor: "projectName" },
+  { header: "Total Amount", accessor: (r) => Number(r.totalAmount) || 0 },
+  { header: "Status", accessor: "status" },
+  { header: "Type", accessor: "poType" },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -2366,6 +2379,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           icon={ShoppingCart}
           action={
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={listData as unknown as Record<string, unknown>[]}
+                columns={PO_EXPORT_COLUMNS}
+                title="Purchase Orders"
+                filename="purchase-orders"
+                disabled={!listData.length || !rights.canExport}
+              />
               <input
                 ref={importFileInputRef}
                 type="file"

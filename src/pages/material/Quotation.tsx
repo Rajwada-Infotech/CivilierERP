@@ -7,6 +7,8 @@ import * as qtApi from "@/api/quotationApi";
 import * as mrApi from "@/api/materialRequestApi";
 import { getSuppliers, getCompanies, getProjects } from "@/api/purchaseOrdersApi";
 import { getTCRecords } from "@/api/tcMasterApi";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   CalendarDays,
   FileText,
@@ -71,6 +73,22 @@ const Field = ({
   </div>
 );
 
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN");
+};
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Date", accessor: (r) => fmtDate(r.DocDate as string) },
+  { header: "Suppliers", accessor: (r) => Number(r.SupplierCount) || 0 },
+  { header: "Items", accessor: (r) => Number(r.ItemCount) || 0 },
+  { header: "Status", accessor: "Status" },
+];
+
 const SectionHeader = ({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub?: string }) => (
   <div className="flex items-center gap-3 pb-3 border-b border-border mb-4">
     <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
@@ -82,15 +100,6 @@ const SectionHeader = ({ icon: Icon, title, sub }: { icon: React.ElementType; ti
     </div>
   </div>
 );
-
-const fmtDate = (d?: string | null) =>
-  d
-    ? new Date(d).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : "—";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1152,10 +1161,21 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
       subtitle="Request and compare supplier quotes against a tagged Material Request"
       icon={FileSpreadsheet}
       action={
-        viewMode === "list" && rights.canCreate ? (
-          <Button type="button" onClick={startNew} className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0">
-            <Plus size={14} /> New Quotation
-          </Button>
+        viewMode === "list" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportMenu
+              data={rows as unknown as Record<string, unknown>[]}
+              columns={EXPORT_COLUMNS}
+              title="Quotations"
+              filename="quotations"
+              disabled={loadingList || !rows.length || !rights.canExport}
+            />
+            {rights.canCreate && (
+              <Button type="button" onClick={startNew} className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0">
+                <Plus size={14} /> New Quotation
+              </Button>
+            )}
+          </div>
         ) : undefined
       }
     >

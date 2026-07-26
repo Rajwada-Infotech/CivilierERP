@@ -281,14 +281,14 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           </div>
         ))}
         {stats && (
-          <p className="text-[9px] text-white/25 mt-2">{stats.workOrders.toLocaleString("en-IN")} total work orders</p>
+          <p className="text-[9px] text-white/25 mt-2">{(stats.workOrders ?? 0).toLocaleString("en-IN")} total work orders</p>
         )}
       </FloatingCard>
 
       <FloatingCard delay={0.6} className="top-[32%] right-[2%] w-44 p-4" style={{ zIndex: 2 }}>
         <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Active Projects</p>
         {stats ? (
-          <p className="text-xl font-bold text-white">{stats.projects.toLocaleString("en-IN")}</p>
+          <p className="text-xl font-bold text-white">{(stats.projects ?? 0).toLocaleString("en-IN")}</p>
         ) : (
           <div className="h-6 w-10 rounded bg-white/10 animate-pulse mb-1" />
         )}
@@ -311,7 +311,7 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           <div>
             <p className="text-xs font-semibold text-white/80">Supplier Network</p>
             {stats ? (
-              <p className="text-[10px] text-white/35">{stats.activeSuppliers} active · {stats.quotations} quotations</p>
+              <p className="text-[10px] text-white/35">{stats.activeSuppliers ?? 0} active · {stats.quotations ?? 0} quotations</p>
             ) : (
               <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse mt-1" />
             )}
@@ -325,7 +325,7 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(167,139,250,0.8)" }}>GRN Module</span>
         </div>
         {stats ? (
-          <p className="text-xs text-white/60">{stats.grns.toLocaleString("en-IN")} receipts recorded</p>
+          <p className="text-xs text-white/60">{(stats.grns ?? 0).toLocaleString("en-IN")} receipts recorded</p>
         ) : (
           <div className="h-3 w-32 rounded bg-white/10 animate-pulse" />
         )}
@@ -529,7 +529,7 @@ export default function Login() {
 
   useEffect(() => {
     fetch("/api/public-stats")
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error("stats unavailable"); return r.json(); })
       .then((d) => setStats(d))
       .catch(() => {/* keep null, cards show skeleton */});
   }, []);
@@ -657,7 +657,7 @@ export default function Login() {
                   animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1.4, repeat: Infinity }} />
               </div>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.projects.toLocaleString("en-IN")}</span>
+                <span className="text-2xl font-bold text-white leading-none">{(stats.projects ?? 0).toLocaleString("en-IN")}</span>
               ) : (
                 <div className="h-7 w-12 rounded bg-white/10 animate-pulse" />
               )}
@@ -674,7 +674,7 @@ export default function Login() {
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 120 }}>
               <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">GRNs Received</span>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.grns.toLocaleString("en-IN")}</span>
+                <span className="text-2xl font-bold text-white leading-none">{(stats.grns ?? 0).toLocaleString("en-IN")}</span>
               ) : (
                 <div className="h-7 w-16 rounded bg-white/10 animate-pulse" />
               )}
@@ -696,7 +696,7 @@ export default function Login() {
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 108 }}>
               <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Work Orders</span>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.workOrders.toLocaleString("en-IN")}</span>
+                <span className="text-2xl font-bold text-white leading-none">{(stats.workOrders ?? 0).toLocaleString("en-IN")}</span>
               ) : (
                 <div className="h-7 w-14 rounded bg-white/10 animate-pulse" />
               )}
@@ -712,7 +712,7 @@ export default function Login() {
                 </svg>
                 <div>
                   {stats ? (
-                    <p className="text-xs font-bold text-white/80">{stats.workOrderCompletionPct}%</p>
+                    <p className="text-xs font-bold text-white/80">{stats.workOrderCompletionPct ?? 0}%</p>
                   ) : (
                     <div className="h-3 w-8 rounded bg-white/10 animate-pulse mb-1" />
                   )}
