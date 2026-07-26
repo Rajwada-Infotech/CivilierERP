@@ -1192,7 +1192,6 @@ export default function MaterialExpenseBooking() {
   const filteredAllPOs = useMemo(() => {
     const companyId   = form.companyId   ? Number(form.companyId)   : null;
     const projectId   = form.projectSite ? Number(form.projectSite) : null;
-    const supplier    = form.supplier?.toLowerCase().trim() || null;
     // Derive year tokens from selected finYear label, e.g. "FY 2026-27" → ["26","27"]
     const fyTokens    = form.financialYear
       ? (form.financialYear.match(/\d{2,4}/g) || []).map((s: string) => s.slice(-2))
@@ -1212,11 +1211,15 @@ export default function MaterialExpenseBooking() {
         );
         if (!docTokens.some((t: string) => fyTokens.includes(t))) return false;
       }
-      // Supplier name match (case-insensitive)
-      if (supplier && (po.SupplierName || "").toLowerCase().trim() !== supplier) return false;
+      // Supplier — match by ID (supplierLHeadId ↔ po.SupplierID) so name
+      // string differences between the two data sources don't break the filter
+      const supplierHeadId = (form as any).supplierLHeadId
+        ? Number((form as any).supplierLHeadId)
+        : null;
+      if (supplierHeadId && po.SupplierID && Number(po.SupplierID) !== supplierHeadId) return false;
       return true;
     });
-  }, [allPOList, form.companyId, form.projectSite, form.financialYear, form.supplier]);
+  }, [allPOList, form.companyId, form.projectSite, form.financialYear, (form as any).supplierLHeadId]);
 
   // Drop a stale PO filter selection once it no longer matches the current
   // company/project/finYear filters, instead of silently continuing to
@@ -1551,13 +1554,20 @@ export default function MaterialExpenseBooking() {
                                 if (found) updates.financialYear = found.year;
                               }
                             }
-                            // Supplier
-                            if (!prev.supplier && po.SupplierName) {
-                              updates.supplier = po.SupplierName;
+                            // Supplier — find by SupplierID (reliable) rather
+                            // than by name string (brittle across data sources)
+                            if (!prev.supplier && (po as any).SupplierID) {
                               const head = supplierHeads.find(
-                                (s) => s.label.toLowerCase() === po.SupplierName!.toLowerCase()
+                                (s) => s.id === Number((po as any).SupplierID)
                               );
-                              if (head) updates.supplierLHeadId = head.id;
+                              if (head) {
+                                updates.supplier = head.label;
+                                updates.supplierLHeadId = head.id;
+                              } else if (po.SupplierName) {
+                                // Fallback: set name so field isn't blank even
+                                // if supplierHeads hasn't loaded yet
+                                updates.supplier = po.SupplierName;
+                              }
                             }
                             return Object.keys(updates).length ? { ...prev, ...updates } : prev;
                           });
