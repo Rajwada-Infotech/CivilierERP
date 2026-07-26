@@ -1185,24 +1185,38 @@ export default function MaterialExpenseBooking() {
 
   const showDocSection = !!form.companyId;
 
-  // "Filter by PO" dropdown options — ALL POs (goods + services, unlike the
-  // Service-only "PO" tab inside DocSelectorPanel), narrowed by the same
-  // company/project/finYear filters already driving the rest of Document
-  // Selection. Picking one here doesn't book anything itself — it just
-  // narrows DocSelectorPanel's own GRN tab down to that PO's GRNs.
-  const filteredAllPOs = useMemo(
-    () =>
-      filterServicePOs(allPOList, {
-        companyId: form.companyId ?? null,
-        projectId: form.projectSite ? parseInt(form.projectSite, 10) : null,
-        finYear: form.financialYear || null,
-      }).filter((po) => {
-        // Also narrow by selected supplier name
-        if (!form.supplier) return true;
-        return (po.SupplierName || "").toLowerCase() === form.supplier.toLowerCase();
-      }),
-    [allPOList, form.companyId, form.projectSite, form.financialYear, form.supplier],
-  );
+  // "Filter by PO" dropdown — all Approved/Received POs (goods + services),
+  // narrowed to match whatever company/project/finYear/supplier the user has
+  // already selected. Does NOT restrict to service-eligible only (that is
+  // the job of the "PO" tab inside DocSelectorPanel).
+  const filteredAllPOs = useMemo(() => {
+    const companyId   = form.companyId   ? Number(form.companyId)   : null;
+    const projectId   = form.projectSite ? Number(form.projectSite) : null;
+    const supplier    = form.supplier?.toLowerCase().trim() || null;
+    // Derive year tokens from selected finYear label, e.g. "FY 2026-27" → ["26","27"]
+    const fyTokens    = form.financialYear
+      ? (form.financialYear.match(/\d{2,4}/g) || []).map((s: string) => s.slice(-2))
+      : null;
+
+    return allPOList.filter((po: any) => {
+      // Must be Approved or Received
+      if (po.Status !== "Approved" && po.Status !== "Received") return false;
+      // Company match
+      if (companyId && po.CompanyId && Number(po.CompanyId) !== companyId) return false;
+      // Project match
+      if (projectId && po.ProjectId && Number(po.ProjectId) !== projectId) return false;
+      // Financial year — match any year token against the PO's DocNo tokens
+      if (fyTokens?.length) {
+        const docTokens = ((po.DocNo || po.PurchaseOrderNo || "").match(/\d{2,4}/g) || []).map(
+          (s: string) => s.slice(-2)
+        );
+        if (!docTokens.some((t: string) => fyTokens.includes(t))) return false;
+      }
+      // Supplier name match (case-insensitive)
+      if (supplier && (po.SupplierName || "").toLowerCase().trim() !== supplier) return false;
+      return true;
+    });
+  }, [allPOList, form.companyId, form.projectSite, form.financialYear, form.supplier]);
 
   // Drop a stale PO filter selection once it no longer matches the current
   // company/project/finYear filters, instead of silently continuing to
