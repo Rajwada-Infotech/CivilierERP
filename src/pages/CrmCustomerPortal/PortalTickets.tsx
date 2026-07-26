@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useOutletContext } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { LifeBuoy, Plus } from "lucide-react";
@@ -14,7 +15,8 @@ const FILTERS = ["All", "Open", "Resolved"] as const;
 
 const PortalTickets: React.FC = () => {
   const qc = useQueryClient();
-  const { data: tickets = [], isLoading } = useQuery({ queryKey: ["portal-tickets"], queryFn: fetchTickets });
+  const { applicationId } = useOutletContext<{ me: any; timeline: any; applicationId: number; applications: any[] }>();
+  const { data: tickets = [], isLoading } = useQuery({ queryKey: ["portal-tickets", applicationId], queryFn: () => fetchTickets(applicationId) });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [form, setForm] = useState({ category: "ServiceRequest", subject: "", description: "" });
@@ -31,13 +33,13 @@ const PortalTickets: React.FC = () => {
     if (!form.subject.trim()) { toast.error("Subject is required"); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${API}/tickets`, { method: "POST", headers: authHeaders(), body: JSON.stringify(form) });
+      const res = await fetch(`${API}/tickets?applicationId=${applicationId}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(form) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`Ticket ${data.TicketNo} raised`);
       setDialogOpen(false);
       setForm({ category: "ServiceRequest", subject: "", description: "" });
-      qc.invalidateQueries({ queryKey: ["portal-tickets"] });
+      qc.invalidateQueries({ queryKey: ["portal-tickets", applicationId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {

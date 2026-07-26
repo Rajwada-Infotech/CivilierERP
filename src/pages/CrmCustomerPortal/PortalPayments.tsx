@@ -5,12 +5,12 @@ import { CheckCircle2, Circle, Clock, CreditCard, FileText } from "lucide-react"
 import { fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
 import { PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, serif } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
 const PortalPayments: React.FC = () => {
-  const { timeline } = useOutletContext<Ctx>();
+  const { timeline, applicationId } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
-  const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices"], queryFn: fetchInvoices, staleTime: 30_000 });
+  const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
 
   if (!milestones.length) {
     return (

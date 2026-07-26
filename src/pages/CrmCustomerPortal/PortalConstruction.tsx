@@ -10,9 +10,9 @@ import {
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
 } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
-function DisputeDialog({ onClose, onSubmitted }: { onClose: () => void; onSubmitted: () => void }) {
+function DisputeDialog({ applicationId, onClose, onSubmitted }: { applicationId: number; onClose: () => void; onSubmitted: () => void }) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -20,7 +20,7 @@ function DisputeDialog({ onClose, onSubmitted }: { onClose: () => void; onSubmit
     if (!reason.trim()) { toast.error("A reason is required"); return; }
     setSaving(true);
     try {
-      await respondPossessionNotice("Dispute", reason);
+      await respondPossessionNotice("Dispute", applicationId, reason);
       toast.success("Dispute submitted — our team will follow up");
       onSubmitted();
     } catch (e: any) {
@@ -53,7 +53,7 @@ function DisputeDialog({ onClose, onSubmitted }: { onClose: () => void; onSubmit
 }
 
 const PortalConstruction: React.FC = () => {
-  const { timeline } = useOutletContext<Ctx>();
+  const { timeline, applicationId } = useOutletContext<Ctx>();
   const qc = useQueryClient();
   const updates = timeline.constructionUpdates || [];
   const latest = updates[0];
@@ -87,7 +87,7 @@ const PortalConstruction: React.FC = () => {
 
   const acknowledge = async () => {
     try {
-      await respondPossessionNotice("Acknowledge");
+      await respondPossessionNotice("Acknowledge", applicationId);
       toast.success("Possession notice acknowledged");
       qc.invalidateQueries({ queryKey: ["portal-timeline"] });
     } catch (e: any) {
@@ -225,6 +225,7 @@ const PortalConstruction: React.FC = () => {
 
       {disputeOpen && (
         <DisputeDialog
+          applicationId={applicationId}
           onClose={() => setDisputeOpen(false)}
           onSubmitted={() => {
             setDisputeOpen(false);

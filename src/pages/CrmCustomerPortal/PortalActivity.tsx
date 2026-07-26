@@ -5,7 +5,7 @@ import { FileText, CreditCard, FolderCheck, LifeBuoy, Radio, ArrowRight, AlertTr
 import { fetchActivity, fetchAgreement, fetchAgreementDocuments, fmtMoney, fmtDate, fmtDateTime } from "./portalApi";
 import { PageHeader, Card, GOLD, GOLD_SOFT, INK, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, SURFACE_ALT, serif } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
 const TYPE_META: Record<string, { icon: any; label: string; to: string }> = {
   agreement: { icon: FileText, label: "Agreement", to: "/crm-client-portal/agreement" },
@@ -36,11 +36,11 @@ const FILTERS: { key: string; label: string }[] = [
 // they take it (the real approve/respond/upload UI already lives on the
 // Agreement/Payments pages — this doesn't duplicate that, it routes to it).
 const PortalActivity: React.FC = () => {
-  const { timeline } = useOutletContext<Ctx>();
+  const { timeline, applicationId } = useOutletContext<Ctx>();
   const navigate = useNavigate();
-  const { data: feed = [], isLoading } = useQuery({ queryKey: ["portal-activity"], queryFn: fetchActivity, staleTime: 30_000 });
-  const { data: agreement } = useQuery({ queryKey: ["portal-agreement"], queryFn: fetchAgreement });
-  const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents"], queryFn: fetchAgreementDocuments });
+  const { data: feed = [], isLoading } = useQuery({ queryKey: ["portal-activity", applicationId], queryFn: () => fetchActivity(applicationId), staleTime: 30_000 });
+  const { data: agreement } = useQuery({ queryKey: ["portal-agreement", applicationId], queryFn: () => fetchAgreement(applicationId) });
+  const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents", applicationId], queryFn: () => fetchAgreementDocuments(applicationId) });
   const [filter, setFilter] = useState("");
 
   const filtered = useMemo(
