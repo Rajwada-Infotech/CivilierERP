@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History, Landmark,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -872,7 +872,7 @@ const CrmApplication: React.FC = () => {
 
           {/* Step indicator */}
           <div className="flex items-center gap-1.5 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Bank/KYC", "Attachments", "Notes"].map((label, i) => (
+            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Notes"].map((label, i) => (
               <React.Fragment key={label}>
                 {i > 0 && <div className="flex-1 h-px bg-border" />}
                 <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium ${
@@ -1199,15 +1199,21 @@ const CrmApplication: React.FC = () => {
           {step === 3 && applicationId && (
             <BankDetailsStep
               applicationId={applicationId}
+              applicantName={selectedCustomer?.CustomerName || ""}
+              applicantAddress={[selectedCustomer?.CurrentAddress, selectedCustomer?.CurrentCity, selectedCustomer?.CurrentState, selectedCustomer?.CurrentPincode].filter(Boolean).join(", ")}
               onRegisterSave={(fn) => { saveBankDetailsRef.current = fn; }}
             />
           )}
 
           {step === 4 && applicationId && (
+            <CoApplicantStep applicationId={applicationId} />
+          )}
+
+          {step === 5 && applicationId && (
             <AttachmentsStep applicationId={applicationId} />
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-4">
               <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-3 text-xs">
                 <div>
@@ -1269,6 +1275,12 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 5 && (
+                <button onClick={() => setStep(6)}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  Next <ChevronRight size={14} />
+                </button>
+              )}
+              {step === 6 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
                   {saving ? "Saving..." : "Save & Close"}
@@ -1487,18 +1499,42 @@ const CrmApplication: React.FC = () => {
 };
 
 // ── Step 3: Bank / KYC / Nominee — identity & bank details only ───────────────
+// Identity fields the Customer master already captures at intake — when the
+// KYC form loads with no bank-detail row saved yet, the backend pre-fills
+// these from dbo.CrmCustomer and flags the response _prefilledFrom:
+// "customer". Those (and only those) fields render locked/view-only below,
+// with an explicit "Edit" toggle to recheck and confirm against the
+// customer — never silently editable as if freshly typed. Once this form is
+// saved once, its own CrmCustomerBankDetail row exists going forward, so
+// later loads return real saved data (no _prefilledFrom flag) and every
+// field is a normal, already-unlocked input.
+const KYC_PREFILL_KEYS = ["PanNo", "AccountHolderName", "AadhaarNo", "Occupation", "AnnualIncome"] as const;
+
 const BankDetailsStep: React.FC<{
   applicationId: number;
+  applicantName?: string;
+  applicantAddress?: string;
   onRegisterSave?: (fn: null | (() => Promise<void>)) => void;
-}> = ({ applicationId, onRegisterSave }) => {
+}> = ({ applicationId, applicantName, applicantAddress, onRegisterSave }) => {
   const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [bankSaving, setBankSaving] = useState(false);
   const [bankLoaded, setBankLoaded] = useState(false);
+  // Which of KYC_PREFILL_KEYS are currently locked (auto-fetched from the
+  // customer record, not yet reviewed/confirmed by staff this time around).
+  const [kycLocked, setKycLocked] = useState<Set<string>>(new Set());
+  // "Same as applicant's address" for the Nominee — a convenience toggle,
+  // not a customer-data prefill lock like kycLocked above. Checking it
+  // copies the applicant's current address in; unchecking hands the field
+  // back for free editing. Defaults on if a saved NomineeAddress already
+  // matches the applicant's address (e.g. re-opening a previously saved form).
+  const [nomineeSameAsApplicant, setNomineeSameAsApplicant] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setBankLoaded(false);
     setBank({ ...EMPTY_BANK });
+    setKycLocked(new Set());
+    setNomineeSameAsApplicant(false);
     fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -1512,10 +1548,27 @@ const BankDetailsStep: React.FC<{
           PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
           Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
         });
+        if (d._prefilledFrom === "customer") {
+          const locked = new Set<string>();
+          KYC_PREFILL_KEYS.forEach((k) => { if (d[k] !== null && d[k] !== undefined && String(d[k]).trim() !== "") locked.add(k); });
+          setKycLocked(locked);
+        }
+        if (applicantAddress && d.NomineeAddress && d.NomineeAddress.trim() === applicantAddress.trim()) {
+          setNomineeSameAsApplicant(true);
+        }
       })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
   }, [applicationId]);
+
+  // While the "same as applicant" checkbox is on, keep NomineeAddress in
+  // step if the applicant's address itself changes (e.g. a different
+  // customer gets selected before this application is first saved).
+  useEffect(() => {
+    if (nomineeSameAsApplicant) {
+      setBank((b) => (b.NomineeAddress === (applicantAddress || "") ? b : { ...b, NomineeAddress: applicantAddress || "" }));
+    }
+  }, [nomineeSameAsApplicant, applicantAddress]);
 
   const saveBank = useCallback(async (silent = false) => {
     setBankSaving(true);
@@ -1558,7 +1611,17 @@ const BankDetailsStep: React.FC<{
           ].map(([key, label]) => (
             <div key={key}>
               <label className={labelCls}>{label}</label>
-              <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
+              {kycLocked.has(key) ? (
+                <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
+                  <span className="text-sm text-foreground truncate">{(bank as any)[key] || "—"} <span className="text-xs text-muted-foreground">(auto-fetched from customer)</span></span>
+                  <button type="button" onClick={() => setKycLocked((s) => { const next = new Set(s); next.delete(key); return next; })}
+                    className="text-xs text-primary hover:underline shrink-0">
+                    Edit
+                  </button>
+                </div>
+              ) : (
+                <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
+              )}
             </div>
           ))}
         </div>
@@ -1566,13 +1629,33 @@ const BankDetailsStep: React.FC<{
           <p className="text-xs font-medium text-foreground mb-2">Nominee</p>
           <div className="grid grid-cols-2 gap-2">
             {[
-              ["NomineeName", "Name"], ["NomineeRelation", "Relation"], ["NomineeContact", "Contact"], ["NomineeAddress", "Address"],
+              ["NomineeName", "Name"], ["NomineeRelation", "Relation"], ["NomineeContact", "Contact"],
             ].map(([key, label]) => (
               <div key={key}>
                 <label className={labelCls}>{label}</label>
                 <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
               </div>
             ))}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className={labelCls + " mb-0"}>Address</label>
+                {applicantAddress && (
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                    <input type="checkbox" checked={nomineeSameAsApplicant}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setNomineeSameAsApplicant(checked);
+                        if (checked) setBank((b) => ({ ...b, NomineeAddress: applicantAddress }));
+                      }}
+                      className="rounded border-border" />
+                    Same as {applicantName || "applicant"}'s address
+                  </label>
+                )}
+              </div>
+              <input value={bank.NomineeAddress} readOnly={nomineeSameAsApplicant}
+                onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
+                className={inputCls + (nomineeSameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
+            </div>
           </div>
         </div>
       </div>
@@ -1812,7 +1895,290 @@ const ParkingSelectionStep: React.FC<{
   );
 };
 
-// ── Step 4: Attachments — document upload only ─────────────────────────────────
+// ── Step 4: Co-Applicant — optional, per-Application, multiple allowed ─────────
+// Each Application independently manages its own co-applicants.  A customer with
+// two applications can have completely different co-applicants on each.  The step
+// is optional — skipping it is fine.
+const RELATION_OPTIONS = ["Spouse", "Parent", "Sibling", "Child", "Friend", "Business Partner", "Other"];
+const GENDER_OPTIONS    = ["Male", "Female", "Other", "Prefer not to say"];
+
+const EMPTY_COAPPLICANT = {
+  Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "",
+  DateOfBirth: "", Gender: "", Occupation: "", AnnualIncome: "",
+  Address: "", City: "", State: "", Pincode: "", Notes: "",
+};
+
+const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId }) => {
+  const qc                         = useQueryClient();
+  const [showForm, setShowForm]    = useState(false);
+  const [editingId, setEditingId]  = useState<number | null>(null);
+  const [form, setForm]            = useState({ ...EMPTY_COAPPLICANT });
+  const [saving, setSaving]        = useState(false);
+  const [deleting, setDeleting]    = useState<number | null>(null);
+
+  const { data: coApplicants = [], isLoading } = useQuery<any[]>({
+    queryKey: ["crm-co-applicants-app", applicationId],
+    queryFn: async () => {
+      const res = await fetch(`/api/crm/co-applicants/application/${applicationId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("crm_token")}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to load");
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const inputCls = "w-full text-sm border border-border rounded-md px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary";
+  const labelCls = "text-xs text-muted-foreground block mb-1";
+
+  const openAdd  = () => { setEditingId(null); setForm({ ...EMPTY_COAPPLICANT }); setShowForm(true); };
+  const openEdit = (ca: any) => {
+    setEditingId(ca.Id);
+    setForm({
+      Name: ca.Name || "", Relation: ca.Relation || "", Mobile: ca.Mobile || "",
+      Email: ca.Email || "", PanNo: ca.PanNo || "", AadhaarNo: ca.AadhaarNo || "",
+      DateOfBirth: ca.DateOfBirth ? String(ca.DateOfBirth).slice(0, 10) : "",
+      Gender: ca.Gender || "", Occupation: ca.Occupation || "",
+      AnnualIncome: ca.AnnualIncome != null ? String(ca.AnnualIncome) : "",
+      Address: ca.Address || "", City: ca.City || "", State: ca.State || "",
+      Pincode: ca.Pincode || "", Notes: ca.Notes || "",
+    });
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.Name.trim()) { toast.error("Co-applicant name is required"); return; }
+    setSaving(true);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const url = editingId
+        ? `/api/crm/co-applicants/${editingId}`
+        : `/api/crm/co-applicants/application/${applicationId}`;
+      const method = editingId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, BookingId: null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Save failed");
+      toast.success(editingId ? "Co-applicant updated" : "Co-applicant added");
+      setShowForm(false);
+      setForm({ ...EMPTY_COAPPLICANT });
+      setEditingId(null);
+      qc.invalidateQueries({ queryKey: ["crm-co-applicants-app", applicationId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Remove this co-applicant?")) return;
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/crm/co-applicants/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("crm_token")}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Delete failed");
+      toast.success("Co-applicant removed");
+      qc.invalidateQueries({ queryKey: ["crm-co-applicants-app", applicationId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-foreground">Co-Applicant (Optional)</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Each application can have its own set of co-applicants — different applications can have different co-applicants.
+          </p>
+        </div>
+        {!showForm && (
+          <button onClick={openAdd}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+            <Plus size={13} /> Add Co-Applicant
+          </button>
+        )}
+      </div>
+
+      {/* Existing co-applicants list */}
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground py-4 text-center">Loading…</p>
+      ) : coApplicants.length > 0 && !showForm ? (
+        <div className="rounded-lg border border-border divide-y divide-border">
+          {coApplicants.map((ca: any) => (
+            <div key={ca.Id} className="flex items-center justify-between px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{ca.Name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {[ca.Relation, ca.Mobile, ca.Email].filter(Boolean).join(" · ") || "No details"}
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0 ml-4">
+                <button onClick={() => openEdit(ca)}
+                  className="text-xs px-2.5 py-1 border border-border rounded-md text-muted-foreground hover:bg-muted transition-colors">
+                  Edit
+                </button>
+                <button onClick={() => handleDelete(ca.Id)} disabled={deleting === ca.Id}
+                  className="text-xs px-2.5 py-1 border border-red-200 rounded-md text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40">
+                  {deleting === ca.Id ? "…" : "Remove"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : !showForm ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-center">
+          <Users2 size={22} className="mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">No co-applicants added yet</p>
+          <p className="text-xs text-muted-foreground mt-1">Co-applicant details can also be added later from the application detail page.</p>
+        </div>
+      ) : null}
+
+      {/* Add / Edit form */}
+      {showForm && (
+        <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-semibold text-foreground">{editingId ? "Edit Co-Applicant" : "New Co-Applicant"}</p>
+            <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_COAPPLICANT }); setEditingId(null); }}
+              className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+
+          {/* Identity */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><User size={12} /> Identity</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className={labelCls}>Full Name *</label>
+                <input value={form.Name} onChange={(e) => setForm((f) => ({ ...f, Name: e.target.value }))} className={inputCls} placeholder="As per ID" />
+              </div>
+              <div>
+                <label className={labelCls}>Relation</label>
+                <select value={form.Relation} onChange={(e) => setForm((f) => ({ ...f, Relation: e.target.value }))} className={inputCls}>
+                  <option value="">Select</option>
+                  {RELATION_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Date of Birth</label>
+                <input type="date" value={form.DateOfBirth} onChange={(e) => setForm((f) => ({ ...f, DateOfBirth: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Gender</label>
+                <select value={form.Gender} onChange={(e) => setForm((f) => ({ ...f, Gender: e.target.value }))} className={inputCls}>
+                  <option value="">Select</option>
+                  {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Contact */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Phone size={12} /> Contact</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Mobile</label>
+                <input value={form.Mobile} onChange={(e) => setForm((f) => ({ ...f, Mobile: e.target.value }))} className={inputCls} placeholder="10-digit number" />
+              </div>
+              <div>
+                <label className={labelCls}>Email</label>
+                <input type="email" value={form.Email} onChange={(e) => setForm((f) => ({ ...f, Email: e.target.value }))} className={inputCls} />
+              </div>
+            </div>
+          </div>
+
+          {/* KYC */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><FileText size={12} /> KYC</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>PAN No.</label>
+                <input value={form.PanNo} onChange={(e) => setForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))} className={inputCls} placeholder="ABCDE1234F" maxLength={10} />
+              </div>
+              <div>
+                <label className={labelCls}>Aadhaar No.</label>
+                <input value={form.AadhaarNo} onChange={(e) => setForm((f) => ({ ...f, AadhaarNo: e.target.value.replace(/\D/g, "") }))} className={inputCls} placeholder="12-digit Aadhaar" maxLength={12} />
+              </div>
+            </div>
+          </div>
+
+          {/* Financial */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Landmark size={12} /> Financial</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Occupation</label>
+                <input value={form.Occupation} onChange={(e) => setForm((f) => ({ ...f, Occupation: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Annual Income (₹)</label>
+                <input type="number" value={form.AnnualIncome} onChange={(e) => setForm((f) => ({ ...f, AnnualIncome: e.target.value }))} className={inputCls} />
+              </div>
+            </div>
+          </div>
+
+          {/* Address */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><MapPin size={12} /> Address</p>
+            <div>
+              <label className={labelCls}>Street Address</label>
+              <input value={form.Address} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))} className={inputCls} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}>City</label>
+                <input value={form.City} onChange={(e) => setForm((f) => ({ ...f, City: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>State</label>
+                <input value={form.State} onChange={(e) => setForm((f) => ({ ...f, State: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Pincode</label>
+                <input value={form.Pincode} onChange={(e) => setForm((f) => ({ ...f, Pincode: e.target.value.replace(/\D/g, "") }))} className={inputCls} maxLength={6} />
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className={labelCls}>Notes / Remarks</label>
+            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_COAPPLICANT }); setEditingId(null); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              {saving ? "Saving..." : editingId ? "Update" : "Add Co-Applicant"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!showForm && coApplicants.length > 0 && (
+        <button onClick={openAdd}
+          className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground border border-dashed border-border rounded-lg hover:bg-muted/30 transition-colors">
+          <Plus size={12} /> Add Another Co-Applicant
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ── Step 5 (was 4): Attachments — document upload only ─────────────────────────
+
 const AttachmentsStep: React.FC<{
   applicationId: number;
 }> = ({ applicationId }) => {

@@ -477,7 +477,7 @@ router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (r
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
     // A Rejected Application can only have gotten here from Pending — no
     // Booking exists yet at that stage (Booking only ever comes from
     // Approve), so any Active hold on its picked Unit/Parking is now dead

@@ -145,8 +145,13 @@ const REGISTRY = [
       return r.recordset;
     },
     async notify(pool, row) {
-      await pool.request().input("id", sql.Int, row.Id)
-        .query("UPDATE dbo.CrmInventoryHold SET Status = 'Expired' WHERE Id = @id");
+      // Re-check status atomically before writing — a staff member could have
+      // converted this hold into a real Booking (flipping it to 'Converted')
+      // in the narrow window between this run's fetch() and this write.
+      // Same guard pattern as crm-booking-confirm-expiry below.
+      const claimed = await pool.request().input("id", sql.Int, row.Id)
+        .query("UPDATE dbo.CrmInventoryHold SET Status = 'Expired' OUTPUT INSERTED.Id WHERE Id = @id AND Status = 'Active'");
+      if (!claimed.recordset.length) return false; // already Converted/Released — skip cascade
       const label = row.EntityType === "Unit" ? `Unit ${row.UnitName}` : `Parking slot ${row.SlotNo}`;
       await logCustomerNotice(pool, row.ApplicationId, "Hold Expired",
         `Your hold on ${label} has expired and it is now available to other buyers.`);

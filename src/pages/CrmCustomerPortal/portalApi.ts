@@ -15,24 +15,36 @@ async function get(path: string) {
   if (res.status === 403) {
     const body = await res.json().catch(() => ({}));
     if (body.mustChangePassword) throw new Error("password_change_required");
+    throw new Error(body.error || "Forbidden");
   }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Request failed");
   return res.json();
 }
 
-export const fetchMe = () => get("/me");
-export const fetchTimeline = () => get("/timeline");
-export const fetchTickets = () => get("/tickets");
-export const fetchActivity = () => get("/activity").catch(() => []);
-export const fetchAgreement = () => get("/agreement").catch(() => null);
-export const fetchAgreementDocuments = () => get("/agreement/documents").catch(() => []);
-export const fetchInvoices = () => get("/invoices").catch(() => []);
+// Appends ?applicationId={id} — required on every detail route after the
+// multi-app rework (JWT now carries customerId only; applicationId is
+// validated per-request server-side).
+function withAppId(path: string, applicationId: number) {
+  return `${path}?applicationId=${applicationId}`;
+}
 
-export async function uploadAgreementDocument(docId: number, file: File) {
+// ── Routes that don't need applicationId ──────────────────────────────────────
+export const fetchMe          = () => get("/me");
+export const fetchApplications = () => get("/applications");
+
+// ── Routes that require applicationId ────────────────────────────────────────
+export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));
+export const fetchTickets           = (applicationId: number) => get(withAppId("/tickets", applicationId));
+export const fetchActivity          = (applicationId: number) => get(withAppId("/activity", applicationId)).catch(() => []);
+export const fetchAgreement         = (applicationId: number) => get(withAppId("/agreement", applicationId)).catch(() => null);
+export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId)).catch(() => []);
+export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId)).catch(() => []);
+
+export async function uploadAgreementDocument(docId: number, file: File, applicationId: number) {
   const token = localStorage.getItem("crm_portal_token");
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API}/agreement/documents/${docId}/upload`, {
+  const res = await fetch(`${API}/agreement/documents/${docId}/upload${withAppId("", applicationId).replace("", "?")}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -41,8 +53,22 @@ export async function uploadAgreementDocument(docId: number, file: File) {
   return res.json();
 }
 
-export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute", reason?: string) {
-  const res = await fetch(`${API}/possession-notice/respond`, {
+// Cleaner version of uploadAgreementDocument with proper query string
+export async function uploadAgreementDoc(docId: number, file: File, applicationId: number) {
+  const token = localStorage.getItem("crm_portal_token");
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API}/agreement/documents/${docId}/upload?applicationId=${applicationId}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Upload failed");
+  return res.json();
+}
+
+export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute", applicationId: number, reason?: string) {
+  const res = await fetch(`${API}/possession-notice/respond?applicationId=${applicationId}`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ decision, reason }),
@@ -51,13 +77,38 @@ export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute
   return res.json();
 }
 
-export async function proposeAgreementDate(proposedDate: string) {
-  const res = await fetch(`${API}/agreement/propose-date`, {
+export async function proposeAgreementDate(proposedDate: string, applicationId: number) {
+  const res = await fetch(`${API}/agreement/propose-date?applicationId=${applicationId}`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ proposedDate }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to propose date");
+  return res.json();
+}
+
+export async function respondAgreement(
+  applicationId: number,
+  decision: "Approve" | "Reject",
+  remarks: string,
+  proposedDate?: string
+) {
+  const res = await fetch(`${API}/agreement/respond?applicationId=${applicationId}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ decision, remarks, proposedDate }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to respond to agreement");
+  return res.json();
+}
+
+export async function respondSalesDeed(applicationId: number, decision: "Approve" | "Reject", remarks: string) {
+  const res = await fetch(`${API}/sales-deed/respond?applicationId=${applicationId}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ decision, remarks }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to respond to sales deed");
   return res.json();
 }
 

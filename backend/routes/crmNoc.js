@@ -237,7 +237,7 @@ router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) 
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    const result = await approvalTransition("crm-noc", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] reject error:", e.message);

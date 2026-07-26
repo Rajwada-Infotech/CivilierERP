@@ -699,7 +699,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-bookings", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    const result = await approvalTransition("crm-bookings", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
 
     // Only reachable from Pending (approvalTransition enforces this), so
     // there's never a real sale to protect here — same cascade

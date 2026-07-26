@@ -28,6 +28,7 @@ router.post("/run", async (req, res) => {
 });
 
 router.get("/status", (req, res) => {
+  if (!isSaAdmin(req)) return res.status(403).json({ error: "Admin access required" });
   res.json({ lastRun });
 });
 

@@ -82,20 +82,30 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
     if (result.recordset.length) return res.json(result.recordset[0]);
 
-    // No bank-detail row saved yet — PAN and the account holder's name are
-    // already on file at Customer intake (dbo.CrmCustomer), so pre-fill them
-    // here instead of making staff retype a PAN the system already has.
-    // Everything else (bank/nominee/Aadhaar/occupation) is genuinely new
-    // information this form is the first place to capture, so it stays blank.
+    // No bank-detail row saved yet — PAN, Aadhaar, Occupation, Annual Income
+    // and the account holder's name are already on file at Customer intake
+    // (dbo.CrmCustomer), so pre-fill them here instead of making staff retype
+    // data the system already has. These come back flagged _prefilledFrom so
+    // the UI can render them locked (view-only) with an explicit unlock/edit
+    // option to recheck and confirm against the customer, rather than
+    // silently editable as if freshly typed. Bank/nominee fields are
+    // genuinely new information this form is the first place to capture, so
+    // they stay blank and unlocked.
     const prefill = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE b.Id = @bid
     `);
     if (!prefill.recordset.length) return res.json(null);
-    res.json({ PanNo: prefill.recordset[0].PanNo || null, AccountHolderName: prefill.recordset[0].AccountHolderName || null });
+    const p = prefill.recordset[0];
+    res.json({
+      PanNo: p.PanNo || null, AccountHolderName: p.AccountHolderName || null,
+      AadhaarNo: p.AadhaarNo || null, Occupation: p.Occupation || null,
+      AnnualIncome: p.AnnualIncome != null ? p.AnnualIncome : null,
+      _prefilledFrom: "customer",
+    });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -199,17 +209,25 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
     if (result.recordset.length) return res.json(result.recordset[0]);
 
-    // No bank-detail row saved yet — same PAN/account-holder pre-fill as the
-    // BookingId-keyed route above, so staff never have to retype a PAN the
-    // system already captured at Customer intake (dbo.CrmCustomer).
+    // No bank-detail row saved yet — same PAN/Aadhaar/Occupation/Annual
+    // Income/account-holder pre-fill as the BookingId-keyed route above, so
+    // staff never have to retype data the system already captured at
+    // Customer intake (dbo.CrmCustomer). Flagged _prefilledFrom so the UI can
+    // lock these fields for review/confirm rather than freshly-typed edit.
     const prefill = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
       FROM dbo.CrmApplication a
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE a.Id = @aid
     `);
     if (!prefill.recordset.length) return res.json(null);
-    res.json({ PanNo: prefill.recordset[0].PanNo || null, AccountHolderName: prefill.recordset[0].AccountHolderName || null });
+    const p = prefill.recordset[0];
+    res.json({
+      PanNo: p.PanNo || null, AccountHolderName: p.AccountHolderName || null,
+      AadhaarNo: p.AadhaarNo || null, Occupation: p.Occupation || null,
+      AnnualIncome: p.AnnualIncome != null ? p.AnnualIncome : null,
+      _prefilledFrom: "customer",
+    });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET /application error:", e.message);
     res.status(500).json({ error: e.message });

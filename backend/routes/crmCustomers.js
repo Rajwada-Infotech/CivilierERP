@@ -42,6 +42,34 @@ const CUSTOMER_SELECT = `
   LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId
 `;
 
+function normalizeEmail(value) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  return trimmed || null;
+}
+
+async function assertUniqueCustomerEmail(pool, email, excludeId = null) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return;
+
+  const req = pool.request().input("email", sql.NVarChar(200), normalized);
+  const exclude = excludeId ? "AND Id <> @id" : "";
+  if (excludeId) req.input("id", sql.Int, excludeId);
+
+  const existing = await req.query(`
+    SELECT TOP 1 Id, CustomerNo, CustomerName
+    FROM dbo.CrmCustomer
+    WHERE IsActive = 1
+      AND LOWER(LTRIM(RTRIM(Email))) = @email
+      ${exclude}
+  `);
+  if (!existing.recordset.length) return;
+
+  const row = existing.recordset[0];
+  const err = new Error(`A customer with this email already exists - ${row.CustomerNo} (${row.CustomerName})`);
+  err.status = 409;
+  throw err;
+}
+
 // GET / — all customers
 router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
   try {
@@ -157,6 +185,9 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       });
     }
 
+    const email = normalizeEmail(b.Email);
+    await assertUniqueCustomerEmail(pool, email);
+
     const cur = resolveCurrentAddress(b);
     const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
     const result = await pool.request()
@@ -165,7 +196,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       .input("name",      sql.NVarChar(200), b.CustomerName.trim())
       .input("mob",       sql.NVarChar(20),  b.Mobile.trim())
       .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
-      .input("email",     sql.NVarChar(200), b.Email || null)
+      .input("email",     sql.NVarChar(200), email)
       .input("pan",       sql.NVarChar(20),  b.PanNo.trim())
       .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
       .input("occ",       sql.NVarChar(100), b.Occupation || null)
@@ -215,8 +246,9 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 
     res.status(201).json({ success: true, id: newId, CustomerNo: customerNo });
   } catch (e) {
+    if (e.status === 409) return res.status(409).json({ error: e.message });
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
-      return res.status(409).json({ error: "A customer with this mobile number already exists" });
+      return res.status(409).json({ error: "A customer with this mobile number or email already exists" });
     }
     console.error("[crm-customers] POST error:", e.message);
     res.status(500).json({ error: e.message });
@@ -230,13 +262,16 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
+    const email = normalizeEmail(b.Email);
+    await assertUniqueCustomerEmail(pool, email, id);
+
     const cur = resolveCurrentAddress(b);
     await pool.request()
       .input("id",       sql.Int,           id)
       .input("name",      sql.NVarChar(200), b.CustomerName || null)
       .input("mob",       sql.NVarChar(20),  b.Mobile || null)
       .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
-      .input("email",     sql.NVarChar(200), b.Email ?? null)
+      .input("email",     sql.NVarChar(200), email)
       .input("pan",       sql.NVarChar(20),  b.PanNo || null)
       .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
       .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
@@ -282,13 +317,22 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
       .input("name",   sql.NVarChar(200), b.CustomerName || null)
       .input("mob",    sql.NVarChar(20), b.Mobile || null)
       .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
-      .input("email",  sql.NVarChar(200), b.Email ?? null)
+      .input("email",  sql.NVarChar(200), email)
       .query(`
         UPDATE dbo.CrmApplication SET
           ApplicantName = ISNULL(@name, ApplicantName),
           Mobile = ISNULL(@mob, Mobile),
           AltMobile = @altmob,
           Email = @email
+        WHERE CustomerId = @id
+      `);
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("email", sql.NVarChar(200), email)
+      .query(`
+        UPDATE dbo.CrmCustomerPortalUser
+        SET Email = @email
         WHERE CustomerId = @id
       `);
 
@@ -300,7 +344,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     // forever. No-op if the customer has no ledger head yet.
     try {
       await syncCrmCustomerLedgerHead(pool, id, {
-        CustomerName: b.CustomerName, Mobile: b.Mobile, Email: b.Email, Address: b.PermanentAddress, PanNo: b.PanNo,
+        CustomerName: b.CustomerName, Mobile: b.Mobile, Email: email, Address: b.PermanentAddress, PanNo: b.PanNo,
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);
@@ -324,8 +368,9 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
 
     res.json({ success: true });
   } catch (e) {
+    if (e.status === 409) return res.status(409).json({ error: e.message });
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
-      return res.status(409).json({ error: "A customer with this mobile number already exists" });
+      return res.status(409).json({ error: "A customer with this mobile number or email already exists" });
     }
     console.error("[crm-customers] PUT error:", e.message);
     res.status(500).json({ error: e.message });
