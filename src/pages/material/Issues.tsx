@@ -39,11 +39,22 @@ import {
   Printer,
 } from "lucide-react";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Date", accessor: (r) => r.IssueDate ? new Date(r.IssueDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Godown", accessor: "GodownName" },
+  { header: "Status", accessor: "Status" },
+];
+
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -1747,6 +1758,13 @@ export default function Issues() {
         action={
           viewMode === "list" ? (
             <div className="flex items-center gap-2 flex-wrap">
+              <ExportMenu
+                data={(issuesData?.data || []) as unknown as Record<string, unknown>[]}
+                columns={ISSUES_EXPORT_COLUMNS}
+                title="Material Issues"
+                filename="material-issues"
+                disabled={loadingIssues || !(issuesData?.data?.length) || !rights.canExport}
+              />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}

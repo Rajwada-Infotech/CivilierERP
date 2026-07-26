@@ -43,7 +43,8 @@ import {
   Lock,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import {
   computeRemainingPOItems,
   hasRemainingItems,
@@ -77,6 +78,17 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+const GRN_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "GRN Date", accessor: (r) => r.GrnDate ? new Date(r.GrnDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Supplier", accessor: "SupplierName" },
+  { header: "PO Number", accessor: "PONumber" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Status", accessor: "Status" },
+];
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
@@ -1897,6 +1909,13 @@ export default function GRN() {
         action={
           !showForm ? (
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={grns as unknown as Record<string, unknown>[]}
+                columns={GRN_EXPORT_COLUMNS}
+                title="Goods Receipt Notes"
+                filename="grn"
+                disabled={!grns.length || !rights.canExport}
+              />
               <input
                 ref={importFileInputRef}
                 type="file"

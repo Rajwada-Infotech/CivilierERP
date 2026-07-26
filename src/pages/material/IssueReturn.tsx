@@ -16,11 +16,22 @@ import {
   CheckCircle2, Eye, ChevronDown, ClipboardList, RotateCw,
   AlertCircle, Hash, TrendingDown, Download, Upload, Loader2,
 } from "lucide-react";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { format } from "date-fns";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/material-issue-returns";
+
+const ISSUE_RETURN_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Return Date", accessor: (r) => r.ReturnDate ? new Date(r.ReturnDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Issue Doc No", accessor: "IssueDocNo" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Status", accessor: "Status" },
+];
+
 
 const inp =
   "w-full text-sm rounded-xl border border-border px-3 py-2.5 bg-muted text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
@@ -301,6 +312,13 @@ export default function IssueReturn() {
                       className="pl-8 pr-3 py-1.5 rounded-xl text-xs bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-44"
                     />
                   </div>
+                  <ExportMenu
+                    data={rows as unknown as Record<string, unknown>[]}
+                    columns={ISSUE_RETURN_EXPORT_COLUMNS}
+                    title="Issue Returns"
+                    filename="issue-returns"
+                    disabled={!rows.length || !rights.canExport}
+                  />
                   <button
                     onClick={() => qc.invalidateQueries({ queryKey: ["issue-returns"] })}
                     className="p-1.5 rounded-xl border border-border bg-muted text-muted-foreground hover:text-foreground transition-colors"
