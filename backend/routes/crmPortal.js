@@ -252,7 +252,7 @@ router.get("/timeline", async (req, res) => {
                ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','Rejected')) AS DocumentsNeedingAction
-        FROM dbo.CrmAgreement WHERE BookingId = @bid
+        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status

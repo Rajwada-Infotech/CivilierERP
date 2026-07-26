@@ -289,7 +289,7 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-cancellations", id, "Rejected", userEmail, req.user?.role, req.body?.Remarks || null);
+    const result = await approvalTransition("crm-cancellations", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] reject error:", e.message);
