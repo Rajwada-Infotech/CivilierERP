@@ -1196,8 +1196,12 @@ export default function MaterialExpenseBooking() {
         companyId: form.companyId ?? null,
         projectId: form.projectSite ? parseInt(form.projectSite, 10) : null,
         finYear: form.financialYear || null,
+      }).filter((po) => {
+        // Also narrow by selected supplier name
+        if (!form.supplier) return true;
+        return (po.SupplierName || "").toLowerCase() === form.supplier.toLowerCase();
       }),
-    [allPOList, form.companyId, form.projectSite, form.financialYear],
+    [allPOList, form.companyId, form.projectSite, form.financialYear, form.supplier],
   );
 
   // Drop a stale PO filter selection once it no longer matches the current
@@ -1501,7 +1505,49 @@ export default function MaterialExpenseBooking() {
                       </p>
                       <Select
                         value={filterPOId != null ? String(filterPOId) : "__none__"}
-                        onValueChange={(val) => setFilterPOId(val === "__none__" ? null : parseInt(val, 10))}
+                        onValueChange={(val) => {
+                          const id = val === "__none__" ? null : parseInt(val, 10);
+                          setFilterPOId(id);
+                          // Auto-fill company / project / finYear / supplier
+                          // from the selected PO when those fields are empty
+                          if (!id) return;
+                          const po = allPOList.find((p) => p.PurchaseOrderID === id);
+                          if (!po) return;
+                          setForm((prev) => {
+                            const updates: Partial<typeof prev> = {};
+                            // Company
+                            if (!prev.companyId && po.CompanyId) {
+                              updates.companyId = po.CompanyId;
+                              updates.projectSite = ""; // reset project when company changes
+                            }
+                            // Project — only set if company matches or wasn't set
+                            if (!prev.projectSite && po.ProjectId) {
+                              updates.projectSite = String(po.ProjectId);
+                            }
+                            // Financial year — derive from PO DocNo
+                            if (!prev.financialYear && po.DocNo) {
+                              const m = po.DocNo.match(/(\d{4})-(\d{2})/); // e.g. PO-2026-00014
+                              if (m) {
+                                const yr = parseInt(m[1], 10);
+                                // Indian FY: DocNo year = start year of FY
+                                const fyStr = `FY ${yr}-${String(yr + 1).slice(-2)}`;
+                                const found = activeFinYears.find((fy) =>
+                                  fy.year === fyStr || fy.year.includes(String(yr))
+                                );
+                                if (found) updates.financialYear = found.year;
+                              }
+                            }
+                            // Supplier
+                            if (!prev.supplier && po.SupplierName) {
+                              updates.supplier = po.SupplierName;
+                              const head = supplierHeads.find(
+                                (s) => s.label.toLowerCase() === po.SupplierName!.toLowerCase()
+                              );
+                              if (head) updates.supplierLHeadId = head.id;
+                            }
+                            return Object.keys(updates).length ? { ...prev, ...updates } : prev;
+                          });
+                        }}
                       >
                         <SelectTrigger className={selectTriggerCls}>
                           <SelectValue placeholder={loadingAllPOs ? "Loading…" : "All POs"} />
