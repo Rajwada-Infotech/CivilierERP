@@ -449,6 +449,7 @@ export function dbToRecord(row: any): ExpenseRecord {
       }
     })(),
     sourceDocNo: row.sourceDocNo ?? null,
+    linkedPODocNo: row.linkedPODocNo ?? null,
     vendorInvoiceNo: row.EVendorInvoiceNo ?? "",
     vendorInvoiceDate: row.EVendorInvoiceDate
       ? row.EVendorInvoiceDate.slice(0, 10)

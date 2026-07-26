@@ -132,7 +132,8 @@ export interface ExpenseRecord {
   projectId?: number | string;
   purchaseOrderId?: number | string;
   workOrderId?: number | string;
-  sourceDocNo?: string;
+  sourceDocNo?: string | null;
+  linkedPODocNo?: string | null;
   igstRate?: number;
   /** Source document type: PO | WO | GRN | TOD — saved to DB and restored on edit */
   eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null;
