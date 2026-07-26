@@ -1,66 +1,74 @@
 /**
  * Auto-provisions a CRM customer portal login the first time an agreement
- * enters preparation for a booking. Username = applicant email, initial
- * password = the applicant's mobile number (hashed, MustChangePassword=1
- * so the customer is forced to set their own password on first login).
+ * enters preparation for a booking. Identity anchor is CrmCustomer (by
+ * Mobile — the canonical unique key), NOT ApplicationId, so a customer with
+ * multiple applications/bookings gets one portal account that can access all
+ * of them, rather than having their portal context silently repointed to the
+ * newest application each time.
+ *
+ * Initial credential: Mobile number (hashed), MustChangePassword=1 so the
+ * customer must set their own password on first login.
+ *
+ * Previous behaviour (ApplicationId-keyed, repoint-on-collision) was
+ * replaced by migration 254. Zero portal users existed at migration time —
+ * no data migration needed.
  */
 const bcrypt = require("bcrypt");
 const { sql } = require("../db");
 
 async function ensurePortalUser(pool, applicationId) {
-  const existing = await pool.request().input("aid", sql.Int, applicationId)
-    .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE ApplicationId = @aid");
-  if (existing.recordset.length) return { created: false, id: existing.recordset[0].Id };
-
-  // CrmCustomer is the canonical identity record (migration 181) — prefer
-  // its Email/Mobile over CrmApplication's own copies, which are only a
-  // snapshot taken at application-creation time and can drift or contain a
-  // typo that was later corrected on the Customer record without anyone
-  // realizing the Application's copy (and therefore the portal login) never
-  // got updated. Falls back to the Application's own fields only if it
-  // somehow has no linked CustomerId.
+  // Resolve ApplicationId → CrmCustomer (preferred) → Email + Mobile.
+  // CrmCustomer is the canonical identity record; falls back to Application's
+  // own snapshot only if CustomerId is somehow null (shouldn't happen post-181).
   const app = await pool.request().input("aid", sql.Int, applicationId).query(`
     SELECT
-      COALESCE(c.Email, a.Email) AS Email,
-      COALESCE(c.Mobile, a.Mobile) AS Mobile
+      a.Id          AS ApplicationId,
+      a.CustomerId,
+      COALESCE(c.Email,   a.Email)  AS Email,
+      COALESCE(c.Mobile,  a.Mobile) AS Mobile
     FROM dbo.CrmApplication a
     LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
-    WHERE a.Id = @aid
+    WHERE a.Id = @aid AND a.IsActive = 1
   `);
+  if (!app.recordset.length) return { created: false, error: "Application not found" };
   const row = app.recordset[0];
-  if (!row?.Email) return { created: false, error: "Applicant has no email on file — cannot provision portal login" };
-  if (!row?.Mobile) return { created: false, error: "Applicant has no mobile on file — cannot provision portal login" };
 
-  const email = row.Email.trim().toLowerCase();
+  if (!row.CustomerId) return { created: false, error: "Application has no linked Customer record — cannot provision portal login" };
+  if (!row.Mobile)     return { created: false, error: "Customer has no mobile on file — cannot provision portal login" };
+  if (!row.Email)      return { created: false, error: "Customer has no email on file — cannot provision portal login" };
 
-  // dbo.CrmCustomerPortalUser has Email UNIQUE — a customer with two
-  // applications sharing the same email would otherwise crash the second
-  // agreement's portal provisioning on this constraint. Reuse the existing
-  // login instead of inserting a duplicate: repoint it at the new
-  // application. Known limitation, not a full fix: the portal is built
-  // entirely around a single ApplicationId per login (every query in
-  // crmPortal.js scopes by it), so this makes the customer's portal show
-  // their MOST RECENT application/booking, not both at once — true
-  // multi-application portal support would need crmPortal.js's queries
-  // reworked to scope by Email/Customer instead, which is out of scope here.
-  const byEmail = await pool.request().input("em", sql.NVarChar(200), email)
-    .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE Email = @em");
-  if (byEmail.recordset.length) {
-    const portalId = byEmail.recordset[0].Id;
-    await pool.request().input("id", sql.Int, portalId).input("aid", sql.Int, applicationId)
-      .query("UPDATE dbo.CrmCustomerPortalUser SET ApplicationId = @aid WHERE Id = @id");
-    return { created: false, id: portalId, reused: true };
+  const customerId = row.CustomerId;
+
+  // Idempotent: if a portal account already exists for this CustomerId, reuse
+  // it — a second Agreement on the same customer simply picks up the existing
+  // login without changing anything. The ApplicationId column is no longer
+  // written here (it's nullable and unused for routing since migration 254).
+  const existing = await pool.request().input("cid", sql.Int, customerId)
+    .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @cid");
+  if (existing.recordset.length) {
+    const portalId = existing.recordset[0].Id;
+    const email = row.Email.trim().toLowerCase();
+    await pool.request()
+      .input("id", sql.Int, portalId)
+      .input("em", sql.NVarChar(200), email)
+      .query("UPDATE dbo.CrmCustomerPortalUser SET Email = @em WHERE Id = @id");
+    return { created: false, id: portalId };
   }
 
+  // New customer — create their portal account keyed to CustomerId.
+  // Password seed = Mobile number (hashed), same as before.
+  const email = row.Email.trim().toLowerCase();
   const passwordHash = await bcrypt.hash(row.Mobile, 10);
+
   const result = await pool.request()
-    .input("aid",  sql.Int, applicationId)
+    .input("cid",  sql.Int,          customerId)
     .input("em",   sql.NVarChar(200), email)
     .input("hash", sql.NVarChar(200), passwordHash)
     .query(`
-      INSERT INTO dbo.CrmCustomerPortalUser (ApplicationId, Email, PasswordHash, MustChangePassword, IsActive, CreatedAt)
+      INSERT INTO dbo.CrmCustomerPortalUser
+        (CustomerId, Email, PasswordHash, MustChangePassword, IsActive, CreatedAt)
       OUTPUT INSERTED.Id
-      VALUES (@aid, @em, @hash, 1, 1, SYSDATETIME())
+      VALUES (@cid, @em, @hash, 1, 1, SYSDATETIME())
     `);
   return { created: true, id: result.recordset[0].Id };
 }
