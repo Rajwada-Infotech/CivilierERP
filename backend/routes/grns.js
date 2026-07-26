@@ -725,9 +725,7 @@ router.get("/:id", async (req, res) => {
 async function createGRNInternal(pool, body, userEmail) {
     const {
       grnDate,
-      // docDate is intentionally NOT read from the client — Doc Date is
-      // always the server's "today" (set below at insert time), never
-      // client-supplied, so it can't be backdated/postdated.
+      docDate,
       supplierId,
       poId,
       vehicleInOutId = null,
@@ -745,6 +743,15 @@ async function createGRNInternal(pool, body, userEmail) {
     if (!grnDate || !supplierId) {
       throw new Error("GRNDate and SupplierID are required");
     }
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (grnDate > todayStr) {
+      throw Object.assign(new Error("GRN Date cannot be a future date"), { status: 400 });
+    }
+    if (docDate && docDate > todayStr) {
+      throw Object.assign(new Error("Doc Date cannot be a future date"), { status: 400 });
+    }
+    // Resolve effective doc date: use client-supplied if valid and not future, else today
+    const effectiveDocDate = (docDate && docDate <= todayStr) ? docDate : todayStr;
 
     // ΓöÇΓöÇ Guard: a GRN can only be raised against an Approved PO ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (poId) {
@@ -860,10 +867,7 @@ async function createGRNInternal(pool, body, userEmail) {
         .request()
         .input("GRNNo", sql.NVarChar(50), finalDocNo)
         .input("GRNDate", sql.Date, grnDate)
-        // Doc Date is always "today" — entries are dated when they're
-        // actually made, not backdated/postdated (mirrors VehicleInOut).
-        // Trust the server clock rather than whatever the client sends.
-        .input("DocDate", sql.Date, new Date())
+        .input("DocDate", sql.Date, effectiveDocDate)
         .input("SupplierID", sql.Int, supplierId)
         .input("POID", sql.Int, poId || null)
         .input(
@@ -1056,6 +1060,7 @@ router.put(
     const {
       grnNo,
       grnDate,
+      docDate,
       supplierId,
       poId,
       grnItems,
@@ -1065,6 +1070,15 @@ router.put(
       docNo,
     } = req.body;
     const grnId = parseInt(req.params.id, 10);
+
+    // Reject future dates
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (grnDate && grnDate > todayStr) {
+      return res.status(400).json({ error: "GRN Date cannot be a future date" });
+    }
+    if (docDate && docDate > todayStr) {
+      return res.status(400).json({ error: "Doc Date cannot be a future date" });
+    }
 
     const pool = getPool();
 
