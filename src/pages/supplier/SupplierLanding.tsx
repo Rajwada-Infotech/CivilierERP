@@ -378,32 +378,51 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                         </div>
                       );
                     })}
-                    {/* Summary footer */}
-                    <div className="px-3 py-2.5 bg-muted/30 border-t border-border flex items-center justify-between">
-                      <div className="text-[10px] text-muted-foreground">
-                        {detail.GstType && detail.GstRate != null && (
-                          <span className="font-mono">{detail.GstType} {detail.GstRate}% GST</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-6">
-                        {detail.SubtotalAmount != null && (
-                          <div className="text-right">
-                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Subtotal</p>
-                            <p className="text-xs font-mono font-semibold text-foreground">
-                              ₹{Number(detail.SubtotalAmount).toLocaleString("en-IN")}
-                            </p>
+                    {/* GST Breakdown footer */}
+                    {(() => {
+                      const subtotal  = Number(detail.SubtotalAmount ?? 0);
+                      const gstRate   = Number(detail.GstRate ?? 0);
+                      const gstAmt    = subtotal * gstRate / 100;
+                      const isIGST    = (detail.GstType ?? "").toUpperCase().includes("IGST");
+                      const hasTax    = gstRate > 0 && subtotal > 0;
+                      const fmt       = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      return (
+                        <div className="border-t border-border divide-y divide-border/60">
+                          {/* Subtotal row */}
+                          <div className="flex items-center justify-between px-3 py-2 text-xs">
+                            <span className="text-muted-foreground">Subtotal</span>
+                            <span className="font-mono font-medium text-foreground">
+                              {subtotal > 0 ? `₹${fmt(subtotal)}` : "—"}
+                            </span>
                           </div>
-                        )}
-                        {totalAmt != null && (
-                          <div className="text-right">
-                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Total (incl. GST)</p>
-                            <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                              ₹{Number(totalAmt).toLocaleString("en-IN")}
-                            </p>
+                          {/* GST rows */}
+                          {hasTax && (isIGST ? (
+                            <div className="flex items-center justify-between px-3 py-2 text-xs">
+                              <span className="text-muted-foreground">IGST ({gstRate}%)</span>
+                              <span className="font-mono text-foreground">₹{fmt(gstAmt)}</span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between px-3 py-2 text-xs">
+                                <span className="text-muted-foreground">CGST ({gstRate / 2}%)</span>
+                                <span className="font-mono text-foreground">₹{fmt(gstAmt / 2)}</span>
+                              </div>
+                              <div className="flex items-center justify-between px-3 py-2 text-xs">
+                                <span className="text-muted-foreground">SGST ({gstRate / 2}%)</span>
+                                <span className="font-mono text-foreground">₹{fmt(gstAmt / 2)}</span>
+                              </div>
+                            </>
+                          ))}
+                          {/* Total row */}
+                          <div className="flex items-center justify-between px-3 py-3 bg-emerald-500/5">
+                            <span className="text-xs font-semibold text-foreground">Total (incl. GST)</span>
+                            <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                              {totalAmt != null ? `₹${fmt(Number(totalAmt))}` : subtotal > 0 ? `₹${fmt(subtotal + gstAmt)}` : "—"}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
