@@ -306,7 +306,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
-        className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border flex items-center justify-between shrink-0">
           <div className="min-w-0">
             <p className="text-sm font-heading font-bold text-foreground truncate">{detail?.DocNo || detail?.PurchaseOrderNo || "Order"}</p>
@@ -334,29 +334,79 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                 )}
               </div>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">What's needed</p>
-                <p className="text-sm text-foreground font-medium">{detail.ItemDescription || "—"}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-muted/40 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Quantity</p>
-                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.Quantity ?? "—"} {detail.Unit ?? ""}</p>
-                </div>
-                <div className="rounded-lg bg-muted/40 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate</p>
-                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.Rate != null ? `₹${Number(detail.Rate).toLocaleString("en-IN")}` : "—"}</p>
-                </div>
-                <div className="rounded-lg bg-muted/40 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Subtotal</p>
-                  <p className="text-sm font-semibold text-foreground mt-0.5">{detail.SubtotalAmount != null ? `₹${Number(detail.SubtotalAmount).toLocaleString("en-IN")}` : "—"}</p>
-                </div>
-                <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total (incl. GST)</p>
-                  <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{detail.TotalAmount != null ? `₹${Number(detail.TotalAmount).toLocaleString("en-IN")}` : "—"}</p>
-                </div>
-              </div>
+              {/* ── Line Items table ──────────────────────────────────── */}
+              {(() => {
+                const items: any[] = Array.isArray(detail.POItems) && detail.POItems.length > 0
+                  ? detail.POItems
+                  : detail.ItemDescription
+                    ? [{ itemDescription: detail.ItemDescription, quantity: detail.Quantity, uomName: detail.Unit, rate: detail.Rate }]
+                    : [];
+                const totalAmt = detail.TotalAmount;
+                return (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    {/* Table header */}
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2 bg-muted/50 border-b border-border">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Item</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-20">Qty</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-24">Rate</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-28">Total</p>
+                    </div>
+                    {/* Rows */}
+                    {items.map((it: any, idx: number) => {
+                      const name = it.itemDescription || it.itemName || it.ItemDescription || it.ItemName || `Item ${idx + 1}`;
+                      const qty  = Number(it.quantity  ?? it.Quantity  ?? 0);
+                      const uom  = it.uomName ?? it.UomName ?? it.unit ?? it.Unit ?? "";
+                      const rate = Number(it.rate ?? it.Rate ?? 0);
+                      const lineTotal = it.lineAmount ?? it.LineAmount ?? (qty * rate);
+                      return (
+                        <div
+                          key={idx}
+                          className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2.5 text-xs ${
+                            idx % 2 === 0 ? "bg-card" : "bg-muted/20"
+                          } border-b border-border/50 last:border-0`}
+                        >
+                          <p className="text-foreground font-medium truncate pr-2" title={name}>{name}</p>
+                          <p className="text-muted-foreground text-right w-20 font-mono tabular-nums">
+                            {qty.toLocaleString("en-IN")} <span className="text-[10px]">{uom}</span>
+                          </p>
+                          <p className="text-muted-foreground text-right w-24 font-mono tabular-nums">
+                            {rate > 0 ? `₹${rate.toLocaleString("en-IN")}` : "—"}
+                          </p>
+                          <p className="text-foreground font-semibold text-right w-28 font-mono tabular-nums">
+                            {lineTotal > 0 ? `₹${Number(lineTotal).toLocaleString("en-IN")}` : "—"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                    {/* Summary footer */}
+                    <div className="px-3 py-2.5 bg-muted/30 border-t border-border flex items-center justify-between">
+                      <div className="text-[10px] text-muted-foreground">
+                        {detail.GstType && detail.GstRate != null && (
+                          <span className="font-mono">{detail.GstType} {detail.GstRate}% GST</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-6">
+                        {detail.SubtotalAmount != null && (
+                          <div className="text-right">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Subtotal</p>
+                            <p className="text-xs font-mono font-semibold text-foreground">
+                              ₹{Number(detail.SubtotalAmount).toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                        )}
+                        {totalAmt != null && (
+                          <div className="text-right">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Total (incl. GST)</p>
+                            <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                              ₹{Number(totalAmt).toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="space-y-2.5 text-sm">
                 {detailRows(detail).map(({ icon: Icon, label, value }) => value ? (
