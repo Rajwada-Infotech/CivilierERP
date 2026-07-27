@@ -48,18 +48,43 @@ const APP_SELECT = `
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     -- Stage drives the Converted/In Process/Not Converted split every
-    -- Applications view now works from: once ANY booking has ever been
-    -- created for this application, it's Converted for good (even if that
-    -- booking later gets cancelled — the conversion event itself already
-    -- happened and a fresh booking attempt belongs on a fresh application,
-    -- matching the linear APPLICATION -> BOOKING step in the workflow spec).
-    -- Dead-end applications (Rejected/Cancelled, never booked) are Not
-    -- Converted; everything else still moving is In Process.
+    -- Applications view now works from. Converted means a LIVE booking
+    -- exists right now (bk.Status NOT IN Cancelled/Rejected) — not merely
+    -- that one was created at some point. A booking that later dies no
+    -- longer represents a real conversion, so its Application falls back
+    -- to NotConverted alongside every other dead-end Application, instead
+    -- of permanently masquerading as a successful sale.
+    -- This is safe against re-booking the same unit twice: the moment a
+    -- Booking is cancelled/rejected, syncApplicationOnBookingTerminal (see
+    -- crmApplicationWorkflow.js, called from crmCancellations.js /:id/approve)
+    -- force-advances this Application's own Status to match — so it no
+    -- longer reads 'Approved' either, which is what actually keeps it out
+    -- of the forBooking dropdown below (Stage alone was never the guard
+    -- against a second booking; Status is). NOTE: this assumes that sync
+    -- has always run — any pre-existing row where a booking died before
+    -- that cascade was wired in could still show Status='Approved' with a
+    -- dead booking, which this change would make eligible for forBooking
+    -- again. Worth a one-time check for Status='Approved' AND
+    -- BookingStatus IN ('Cancelled','Rejected') before relying on this.
     CASE
-      WHEN bk.Id IS NOT NULL THEN 'Converted'
+      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('Cancelled', 'Rejected') THEN 'Converted'
       WHEN a.Status IN ('Rejected', 'Cancelled') THEN 'NotConverted'
       ELSE 'InProcess'
-    END AS Stage
+    END AS Stage,
+    -- Distinguishes an Approved application that's actually bookable from one
+    -- that isn't, so the frontend can show something other than a "Create
+    -- Booking" button that's just going to 409 again for the same reason it
+    -- did last time. Computed live against current CrmBooking/CrmInventoryHold
+    -- rows (same checks createCrmBookingRecord itself uses) rather than stored
+    -- from whatever error the last attempt happened to produce, so it can't go
+    -- stale in either direction — it clears itself the moment the conflict
+    -- actually resolves (e.g. the other booking gets cancelled).
+    CASE
+      WHEN a.Status = 'Approved' AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('Cancelled', 'Rejected') AND ob.ApplicationId <> a.Id)
+        OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = 'Active' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
+      ) THEN 1 ELSE 0
+    END AS UnitUnavailableForBooking
   FROM dbo.CrmApplication a
   LEFT JOIN dbo.Users u   ON u.id  = a.AssignedTo
   LEFT JOIN dbo.Users ab  ON ab.id = a.AssignedBy
@@ -155,7 +180,12 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
   }
 });
 
-// POST / — create application (optionally from a lead, always starts Draft).
+// POST / — create application (optionally from a lead). createCrmApplicationRecord
+// inserts Status = 'Pending' directly — there is no Draft phase for CrmApplication;
+// 'Draft' remains in STATUSES/APPLICATION_TRANSITIONS/the frontend's Resume check for
+// backward compatibility but nothing in this codebase ever writes it. A unit pick at
+// creation is also checked (assertEntityNotTaken + findActiveHold) and hold-placed
+// immediately, best-effort — see createCrmApplicationRecord in crmEntityCreation.js.
 // Delegates to the shared creation service (backend/services/crmEntityCreation.js)
 // — the exact same function backend/services/saHandoff.js calls for the
 // Sales Automation -> CRM handoff, so there is one single source of truth
@@ -355,15 +385,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
   }
 });
 
-// PUT /:id/submit — Draft/Rejected -> Pending. Any editor can submit; this is
-// not an approval action, just moving the record into the approval queue.
-// POST / itself already inserts new Applications straight into 'Pending'
-// (not 'Draft' — see createCrmApplicationRecord), so a fresh Application
-// filed through the wizard is already "in the queue" by the time staff
-// reach Step 4. Treat that as already-submitted (no-op the status
-// transition, skip straight to the hold-placement below) rather than
-// erroring — approvalTransition only accepts Draft/Rejected -> Pending, and
-// a real re-submission after Rejected still needs the actual transition.
+// PUT /:id/submit — Rejected -> Pending (a real resubmit) via approvalTransition;
+// otherwise a no-op. POST / itself already inserts new Applications straight into
+// 'Pending' (see createCrmApplicationRecord), so a fresh Application filed through
+// the wizard is already "in the queue" by the time staff reach Step 4 — the no-op
+// branch below is what actually runs for every normal creation; the Draft->Pending
+// transition this route was originally written for is unreachable in practice since
+// nothing creates a CrmApplication as Draft anymore.
 router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -376,13 +404,12 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       ? { newStatus: "Pending" }
       : await approvalTransition("crm-applications", id, "Pending", userEmail, req.user?.role);
 
-    // Auto-hold the picked Unit for 72h the moment the full 4-step wizard is
-    // actually submitted (not at Step 1's unit-pick, which only creates the
-    // record) — reserves the unit while the application sits in the admin
-    // approval queue, so a second salesperson can't pick the same unit for a
-    // different customer in the meantime. Never blocks the submit itself:
-    // same partial-failure tolerance as the auto-booking-on-approval logic
-    // below in this file.
+    // Auto-hold the picked Unit for 72h. createCrmApplicationRecord already
+    // attempts this same hold at creation time (Step 1), but that attempt is
+    // best-effort/non-blocking there — so this call is the enforced backstop:
+    // unlike creation, a real conflict here (holdErr.status set, below) blocks
+    // the submit outright instead of letting a second salesperson's application
+    // sail into the approval queue unprotected.
     //
     // Parking deliberately gets no separate hold here: unlike a Unit (which
     // is only a soft PreferredUnitId preference until a real Booking exists),

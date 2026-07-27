@@ -218,7 +218,16 @@ const CrmApplication: React.FC = () => {
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
-  const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  // Unlike the other dropdowns below (company/project/plan — slow-changing
+  // reference data), unit availability changes whenever any salesperson
+  // holds or books a unit. Creation and submit both enforce this server-side
+  // regardless (see crmEntityCreation.js / crmApplications.js PUT /:id/submit),
+  // so this can never let someone actually take an unavailable unit — but a
+  // 5-minute staleTime meant this dropdown could keep listing an already-held
+  // unit to a second salesperson for that long, who'd then hit a 409 instead
+  // of just not seeing it. 30s keeps the common dropdown-render case cheap
+  // (no refetch storm) while closing most of that window.
+  const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
   const { data: platforms = [] } = useQuery({ queryKey: ["sa-platforms"], queryFn: fetchPlatforms, staleTime: 5 * 60_000 });
   const { data: campaigns = [] } = useQuery({ queryKey: ["sa-campaigns-dropdown"], queryFn: fetchCampaigns, staleTime: 5 * 60_000 });
   const { data: ads = [] } = useQuery({ queryKey: ["sa-ads-dropdown"], queryFn: fetchAds, staleTime: 5 * 60_000 });
@@ -288,17 +297,28 @@ const CrmApplication: React.FC = () => {
   const activePaymentPlans = useMemo(() => (paymentPlans as any[]).filter((p: any) => p.IsActive), [paymentPlans]);
   const applicablePaymentPlans = unitTaggedPaymentPlans.length ? unitTaggedPaymentPlans : activePaymentPlans;
 
-  // Resume is only meaningful for a genuinely incomplete application — and
-  // Status='Draft' is now that exact, authoritative signal (Step 1 of the
-  // wizard creates the record as Draft; it only flips to Pending once Step 4
-  // actually submits it — see crmEntityCreation.js / crmApplications.js
-  // PUT /:id/submit). This used to be guessed from which form fields
-  // happened to be empty, which was fragile in both directions: a fully
-  // submitted Pending application with a blank (optional) Notes field would
-  // incorrectly show Resume, while other field combinations could just as
-  // easily fail to show it on a genuinely incomplete one. Status is the
-  // real answer; stop guessing.
+  // Resume is only meaningful for a genuinely incomplete application. In
+  // practice that's Status='Pending' — POST / (createCrmApplicationRecord)
+  // inserts new applications straight into 'Pending', not 'Draft', so the
+  // Draft check below is kept only for backward compatibility (an older
+  // record, or a future path that writes it) and doesn't fire in the normal
+  // flow. This used to be guessed from which form fields happened to be
+  // empty, which was fragile in both directions: a fully submitted Pending
+  // application with a blank (optional) Notes field would incorrectly show
+  // Resume, while other field combinations could just as easily fail to show
+  // it on a genuinely incomplete one. Status is the real answer; stop guessing.
   const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
+
+  // Mirrors APPLICATION_TRANSITIONS in crmApplicationWorkflow.js: Cancel is a
+  // business action any editor can take pre-approval — accidental filing or a
+  // mistake means reapplying is cleaner than salvaging the record, and
+  // cancelling releases whatever unit/parking hold it was carrying immediately
+  // (see PUT /:id/cancel) instead of leaving it tied up until the hold's own
+  // expiry. Once Approved, the backend refuses this transition outright — the
+  // real Booking's own Cancellation Request flow is the only path from there,
+  // so this never shows for an Approved application. The button itself is
+  // just a convenience gate; the backend re-checks and is the real guard.
+  const canCancelApplication = (app: any) => !!app && !["Approved", "Cancelled", "Expired"].includes(app.Status);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -516,6 +536,10 @@ const CrmApplication: React.FC = () => {
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
       toast.success(`Application ${data.ApplicationNo} created`);
+      // A hold on the picked unit is placed server-side as part of creation
+      // (see createCrmApplicationRecord) — refresh so this session's own
+      // dropdown reflects it right away rather than waiting out staleTime.
+      if (form.PreferredUnitId) qc.invalidateQueries({ queryKey: ["unit-master"] });
       setStep(2);
     } catch (e: any) {
       toast.error(e.message);
@@ -564,6 +588,7 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
       qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -607,6 +632,42 @@ const CrmApplication: React.FC = () => {
   // when that auto-create silently failed (e.g. a stale hold conflict) —
   // there is no separate "New Booking" form anywhere else in the app.
   const [creatingBookingId, setCreatingBookingId] = useState<number | null>(null);
+
+  // Cancel confirmation state — a destructive, one-way action (backend has no
+  // "un-cancel"), so this always goes through a confirm dialog rather than
+  // firing straight off a row-action click.
+  const [cancellingApp, setCancellingApp] = useState<any | null>(null);
+  const [cancelRemarks, setCancelRemarks] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const handleCancelApplication = async () => {
+    if (!cancellingApp) return;
+    setCancelling(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${cancellingApp.Id}/cancel`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Remarks: cancelRemarks.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel application");
+      toast.success("Application cancelled — any unit/parking hold has been released");
+      const cancelledId = cancellingApp.Id;
+      setCancellingApp(null);
+      setCancelRemarks("");
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      // The hold this application was carrying is released server-side the
+      // instant cancel succeeds — refresh unit data so it's immediately
+      // pickable again instead of waiting out unit-master's staleTime.
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+      if (viewingAppId === cancelledId) qc.invalidateQueries({ queryKey: ["crm-app-detail", cancelledId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setCancelling(false);
+    }
+  };
   const handleCreateBooking = async (a: any) => {
     if (!a.PreferredUnitId) {
       toast.error("This application has no unit selected — edit it and pick a unit before a booking can be created");
@@ -761,7 +822,10 @@ const CrmApplication: React.FC = () => {
                   recordId={a.Id}
                   endpoint={API}
                   submitOnly
-                  onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-apps"] })}
+                  onSuccess={(_action, data) => {
+                    qc.invalidateQueries({ queryKey: ["crm-apps"] });
+                    if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
+                  }}
                 />
                 {a.Status === "Pending" && (
                   <span className="text-xs text-muted-foreground">Pending admin approval</span>
@@ -771,17 +835,43 @@ const CrmApplication: React.FC = () => {
                     conflict at the time) — the sole retry path, no separate
                     "New Booking" form exists anywhere else. */}
                 {a.Status === "Approved" && (
+                  a.UnitUnavailableForBooking ? (
+                    <span
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
+                      title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
+                    >
+                      <XCircle size={12} /> Unit unavailable
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleCreateBooking(a)}
+                      disabled={creatingBookingId === a.Id}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                    >
+                      <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
+                    </button>
+                  )
+                )}
+                {canCancelApplication(a) && (
                   <button
-                    onClick={() => handleCreateBooking(a)}
-                    disabled={creatingBookingId === a.Id}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                    onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
+                    className="text-xs text-red-600 hover:underline"
                   >
-                    <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
+                    Cancel
                   </button>
                 )}
               </>
             ) : (
-              <span className="text-xs text-muted-foreground">{a.Status} — no further action</span>
+              canCancelApplication(a) ? (
+                <button
+                  onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Cancel
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">{a.Status} — no further action</span>
+              )
             )}
           </div>
         );
@@ -1475,6 +1565,11 @@ const CrmApplication: React.FC = () => {
                     <div><span className="text-muted-foreground">Preferred Unit:</span> {a.PreferredUnitName || a.InterestedUnit || "—"}</div>
                     <div><span className="text-muted-foreground">Type:</span> {[a.PropertyType, a.BhkPreference].filter(Boolean).join(" · ") || "—"}</div>
                   </div>
+                  {a.UnitUnavailableForBooking && (
+                    <div className="flex items-center gap-1.5 text-xs text-red-600 pt-2 border-t border-border">
+                      <XCircle size={12} /> This unit is currently booked or held by a different application — a booking can't be created until it's re-picked.
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-border p-4 space-y-2">
@@ -1551,6 +1646,14 @@ const CrmApplication: React.FC = () => {
             <button onClick={() => setViewingAppId(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
               Close
             </button>
+            {viewingAppDetail && canCancelApplication(viewingAppDetail.application) && (
+              <button
+                onClick={() => { setCancellingApp(viewingAppDetail.application); setCancelRemarks(""); }}
+                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+              >
+                Cancel Application
+              </button>
+            )}
             {viewingAppDetail && isResumeEditable(viewingAppDetail.application) && (
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; setViewingAppId(null); loadApplicationIntoWizard(id); }}
@@ -1560,6 +1663,53 @@ const CrmApplication: React.FC = () => {
                 {loadingApplication ? "Loading..." : "Resume"}
               </button>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel is one-way (no "un-cancel" on the backend) — always confirm
+          before firing it, and explain what actually happens (hold release)
+          so staff aren't surprised the unit shows as available again right
+          after. */}
+      <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Cancel Application?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
+              <span className="font-medium text-foreground">{cancellingApp?.ApplicantName}</span> will be moved to Cancelled.
+              {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
+                " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."
+              )}
+              {" "}This can't be undone; file a new application to reapply.
+            </p>
+            <div>
+              <label className={labelCls}>Remarks (optional)</label>
+              <textarea
+                value={cancelRemarks}
+                onChange={(e) => setCancelRemarks(e.target.value)}
+                rows={2}
+                className={`${inputCls} resize-none`}
+                placeholder="e.g. Applied by mistake, customer changed their mind..."
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted"
+            >
+              Keep Application
+            </button>
+            <button
+              onClick={handleCancelApplication}
+              disabled={cancelling}
+              className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40"
+            >
+              {cancelling ? "Cancelling..." : "Cancel Application"}
+            </button>
           </div>
         </DialogContent>
       </Dialog>

@@ -9,6 +9,7 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
+const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
@@ -591,6 +592,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     `);
 
   const bookingId = result.recordset[0].Id;
+
+  // Unconditional, not just via guardAndConvertHold's own bump above — a
+  // CrmBooking row now exists against this unit regardless of whether a hold
+  // was there to convert (e.g. it expired in the seconds before this ran), and
+  // unit-master's GET / joins CrmBooking directly, so this is the one place
+  // that's guaranteed to run whenever that join's answer actually changes.
+  bumpCacheVersion("unit-master").catch(() => {});
 
   // The Application-stage capture (bank/KYC, documents, parking) was saved
   // keyed by ApplicationId with BookingId left NULL, since no Booking existed

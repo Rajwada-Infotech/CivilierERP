@@ -637,8 +637,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  const hasBookingInvoice = (invoices as any[]).some((inv) => inv.InvoiceType === "Booking");
+
   const openInvoiceDialog = () => {
-    setInvoiceForm({ InvoiceType: "Booking", Amount: booking?.BookingAmount ? String(booking.BookingAmount) : "", InvoiceDate: "", Description: "" });
+    const todayStr = new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, matches <input type="date">
+    // Booking is the system-owned invoice type — maybeAutoGenerateBookingInvoice
+    // already creates it at ready-for-approval, and the backend now rejects a
+    // second one outright. Once that row exists, this dialog has no business
+    // opening onto "Booking" at all — default straight to Maintenance instead.
+    setInvoiceForm(
+      hasBookingInvoice
+        ? { InvoiceType: "Maintenance", Amount: "", InvoiceDate: todayStr, Description: "" }
+        : { InvoiceType: "Booking", Amount: booking?.BookingAmount ? String(booking.BookingAmount) : "", InvoiceDate: todayStr, Description: "" }
+    );
     setInvoiceDialog(true);
   };
 
@@ -1217,6 +1228,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </button>
                   )}
                 </div>
+                {booking.Status === "Approved" && (invoices as any[]).length === 0 && (
+                  <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    Booking confirmed — invoice generation is pending
+                  </div>
+                )}
                 {(invoices as any[]).length === 0 ? (
                   <p className="text-xs text-muted-foreground py-4">No invoices generated yet.</p>
                 ) : (
@@ -1261,15 +1278,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                       <h3 className="text-sm font-semibold">Generate Invoice</h3>
                       <div className="space-y-2">
-                        <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                          <option value="Booking">Booking</option>
-                          <option value="Maintenance">Maintenance</option>
-                          <option value="Other">Other</option>
-                        </select>
+                        {invoiceForm.InvoiceType === "Booking" ? (
+                          // Booking invoice — no type change, no amount edit. This is a
+                          // system-owned invoice (see maybeAutoGenerateBookingInvoice);
+                          // letting staff retype or re-amount it here was the risky gap.
+                          <div className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-muted/30">
+                            <div className="flex items-baseline gap-2 min-w-0">
+                              <span className="font-medium">Booking</span>
+                              <span className="text-xs text-muted-foreground truncate">
+                                {booking.BookingNo}
+                                {booking.BookingDate ? ` · ${new Date(booking.BookingDate).toLocaleDateString("en-IN")}` : ""}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                            {!hasBookingInvoice && <option value="Booking">Booking</option>}
+                            <option value="Maintenance">Maintenance</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        )}
                         <input type="number" placeholder="Amount" value={invoiceForm.Amount}
                           onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                          readOnly={invoiceForm.InvoiceType === "Booking"}
+                          disabled={invoiceForm.InvoiceType === "Booking"}
+                          className={`w-full text-sm border border-border rounded-lg px-2.5 py-2 ${invoiceForm.InvoiceType === "Booking" ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
                         <input type="date" value={invoiceForm.InvoiceDate}
                           onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
