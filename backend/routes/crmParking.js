@@ -314,6 +314,36 @@ async function releaseAllParkingForBooking(pool, bookingId) {
   return { released: rows.recordset.length };
 }
 
+// Called from crmApplications.js's Cancel/Reject actions — the Application-
+// stage equivalent of releaseAllParkingForBooking() above. Without this,
+// cancelling or rejecting an Application released the picked Unit's hold
+// (crmHoldService.js) but left any standalone parking slot picked during the
+// wizard's Attachments step (a real, permanent CrmParkingAllotment row —
+// see POST /standalone below) permanently stuck as "Booked" in the parking
+// matrix forever, since nothing ever deactivated it. In practice this only
+// ever finds BookingId-IS-NULL rows: the calling routes already refuse to
+// cancel/reject an Application that has an active Booking, so anything
+// still ApplicationId-linked with a real BookingId at this point is already-
+// dead history under a Cancelled/Rejected Booking, cleaned up when that
+// Booking itself was cancelled. Reuses applyReleaseParking() per row so the
+// existing Paid-guard and milestone cleanup stay identical to every other
+// release path — a still-Paid standalone sale is left standing (logged, not
+// silently wiped) rather than blocking the whole Application cancellation.
+async function releaseAllParkingForApplication(pool, applicationId) {
+  const rows = await pool.request().input("aid", sql.Int, applicationId)
+    .query("SELECT Id FROM dbo.CrmParkingAllotment WHERE ApplicationId = @aid AND IsActive = 1");
+  let released = 0;
+  for (const row of rows.recordset) {
+    try {
+      await applyReleaseParking(pool, row.Id);
+      released++;
+    } catch (e) {
+      console.error("[crm-parking] releaseAllParkingForApplication failed for allotment", row.Id, e.message);
+    }
+  }
+  return { released };
+}
+
 // GET / — every parking allotment system-wide (both unit-linked and
 // standalone sales) for the dedicated Parking Booking page. Optional
 // ?status= filters by PaymentStatus.
@@ -802,3 +832,4 @@ module.exports.applyAddParking = applyAddParking;
 module.exports.applyEditParking = applyEditParking;
 module.exports.applyReleaseParking = applyReleaseParking;
 module.exports.releaseAllParkingForBooking = releaseAllParkingForBooking;
+module.exports.releaseAllParkingForApplication = releaseAllParkingForApplication;

@@ -12,7 +12,7 @@ const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
-const { guardAndConvertHold } = require("./crmHoldService");
+const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { createReceiptForMilestone } = require("../routes/crmPayments");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
@@ -152,6 +152,31 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
     unitName = unit.recordset[0].UnitName;
+
+    // Reject the pick up front if the unit is already spoken for — before any
+    // Application row exists to be rolled back. This is the actual fix for
+    // "a unit can be applied for multiple times": previously nothing here
+    // checked availability at all, and the real hold (crmHoldService.js) only
+    // ever got placed at the wizard's final submit step — leaving the entire
+    // creation-to-submit window (which can be hours or days, not a race) with
+    // no protection whatsoever, so the dropdown kept offering an already-
+    // picked unit to every other salesperson. Reuses the exact same checks
+    // placeHold() itself uses (assertEntityNotTaken + findActiveHold), so
+    // "available" can never mean something different here than it does
+    // anywhere else in the system. assertEntityNotTaken throws a plain Error
+    // (with .status set) rather than CrmCreationError — re-wrapped here so
+    // the POST / route's `instanceof CrmCreationError` check (which is what
+    // actually picks the right HTTP status) still fires correctly instead of
+    // silently falling through to a 500.
+    try {
+      await assertEntityNotTaken(pool, "Unit", parseInt(b.PreferredUnitId));
+    } catch (takenErr) {
+      throw new CrmCreationError(takenErr.message, takenErr.status || 409);
+    }
+    const existingHold = await findActiveHold(pool, "Unit", parseInt(b.PreferredUnitId));
+    if (existingHold) {
+      throw new CrmCreationError("This unit already has an active hold from another application", 409);
+    }
   }
   const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
@@ -229,6 +254,29 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   }
   const applicationId = result.recordset[0].Id;
   await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actorUserId);
+
+  // Place the actual hold now that the Application (and its Id) exists —
+  // placeHold() itself re-does the availability + same-project checks
+  // authoritatively (it's the single source of truth every caller goes
+  // through), so this isn't just trusting the pre-check above blindly.
+  // A conflict here means a genuine last-moment race — another application's
+  // hold landed in the few milliseconds between the pre-check and this
+  // insert — the same order of magnitude as the mobile-number race
+  // findOrCreateCustomer already tolerates above. There's no transaction
+  // wrapping this function to roll the Application row back into, so this
+  // doesn't fail the whole creation; crmApplications.js's own submit-time
+  // placeHoldIfNeeded call remains the backstop that catches it if it's
+  // still unresolved by the time this application is submitted.
+  if (b.PreferredUnitId) {
+    try {
+      await placeHoldIfNeeded(pool, {
+        entityType: "Unit", entityId: parseInt(b.PreferredUnitId), applicationId, holdDays: 3,
+        reason: "Application created — auto-hold", userId: actorUserId,
+      });
+    } catch (holdErr) {
+      console.error("[crm-entity-creation] auto-hold on application creation failed:", holdErr.message);
+    }
+  }
 
   return { id: applicationId, ApplicationNo: appNo };
 }

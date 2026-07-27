@@ -12,7 +12,8 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
-const { placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
+const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
+const { releaseAllParkingForApplication } = require("../routes/crmParking");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -234,6 +235,28 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
       unitName = unit.recordset[0].UnitName;
     }
+
+    // If the unit pick is actually changing (not just re-sent unchanged), the
+    // hold has to move with it — otherwise either the old unit's hold leaks
+    // forever, or the newly-picked unit sits completely unprotected the same
+    // way units did before creation-time holds existed at all (see
+    // createCrmApplicationRecord). Placed BEFORE the main UPDATE below runs,
+    // so a conflict on the new unit blocks this edit outright and the
+    // Application's PreferredUnitId is never changed to something already
+    // taken; the old hold is only released afterward, once the new one is
+    // confirmed in place.
+    const newUnitId = b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null;
+    const unitIsChanging = newUnitId !== null && newUnitId !== existingUnitId;
+    if (unitIsChanging) {
+      try {
+        await placeHoldIfNeeded(pool, {
+          entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
+          reason: "Application unit changed — auto-hold", userId: actor,
+        });
+      } catch (holdErr) {
+        return res.status(holdErr.status || 400).json({ error: holdErr.message });
+      }
+    }
     // Same resolver used at Application creation (see createCrmApplicationRecord)
     // and Booking creation — validates the picked plan against the unit's
     // CrmUnitPaymentPlan tags and enforces the "2+ tags -> must pick one"
@@ -309,6 +332,22 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         WHERE Id = @id AND IsActive = 1
       `);
 
+    // Now that the new unit's hold is confirmed and the row itself is saved,
+    // release whatever hold this same application still has on the OLD unit
+    // — findActiveHold + a targeted releaseHold, not
+    // releaseAllHoldsForApplication, since that bulk helper would also tear
+    // down the new hold just placed above.
+    if (unitIsChanging && existingUnitId) {
+      try {
+        const oldHold = await findActiveHold(pool, "Unit", existingUnitId);
+        if (oldHold && oldHold.ApplicationId === id) {
+          await releaseHold(pool, oldHold.Id, actor);
+        }
+      } catch (releaseErr) {
+        console.error("[crm-applications] releasing old unit hold on edit failed:", releaseErr.message);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-applications] PUT error:", e.message);
@@ -367,6 +406,19 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         });
       }
     } catch (holdErr) {
+      // A deliberate business-rule throw (unit already held by another
+      // application, unit already booked, project mismatch, etc.) always
+      // carries an explicit .status — that's this codebase's own convention
+      // (CrmCreationError, and crmHoldService.js's manually-set e.status).
+      // Those must block the submit, not be treated as tolerable infra noise
+      // — otherwise a second application for the same unit sails into the
+      // approval queue with no hold protecting it. Only a truly unexpected
+      // error (driver timeout, connection reset — no .status) stays
+      // non-blocking, matching the tolerance this comment originally intended.
+      if (holdErr.status) {
+        console.error("[crm-applications] auto-hold on submit blocked:", holdErr.message);
+        return res.status(holdErr.status).json({ error: holdErr.message });
+      }
       console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
     }
 
@@ -397,6 +449,7 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
     // stands either way, and staff can create the booking by hand as a
     // fallback, same tolerance-of-partial-failure pattern used for GL posting.
     let booking = null;
+    let bookingError = null;
     if (result.newStatus === "Approved") {
       const pool = getPool();
       const already = await pool.request().input("id", sql.Int, id)
@@ -455,13 +508,26 @@ router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (
                 WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
               `);
           } catch (bookingErr) {
-            console.error("[crm-applications] auto-booking failed:", bookingErr.message);
+            if (bookingErr.status) {
+              // The Approved transition above has already committed and must
+              // stay committed (same reasoning as the existing comment on
+              // this block) — so this stays a 200, not a 409. But the
+              // response can no longer pretend booking creation succeeded:
+              // bookingError surfaces the real conflict (e.g. unit taken by
+              // another application's booking in the interim) so the admin
+              // inbox / frontend can show it instead of a silently null
+              // booking that looks like "nothing to create yet."
+              console.error("[crm-applications] auto-booking blocked:", bookingErr.message);
+              bookingError = bookingErr.message;
+            } else {
+              console.error("[crm-applications] auto-booking failed:", bookingErr.message);
+            }
           }
         }
       }
     }
 
-    res.json({ success: true, status: result.newStatus, booking });
+    res.json({ success: true, status: result.newStatus, booking, bookingError });
   } catch (e) {
     console.error("[crm-applications] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
@@ -477,13 +543,17 @@ router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (r
     const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
     // A Rejected Application can only have gotten here from Pending — no
     // Booking exists yet at that stage (Booking only ever comes from
-    // Approve), so any Active hold on its picked Unit/Parking is now dead
-    // weight. Release it immediately instead of leaving it to the hourly
-    // SLA sweep to notice HoldUntil has passed — the entity should go back
-    // to Available for other customers right away, not hours later.
+    // Approve), so any Active hold on its picked Unit is now dead weight,
+    // and so is any standalone parking slot picked during the wizard's
+    // Attachments step (a real CrmParkingAllotment row, not a hold — see
+    // crmParking.js). Release both immediately instead of leaving the unit
+    // hold to the hourly SLA sweep and the parking slot stuck "Booked"
+    // forever with nothing to ever clean it up.
     if (result.newStatus === "Rejected") {
       try { await releaseAllHoldsForApplication(getPool(), id, actorId(req)); }
       catch (holdErr) { console.error("[crm-applications] hold release on reject failed:", holdErr.message); }
+      try { await releaseAllParkingForApplication(getPool(), id); }
+      catch (parkErr) { console.error("[crm-applications] parking release on reject failed:", parkErr.message); }
     }
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
@@ -493,7 +563,13 @@ router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (r
 });
 
 // PUT /:id/cancel — a business action, not an approval — any editor can
-// cancel a Draft/Pending/Rejected/Approved application.
+// cancel a Draft/Pending/Rejected application to fix an accidental or
+// mistaken filing and free up whatever it was holding. Approved is
+// deliberately excluded (see APPLICATION_TRANSITIONS in
+// crmApplicationWorkflow.js) — advanceApplicationStatus below will refuse
+// the transition and this route just surfaces that as a 400. Once
+// Approved, undoing the deal has to go through the Booking's own
+// Cancellation Request flow instead of this single-step action.
 router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -512,7 +588,11 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // query comment: "once ANY booking has ever been created for this
     // application, it's Converted for good") already treats a booked
     // Application and its Booking as one linked lifecycle -- this just
-    // enforces that on the cancel path too.
+    // enforces that on the cancel path too. In practice this is now mostly a
+    // second line of defense — an Approved Application can no longer reach
+    // Cancelled at all (APPLICATION_TRANSITIONS), so this only still matters
+    // for the rare case of an Approved Application with an active Booking
+    // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
     if (activeBooking.recordset.length) {
@@ -525,11 +605,15 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     const result = await advanceApplicationStatus(pool, id, "Cancelled", "Manual", remarks, actorId(req));
     if (!result.ok) return res.status(result.error === "Application not found" ? 404 : 400).json({ error: result.error });
     // Same reasoning as the Reject path above — the active-Booking check
-    // just above guarantees nothing but a hold could still be tying up real
-    // inventory for this Application, so release it now rather than
-    // waiting on the hourly SLA sweep.
+    // just above guarantees nothing but a hold or a standalone parking
+    // allotment could still be tying up real inventory for this
+    // Application, so release both now rather than waiting on the hourly
+    // SLA sweep (which only ever covers hold expiry, never parking
+    // allotments — see releaseAllParkingForApplication in crmParking.js).
     try { await releaseAllHoldsForApplication(pool, id, actorId(req)); }
     catch (holdErr) { console.error("[crm-applications] hold release on cancel failed:", holdErr.message); }
+    try { await releaseAllParkingForApplication(pool, id); }
+    catch (parkErr) { console.error("[crm-applications] parking release on cancel failed:", parkErr.message); }
     res.json({ success: true, status: result.to });
   } catch (e) {
     console.error("[crm-applications] cancel error:", e.message);

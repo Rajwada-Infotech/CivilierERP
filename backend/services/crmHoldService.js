@@ -154,5 +154,5 @@ async function releaseAllHoldsForApplication(pool, applicationId, userId) {
 
 module.exports = {
   ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold,
-  guardAndConvertHold, releaseAllHoldsForApplication,
+  guardAndConvertHold, releaseAllHoldsForApplication, assertEntityNotTaken,
 };
