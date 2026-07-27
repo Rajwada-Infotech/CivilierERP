@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -1316,7 +1316,14 @@ const CrmApplication: React.FC = () => {
           )}
 
           {step === 4 && applicationId && (
-            <CoApplicantStep applicationId={applicationId} />
+            <CoApplicantStep
+              applicationId={applicationId}
+              applicantName={selectedCustomer?.CustomerName || ""}
+              applicantAddress={selectedCustomer?.CurrentAddress || ""}
+              applicantCity={selectedCustomer?.CurrentCity || ""}
+              applicantState={selectedCustomer?.CurrentState || ""}
+              applicantPincode={selectedCustomer?.CurrentPincode || ""}
+            />
           )}
 
           {step === 5 && applicationId && (
@@ -1848,13 +1855,27 @@ const BankDetailsStep: React.FC<{
           <p className="text-xs font-medium text-foreground mb-2">Nominee</p>
           <div className="grid grid-cols-2 gap-2">
             {[
-              ["NomineeName", "Name"], ["NomineeRelation", "Relation"], ["NomineeContact", "Contact"],
+              ["NomineeName", "Name"], ["NomineeContact", "Contact"],
             ].map(([key, label]) => (
               <div key={key}>
                 <label className={labelCls}>{label}</label>
                 <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
               </div>
             ))}
+            <div>
+              <label className={labelCls}>Relation</label>
+              <select value={bank.NomineeRelation} onChange={(e) => setBank((b) => ({ ...b, NomineeRelation: e.target.value }))} className={inputCls}>
+                <option value="">Select</option>
+                <option value="Spouse">Spouse</option>
+                <option value="Son">Son</option>
+                <option value="Daughter">Daughter</option>
+                <option value="Father">Father</option>
+                <option value="Mother">Mother</option>
+                <option value="Brother">Brother</option>
+                <option value="Sister">Sister</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className={labelCls + " mb-0"}>Address</label>
@@ -2089,7 +2110,14 @@ const emptyCoApplicant = () => ({
   Address: "", City: "", State: "", Pincode: "", Notes: "",
 });
 
-const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId }) => {
+const CoApplicantStep: React.FC<{
+  applicationId: number;
+  applicantName?: string;
+  applicantAddress?: string;
+  applicantCity?: string;
+  applicantState?: string;
+  applicantPincode?: string;
+}> = ({ applicationId, applicantName, applicantAddress, applicantCity, applicantState, applicantPincode }) => {
   const { data: coApplicants = [], refetch } = useQuery({
     queryKey: ["crm-app-co-applicants-edit", applicationId],
     queryFn: async () => {
@@ -2101,8 +2129,19 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
   const [editingId, setEditingId] = useState<number | "new" | null>(null);
   const [draft, setDraft] = useState<any>(emptyCoApplicant());
   const [saving, setSaving] = useState(false);
+  // Clicking a co-applicant's row (anywhere but Edit/Delete) opens a
+  // read-only details popup — the row itself only ever shows Name/Relation/
+  // Mobile, so this is the only way to see PAN, Aadhaar, DOB, address, etc.
+  // without dropping into edit mode.
+  const [viewingCoApplicant, setViewingCoApplicant] = useState<any | null>(null);
+  // "Same as applicant's address" — same convenience toggle as the Nominee
+  // section: checking it copies the applicant's current Address/City/State/
+  // Pincode in and locks those fields; unchecking hands them back for free
+  // editing. Defaults on if a saved co-applicant's address already matches
+  // the applicant's (e.g. re-opening a previously saved entry).
+  const [sameAsApplicant, setSameAsApplicant] = useState(false);
 
-  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); };
+  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); setSameAsApplicant(false); };
   const startEdit = (co: any) => {
     setDraft({
       Name: co.Name || "", Relation: co.Relation || "", Mobile: co.Mobile || "",
@@ -2114,8 +2153,26 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
       Pincode: co.Pincode || "", Notes: co.Notes || "",
     });
     setEditingId(co.Id);
+    setSameAsApplicant(
+      !!applicantAddress && (co.Address || "").trim() === applicantAddress.trim() &&
+      (co.City || "").trim() === (applicantCity || "").trim() &&
+      (co.State || "").trim() === (applicantState || "").trim() &&
+      (co.Pincode || "").trim() === (applicantPincode || "").trim()
+    );
   };
-  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); };
+  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
+
+  // While the checkbox is on, keep the draft's address fields in step if
+  // the applicant's own address changes mid-edit.
+  useEffect(() => {
+    if (sameAsApplicant) {
+      setDraft((d: any) => ({
+        ...d,
+        Address: applicantAddress || "", City: applicantCity || "",
+        State: applicantState || "", Pincode: applicantPincode || "",
+      }));
+    }
+  }, [sameAsApplicant, applicantAddress, applicantCity, applicantState, applicantPincode]);
 
   const handleSave = async () => {
     if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
@@ -2157,15 +2214,17 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
         {(coApplicants as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(coApplicants as any[]).map((co: any) => (
-              <div key={co.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+              <div key={co.Id}
+                onClick={() => setViewingCoApplicant(co)}
+                className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
                 <span className="flex items-center gap-1.5">
                   <span className="font-medium text-foreground">{co.Name}</span>
                   {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
                   {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
                 </span>
                 <span className="flex items-center gap-2">
-                  <button onClick={() => startEdit(co)} className="text-primary hover:underline">Edit</button>
-                  <button onClick={() => handleDelete(co.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
                 </span>
               </div>
             ))}
@@ -2190,7 +2249,19 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
             </div>
             <div>
               <label className={labelCls}>Relation</label>
-              <input value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls} placeholder="Spouse, Parent, Sibling..." />
+              <select value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls}>
+                <option value="">Select</option>
+                <option value="Spouse">Spouse</option>
+                <option value="Son">Son</option>
+                <option value="Daughter">Daughter</option>
+                <option value="Father">Father</option>
+                <option value="Mother">Mother</option>
+                <option value="Brother">Brother</option>
+                <option value="Sister">Sister</option>
+                <option value="Friend">Friend</option>
+                <option value="Business Partner">Business Partner</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <div>
               <label className={labelCls}>Mobile</label>
@@ -2231,21 +2302,48 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
             </div>
           </div>
           <div>
-            <label className={labelCls}>Address</label>
-            <input value={draft.Address} onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))} className={inputCls} />
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls + " mb-0"}>Address</label>
+              {applicantAddress && (
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                  <input type="checkbox" checked={sameAsApplicant}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSameAsApplicant(checked);
+                      if (checked) {
+                        setDraft((d: any) => ({
+                          ...d, Address: applicantAddress || "", City: applicantCity || "",
+                          State: applicantState || "", Pincode: applicantPincode || "",
+                        }));
+                      }
+                    }}
+                    className="rounded border-border" />
+                  Same as {applicantName || "applicant"}'s address
+                </label>
+              )}
+            </div>
+            <input value={draft.Address} readOnly={sameAsApplicant}
+              onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
+              className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>City</label>
-              <input value={draft.City} onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))} className={inputCls} />
+              <input value={draft.City} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
             </div>
             <div>
               <label className={labelCls}>State</label>
-              <input value={draft.State} onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))} className={inputCls} />
+              <input value={draft.State} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
             </div>
             <div>
               <label className={labelCls}>Pincode</label>
-              <input value={draft.Pincode} onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))} className={inputCls} />
+              <input value={draft.Pincode} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
             </div>
           </div>
           <div>
@@ -2258,6 +2356,68 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
               className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Saving..." : "Save"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Plain custom overlay instead of the shadcn/Radix <Dialog> — this
+          popup opens while the wizard's own Dialog is already open, and
+          nesting two Radix Dialogs is a known source of a stuck
+          pointer-events/focus-trap state on the outer dialog once the inner
+          one closes (symptom: buttons like Edit stop responding). A plain
+          div-based overlay sidesteps that entirely. */}
+      {viewingCoApplicant && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setViewingCoApplicant(null)}
+        >
+          <div
+            className="bg-background border border-border rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading text-sm font-semibold text-foreground flex items-center gap-2">
+                <Users2 size={16} />
+                {viewingCoApplicant.Name}
+                {viewingCoApplicant.Relation && (
+                  <span className="text-xs font-normal text-muted-foreground">({viewingCoApplicant.Relation})</span>
+                )}
+              </h3>
+              <button onClick={() => setViewingCoApplicant(null)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
+              <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
+              <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
+              <div><span className="text-muted-foreground">Aadhaar No.:</span> <span className="text-foreground">{viewingCoApplicant.AadhaarNo || "—"}</span></div>
+              <div><span className="text-muted-foreground">Date of Birth:</span> <span className="text-foreground">{viewingCoApplicant.DateOfBirth ? String(viewingCoApplicant.DateOfBirth).slice(0, 10) : "—"}</span></div>
+              <div><span className="text-muted-foreground">Gender:</span> <span className="text-foreground">{viewingCoApplicant.Gender || "—"}</span></div>
+              <div><span className="text-muted-foreground">Occupation:</span> <span className="text-foreground">{viewingCoApplicant.Occupation || "—"}</span></div>
+              <div><span className="text-muted-foreground">Annual Income:</span> <span className="text-foreground">{viewingCoApplicant.AnnualIncome != null && viewingCoApplicant.AnnualIncome !== "" ? viewingCoApplicant.AnnualIncome : "—"}</span></div>
+              <div className="col-span-2"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
+              <div><span className="text-muted-foreground">City:</span> <span className="text-foreground">{viewingCoApplicant.City || "—"}</span></div>
+              <div><span className="text-muted-foreground">State:</span> <span className="text-foreground">{viewingCoApplicant.State || "—"}</span></div>
+              <div><span className="text-muted-foreground">Pincode:</span> <span className="text-foreground">{viewingCoApplicant.Pincode || "—"}</span></div>
+              {viewingCoApplicant.Notes && (
+                <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <button
+                type="button"
+                onClick={() => { const co = viewingCoApplicant; setViewingCoApplicant(null); startEdit(co); }}
+                className="px-3 py-1.5 text-xs border border-border rounded-md text-primary hover:bg-muted/40">
+                Edit
+              </button>
+              <button type="button" onClick={() => setViewingCoApplicant(null)}
+                className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90">
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
