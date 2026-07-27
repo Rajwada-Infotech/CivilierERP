@@ -19,7 +19,7 @@ const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateB
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, validatePaymentPlanScope } = require("../services/crmEntityCreation");
+const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -236,15 +236,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
     if (planIsChanging) {
       if (newPlanId) {
-        const unitBlock = oldRow.UnitId
-          ? await pool.request().input("uid", sql.Int, oldRow.UnitId).query("SELECT BlockId FROM dbo.UnitMaster WHERE Id = @uid")
-          : { recordset: [] };
+        // Same tag-based resolver Application/Booking creation use — the new
+        // plan must be one of the unit's CrmUnitPaymentPlan tags (or the
+        // unit has no tags, in which case any active plan is acceptable).
         try {
-          await validatePaymentPlanScope(pool, newPlanId, {
-            companyId: oldRow.CompanyId, projectId: oldRow.ProjectId, blockId: unitBlock.recordset[0]?.BlockId || null,
-          });
+          await resolveApplicationPaymentPlan(pool, { preferredUnitId: oldRow.UnitId, paymentPlanId: newPlanId });
         } catch (e) {
-          return res.status(400).json({ error: e.message });
+          return res.status(e.status || 400).json({ error: e.message });
         }
       }
       const paid = await pool.request().input("bid", sql.Int, id).query(`
@@ -348,7 +346,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     // Same lookup + availability checks as booking creation — the new unit
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt, u.DefaultPaymentPlanId,
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
@@ -372,14 +370,18 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))
     `);
     const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
-    const newPlanId = canRegenerateSchedule && unitRow.DefaultPaymentPlanId ? unitRow.DefaultPaymentPlanId : null;
-    if (newPlanId) {
-      await validatePaymentPlanScope(pool, newPlanId, {
-        companyId: unitRow.CompanyId || null,
-        projectId: unitRow.ProjectId || null,
-        blockId: unitRow.BlockId || null,
-        unitId: unitRow.Id || null,
-      });
+    let newPlanId = null;
+    if (canRegenerateSchedule) {
+      try {
+        // No explicit plan pick on this endpoint yet, so this only resolves
+        // automatically when the new unit has exactly one tagged plan (see
+        // resolveApplicationPaymentPlan). A unit with 0 or 2+ tags leaves
+        // the plan unresolved here rather than guessing — staff can set it
+        // explicitly via the booking's own PUT /:id payment-plan change.
+        newPlanId = await resolveApplicationPaymentPlan(pool, { preferredUnitId: unitRow.Id, paymentPlanId: null });
+      } catch (e) {
+        newPlanId = null;
+      }
     }
     const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;

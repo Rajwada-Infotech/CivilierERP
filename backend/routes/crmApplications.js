@@ -11,7 +11,7 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, validatePaymentPlanScope } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
 
 router.use(authMiddleware);
@@ -44,7 +44,6 @@ const APP_SELECT = `
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
-    cust.CoApplicantName, cust.CoApplicantMobile, cust.CoApplicantPanNo, cust.CoApplicantRelation,
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -190,8 +189,9 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const existingUnitId = existing.recordset[0].PreferredUnitId || null;
 
     // Contact identity fields (Mobile/AltMobile/Email) get the same
     // protection Status already had — but tighter, since these are used as
@@ -228,30 +228,27 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       companyId = companyId || proj.recordset[0].company_id || null;
     }
     let unitName = b.InterestedUnit || null;
-    let unitDefaultPaymentPlanId = null;
-    let unitBlockId = null;
     if (b.PreferredUnitId) {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName, BlockId, DefaultPaymentPlanId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
-      const unitRow = unit.recordset[0];
-      unitName = unitRow.UnitName;
-      unitBlockId = unitRow.BlockId || null;
-      unitDefaultPaymentPlanId = unitRow.DefaultPaymentPlanId || null;
+      unitName = unit.recordset[0].UnitName;
     }
-    const effectivePaymentPlanId = b.PaymentPlanId
-      ? parseInt(b.PaymentPlanId)
-      : (b.PreferredUnitId ? unitDefaultPaymentPlanId : null);
-    if (effectivePaymentPlanId) {
+    // Same resolver used at Application creation (see createCrmApplicationRecord)
+    // and Booking creation — validates the picked plan against the unit's
+    // CrmUnitPaymentPlan tags and enforces the "2+ tags -> must pick one"
+    // rule, instead of the old single DefaultPaymentPlanId fallback.
+    const pptouched = (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0;
+    let effectivePaymentPlanId = null;
+    if (pptouched) {
+      const effectiveUnitId = b.PreferredUnitId ? parseInt(b.PreferredUnitId) : existingUnitId;
       try {
-        await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
-          companyId,
-          projectId: b.ProjectId ? parseInt(b.ProjectId) : null,
-          blockId: unitBlockId,
-          unitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
+        effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+          preferredUnitId: effectiveUnitId,
+          paymentPlanId: b.PaymentPlanId || null,
         });
-      } catch (scopeErr) {
-        return res.status(400).json({ error: scopeErr.message });
+      } catch (planErr) {
+        return res.status(planErr.status || 400).json({ error: planErr.message });
       }
     }
 
@@ -276,7 +273,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId)
-      .input("pptouched", sql.Bit,      (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0)
+      .input("pptouched", sql.Bit,      pptouched)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)

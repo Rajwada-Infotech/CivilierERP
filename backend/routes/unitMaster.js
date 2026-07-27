@@ -38,6 +38,31 @@ async function getUnitLockReason(pool, id) {
   return "is currently on hold";
 }
 
+// A unit can be tagged with multiple Payment Plans (dbo.CrmUnitPaymentPlan,
+// many-to-many) — plans themselves are created independently in Payment Plan
+// Master; this just decides which of them apply to this specific unit, for
+// the Application wizard's Payment Plan dropdown to offer. Existing tags are
+// deactivated and the new set (re-)activated in one pass — same
+// deactivate-then-upsert pattern the old CrmPaymentPlanProject scope table
+// used, so a removed tag doesn't leave a dangling active row behind.
+async function syncUnitPaymentPlanTags(pool, unitId, planIds) {
+  await pool.request().input("uid", sql.Int, unitId)
+    .query("UPDATE dbo.CrmUnitPaymentPlan SET IsActive = 0 WHERE UnitId = @uid");
+  for (const planId of planIds) {
+    if (!Number.isFinite(planId)) continue;
+    await pool.request()
+      .input("uid", sql.Int, unitId)
+      .input("pid", sql.Int, planId)
+      .query(`
+        MERGE dbo.CrmUnitPaymentPlan AS tgt
+        USING (SELECT @uid AS UnitId, @pid AS PlanId) AS src
+        ON tgt.UnitId = src.UnitId AND tgt.PlanId = src.PlanId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (UnitId, PlanId, IsActive, CreatedAt) VALUES (src.UnitId, src.PlanId, 1, SYSDATETIME());
+      `);
+  }
+}
+
 // GET all units — ?isActive=1 filters out soft-deleted units (used by unit
 // pickers like CrmBooking's; the Unit Master admin grid itself omits this
 // param so it can still see/reactivate deactivated units).
@@ -60,14 +85,20 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.IsActive,
         u.CreatedAt,
         u.UpdatedAt,
-        u.DefaultPaymentPlanId,
-        pp.PlanName AS DefaultPaymentPlanName,
+        tags.PlanIds AS PaymentPlanIds,
+        tags.PlanNames AS PaymentPlanNames,
         bk.BookingNo AS LockBookingNo,
         h.Id AS LockHoldId
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise  ep ON ep.id = u.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = u.BlockId
-      LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = u.DefaultPaymentPlanId
+      OUTER APPLY (
+        SELECT STRING_AGG(CAST(upp.PlanId AS VARCHAR(20)), ',') AS PlanIds,
+               STRING_AGG(pp.PlanName, ', ') AS PlanNames
+        FROM dbo.CrmUnitPaymentPlan upp
+        JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = upp.PlanId
+        WHERE upp.UnitId = u.Id AND upp.IsActive = 1
+      ) tags
       LEFT JOIN dbo.CrmBooking bk
         ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
       LEFT JOIN dbo.CrmInventoryHold h
@@ -126,7 +157,8 @@ router.get("/blocks", async (req, res) => {
 
 // POST — add unit
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
+  const planIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const createdBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
@@ -160,19 +192,18 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
         .input("UnitType", sql.NVarChar(50), UnitType || null)
         .input("Area", sql.Decimal(18, 2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
-        .input("PlanId", sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
         .input("UpdatedBy", sql.Int, createdBy)
         .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
           UPDATE dbo.UnitMaster SET
             FloorNo = @FloorNo,
             UnitType = @UnitType,
             AreaSqFt = @Area,
-            DefaultPaymentPlanId = @PlanId,
             IsActive = 1,
             UpdatedBy = @UpdatedBy,
             UpdatedAt = @UpdatedAt
           WHERE Id = @Id
         `);
+      await syncUnitPaymentPlanTags(pool, existing.Id, planIds);
       await bumpCacheVersion("unit-master");
       logAudit({ module: "UnitMaster", recordId: existing.Id, recordNo: UnitName, action: "Reactivated", changedBy: userName });
       return res.json({ message: "Unit reactivated successfully" });
@@ -187,13 +218,13 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
       .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
-      .input("PlanId",    sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId, CreatedBy, CreatedAt)
+        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @PlanId, @CreatedBy, @CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @CreatedBy, @CreatedAt)
       `);
+    await syncUnitPaymentPlanTags(pool, result.recordset[0].Id, planIds);
     await bumpCacheVersion("unit-master");
     logAudit({ module: "UnitMaster", recordId: result.recordset[0].Id, recordNo: UnitName, action: "Created", changedBy: userName });
     res.json({ message: "Unit added successfully" });
@@ -206,7 +237,8 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 // PUT — update unit
 router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, DefaultPaymentPlanId } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
+  const planIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
@@ -249,7 +281,6 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
       .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
-      .input("PlanId",    sql.Int, DefaultPaymentPlanId ? parseInt(DefaultPaymentPlanId) : null)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.UnitMaster SET
@@ -260,11 +291,11 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UnitType  = @UnitType,
           AreaSqFt  = @Area,
           IsActive  = @IsActive,
-          DefaultPaymentPlanId = @PlanId,
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+    await syncUnitPaymentPlanTags(pool, parseInt(id), planIds);
     await bumpCacheVersion("unit-master");
     logAudit({ module: "UnitMaster", recordId: parseInt(id), recordNo: UnitName, action: "Updated", changedBy: userName });
     res.json({ message: "Unit updated successfully" });

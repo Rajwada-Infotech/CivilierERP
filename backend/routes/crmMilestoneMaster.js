@@ -15,7 +15,7 @@ router.get("/", requirePageRight("crm-milestone-master", "view"), async (req, re
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, Name, DefaultPercent, SortOrder, IsActive, CreatedAt, UpdatedAt
+      SELECT Id, Name, SortOrder, IsActive, CreatedAt, UpdatedAt
       FROM dbo.CrmMilestoneMaster
       ORDER BY SortOrder, Name
     `);
@@ -34,13 +34,12 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
 
     const result = await pool.request()
       .input("name", sql.NVarChar(200), b.Name.trim())
-      .input("pct",  sql.Decimal(5,2),  b.DefaultPercent != null && b.DefaultPercent !== "" ? parseFloat(b.DefaultPercent) : null)
       .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : 0)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
-        INSERT INTO dbo.CrmMilestoneMaster (Name, DefaultPercent, SortOrder, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmMilestoneMaster (Name, SortOrder, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@name, @pct, @sort, 1, @cb, SYSDATETIME())
+        VALUES (@name, @sort, 1, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -59,13 +58,12 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)
-      .input("pct",  sql.Decimal(5,2),  b.DefaultPercent != null && b.DefaultPercent !== "" ? parseFloat(b.DefaultPercent) : null)
       .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : null)
       .input("active", sql.Bit,        b.IsActive !== false ? 1 : 0)
       .input("ub",   sql.Int,           actorId(req))
       .query(`
         UPDATE dbo.CrmMilestoneMaster SET
-          Name = ISNULL(@name, Name), DefaultPercent = @pct,
+          Name = ISNULL(@name, Name),
           SortOrder = ISNULL(@sort, SortOrder), IsActive = @active,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id

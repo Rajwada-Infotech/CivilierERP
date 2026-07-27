@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History, Landmark,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -22,8 +22,7 @@ const UNIT_API = "/api/unit-master";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const DOC_API = "/api/crm/booking-documents";
 const PARKING_API = "/api/crm/parking";
-const PARKING_MASTER_API = "/api/parking-master";
-const PARKING_SLOT_API = "/api/parking-slot-master";
+const CO_APPLICANT_API = "/api/crm/co-applicants";
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
@@ -122,14 +121,20 @@ async function fetchChannelPartners(): Promise<any[]> {
 async function fetchBrokers(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/account-head?type=BR"); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchParkingMaster(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PARKING_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchParkingSlots(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PARKING_SLOT_API); return r.ok ? r.json() : []; } catch { return []; }
-}
 async function fetchPaymentPlans(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/crm/payment-plans"); return r.ok ? r.json() : []; } catch { return []; }
+}
+
+// Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
+// MilestonesJson column — reused here so the brief plan-preview card below
+// can compute real ₹ figures instead of just repeating raw %s.
+type MilestoneRow = { name: string; pct: number };
+function parseMilestones(json: string | null | undefined): MilestoneRow[] {
+  if (!json) return [];
+  try {
+    const raw = JSON.parse(json);
+    return (raw as any[]).map((r) => ({ name: r.name, pct: Number(r.pct) || 0 }));
+  } catch { return []; }
 }
 
 const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
@@ -155,11 +160,9 @@ const CrmApplication: React.FC = () => {
   // original lead's source. Unlocked by default for customers with no
   // linked lead, since there is nothing to auto-fetch.
   const [sourceLocked, setSourceLocked] = useState(false);
-  // Locked once a Payment Plan is auto-fetched from the selected Unit's own
-  // default (Unit Master decides this up front) — "Change" lets staff pick
-  // a different plan for the (rarer) deal that genuinely needs one. No plan
-  // to lock if the unit has no default set.
-  const [planLocked, setPlanLocked] = useState(false);
+  // (No more planLocked/auto-fetch state — Unit Master no longer has a
+  // single "default" plan to silently apply; Payment Plan is always an
+  // explicit, mandatory pick once a unit is on the application.)
   const [invoiceRow, setInvoiceRow] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
   const [invoiceSaving, setInvoiceSaving] = useState(false);
@@ -200,6 +203,17 @@ const CrmApplication: React.FC = () => {
     queryFn: () => fetchAppDetail(viewingAppId as number),
     enabled: !!viewingAppId,
   });
+  // Co-applicants now live in their own list keyed by ApplicationId (see
+  // crmCoApplicant.js GET /application/:id) rather than as flat
+  // CoApplicantName/Relation/Mobile columns on CrmApplication itself.
+  const { data: viewingAppCoApplicants = [] } = useQuery({
+    queryKey: ["crm-app-co-applicants", viewingAppId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${viewingAppId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!viewingAppId,
+  });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
@@ -210,9 +224,19 @@ const CrmApplication: React.FC = () => {
   const { data: ads = [] } = useQuery({ queryKey: ["sa-ads-dropdown"], queryFn: fetchAds, staleTime: 5 * 60_000 });
   const { data: channelPartners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchChannelPartners, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
-  const { data: parkingRates = [] } = useQuery({ queryKey: ["parking-master"], queryFn: fetchParkingMaster, staleTime: 5 * 60_000 });
-  const { data: parkingSlots = [] } = useQuery({ queryKey: ["parking-slot-master"], queryFn: fetchParkingSlots, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
+  // — react-query dedupes/caches across the two, so the Details tab (Step
+  // 6) can show the parking total without firing its own separate fetch.
+  const { data: detailParkingAllotments = [] } = useQuery({
+    queryKey: ["crm-app-parking", applicationId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${PARKING_API}/application/${applicationId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!applicationId,
+  });
+  const detailParkingTotal = (detailParkingAllotments as any[]).reduce((s, a) => s + (Number(a.TotalAmount) || 0), 0);
 
   const selectedCustomer = useMemo(() =>
     (customers as any[]).find((c: any) => String(c.Id) === form.CustomerId) || null,
@@ -252,29 +276,17 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
-  const applicablePaymentPlans = useMemo(() => {
-    return (paymentPlans as any[]).filter((p: any) => {
-      if (!p.IsActive) return false;
-      if (p.CompanyId && String(p.CompanyId) !== form.CompanyId) return false;
-      if (p.Projects?.length && !p.Projects.some((x: any) => String(x.Id) === form.ProjectId)) return false;
-      if (p.BlockId && String(p.BlockId) !== form.BlockId) return false;
-      if (p.UnitId && String(p.UnitId) !== form.PreferredUnitId) return false;
-      return true;
-    });
-  }, [paymentPlans, form.CompanyId, form.ProjectId, form.BlockId, form.PreferredUnitId]);
-  // Broader fallback for the "this unit was never given a default plan"
-  // case — every plan that applies to the Project (ignoring any Block/Unit-
-  // level narrowing a plan might carry), since the whole point here is
-  // giving staff a genuine choice rather than an empty/near-empty dropdown
-  // just because Unit Master setup was left incomplete for this one unit.
-  const projectPaymentPlans = useMemo(() => {
-    return (paymentPlans as any[]).filter((p: any) => {
-      if (!p.IsActive) return false;
-      if (p.CompanyId && String(p.CompanyId) !== form.CompanyId) return false;
-      if (p.Projects?.length && !p.Projects.some((x: any) => String(x.Id) === form.ProjectId)) return false;
-      return true;
-    });
-  }, [paymentPlans, form.CompanyId, form.ProjectId]);
+  // A unit's tagged plans (set in Unit Master) constrain the choice; a unit
+  // with no tags at all leaves every active plan on the table. Either way a
+  // plan must be picked once a unit is on the application — there's no more
+  // "leave blank for the default split" option.
+  const unitTaggedPaymentPlans = useMemo(() => {
+    if (!selectedUnit?.PaymentPlanIds) return [];
+    const taggedIds: string[] = String(selectedUnit.PaymentPlanIds).split(",").filter(Boolean);
+    return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
+  }, [paymentPlans, selectedUnit]);
+  const activePaymentPlans = useMemo(() => (paymentPlans as any[]).filter((p: any) => p.IsActive), [paymentPlans]);
+  const applicablePaymentPlans = unitTaggedPaymentPlans.length ? unitTaggedPaymentPlans : activePaymentPlans;
 
   // Resume is only meaningful for a genuinely incomplete application — and
   // Status='Draft' is now that exact, authoritative signal (Step 1 of the
@@ -374,39 +386,34 @@ const CrmApplication: React.FC = () => {
     }
   }, [selectedUnit]);
 
-  // Which unit's Payment Plan the user has explicitly clicked "Change" on —
-  // mirrors sourceUnlockedForCustomerRef so a background units refetch
-  // (same data, new array identity) never silently re-locks and clobbers
-  // the override.
-  const planUnlockedForUnitRef = useRef<number | null>(null);
-
-  // The moment a unit with a Default Payment Plan is selected, auto-fetch
-  // it onto the application and lock it — the plan was already decided at
-  // Unit Master setup time, not something staff should re-pick per deal.
+  // If the unit changes to one with a different (or no) tagged-plan set,
+  // clear a PaymentPlanId that no longer applies — e.g. it was one of the
+  // old unit's tags but isn't one of the new unit's.
   useEffect(() => {
-    const unitId = selectedUnit?.Id ?? null;
     if (applicationId) return;
-    if (!unitId) {
-      setPlanLocked(false);
-      setForm((f) => (f.PaymentPlanId ? { ...f, PaymentPlanId: "" } : f));
-      return;
-    }
-    if (!selectedUnit?.DefaultPaymentPlanId) {
-      setPlanLocked(false);
-      setForm((f) => (f.PaymentPlanId ? { ...f, PaymentPlanId: "" } : f));
-      return;
-    }
-    if (planUnlockedForUnitRef.current === unitId) return;
-    setForm((f) => ({ ...f, PaymentPlanId: String(selectedUnit.DefaultPaymentPlanId) }));
-    setPlanLocked(true);
+    if (!form.PaymentPlanId) return;
+    const stillValid = applicablePaymentPlans.some((p: any) => String(p.Id) === form.PaymentPlanId);
+    if (!stillValid) setForm((f) => ({ ...f, PaymentPlanId: "" }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applicationId, selectedUnit?.Id, selectedUnit?.DefaultPaymentPlanId]);
+  }, [applicationId, selectedUnit?.Id]);
 
   const computedTotal = useMemo(() => {
     const area = Number(selectedUnit?.AreaSqFt) || 0;
     const rate = Number(form.RatePerSqFt) || 0;
     return area && rate ? Math.round(area * rate) : 0;
   }, [selectedUnit, form.RatePerSqFt]);
+
+  // Brief, real-money preview of the plan actually picked — Booking is the
+  // plan's own fixed ₹ (never a % — see CrmPaymentPlans.tsx), every
+  // milestone after it splits 100% of (computedTotal - BookingAmount), same
+  // math generateMilestonesForBooking uses once a real Booking exists.
+  const selectedPaymentPlan = useMemo(() =>
+    (paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId) || null,
+    [paymentPlans, form.PaymentPlanId]
+  );
+  const selectedPlanMilestones = useMemo(() => parseMilestones(selectedPaymentPlan?.MilestonesJson), [selectedPaymentPlan]);
+  const selectedPlanBookingAmount = Number(selectedPaymentPlan?.BookingAmount || 0);
+  const selectedPlanRemainder = Math.max(0, computedTotal - selectedPlanBookingAmount);
 
   // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
   // percentage/amount is computed server-side off the Booking's actual
@@ -425,8 +432,6 @@ const CrmApplication: React.FC = () => {
     // auto-fetch for a customer who never actually clicked "Change").
     setSourceLocked(false);
     sourceUnlockedForCustomerRef.current = null;
-    setPlanLocked(false);
-    planUnlockedForUnitRef.current = null;
   };
 
   const loadApplicationIntoWizard = async (id: number) => {
@@ -465,8 +470,6 @@ const CrmApplication: React.FC = () => {
         Notes: app.Notes || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
-      setPlanLocked(!!app.PaymentPlanId);
-      planUnlockedForUnitRef.current = null;
 
       const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
       setStep(hasProject ? 2 : 1);
@@ -484,6 +487,7 @@ const CrmApplication: React.FC = () => {
   const handleCreateAndNext = async () => {
     if (!form.CustomerId) { toast.error("Select a customer"); return; }
     if (!form.CompanyId || !form.ProjectId) { toast.error("Select a company and project"); return; }
+    if (form.PreferredUnitId && !form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -872,7 +876,7 @@ const CrmApplication: React.FC = () => {
 
           {/* Step indicator */}
           <div className="flex items-center gap-1.5 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Notes"].map((label, i) => (
+            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => (
               <React.Fragment key={label}>
                 {i > 0 && <div className="flex-1 h-px bg-border" />}
                 <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium ${
@@ -919,8 +923,6 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Company *</label>
                     <select value={form.CompanyId} disabled={!!applicationId}
                       onChange={(e) => {
-                        planUnlockedForUnitRef.current = null;
-                        setPlanLocked(false);
                         setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
@@ -932,8 +934,6 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Project *</label>
                     <select value={form.ProjectId} disabled={!!applicationId}
                       onChange={(e) => {
-                        planUnlockedForUnitRef.current = null;
-                        setPlanLocked(false);
                         setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
@@ -945,8 +945,6 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Block / Tower</label>
                     <select value={form.BlockId} disabled={!!applicationId}
                       onChange={(e) => {
-                        planUnlockedForUnitRef.current = null;
-                        setPlanLocked(false);
                         setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
@@ -958,8 +956,6 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Floor</label>
                     <select value={form.FloorNo} disabled={!!applicationId}
                       onChange={(e) => {
-                        planUnlockedForUnitRef.current = null;
-                        setPlanLocked(false);
                         setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
@@ -971,8 +967,6 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Unit *</label>
                     <select value={form.PreferredUnitId} disabled={!!applicationId}
                       onChange={(e) => {
-                        planUnlockedForUnitRef.current = null;
-                        setPlanLocked(false);
                         setForm((f) => ({ ...f, PreferredUnitId: e.target.value, PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
@@ -984,36 +978,64 @@ const CrmApplication: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Payment Plan — decided once at Unit Master setup time for
-                    this exact unit, auto-fetched and locked the moment the
-                    unit above is selected. "Change" unlocks it for the
-                    (rarer) deal that genuinely needs a different plan. Not
-                    re-selectable on the Booking page — this is the one
-                    place it's chosen. */}
+                {/* Brief unit price — the unit's own name/type/area is
+                    already visible in the Unit dropdown right above, so
+                    this only needs to show the derived ₹ math itself. */}
+                {selectedUnit && (
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                    <IndianRupee size={11} className="text-primary shrink-0" />
+                    {form.RatePerSqFt && computedTotal ? (
+                      <span>
+                        {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
+                      </span>
+                    ) : (
+                      <span>Enter Rate (₹/sqft) below to see the full price.</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Payment Plan — mandatory the moment a unit is picked.
+                    Options are this unit's own tagged plans (set in Unit
+                    Master); if the unit has none tagged, every active plan
+                    is offered instead. Not re-selectable on the Booking
+                    page — this is the one place it's chosen. */}
                 {form.PreferredUnitId && (
                   <div className="pt-2">
-                    <label className={labelCls}>Payment Plan</label>
-                    {planLocked ? (
-                      <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5">
-                        <span className="text-sm text-foreground">
-                          {(paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId)?.PlanName || "—"}
-                          {" "}<span className="text-xs text-muted-foreground">(auto-fetched from unit)</span>
-                        </span>
-                        <button type="button" onClick={() => { planUnlockedForUnitRef.current = selectedUnit?.Id ?? null; setPlanLocked(false); }}
-                          className="text-xs text-primary hover:underline shrink-0">
-                          Change
-                        </button>
-                      </div>
-                    ) : (
-                      <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
-                        <option value="">— Use default milestone schedule —</option>
-                        {(selectedUnit?.DefaultPaymentPlanId ? applicablePaymentPlans : projectPaymentPlans).map((p: any) => (
-                          <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
-                        ))}
-                      </select>
+                    <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
+                    <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
+                      <option value="">Select a payment plan</option>
+                      {applicablePaymentPlans.map((p: any) => (
+                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
+                      ))}
+                    </select>
+                    {!unitTaggedPaymentPlans.length && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans tagged in Unit Master — showing every active plan instead.</p>
                     )}
-                    {!selectedUnit?.DefaultPaymentPlanId && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no default plan set in Unit Master — select any plan available for this project below, or leave blank for the default 7-stage split.</p>
+
+                    {/* Brief plan breakdown — Booking is the plan's own
+                        fixed ₹ (never a %), everything after it splits
+                        100% of (Total Value - Booking) the same way
+                        generateMilestonesForBooking computes it for a real
+                        Booking. Purely a preview here — nothing is saved
+                        until the actual Booking is created. */}
+                    {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
+                      <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 space-y-1">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Booking</span>
+                          <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
+                        </div>
+                        {selectedPlanMilestones.slice(1).map((m, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                            <span className="font-semibold text-foreground shrink-0">
+                              {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                        {!computedTotal && (
+                          <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1190,8 +1212,6 @@ const CrmApplication: React.FC = () => {
               applicationId={applicationId}
               projectId={form.ProjectId}
               blockId={form.BlockId}
-              parkingRates={parkingRates}
-              parkingSlots={parkingSlots}
               computedTotal={computedTotal}
             />
           )}
@@ -1225,6 +1245,51 @@ const CrmApplication: React.FC = () => {
                   <p className="font-medium text-foreground">{currentUser?.name || "—"} (you)</p>
                 </div>
               </div>
+
+              {/* Unit, price, parking — one brief, well-derived summary
+                  pulling together everything decided across the earlier
+                  steps, so nothing has to be re-checked tab by tab. */}
+              {selectedUnit && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-1">
+                  <p className="font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} className="text-primary" /> Unit & Price</p>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</span>
+                    <span className="font-semibold text-foreground shrink-0">{computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}</span>
+                  </div>
+                  {detailParkingTotal > 0 && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>Parking ({(detailParkingAllotments as any[]).length})</span>
+                      <span className="font-semibold text-foreground shrink-0">₹{detailParkingTotal.toLocaleString("en-IN")}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between border-t border-border pt-1 mt-1">
+                    <span className="text-muted-foreground">Grand Total</span>
+                    <span className="font-semibold text-primary">₹{(computedTotal + detailParkingTotal).toLocaleString("en-IN")}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment plan breakdown — identical math to the Step 1
+                  preview (Booking is the plan's own fixed ₹, everything
+                  after it splits 100% of Total - Booking). */}
+              {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
+                  <p className="font-semibold text-foreground">{selectedPaymentPlan.PlanName} — Payment Breakdown</p>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Booking</span>
+                    <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
+                  </div>
+                  {selectedPlanMilestones.slice(1).map((m, i) => (
+                    <div key={i} className="flex items-center justify-between text-muted-foreground">
+                      <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                      <span className="font-semibold text-foreground shrink-0">
+                        {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div>
                 <label className={labelCls}>Notes / Remarks</label>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
@@ -1388,12 +1453,16 @@ const CrmApplication: React.FC = () => {
                       {[a.CustomerAddress, a.CustomerCity, a.CustomerState, a.CustomerPincode].filter(Boolean).join(", ") || "—"}
                     </div>
                   </div>
-                  {a.CoApplicantName && (
-                    <div className="pt-2 border-t border-border flex items-center gap-1.5 text-xs">
-                      <Users2 size={12} className="text-muted-foreground" />
-                      <span className="font-medium">{a.CoApplicantName}</span>
-                      {a.CoApplicantRelation && <span className="text-muted-foreground">({a.CoApplicantRelation})</span>}
-                      {a.CoApplicantMobile && <span className="text-muted-foreground">— {a.CoApplicantMobile}</span>}
+                  {(viewingAppCoApplicants as any[]).length > 0 && (
+                    <div className="pt-2 border-t border-border space-y-1.5">
+                      {(viewingAppCoApplicants as any[]).map((co: any) => (
+                        <div key={co.Id} className="flex items-center gap-1.5 text-xs">
+                          <Users2 size={12} className="text-muted-foreground shrink-0" />
+                          <span className="font-medium">{co.Name}</span>
+                          {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
+                          {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1667,8 +1736,8 @@ const BankDetailsStep: React.FC<{
 // ── Step 2: Parking Selection ──────────────────────────────────────────────────
 const ParkingSelectionStep: React.FC<{
   applicationId: number; projectId: string; blockId: string;
-  parkingRates: any[]; parkingSlots: any[]; computedTotal: number;
-}> = ({ applicationId, projectId, blockId, parkingRates, parkingSlots, computedTotal }) => {
+  computedTotal: number;
+}> = ({ applicationId, projectId, blockId, computedTotal }) => {
   const { data: allotments = [], refetch: refetchParking } = useQuery({
     queryKey: ["crm-app-parking", applicationId],
     queryFn: async () => {
@@ -1677,100 +1746,52 @@ const ParkingSelectionStep: React.FC<{
     },
   });
 
-  const applicableRates = useMemo(() => {
-    if (!projectId) return [];
-    return (parkingRates as any[]).filter((p: any) =>
-      String(p.ProjectId) === projectId && (!blockId || !p.BlockId || String(p.BlockId) === blockId));
-  }, [parkingRates, projectId, blockId]);
+  // Truly-available parking, computed server-side against every allotment
+  // and hold system-wide (not just this application's own picks) — see
+  // crmParking.js GET /available. Refetched alongside allotments so a slot
+  // this step itself just took disappears from "available" immediately too.
+  const { data: availableRates = [], refetch: refetchAvailable } = useQuery({
+    queryKey: ["crm-parking-available", projectId, blockId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const params = new URLSearchParams({ projectId });
+      if (blockId) params.set("blockId", blockId);
+      const r = await fetchWithAuth(`${PARKING_API}/available?${params}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!projectId,
+  });
 
-  const availableSlots = useMemo(() => {
-    if (!projectId) return [];
-    const takenSlotIds = new Set((allotments as any[]).map((a: any) => a.ParkingSlotId).filter(Boolean));
-    return (parkingSlots as any[]).filter((s: any) =>
-      String(s.ProjectId) === projectId && s.IsActive && (!blockId || !s.BlockId || String(s.BlockId) === blockId) && !takenSlotIds.has(s.Id));
-  }, [parkingSlots, projectId, blockId, allotments]);
+  const refetchAll = () => { refetchParking(); refetchAvailable(); };
 
-  // Slots grouped by ParkingType so e.g. two Basement slots (B-01, B-02)
-  // render as one "Basement" group with two selectable rows, instead of two
-  // separate top-level buttons that look like duplicate/confusing entries.
-  const slotGroups = useMemo(() => {
-    const map = new Map<string, any[]>();
-    for (const s of availableSlots) {
-      if (!map.has(s.ParkingType)) map.set(s.ParkingType, []);
-      map.get(s.ParkingType)!.push(s);
-    }
-    return Array.from(map.entries());
-  }, [availableSlots]);
-
-  // Rate types with no specific slot inventory (e.g. "Open" parking sold by
-  // count, not by a fixed slot) — these get a quantity input instead of a
-  // slot picker, since one click could never mean "buy 3".
-  const ratesWithoutSlots = useMemo(() => {
-    const typesWithSlots = new Set(availableSlots.map((s: any) => s.ParkingType));
-    return (applicableRates as any[]).filter((r: any) => !typesWithSlots.has(r.ParkingType));
-  }, [applicableRates, availableSlots]);
-
-  const [selectedSlotIds, setSelectedSlotIds] = useState<Set<number>>(new Set());
-  const [qtyByRateId, setQtyByRateId] = useState<Record<number, string>>({});
+  const [selectedType, setSelectedType] = useState("");
+  const [selectedSlotId, setSelectedSlotId] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const toggleSlot = (id: number) => {
-    setSelectedSlotIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
+  // Reset the slot/quantity pick (not the type) whenever the chosen type's
+  // own available list changes under it — e.g. someone else just took the
+  // one slot this staff member had highlighted.
+  const currentType = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType) || null;
+  useEffect(() => { setSelectedSlotId(""); }, [selectedType]);
 
-  const handleAddSelectedSlots = async () => {
-    if (!selectedSlotIds.size) return;
+  const handleAdd = async () => {
+    if (!currentType) return;
+    if (!currentType.HasSlots) { toast.error("No slots available for this parking type"); return; }
+    if (!selectedSlotId) { toast.error("Select a slot"); return; }
     setAdding(true);
     try {
-      let addedTotal = 0;
-      for (const slotId of selectedSlotIds) {
-        const slot = availableSlots.find((s: any) => s.Id === slotId);
-        const rate = applicableRates.find((r: any) => r.ParkingType === slot.ParkingType) || applicableRates[0];
-        if (!rate) continue;
-        const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ApplicationId: applicationId, ParkingMasterId: rate.Id,
-            ParkingSlotId: slot.Id, Quantity: 1,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Failed to add ${slot.ParkingType} ${slot.SlotNo}`);
-        addedTotal += Number(data.TotalAmount) || 0;
-      }
-      toast.success(`${selectedSlotIds.size} parking slot(s) added — ₹${addedTotal.toLocaleString("en-IN")}`);
-      setSelectedSlotIds(new Set());
-      refetchParking();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleAddByQuantity = async (rate: any) => {
-    const qty = parseInt(qtyByRateId[rate.Id] || "1");
-    if (!Number.isFinite(qty) || qty < 1) { toast.error("Enter a valid quantity"); return; }
-    setAdding(true);
-    try {
+      const body: any = {
+        ApplicationId: applicationId, ParkingMasterId: currentType.ParkingMasterId,
+        ParkingSlotId: parseInt(selectedSlotId), Quantity: 1,
+      };
       const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ApplicationId: applicationId, ParkingMasterId: rate.Id,
-          ParkingSlotId: null, Quantity: qty,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add parking");
-      toast.success(`${rate.ParkingType} x${qty} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
-      setQtyByRateId((f) => ({ ...f, [rate.Id]: "1" }));
-      refetchParking();
+      if (!res.ok) throw new Error(data.error || `Failed to add ${currentType.ParkingType}`);
+      toast.success(`${currentType.ParkingType} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      setSelectedType(""); setSelectedSlotId("");
+      refetchAll();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -1787,7 +1808,7 @@ const ParkingSelectionStep: React.FC<{
       const url = a.Kind === "Hold" ? `${PARKING_API}/hold/${a.Id}` : `${PARKING_API}/${a.Id}`;
       const res = await fetchWithAuth(url, { method: "DELETE" });
       if (!res.ok) throw new Error((await res.json()).error);
-      refetchParking();
+      refetchAll();
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -1797,20 +1818,14 @@ const ParkingSelectionStep: React.FC<{
 
   return (
     <div className="space-y-4">
-      {/* Auto-filled charges summary */}
-      <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-3 gap-3 text-xs">
-        <div>
-          <p className="text-muted-foreground">Unit Value</p>
-          <p className="font-semibold text-foreground">{computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Parking Charges</p>
-          <p className="font-semibold text-foreground">{parkingTotal ? `₹${parkingTotal.toLocaleString("en-IN")}` : "—"}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Grand Total</p>
-          <p className="font-semibold text-primary">₹{(computedTotal + parkingTotal).toLocaleString("en-IN")}</p>
-        </div>
+      {/* Auto-filled charges summary — one brief line, same compact style
+          as the Unit price preview on Step 1, instead of a 3-cell grid. */}
+      <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+        <IndianRupee size={11} className="text-primary shrink-0" />
+        Unit ₹{computedTotal.toLocaleString("en-IN")}
+        {parkingTotal > 0 && ` + Parking ₹${parkingTotal.toLocaleString("en-IN")}`}
+        {" = "}
+        <span className="font-semibold text-foreground">Grand Total ₹{(computedTotal + parkingTotal).toLocaleString("en-IN")}</span>
       </div>
 
       {/* Already-added allotments */}
@@ -1838,134 +1853,136 @@ const ParkingSelectionStep: React.FC<{
         )}
       </div>
 
-      {/* Add parking */}
+      {/* Add parking — pick a type, then (if it has fixed slots) pick a slot */}
       {!projectId ? (
         <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
-      ) : slotGroups.length === 0 && ratesWithoutSlots.length === 0 ? (
+      ) : (availableRates as any[]).length === 0 ? (
         <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
       ) : (
-        <div className="space-y-3">
-          {slotGroups.map(([type, slots]) => {
-            const rate = applicableRates.find((r: any) => r.ParkingType === type);
-            return (
-              <div key={type} className="rounded-lg border border-border p-3 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-foreground">
-                    {type} {rate ? `— ₹${Number(rate.Charge).toLocaleString("en-IN")} each` : ""}
-                  </label>
-                  <span className="text-[11px] text-muted-foreground">{slots.length} available</span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5 max-h-32 overflow-y-auto">
-                  {slots.map((s: any) => (
-                    <label key={s.Id} className="flex items-center gap-1.5 text-xs border border-border rounded-md px-2 py-1.5 cursor-pointer hover:border-primary hover:bg-primary/5 has-[:checked]:border-primary has-[:checked]:bg-primary/10">
-                      <input type="checkbox" checked={selectedSlotIds.has(s.Id)} onChange={() => toggleSlot(s.Id)} />
-                      Slot {s.SlotNo}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {selectedSlotIds.size > 0 && (
-            <button onClick={handleAddSelectedSlots} disabled={adding}
+        <div className="rounded-lg border border-border p-3 space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Parking Type</label>
+            <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <option value="">— Select a parking type —</option>
+              {(availableRates as any[]).map((r: any) => {
+                // No ParkingSlot rows entered for this type at all yet —
+                // Ops hasn't set up inventory in Parking Slot Master.
+                // Quantity-only selling is no longer offered as a fallback;
+                // this type is simply unavailable until slots exist.
+                const noneInBlock = r.HasSlots && r.AvailableSlots.length === 0;
+                // "Sold out" only when the backend confirms zero slots of
+                // this type are free ANYWHERE in the project (see
+                // SoldOutProjectWide in crmParking.js GET /available).
+                // Basement/Covered-style parking is often reserved
+                // per-block, so a block-scoped zero doesn't necessarily
+                // mean no inventory exists — it may just belong to another
+                // block/tower.
+                const soldOutEverywhere = noneInBlock && r.SoldOutProjectWide;
+                const availableElsewhere = noneInBlock && !r.SoldOutProjectWide;
+                const disabled = r.NoInventory || noneInBlock;
+                return (
+                  <option key={r.ParkingType} value={r.ParkingType} disabled={disabled}>
+                    {r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} each
+                    {r.HasSlots ? ` (${r.AvailableSlots.length} available)` : ""}
+                    {r.NoInventory ? " — Not available (no slots set up yet)" : ""}
+                    {soldOutEverywhere ? " — Sold out" : ""}
+                    {availableElsewhere ? ` — None in this block (${r.FreeCountProjectWide} free in other blocks)` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {currentType && currentType.HasSlots && (
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Available Slot</label>
+              <select value={selectedSlotId} onChange={(e) => setSelectedSlotId(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">— Select a slot —</option>
+                {currentType.AvailableSlots.map((s: any) => (
+                  <option key={s.Id} value={String(s.Id)}>Slot {s.SlotNo}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Defensive only — the dropdown disables this option, so a
+              no-inventory type shouldn't normally reach here. */}
+          {currentType && !currentType.HasSlots && (
+            <p className="text-xs text-muted-foreground">
+              No slots have been set up for {currentType.ParkingType} parking yet — ask an admin to add them in Parking Slot Master.
+            </p>
+          )}
+
+          {currentType && (
+            <button onClick={handleAdd} disabled={adding || !currentType.HasSlots || !selectedSlotId}
               className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-              {adding ? "Adding..." : `Add ${selectedSlotIds.size} Selected Slot(s)`}
+              {adding ? "Adding..." : `Add ${currentType.ParkingType}`}
             </button>
           )}
-          {ratesWithoutSlots.map((r: any) => (
-            <div key={r.Id} className="rounded-lg border border-border p-3 flex items-center justify-between gap-2">
-              <div className="text-xs">
-                <p className="font-semibold text-foreground">{r.ParkingType}</p>
-                <p className="text-muted-foreground">₹{Number(r.Charge).toLocaleString("en-IN")} each — no fixed slot</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input type="number" min="1" value={qtyByRateId[r.Id] ?? "1"}
-                  onChange={(e) => setQtyByRateId((f) => ({ ...f, [r.Id]: e.target.value }))}
-                  className="w-16 text-xs border border-border rounded px-2 py-1.5 bg-background" />
-                <button onClick={() => handleAddByQuantity(r)} disabled={adding}
-                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-                  Add
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
   );
 };
 
-// ── Step 4: Co-Applicant — optional, per-Application, multiple allowed ─────────
-// Each Application independently manages its own co-applicants.  A customer with
-// two applications can have completely different co-applicants on each.  The step
-// is optional — skipping it is fine.
-const RELATION_OPTIONS = ["Spouse", "Parent", "Sibling", "Child", "Friend", "Business Partner", "Other"];
-const GENDER_OPTIONS    = ["Male", "Female", "Other", "Prefer not to say"];
-
-const EMPTY_COAPPLICANT = {
+// ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
+// Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
+// set now, BookingId backfilled later by crmEntityCreation.js) rather than as
+// a single flat name/relation/mobile on CrmCustomer as before — a customer can
+// have a different set of co-applicants on each of their Applications, and a
+// deal can have more than one. See crmCoApplicant.js's /application/:id routes.
+const emptyCoApplicant = () => ({
   Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "",
   DateOfBirth: "", Gender: "", Occupation: "", AnnualIncome: "",
   Address: "", City: "", State: "", Pincode: "", Notes: "",
-};
+});
 
 const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId }) => {
-  const qc                         = useQueryClient();
-  const [showForm, setShowForm]    = useState(false);
-  const [editingId, setEditingId]  = useState<number | null>(null);
-  const [form, setForm]            = useState({ ...EMPTY_COAPPLICANT });
-  const [saving, setSaving]        = useState(false);
-  const [deleting, setDeleting]    = useState<number | null>(null);
-
-  const { data: coApplicants = [], isLoading } = useQuery<any[]>({
-    queryKey: ["crm-co-applicants-app", applicationId],
+  const { data: coApplicants = [], refetch } = useQuery({
+    queryKey: ["crm-app-co-applicants-edit", applicationId],
     queryFn: async () => {
-      const res = await fetch(`/api/crm/co-applicants/application/${applicationId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("crm_token")}` },
-      });
-      if (!res.ok) throw new Error((await res.json()).error || "Failed to load");
-      return res.json();
+      const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${applicationId}`);
+      return r.ok ? r.json() : [];
     },
-    staleTime: 30_000,
   });
 
-  const inputCls = "w-full text-sm border border-border rounded-md px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary";
-  const labelCls = "text-xs text-muted-foreground block mb-1";
+  const [editingId, setEditingId] = useState<number | "new" | null>(null);
+  const [draft, setDraft] = useState<any>(emptyCoApplicant());
+  const [saving, setSaving] = useState(false);
 
-  const openAdd  = () => { setEditingId(null); setForm({ ...EMPTY_COAPPLICANT }); setShowForm(true); };
-  const openEdit = (ca: any) => {
-    setEditingId(ca.Id);
-    setForm({
-      Name: ca.Name || "", Relation: ca.Relation || "", Mobile: ca.Mobile || "",
-      Email: ca.Email || "", PanNo: ca.PanNo || "", AadhaarNo: ca.AadhaarNo || "",
-      DateOfBirth: ca.DateOfBirth ? String(ca.DateOfBirth).slice(0, 10) : "",
-      Gender: ca.Gender || "", Occupation: ca.Occupation || "",
-      AnnualIncome: ca.AnnualIncome != null ? String(ca.AnnualIncome) : "",
-      Address: ca.Address || "", City: ca.City || "", State: ca.State || "",
-      Pincode: ca.Pincode || "", Notes: ca.Notes || "",
+  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); };
+  const startEdit = (co: any) => {
+    setDraft({
+      Name: co.Name || "", Relation: co.Relation || "", Mobile: co.Mobile || "",
+      Email: co.Email || "", PanNo: co.PanNo || "", AadhaarNo: co.AadhaarNo || "",
+      DateOfBirth: co.DateOfBirth ? String(co.DateOfBirth).slice(0, 10) : "",
+      Gender: co.Gender || "", Occupation: co.Occupation || "",
+      AnnualIncome: co.AnnualIncome != null ? String(co.AnnualIncome) : "",
+      Address: co.Address || "", City: co.City || "", State: co.State || "",
+      Pincode: co.Pincode || "", Notes: co.Notes || "",
     });
-    setShowForm(true);
+    setEditingId(co.Id);
   };
+  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); };
 
   const handleSave = async () => {
-    if (!form.Name.trim()) { toast.error("Co-applicant name is required"); return; }
+    if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
     try {
-      const token = localStorage.getItem("crm_token");
-      const url = editingId
-        ? `/api/crm/co-applicants/${editingId}`
-        : `/api/crm/co-applicants/application/${applicationId}`;
-      const method = editingId ? "PUT" : "POST";
-      const res = await fetch(url, {
-        method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, BookingId: null }),
+      const isNew = editingId === "new";
+      const url = isNew ? `${CO_APPLICANT_API}/application/${applicationId}` : `${CO_APPLICANT_API}/${editingId}`;
+      const res = await fetchWithAuth(url, {
+        method: isNew ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Save failed");
-      toast.success(editingId ? "Co-applicant updated" : "Co-applicant added");
-      setShowForm(false);
-      setForm({ ...EMPTY_COAPPLICANT });
-      setEditingId(null);
-      qc.invalidateQueries({ queryKey: ["crm-co-applicants-app", applicationId] });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success(isNew ? "Co-applicant added" : "Co-applicant updated");
+      cancelEdit();
+      refetch();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -1974,211 +1991,131 @@ const CoApplicantStep: React.FC<{ applicationId: number }> = ({ applicationId })
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Remove this co-applicant?")) return;
-    setDeleting(id);
     try {
-      const res = await fetch(`/api/crm/co-applicants/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${localStorage.getItem("crm_token")}` },
-      });
-      if (!res.ok) throw new Error((await res.json()).error || "Delete failed");
-      toast.success("Co-applicant removed");
-      qc.invalidateQueries({ queryKey: ["crm-co-applicants-app", applicationId] });
+      const res = await fetchWithAuth(`${CO_APPLICANT_API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed");
+      refetch();
     } catch (e: any) {
       toast.error(e.message);
-    } finally {
-      setDeleting(null);
     }
   };
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-foreground">Co-Applicant (Optional)</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Each application can have its own set of co-applicants — different applications can have different co-applicants.
-          </p>
-        </div>
-        {!showForm && (
-          <button onClick={openAdd}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
-            <Plus size={13} /> Add Co-Applicant
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicants</label>
+        {(coApplicants as any[]).length > 0 ? (
+          <div className="space-y-1.5">
+            {(coApplicants as any[]).map((co: any) => (
+              <div key={co.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+                <span className="flex items-center gap-1.5">
+                  <span className="font-medium text-foreground">{co.Name}</span>
+                  {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
+                  {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
+                </span>
+                <span className="flex items-center gap-2">
+                  <button onClick={() => startEdit(co)} className="text-primary hover:underline">Edit</button>
+                  <button onClick={() => handleDelete(co.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No co-applicants added yet — optional.</p>
+        )}
+        {editingId === null && (
+          <button onClick={startAdd}
+            className="text-xs px-3 py-1.5 border border-border rounded-md text-primary hover:bg-muted/40 flex items-center gap-1">
+            <Plus size={12} /> Add Co-Applicant
           </button>
         )}
       </div>
 
-      {/* Existing co-applicants list */}
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">Loading…</p>
-      ) : coApplicants.length > 0 && !showForm ? (
-        <div className="rounded-lg border border-border divide-y divide-border">
-          {coApplicants.map((ca: any) => (
-            <div key={ca.Id} className="flex items-center justify-between px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">{ca.Name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {[ca.Relation, ca.Mobile, ca.Email].filter(Boolean).join(" · ") || "No details"}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0 ml-4">
-                <button onClick={() => openEdit(ca)}
-                  className="text-xs px-2.5 py-1 border border-border rounded-md text-muted-foreground hover:bg-muted transition-colors">
-                  Edit
-                </button>
-                <button onClick={() => handleDelete(ca.Id)} disabled={deleting === ca.Id}
-                  className="text-xs px-2.5 py-1 border border-red-200 rounded-md text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40">
-                  {deleting === ca.Id ? "…" : "Remove"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : !showForm ? (
-        <div className="rounded-lg border border-dashed border-border p-6 text-center">
-          <Users2 size={22} className="mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No co-applicants added yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Co-applicant details can also be added later from the application detail page.</p>
-        </div>
-      ) : null}
-
-      {/* Add / Edit form */}
-      {showForm && (
-        <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-sm font-semibold text-foreground">{editingId ? "Edit Co-Applicant" : "New Co-Applicant"}</p>
-            <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_COAPPLICANT }); setEditingId(null); }}
-              className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
-          </div>
-
-          {/* Identity */}
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><User size={12} /> Identity</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className={labelCls}>Full Name *</label>
-                <input value={form.Name} onChange={(e) => setForm((f) => ({ ...f, Name: e.target.value }))} className={inputCls} placeholder="As per ID" />
-              </div>
-              <div>
-                <label className={labelCls}>Relation</label>
-                <select value={form.Relation} onChange={(e) => setForm((f) => ({ ...f, Relation: e.target.value }))} className={inputCls}>
-                  <option value="">Select</option>
-                  {RELATION_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Date of Birth</label>
-                <input type="date" value={form.DateOfBirth} onChange={(e) => setForm((f) => ({ ...f, DateOfBirth: e.target.value }))} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Gender</label>
-                <select value={form.Gender} onChange={(e) => setForm((f) => ({ ...f, Gender: e.target.value }))} className={inputCls}>
-                  <option value="">Select</option>
-                  {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Contact */}
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Phone size={12} /> Contact</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Mobile</label>
-                <input value={form.Mobile} onChange={(e) => setForm((f) => ({ ...f, Mobile: e.target.value }))} className={inputCls} placeholder="10-digit number" />
-              </div>
-              <div>
-                <label className={labelCls}>Email</label>
-                <input type="email" value={form.Email} onChange={(e) => setForm((f) => ({ ...f, Email: e.target.value }))} className={inputCls} />
-              </div>
-            </div>
-          </div>
-
-          {/* KYC */}
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><FileText size={12} /> KYC</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>PAN No.</label>
-                <input value={form.PanNo} onChange={(e) => setForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))} className={inputCls} placeholder="ABCDE1234F" maxLength={10} />
-              </div>
-              <div>
-                <label className={labelCls}>Aadhaar No.</label>
-                <input value={form.AadhaarNo} onChange={(e) => setForm((f) => ({ ...f, AadhaarNo: e.target.value.replace(/\D/g, "") }))} className={inputCls} placeholder="12-digit Aadhaar" maxLength={12} />
-              </div>
-            </div>
-          </div>
-
-          {/* Financial */}
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Landmark size={12} /> Financial</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Occupation</label>
-                <input value={form.Occupation} onChange={(e) => setForm((f) => ({ ...f, Occupation: e.target.value }))} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Annual Income (₹)</label>
-                <input type="number" value={form.AnnualIncome} onChange={(e) => setForm((f) => ({ ...f, AnnualIncome: e.target.value }))} className={inputCls} />
-              </div>
-            </div>
-          </div>
-
-          {/* Address */}
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5"><MapPin size={12} /> Address</p>
+      {editingId !== null && (
+        <div className="rounded-lg border border-border p-3 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Street Address</label>
-              <input value={form.Address} onChange={(e) => setForm((f) => ({ ...f, Address: e.target.value }))} className={inputCls} />
+              <label className={labelCls}>Name *</label>
+              <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className={labelCls}>City</label>
-                <input value={form.City} onChange={(e) => setForm((f) => ({ ...f, City: e.target.value }))} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>State</label>
-                <input value={form.State} onChange={(e) => setForm((f) => ({ ...f, State: e.target.value }))} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Pincode</label>
-                <input value={form.Pincode} onChange={(e) => setForm((f) => ({ ...f, Pincode: e.target.value.replace(/\D/g, "") }))} className={inputCls} maxLength={6} />
-              </div>
+            <div>
+              <label className={labelCls}>Relation</label>
+              <input value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls} placeholder="Spouse, Parent, Sibling..." />
+            </div>
+            <div>
+              <label className={labelCls}>Mobile</label>
+              <input value={draft.Mobile} onChange={(e) => setDraft((d: any) => ({ ...d, Mobile: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Email</label>
+              <input value={draft.Email} onChange={(e) => setDraft((d: any) => ({ ...d, Email: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>PAN</label>
+              <input value={draft.PanNo} onChange={(e) => setDraft((d: any) => ({ ...d, PanNo: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Aadhaar No.</label>
+              <input value={draft.AadhaarNo} onChange={(e) => setDraft((d: any) => ({ ...d, AadhaarNo: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Date of Birth</label>
+              <input type="date" value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Gender</label>
+              <select value={draft.Gender} onChange={(e) => setDraft((d: any) => ({ ...d, Gender: e.target.value }))} className={inputCls}>
+                <option value="">Select</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Occupation</label>
+              <input value={draft.Occupation} onChange={(e) => setDraft((d: any) => ({ ...d, Occupation: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Annual Income</label>
+              <input type="number" value={draft.AnnualIncome} onChange={(e) => setDraft((d: any) => ({ ...d, AnnualIncome: e.target.value }))} className={inputCls} />
             </div>
           </div>
-
-          {/* Notes */}
           <div>
-            <label className={labelCls}>Notes / Remarks</label>
-            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
+            <label className={labelCls}>Address</label>
+            <input value={draft.Address} onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))} className={inputCls} />
           </div>
-
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>City</label>
+              <input value={draft.City} onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>State</label>
+              <input value={draft.State} onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Pincode</label>
+              <input value={draft.Pincode} onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Notes</label>
+            <textarea value={draft.Notes} onChange={(e) => setDraft((d: any) => ({ ...d, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
+          </div>
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_COAPPLICANT }); setEditingId(null); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
-              Cancel
-            </button>
+            <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border rounded-md text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
-              {saving ? "Saving..." : editingId ? "Update" : "Add Co-Applicant"}
+              className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
-      )}
-
-      {!showForm && coApplicants.length > 0 && (
-        <button onClick={openAdd}
-          className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground border border-dashed border-border rounded-lg hover:bg-muted/30 transition-colors">
-          <Plus size={12} /> Add Another Co-Applicant
-        </button>
       )}
     </div>
   );
 };
 
-// ── Step 5 (was 4): Attachments — document upload only ─────────────────────────
-
+// ── Step 5: Attachments — document upload only ─────────────────────────────────
 const AttachmentsStep: React.FC<{
   applicationId: number;
 }> = ({ applicationId }) => {

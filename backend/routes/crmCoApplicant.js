@@ -3,7 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
@@ -53,8 +53,14 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
   }
 });
 
-// PUT /:id — update a co-applicant
-router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+// PUT /:id — update a co-applicant. The only edit route for BOTH a
+// Booking-stage row (Welcome Call) and an Application-stage row (the wizard's
+// own Co-Applicant tab, added below) — there's no separate
+// PUT /application/:id, since a co-applicant row's own Id is already the
+// unique key regardless of which stage it belongs to. Gated on either right
+// so an Application-stage salesperson (crm-applications, no Welcome Call
+// access) can still edit/remove the co-applicant they themselves just added.
+router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -85,8 +91,8 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
   }
 });
 
-// DELETE /:id — soft delete
-router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+// DELETE /:id — soft delete. Same dual-gate reasoning as PUT /:id above.
+router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -182,4 +188,3 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 });
 
 module.exports = router;
-

@@ -26,6 +26,7 @@ const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
+const PLAN_API = "/api/crm/payment-plans";
 
 const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
@@ -54,6 +55,12 @@ const EMPTY_FORM = {
 
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Needed to resolve a tagged plan's fixed Booking Amount — Booking is no
+// longer typed per booking, it's decided when the plan itself was created
+// (see CrmPaymentPlans.tsx / crmEntityCreation.js's generateMilestonesForBooking).
+async function fetchPaymentPlans(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${PLAN_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
 // One Application -> at most one Booking, ever (see crmEntityCreation.js's
 // createCrmBookingRecord). This dropdown must only ever offer applications
@@ -154,6 +161,24 @@ const CrmBooking: React.FC = () => {
   const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+
+  // The plan actually tagged to this booking (via the Application) — its
+  // BookingAmount is the fixed, authoritative figure; nobody types this by
+  // hand anymore.
+  const selectedPlan = useMemo(
+    () => (paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId) || null,
+    [paymentPlans, form.PaymentPlanId],
+  );
+
+  // Booking Amount is decided on the Payment Plan itself now, not typed
+  // here — whenever the tagged plan (or its BookingAmount) is known, force
+  // the form to match it rather than leaving stale/hand-typed data around.
+  React.useEffect(() => {
+    if (selectedPlan?.BookingAmount == null) return;
+    const planAmt = String(selectedPlan.BookingAmount);
+    setForm((f) => f.BookingAmount === planAmt ? f : { ...f, BookingAmount: planAmt });
+  }, [selectedPlan]);
 
   const availableUnits = useMemo(() => {
     const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled" && b.Status !== "Rejected").map((b: any) => b.UnitId));
@@ -189,10 +214,10 @@ const CrmBooking: React.FC = () => {
       BlockName: u?.BlockName || f.BlockName,
       UnitType: u?.UnitType || "",
       AreaSqFt: area,
-      // A locked (Application-sourced) PaymentPlanId always wins over the
-      // Unit's own default — only fall back to the Unit default when the
-      // Application didn't already specify a plan.
-      PaymentPlanId: f.PaymentPlanId || (u?.DefaultPaymentPlanId ? String(u.DefaultPaymentPlanId) : ""),
+      // PaymentPlanId comes from the Application (mandatory there) — a Unit
+      // no longer has a single "default" plan, only 1+ tagged plans, so
+      // there's nothing to fall back to here.
+      PaymentPlanId: f.PaymentPlanId,
       TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
     }));
   };
@@ -513,7 +538,7 @@ const CrmBooking: React.FC = () => {
                   AreaSqFt: area,
                   RatePerSqFt: rate,
                   TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
-                  PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : (appUnit?.DefaultPaymentPlanId ? String(appUnit.DefaultPaymentPlanId) : ""),
+                  PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "",
                   TokenType: app?.TokenType || "Percentage",
                   TokenValue: app?.TokenValue != null ? String(app.TokenValue) : "",
                   BookingAmount: app?.BookingAmount != null ? String(app.BookingAmount) : "",
@@ -608,8 +633,8 @@ const CrmBooking: React.FC = () => {
               <div className="col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">Payment Plan (from the Application — not editable here)</label>
                 <input type="text" readOnly disabled
-                  value={(apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                    || (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.DefaultPaymentPlanName
+                  value={selectedPlan?.PlanName
+                    || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
                     || "Default 7-stage split"}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
@@ -649,12 +674,13 @@ const CrmBooking: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Booking Amount (₹) {form.ApplicationId && form.BookingAmount ? "(from Application)" : ""}
+                  Booking Amount (₹) {selectedPlan ? "(from Payment Plan)" : ""}
                 </label>
                 <input type="number" value={form.BookingAmount}
                   onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                  readOnly={!!form.ApplicationId && !!form.BookingAmount} disabled={!!form.ApplicationId && !!form.BookingAmount}
-                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.BookingAmount ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
+                  readOnly={!!selectedPlan} disabled={!!selectedPlan}
+                  placeholder={selectedPlan ? undefined : "Select a Payment Plan to set this"}
+                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${selectedPlan ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
