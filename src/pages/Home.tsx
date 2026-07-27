@@ -602,7 +602,7 @@ export default function HomePage() {
   const { data: crmData } = useQuery({
     queryKey: ["home-crm"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/crm-dashboard");
+      const res = await fetchWithAuth("/api/crm/dashboard");
       if (!res.ok) throw new Error("CRM stats unavailable");
       return res.json().catch(() => ({}));
     },
