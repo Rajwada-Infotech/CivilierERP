@@ -32,6 +32,7 @@ import {
   Megaphone,
   Pickaxe,
   Receipt,
+  HeartHandshake,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
@@ -530,6 +531,13 @@ export default function HomePage() {
       "civilworkdpr-contractor-register",
       "civilworkdpr-worker-attendance",
     ],
+    crm: [
+      "crm-dashboard",
+      "crm-customers",
+      "crm-applications",
+      "crm-bookings",
+      "crm-payments",
+    ],
   };
 
   const hasModuleAccess = (moduleId: string): boolean => {
@@ -548,6 +556,7 @@ export default function HomePage() {
     sales: hasModuleAccess("sales"),
     salesAutomation: hasModuleAccess("salesAutomation"),
     civilworkdpr: hasModuleAccess("civilworkdpr"),
+    crm: hasModuleAccess("crm"),
     approvals: privileged,
     admin: privileged && !isDba,
     dba: isDba,
@@ -589,14 +598,38 @@ export default function HomePage() {
     retry: 1,
   });
 
-  const fin = data?.finance;
-  const mat = data?.material;
-  const adm = data?.admin;
+  // CRM dashboard stats
+  const { data: crmData } = useQuery({
+    queryKey: ["home-crm"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/crm/dashboard");
+      if (!res.ok) throw new Error("CRM stats unavailable");
+      return res.json().catch(() => ({}));
+    },
+    enabled: access.crm,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+  });
+
+  const fin  = data?.finance;
+  const mat  = data?.material;
+  const adm  = data?.admin;
   const tick = data?.tickets;
-  const eng = data?.engineering;
-  const fol = data?.followup;
-  const sal = data?.sales;
+  const eng  = data?.engineering;
+  const fol  = data?.followup;
+  const sal  = data?.sales;
   const pendingApprovals = data?.pendingApprovals ?? [];
+
+  // Derive handy CRM scalars from the grouped recordsets
+  const crmBookings     = (crmData?.bookings     ?? []) as { Status: string; Count: number; TotalValue: number }[];
+  const crmApps         = (crmData?.applications ?? []) as { Status: string; Count: number }[];
+  const crmTickets      = (crmData?.serviceTickets ?? []) as { Status: string; Count: number }[];
+  const crmConfirmed    = crmBookings.find(b => b.Status === "Confirmed")?.Count ?? 0;
+  const crmTotalBookings = crmBookings.reduce((s, b) => s + b.Count, 0);
+  const crmPendingApps  = crmApps.find(a => a.Status === "Pending")?.Count ?? 0;
+  const crmOpenTickets  = crmTickets.filter(t => t.Status !== "Closed" && t.Status !== "Resolved").reduce((s, t) => s + t.Count, 0);
+  const crmOverdue      = crmData?.payments?.OverdueCount ?? 0;
 
   const lastUpdated = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", {
@@ -1014,9 +1047,16 @@ export default function HomePage() {
                 ]} />
             )}
 
-            {/* 8 · Sales Automation */}
-            {access.salesAutomation && (
-              <ModuleCard title="Sales Auto" href="/sales-automation/leads" icon={Megaphone} accent="#f97316" delay={nextDelay()} loading={isLoading} stats={[]} />
+            {/* 8 · CRM */}
+            {access.crm && (
+              <ModuleCard title="CRM" href="/crm/dashboard" icon={HeartHandshake} accent="#e11d48" delay={nextDelay()} loading={isLoading}
+                badge={crmOverdue > 0 ? crmOverdue : undefined}
+                stats={[
+                  { label: "Confirmed bookings", value: crmConfirmed, accent: "#e11d48" },
+                  { label: "Total bookings", value: crmTotalBookings, accent: "#f43f5e", icon: CheckCircle2 },
+                  { label: "Pending applications", value: crmPendingApps, accent: crmPendingApps ? "#f59e0b" : undefined },
+                  { label: "Open service tickets", value: crmOpenTickets, accent: crmOpenTickets ? "#ef4444" : undefined },
+                ]} />
             )}
 
             {/* 9 · Tickets */}

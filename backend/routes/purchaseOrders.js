@@ -625,13 +625,22 @@ async function getPOSelect(pool) {
     ${hasPT ? "pt.Description" : "CAST(NULL AS NVARCHAR(500))"} AS PaymentTermDescription,
     ${hasPT ? "pt.Days" : "CAST(NULL AS INT)"} AS PaymentTermDays,
     td.Prefix             AS DocTypePrefix,
-    td.Description        AS DocTypeDescription
+    td.Description        AS DocTypeDescription,
+    -- The MR this PO is ultimately tagged to — direct (po.SourceMRId, set
+    -- when the PO was raised straight off an MR) or indirect (raised off a
+    -- Quotation that itself was raised off an MR — po.SourceMRDocNo isn't
+    -- reliably back-filled in that case, so fall back to the Quotation's
+    -- own SourceMRDocNo). See backend/routes/materialChain.js's
+    -- getEffectiveMR for the same fallback used by the chain API.
+    COALESCE(po.SourceMRDocNo, qt.SourceMRDocNo) AS EffectiveMRDocNo,
+    COALESCE(po.SourceMRId, qt.SourceMRId)       AS EffectiveMRId
   FROM dbo.PurchaseOrders po
   LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId    = po.SupplierID
   LEFT JOIN dbo.enterprise        co ON co.id         = po.CompanyId
   LEFT JOIN dbo.enterprise        pr ON pr.id         = po.ProjectId
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
+  LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
   ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;

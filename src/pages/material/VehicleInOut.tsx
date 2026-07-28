@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -2367,6 +2368,10 @@ export default function VehicleInOut() {
                     </div>
                   )}
                 </div>
+
+                {/* Full chain — PO this lot came from, and (via the PO)
+                    whichever Material Request or Quotation it's tagged to */}
+                <DocumentChainPanel docType="vio" id={viewingRec.VehicleInOutID} />
 
                 {/* Times */}
                 <div className="grid grid-cols-2 gap-3">

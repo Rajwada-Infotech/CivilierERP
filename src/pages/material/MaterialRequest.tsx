@@ -187,84 +187,6 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Status", accessor: "Status" },
 ];
 
-// ─── Linked Purchase Orders ─────────────────────────────────────────────────────
-// Every PO raised against this MR, newest first, with a running "what's left"
-// balance — same audit-trail pattern as GRN ↔ Vehicle In/Out. Clicking a row
-// opens that PO directly in preview mode (?view=<id>, matches the deep-link
-// convention PurchaseOrderMaster.tsx already supports).
-
-const LinkedPurchaseOrders: React.FC<{
-  mrId: number;
-  navigate: ReturnType<typeof useNavigate>;
-}> = ({ mrId, navigate }) => {
-  const { data: linkedPOs = [], isLoading } = useQuery({
-    queryKey: ["mr-linked-pos", mrId],
-    queryFn: () => mrApi.getMRLinkedPOs(mrId),
-  });
-
-  if (isLoading) {
-    return (
-      <div className="h-16 rounded-xl border border-dashed border-border animate-pulse" />
-    );
-  }
-  if (linkedPOs.length === 0) return null;
-
-  return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
-        <ShoppingCart size={13} className="text-muted-foreground" />
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Linked Purchase Orders
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-muted/20 text-[9px] uppercase tracking-widest text-muted-foreground">
-              <th className="px-3 py-2 text-left">PO Number</th>
-              <th className="px-3 py-2 text-left">Date</th>
-              <th className="px-3 py-2 text-right">Ordered Qty</th>
-              <th className="px-3 py-2 text-left">Status</th>
-              <th className="px-3 py-2 text-right">Remaining Qty</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {linkedPOs.map((po) => (
-              <tr
-                key={po.purchaseOrderId}
-                className="hover:bg-muted/20 cursor-pointer transition-colors"
-                onClick={() =>
-                  navigate(`/material/purchase-order?view=${po.purchaseOrderId}`)
-                }
-              >
-                <td className="px-3 py-2 font-mono font-semibold text-primary">
-                  {po.poNumber}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">
-                  {fmtDate(po.date)}
-                </td>
-                <td className="px-3 py-2 text-right font-medium">
-                  {po.orderedQty}
-                </td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={po.status} />
-                </td>
-                <td className="px-3 py-2 text-right font-medium">
-                  {po.remainingQtyAfter > 0 ? (
-                    <span className="text-amber-500">{po.remainingQtyAfter}</span>
-                  ) : (
-                    <span className="text-emerald-500">0</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
@@ -1830,10 +1752,8 @@ export default function MaterialRequest() {
             </div>
           </div>
 
-          {/* ── Linked Purchase Orders ── */}
-          <LinkedPurchaseOrders mrId={viewingRecord.MRId} navigate={navigate} />
-
-          {/* ── Document chain ── */}
+          {/* ── Document chain — tagged PO doc ref is enough here, the full
+              Linked Purchase Orders table was redundant with this ── */}
           <DocumentChainPanel docType="mr" id={viewingRecord.MRId} />
 
         </div>

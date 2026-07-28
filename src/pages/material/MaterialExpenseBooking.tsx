@@ -95,6 +95,7 @@ import {
   DateField,
   SectionHeader,
   GRNChainBadge,
+  LinkedDocBadge,
 } from "./ExpenseBooking/PickerPrimitives";
 import { AmountGstSection } from "./ExpenseBooking/AmountGstSection";
 import { GRNItemsSummary } from "./ExpenseBooking/GRNItemsSummary";
@@ -2166,7 +2167,7 @@ export default function MaterialExpenseBooking() {
                                 Net Amt
                               </TableHead>
                               <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
-                                GRN
+                                Doc
                               </TableHead>
                               <TableHead className="text-xs font-heading w-[9%]">
                                 Status
@@ -2325,7 +2326,12 @@ export default function MaterialExpenseBooking() {
                                     )}
                                   </TableCell>
                                   <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
-                                    <GRNChainBadge bookingId={rec.id} />
+                                    <LinkedDocBadge
+                                      eSourceType={rec.eSourceType}
+                                      sourceDocNo={rec.sourceDocNo}
+                                      linkedPODocNo={rec.linkedPODocNo}
+                                      linkedGrnDocNos={rec.linkedGrnDocNos}
+                                    />
                                   </TableCell>
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
