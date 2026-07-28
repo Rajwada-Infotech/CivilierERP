@@ -41,6 +41,7 @@ import {
   SlidersHorizontal,
   UsersRound,
   ShieldCheck,
+  Wand2,
 } from "lucide-react";
 import {
   Bank,
@@ -415,6 +416,13 @@ const salesAutomationSetupItems: SetupItem[] = [
 // visibility for non-privileged users matches the real access gate. Kept
 // in sync with TopNavbar.tsx's own copy.
 const crmSetupItems: SetupItem[] = [
+  {
+    icon: Wand2,
+    label: "Auto Project Setup",
+    path: "/crm/setup/auto-project-setup",
+    color: "text-fuchsia-500",
+    pageKey: "crm-auto-project-setup",
+  },
   {
     icon: Users,
     label: "Customer Master",

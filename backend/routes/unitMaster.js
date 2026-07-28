@@ -7,36 +7,16 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { getUnitLockReason } = require("../services/crmHierarchyLocks");
 
 bumpCacheVersion("unit-master").catch(() => {});
 
-// Shared lock check — mirrors the exact Booked/OnHold definitions used by
-// unitMatrix.js, so "locked" here always matches what the matrix displays.
-// A unit is locked (cannot be edited or deleted) if it has:
-//   - a live, non-cancelled/non-rejected booking ("Booked" / "Bought"), or
-//   - an active, unexpired inventory hold ("OnHold")
-// Returns a short reason string if locked, or null if the unit is free to
-// edit/delete.
-async function getUnitLockReason(pool, id) {
-  const result = await pool
-    .request()
-    .input("Id", sql.Int, id)
-    .query(`
-      SELECT TOP 1
-        bk.BookingNo,
-        h.Id AS HoldId
-      FROM dbo.UnitMaster u
-      LEFT JOIN dbo.CrmBooking bk
-        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-      WHERE u.Id = @Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
-    `);
-  if (!result.recordset.length) return null;
-  const row = result.recordset[0];
-  if (row.BookingNo) return `has an active booking (${row.BookingNo})`;
-  return "is currently on hold";
-}
+// Shared lock check — moved to services/crmHierarchyLocks.js (also reused
+// by blockMaster.js's roll-up and the Auto Project Setup page). Mirrors the
+// exact Booked/OnHold definitions unitMatrix.js uses, so "locked" here
+// always matches what the matrix displays, PLUS a live (non-Cancelled/
+// Rejected) Application whose PreferredUnitId points at this unit —
+// "applied", not just booked/held.
 
 // A unit can be tagged with multiple Payment Plans (dbo.CrmUnitPaymentPlan,
 // many-to-many) — plans themselves are created independently in Payment Plan

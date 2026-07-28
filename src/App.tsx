@@ -406,6 +406,7 @@ const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDet
 const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
 const CrmPaymentPlans      = lazy(() => import("./pages/CRM/CrmPaymentPlans"));
 const CrmProjectBanks      = lazy(() => import("./pages/CRM/CrmProjectBanks"));
+const CrmProjectAutoSetup  = lazy(() => import("./pages/CRM/CrmProjectAutoSetup"));
 const CrmMilestoneMaster   = lazy(() => import("./pages/CRM/CrmMilestoneMaster"));
 const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
 const CrmBrokerPayments    = lazy(() => import("./pages/CRM/CrmBrokerPayments"));
@@ -2236,6 +2237,7 @@ function AppRoutes() {
       <Route path="/crm/brokerage"             element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerage /></ProtectedRoute>} />
       <Route path="/crm/payment-plans"         element={<ProtectedRoute pageKey="crm-payment-plans"><CrmPaymentPlans /></ProtectedRoute>} />
       <Route path="/crm/setup/project-banks"   element={<ProtectedRoute pageKey="crm-project-banks"><CrmProjectBanks /></ProtectedRoute>} />
+      <Route path="/crm/setup/auto-project-setup" element={<ProtectedRoute pageKey="crm-auto-project-setup"><CrmProjectAutoSetup /></ProtectedRoute>} />
       {/* These masters are shared with the Follow-Up module (same
           component/data, same pageKey gating) — registered again under
           /crm/setup/* so the CRM Setup menu can link straight to them
