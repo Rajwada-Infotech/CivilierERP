@@ -2,10 +2,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useIdleLogout } from "./useIdleLogout";
 
-// Real production timing (14 min warning + 60s countdown) exercised via fake
+// Real production timing (44 min warning + 60s countdown) exercised via fake
 // timers rather than shrinking the constants — this is the actual behavior
 // shipped to users, not an approximation of it.
-const WARNING_AFTER_MS = 14 * 60 * 1000;
+const WARNING_AFTER_MS = 44 * 60 * 1000;
 const COUNTDOWN_MS = 60 * 1000;
 const TOTAL_MS = WARNING_AFTER_MS + COUNTDOWN_MS;
 
