@@ -1,6 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-export type ChainDocType = "mr" | "po" | "grn" | "expense";
+export type ChainDocType = "mr" | "po" | "vio" | "grn" | "expense";
 
 export interface ChainNode {
   docType: ChainDocType;
@@ -34,6 +34,7 @@ export const getDocumentChain = async (
 export const CHAIN_ROUTES: Record<ChainDocType, string> = {
   mr: "/material/material-request",
   po: "/material/purchase-order",
+  vio: "/material/vehicle-in-out",
   grn: "/material/grn",
   expense: "/material/expense-booking",
 };

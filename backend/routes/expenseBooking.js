@@ -855,8 +855,16 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           -- Source doc: use actual GRN document number when source is GRN
           CASE
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
+            WHEN eb.ESourceType IN ('PO','WO_PO') AND po_direct.DocNo IS NOT NULL THEN po_direct.DocNo
+            WHEN eb.ESourceType = 'WORK_DONE' AND wd_direct.DocNo IS NOT NULL THEN wd_direct.DocNo
             ELSE NULL
           END AS sourceDocNo,
+          -- For GRN rows: also expose the parent PO DocNo so the Doc column
+          -- can show both PO and GRN without a second API call.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND po_list.DocNo IS NOT NULL THEN po_list.DocNo
+            ELSE NULL
+          END AS linkedPODocNo,
           -- Supplier name/id: resolved via the shared expenseBookingSupplierSql
           -- helper (GRN/PO/WO_PO/WORK_DONE/WO -> source doc's supplier;
           -- direct/manual bookings -> eb.LHeadId). EName is only ever the
@@ -883,6 +891,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
+        -- Direct PO / WO_PO source link
+        LEFT JOIN dbo.PurchaseOrders po_direct
+          ON eb.ESourceType IN ('PO','WO_PO') AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        -- Direct Work Done source link
+        LEFT JOIN dbo.WorkDone wd_direct
+          ON eb.ESourceType = 'WORK_DONE' AND wd_direct.ID = TRY_CAST(eb.ESourceId AS INT)
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'

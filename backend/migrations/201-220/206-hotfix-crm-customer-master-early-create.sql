@@ -1,0 +1,22 @@
+-- =============================================================================
+-- Hotfix: CrmCustomer table created early to unblock migration 204
+-- =============================================================================
+-- Context:  Migration 204-crm-customer-broker-column.sql tried to ALTER
+--           dbo.CrmCustomer before migration 206-crm-customer-master.sql had
+--           created the table, causing a "Invalid object name" error.
+-- Fix:      Manually ran the full contents of 206-crm-customer-master.sql
+--           first, then marked it applied in __Migrations, then ran 204.
+-- Applied:  Manually executed on 2026-07-26 (prod).
+--
+-- Marking step executed manually:
+--   INSERT INTO __Migrations (name, applied_at)
+--   VALUES ('206-crm-customer-master.sql', GETUTCDATE());
+--
+-- This file is a documentary record only. The actual table DDL lives in
+-- 206-crm-customer-master.sql. This hotfix file is idempotent (no-op if
+-- the table already exists).
+-- =============================================================================
+
+-- No DDL needed here — 206-crm-customer-master.sql is the canonical source.
+-- This file records the out-of-order manual execution for audit purposes.
+PRINT 'Hotfix 206-crm-customer-master-early-create: recorded. Table was created manually before migration 204 ran.';

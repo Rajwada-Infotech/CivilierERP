@@ -16,11 +16,14 @@ DELETE FROM dbo.ParkingMaster WHERE Id = 2;
 -- Same shape as UnitMaster's own UX_UnitMaster_Project_Block_UnitName —
 -- unfiltered (covers soft-deleted rows too), matching the "reactivate the
 -- old row instead of inserting a new one" pattern each route already uses.
-CREATE UNIQUE INDEX UX_BlockMaster_Project_BlockName
-  ON dbo.BlockMaster (ProjectId, BlockName);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_BlockMaster_Project_BlockName' AND object_id = OBJECT_ID('dbo.BlockMaster'))
+  CREATE UNIQUE INDEX UX_BlockMaster_Project_BlockName
+    ON dbo.BlockMaster (ProjectId, BlockName);
 
-CREATE UNIQUE INDEX UX_ParkingSlot_Project_Block_SlotNo
-  ON dbo.ParkingSlot (ProjectId, BlockId, SlotNo);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_ParkingSlot_Project_Block_SlotNo' AND object_id = OBJECT_ID('dbo.ParkingSlot'))
+  CREATE UNIQUE INDEX UX_ParkingSlot_Project_Block_SlotNo
+    ON dbo.ParkingSlot (ProjectId, BlockId, SlotNo);
 
-CREATE UNIQUE INDEX UX_ParkingMaster_Project_Block_ParkingType
-  ON dbo.ParkingMaster (ProjectId, BlockId, ParkingType);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_ParkingMaster_Project_Block_ParkingType' AND object_id = OBJECT_ID('dbo.ParkingMaster'))
+  CREATE UNIQUE INDEX UX_ParkingMaster_Project_Block_ParkingType
+    ON dbo.ParkingMaster (ProjectId, BlockId, ParkingType);

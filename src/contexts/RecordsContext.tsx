@@ -19,6 +19,12 @@ export type UnifiedRecord = {
   uploadedBy: string | null;
   uploadedAt: string; // ISO string
   url: string; // streams the file from its original module's endpoint
+  /** True when the source document has been deleted and this file is
+   *  inside its 7-day grace window before recordsRetentionService.js
+   *  purges it for good (currently only set for Contract). */
+  pendingDeletion?: boolean;
+  /** ISO string — when this file will actually be purged, if pendingDeletion. */
+  purgeAt?: string | null;
 };
 
 // Kept for backward compatibility with any code still importing the old
@@ -43,6 +49,8 @@ type RawRecord = {
   uploadedBy: string | null;
   uploadedAt: string;
   url: string;
+  pendingDeletion?: boolean;
+  purgeAt?: string | null;
 };
 
 type RecordsContextType = {
@@ -68,6 +76,8 @@ function mapRecord(r: RawRecord): UnifiedRecord {
     uploadedBy: r.uploadedBy,
     uploadedAt: r.uploadedAt,
     url: r.url,
+    pendingDeletion: r.pendingDeletion,
+    purgeAt: r.purgeAt,
   };
 }
 
