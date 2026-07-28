@@ -549,7 +549,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-      .query("SELECT Id, ProjectId FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
 
     const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
@@ -591,6 +591,22 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const slotNo = slot.recordset[0].SlotNo;
 
     if (!b.Immediate) {
+      // Hold-first path — this is the Application wizard's own Parking step
+      // (see CrmApplication.tsx ParkingSelectionStep), the parking-side twin
+      // of the Company/Project/Unit lock on the Application itself (see
+      // PUT /:id's changingUnitSelection check in crmApplications.js). A
+      // slot picked here is still just a hold until the Application's
+      // Booking is created, so it can move freely pre-approval but never
+      // after — same reasoning, same Draft/Pending gate. The dedicated
+      // standalone sale page (Immediate: true, CrmParkingBooking.tsx) is a
+      // separate, independent sale and is deliberately NOT gated by this —
+      // it never depends on its linked Application's own approval state.
+      if (!["Draft", "Pending"].includes(application.recordset[0].Status)) {
+        return res.status(400).json({
+          error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
+        });
+      }
+
       const hold = await placeHoldIfNeeded(pool, {
         entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
         holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
@@ -652,9 +668,22 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     const pool = getPool();
     const holdId = parseInt(req.params.holdId);
     const row = await pool.request().input("id", sql.Int, holdId)
-      .query("SELECT EntityType FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
+      .query("SELECT EntityType, ApplicationId FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
     if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
       return res.status(404).json({ error: "Active parking hold not found" });
+    }
+    // Same Draft/Pending lock as picking one in the first place (see POST
+    // /standalone above) — once the linked Application is Approved (or
+    // beyond), this hold either already converted into a real allotment or
+    // is about to, so it can no longer be pulled back out from here.
+    if (row.recordset[0].ApplicationId) {
+      const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (app.recordset.length && !["Draft", "Pending"].includes(app.recordset[0].Status)) {
+        return res.status(400).json({
+          error: `Cannot change this application's parking selection once it is ${app.recordset[0].Status} — this is locked after approval.`,
+        });
+      }
     }
     await releaseHold(pool, holdId, actorId(req));
     res.json({ success: true });

@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -27,6 +27,12 @@ const CO_APPLICANT_API = "/api/crm/co-applicants";
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
+// Mirrors CrmBooking.tsx's own PAY_MODES/TOKEN_TYPES so Payment Mode/Token
+// Type picked here read back identically once CrmBooking.tsx auto-fetches
+// them from the Application (see its TokenType/PaymentMode "(from
+// Application)" read-only fields).
+const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
+const TOKEN_TYPES = ["Percentage", "Amount"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
 
 const statusColor: Record<string, string> = {
@@ -42,6 +48,7 @@ const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
   ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "",
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
+  TokenType: "", TokenValue: "", BookingAmount: "", PaymentMode: "",
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
@@ -149,11 +156,29 @@ const CrmApplication: React.FC = () => {
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
+  // Furthest step this application has actually reached — persisted
+  // server-side as CrmApplication.CurrentStep so Resume can land back where
+  // the user left off, and so the stepper tabs can be clicked to jump to
+  // anything already visited.
+  const [maxStepReached, setMaxStepReached] = useState(1);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [loadingApplication, setLoadingApplication] = useState(false);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationNo, setApplicationNo] = useState<string | null>(null);
+  // Status of the application currently open in the wizard, as loaded from
+  // the server (null while creating a brand-new one in step 1). Drives
+  // whether the Project/Unit tree can be unlocked for editing at all — see
+  // canEditUnitSelection below. Kept separate from `form` since it's never
+  // itself an editable field.
+  const [wizardAppStatus, setWizardAppStatus] = useState<string | null>(null);
+  // Company/Project/Block/Floor/Unit/Payment Plan start locked (read-only)
+  // once an already-saved application is resumed, same as sourceLocked
+  // below — "Edit" unlocks them for the (normal, expected) case of
+  // adjusting the pick before approval. Once Approved, canEditUnitSelection
+  // goes false and no Edit control is ever shown, so this can't be
+  // unlocked at all past that point (see the Project/Unit tree JSX).
+  const [unitLocked, setUnitLocked] = useState(false);
   // Locked once a source chain is auto-fetched from the customer's linked
   // lead — "Change" lets staff override it for the (rarer) case the
   // customer's actual source for THIS application differs from their
@@ -309,6 +334,19 @@ const CrmApplication: React.FC = () => {
   // it on a genuinely incomplete one. Status is the real answer; stop guessing.
   const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
 
+  // Same Draft/Pending gate as isResumeEditable, applied inside the open
+  // wizard rather than at the Resume button: null status means a brand-new
+  // application still being created in step 1 (always editable — nothing
+  // saved yet to protect). Once wizardAppStatus is anything else (Approved,
+  // Rejected, Cancelled, Expired), the Project/Unit tree's Edit control
+  // never renders and the fields stay disabled no matter what unitLocked
+  // says — a real Booking either exists or is expected once Approved
+  // (createCrmBookingRecord requires it), so the unit pick can't move here
+  // anymore; see the comment on APPLICATION_TRANSITIONS in
+  // crmApplicationWorkflow.js for why Cancel-and-redo isn't the answer
+  // either at that point.
+  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === "Draft" || wizardAppStatus === "Pending";
+
   // Mirrors APPLICATION_TRANSITIONS in crmApplicationWorkflow.js: Cancel is a
   // business action any editor can take pre-approval — accidental filing or a
   // mistake means reapplying is cleaner than salvaging the record, and
@@ -444,6 +482,7 @@ const CrmApplication: React.FC = () => {
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
     setStep(1);
+    setMaxStepReached(1);
     setApplicationId(null);
     setApplicationNo(null);
     // Lock flag/unlock-guard is gated on the form that's about to be blown
@@ -452,6 +491,10 @@ const CrmApplication: React.FC = () => {
     // auto-fetch for a customer who never actually clicked "Change").
     setSourceLocked(false);
     sourceUnlockedForCustomerRef.current = null;
+    // Same reasoning — a brand-new application starts fully unlocked (no
+    // saved pick to protect yet) and with no status of its own.
+    setWizardAppStatus(null);
+    setUnitLocked(false);
   };
 
   const loadApplicationIntoWizard = async (id: number) => {
@@ -478,6 +521,10 @@ const CrmApplication: React.FC = () => {
         PaymentPlanId: app.PaymentPlanId ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        TokenType: app.TokenType || "",
+        TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
+        BookingAmount: app.BookingAmount != null ? String(app.BookingAmount) : "",
+        PaymentMode: app.PaymentMode || "",
         Source: app.Source || "",
         PlatformId: app.PlatformId ? String(app.PlatformId) : "",
         CampaignId: app.CampaignId ? String(app.CampaignId) : "",
@@ -490,9 +537,31 @@ const CrmApplication: React.FC = () => {
         Notes: app.Notes || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
+      setWizardAppStatus(app.Status || null);
 
       const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
-      setStep(hasProject ? 2 : 1);
+      // Lock the Project/Unit tree the same way Source locks once
+      // auto-fetched — there's already a saved pick here, so default to
+      // showing it read-only with an Edit control rather than inviting an
+      // accidental reselection every time the wizard is reopened. Resume is
+      // only ever reachable for Draft/Pending (see isResumeEditable), so
+      // Edit is always available here in practice; canEditUnitSelection
+      // below still gates it defensively in case that ever changes.
+      setUnitLocked(hasProject);
+      // CurrentStep is the furthest step this application actually reached
+      // (persisted by saveApplicationFields on every "Next" — see
+      // handleCreateAndNext/handleBankDetailsNext/handleCoApplicantNext/
+      // handleAttachmentsNext below). Resume there instead of hardcoding
+      // Parking (step 2) every time — e.g. an application that already has
+      // Bank/KYC, Co-Applicant, and Attachments done, sitting only on
+      // Details awaiting approval, reopens straight on Details (step 6)
+      // rather than making staff click back through everything again.
+      // Still clamped: never below step 2 once a project/unit exists (step 1
+      // is already done), never above 6, never above 1 without one.
+      const savedStep = Number(app.CurrentStep) || 1;
+      const resumeStep = hasProject ? Math.min(6, Math.max(2, savedStep)) : 1;
+      setStep(resumeStep);
+      setMaxStepReached(resumeStep);
       setDialogOpen(true);
     } catch (e: any) {
       toast.error(e.message);
@@ -510,37 +579,82 @@ const CrmApplication: React.FC = () => {
     if (form.PreferredUnitId && !form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
     setSaving(true);
     try {
+      // Shared Company/Project/Unit/Payment Plan + intake fields step 1 owns.
+      // CustomerId is deliberately excluded from the shared payload — it's
+      // permanently locked once an application exists (see the Customer
+      // select's disabled={!!applicationId} above) and PUT /:id doesn't
+      // accept it, only POST does on first creation.
+      const step1Fields = {
+        CompanyId: form.CompanyId || null,
+        ProjectId: form.ProjectId || null,
+        PreferredUnitId: form.PreferredUnitId || null,
+        PaymentPlanId: form.PaymentPlanId || null,
+        RatePerSqFt: form.RatePerSqFt || null,
+        DateOfApply: form.DateOfApply || null,
+        TokenType: form.TokenType || null,
+        TokenValue: form.TokenValue !== "" ? form.TokenValue : null,
+        BookingAmount: form.BookingAmount !== "" ? form.BookingAmount : null,
+        PaymentMode: form.PaymentMode || null,
+        Source: form.Source || null,
+        PlatformId: form.PlatformId || null,
+        CampaignId: form.CampaignId || null,
+        AdId: form.AdId || null,
+        ChannelPartnerId: form.ChannelPartnerId || null,
+        BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
+        BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
+        BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
+      };
+
+      if (applicationId) {
+        // Already exists (Resume) — this is an edit to an already-saved
+        // pick (only reachable at all while unitLocked was toggled off via
+        // Edit, which itself only renders pre-approval), so PUT the change
+        // against the existing record. POSTing here instead — the old,
+        // unconditional behavior — would have silently created a second,
+        // duplicate Application every time step 1 was revisited and saved.
+        const res = await fetchWithAuth(`${API}/${applicationId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(step1Fields),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to save changes");
+        setUnitLocked(true);
+        toast.success("Project/Unit selection updated");
+        if (form.PreferredUnitId) qc.invalidateQueries({ queryKey: ["unit-master"] });
+        advanceStep(2);
+        return;
+      }
+
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          CustomerId: parseInt(form.CustomerId),
-          CompanyId: form.CompanyId || null,
-          ProjectId: form.ProjectId || null,
-          PreferredUnitId: form.PreferredUnitId || null,
-          PaymentPlanId: form.PaymentPlanId || null,
-          RatePerSqFt: form.RatePerSqFt || null,
-          DateOfApply: form.DateOfApply || null,
-          Source: form.Source || null,
-          PlatformId: form.PlatformId || null,
-          CampaignId: form.CampaignId || null,
-          AdId: form.AdId || null,
-          ChannelPartnerId: form.ChannelPartnerId || null,
-          BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
-          BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
-          BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
-        }),
+        body: JSON.stringify({ CustomerId: parseInt(form.CustomerId), ...step1Fields }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create application");
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
+      // Freshly created — always Draft, and stays unlocked since this is the
+      // same step-1 pick that was just made, not yet a saved value to guard.
+      setWizardAppStatus("Draft");
+      setUnitLocked(false);
       toast.success(`Application ${data.ApplicationNo} created`);
       // A hold on the picked unit is placed server-side as part of creation
       // (see createCrmApplicationRecord) — refresh so this session's own
       // dropdown reflects it right away rather than waiting out staleTime.
       if (form.PreferredUnitId) qc.invalidateQueries({ queryKey: ["unit-master"] });
+      // applicationId (state) won't be updated yet on this render, so
+      // advanceStep's saveApplicationFields (which reads applicationId
+      // from state) would no-op — patch CurrentStep directly against the
+      // id we just got back instead.
       setStep(2);
+      setMaxStepReached((m) => Math.max(m, 2));
+      fetchWithAuth(`${API}/${data.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ CurrentStep: 2 }),
+      }).catch(() => {});
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -560,11 +674,21 @@ const CrmApplication: React.FC = () => {
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
   };
 
+  // Moves forward and persists CurrentStep (fire-and-forget — a failed save
+  // of the progress marker shouldn't block navigation the user already
+  // completed) so Resume and the clickable tabs both know how far this
+  // application has actually gotten, instead of Resume always guessing.
+  const advanceStep = (n: number) => {
+    setStep(n);
+    setMaxStepReached((m) => Math.max(m, n));
+    saveApplicationFields({ CurrentStep: n }).catch(() => {});
+  };
+
   const handleBankDetailsNext = async () => {
     setSaving(true);
     try {
       await saveBankDetailsRef.current?.();
-      setStep(4);
+      advanceStep(4);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -771,11 +895,15 @@ const CrmApplication: React.FC = () => {
     { accessorKey: "Mobile", header: "Mobile", size: 100,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
     { id: "interestedProject", header: "Interested Project", size: 140, enableSorting: false,
-      cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
-          {[i.row.original.InterestedProject, i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" · ") || "—"}
-        </span>
-      ) },
+      cell: (i) => {
+        const r = i.row.original;
+        const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
+        return (
+          <span onClick={() => setViewingAppId(r.Id)} className="cursor-pointer">
+            {[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}
+          </span>
+        );
+      } },
     { accessorKey: "Source", header: "Source", size: 130,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
@@ -797,81 +925,90 @@ const CrmApplication: React.FC = () => {
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 210, enableSorting: false,
+    { id: "actions", header: "", size: 230, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = activeStage === "InProcess" && isResumeEditable(a);
         return (
-          <div className="flex items-center gap-2 flex-wrap">
-            {activeStage === "InProcess" ? (
-              <>
-                {canResume ? (
-                  <button
-                    onClick={() => loadApplicationIntoWizard(a.Id)}
-                    disabled={loadingApplication}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Resume
-                  </button>
-                ) : null}
-                {/* submitOnly: Approve/Reject only ever happen from the Admin
-                    Approval Inbox (admin/super_admin/dba), never self-service here.
-                    Approval now also auto-creates the Booking — see crmApplications.js. */}
-                <ApprovalActions
-                  status={a.Status}
-                  recordId={a.Id}
-                  endpoint={API}
-                  submitOnly
-                  onSuccess={(_action, data) => {
-                    qc.invalidateQueries({ queryKey: ["crm-apps"] });
-                    if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
-                  }}
-                />
-                {a.Status === "Pending" && (
-                  <span className="text-xs text-muted-foreground">Pending admin approval</span>
-                )}
-                {/* Approval auto-creates the Booking; this only ever shows up
-                    when that auto-create didn't happen (e.g. a unit-hold
-                    conflict at the time) — the sole retry path, no separate
-                    "New Booking" form exists anywhere else. */}
-                {a.Status === "Approved" && (
-                  a.UnitUnavailableForBooking ? (
-                    <span
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
-                      title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
-                    >
-                      <XCircle size={12} /> Unit unavailable
-                    </span>
-                  ) : (
+          <div className="flex flex-col gap-1.5 py-0.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {activeStage === "InProcess" ? (
+                <>
+                  {canResume && (
                     <button
-                      onClick={() => handleCreateBooking(a)}
-                      disabled={creatingBookingId === a.Id}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                      onClick={() => loadApplicationIntoWizard(a.Id)}
+                      disabled={loadingApplication}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-primary/20 bg-primary/5 text-primary font-medium hover:bg-primary/10 disabled:opacity-40 transition-colors"
                     >
-                      <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
+                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
                     </button>
-                  )
-                )}
-                {canCancelApplication(a) && (
+                  )}
+                  {/* submitOnly: Approve/Reject only ever happen from the Admin
+                      Approval Inbox (admin/super_admin/dba), never self-service here.
+                      Approval now also auto-creates the Booking — see crmApplications.js. */}
+                  <ApprovalActions
+                    status={a.Status}
+                    recordId={a.Id}
+                    endpoint={API}
+                    submitOnly
+                    onSuccess={(_action, data) => {
+                      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+                      if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
+                    }}
+                  />
+                  {/* Approval auto-creates the Booking; this only ever shows up
+                      when that auto-create didn't happen (e.g. a unit-hold
+                      conflict at the time) — the sole retry path, no separate
+                      "New Booking" form exists anywhere else. */}
+                  {a.Status === "Approved" && (
+                    a.UnitUnavailableForBooking ? (
+                      <span
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
+                        title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
+                      >
+                        <XCircle size={12} /> Unit unavailable
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleCreateBooking(a)}
+                        disabled={creatingBookingId === a.Id}
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                      >
+                        <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
+                      </button>
+                    )
+                  )}
+                  {canCancelApplication(a) && (
+                    <button
+                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Ban size={12} /> Cancel
+                    </button>
+                  )}
+                </>
+              ) : (
+                canCancelApplication(a) && (
                   <button
                     onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                    className="text-xs text-red-600 hover:underline"
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
                   >
-                    Cancel
+                    <Ban size={12} /> Cancel
                   </button>
-                )}
-              </>
-            ) : (
-              canCancelApplication(a) ? (
-                <button
-                  onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                  className="text-xs text-red-600 hover:underline"
-                >
-                  Cancel
-                </button>
-              ) : (
-                <span className="text-xs text-muted-foreground">{a.Status} — no further action</span>
-              )
+                )
+              )}
+            </div>
+            {/* Status hint lives on its own line as a plain caption, never
+                inline with the buttons — that inline mixing (a link, a
+                sentence, another link, all wrapping unpredictably in a
+                210px cell) was what made this column look broken. */}
+            {activeStage === "InProcess" && a.Status === "Pending" && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Clock size={10} /> Pending admin approval
+              </span>
+            )}
+            {activeStage !== "InProcess" && !canCancelApplication(a) && (
+              <span className="text-[11px] text-muted-foreground">{a.Status} — no further action</span>
             )}
           </div>
         );
@@ -964,19 +1101,32 @@ const CrmApplication: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
 
-          {/* Step indicator */}
+          {/* Step indicator — each tab is clickable navigation to any step
+              already reached (maxStepReached), so staff can jump straight
+              back to e.g. Co-Applicant without walking Next through Parking
+              and Bank/KYC again. A step beyond what's been reached yet isn't
+              clickable — steps 2-6 all need applicationId (created in step 1)
+              and Bank/KYC intentionally still gates via its own Next/Save. */}
           <div className="flex items-center gap-1.5 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => (
-              <React.Fragment key={label}>
-                {i > 0 && <div className="flex-1 h-px bg-border" />}
-                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium ${
-                  step === i + 1 ? "bg-primary text-primary-foreground" : step > i + 1 ? "text-green-600" : "text-muted-foreground"
-                }`}>
-                  {step > i + 1 ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{i + 1}</span>}
-                  {label}
-                </div>
-              </React.Fragment>
-            ))}
+            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
+              const stepNum = i + 1;
+              const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
+              return (
+                <React.Fragment key={label}>
+                  {i > 0 && <div className="flex-1 h-px bg-border" />}
+                  <button
+                    type="button"
+                    onClick={() => reachable && setStep(stepNum)}
+                    disabled={!reachable}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium transition-colors ${
+                      step === stepNum ? "bg-primary text-primary-foreground" : step > stepNum ? "text-green-600" : "text-muted-foreground"
+                    } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
+                    {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{stepNum}</span>}
+                    {label}
+                  </button>
+                </React.Fragment>
+              );
+            })}
           </div>
 
           {step === 1 && (
@@ -1005,13 +1155,36 @@ const CrmApplication: React.FC = () => {
                 )}
               </div>
 
-              {/* Tree: Company > Project > Block > Floor > Unit */}
+              {/* Tree: Company > Project > Block > Floor > Unit. Locked
+                  (read-only-styled, disabled) once a pick is already saved,
+                  same as Source below — "Edit" unlocks it for changes made
+                  before approval. Once the application is past Draft/Pending
+                  (canEditUnitSelection false), Edit never renders at all and
+                  every field here stays permanently disabled — a real
+                  Booking either exists or is expected the moment it's
+                  Approved, so the unit pick can't move anymore. */}
               <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <label className="text-xs font-semibold text-foreground block">Project / Unit (tree)</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground block">Project / Unit (tree)</label>
+                  {!!applicationId && (
+                    canEditUnitSelection ? (
+                      unitLocked && (
+                        <button type="button" onClick={() => setUnitLocked(false)}
+                          className="text-xs text-primary hover:underline shrink-0">
+                          Edit
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                        <Lock size={11} /> Locked ({wizardAppStatus})
+                      </span>
+                    )
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className={labelCls}>Company *</label>
-                    <select value={form.CompanyId} disabled={!!applicationId}
+                    <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
@@ -1022,7 +1195,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Project *</label>
-                    <select value={form.ProjectId} disabled={!!applicationId}
+                    <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
@@ -1033,7 +1206,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Block / Tower</label>
-                    <select value={form.BlockId} disabled={!!applicationId}
+                    <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
@@ -1044,7 +1217,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Floor</label>
-                    <select value={form.FloorNo} disabled={!!applicationId}
+                    <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
@@ -1055,7 +1228,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div className="col-span-2">
                     <label className={labelCls}>Unit *</label>
-                    <select value={form.PreferredUnitId} disabled={!!applicationId}
+                    <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, PreferredUnitId: e.target.value, PaymentPlanId: "" }));
                       }}
@@ -1092,7 +1265,8 @@ const CrmApplication: React.FC = () => {
                 {form.PreferredUnitId && (
                   <div className="pt-2">
                     <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
-                    <select value={form.PaymentPlanId} onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
+                    <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
                       <option value="">Select a payment plan</option>
                       {applicablePaymentPlans.map((p: any) => (
                         <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
@@ -1144,6 +1318,41 @@ const CrmApplication: React.FC = () => {
                   <label className={labelCls}>Est. Total Value</label>
                   <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
                     className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                </div>
+              </div>
+
+              {/* Token/Booking Amount/Payment Mode — same lock rule as the
+                  Company/Project/Unit/Payment Plan tree (canEditUnitSelection):
+                  once the application is past Draft/Pending these financial
+                  terms freeze too, since a Booking may already exist off them. */}
+              <div className="grid grid-cols-4 gap-3">
+                <div>
+                  <label className={labelCls}>Token Type</label>
+                  <select value={form.TokenType} disabled={!!applicationId && !canEditUnitSelection}
+                    onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))} className={inputCls}>
+                    <option value="">Select</option>
+                    {TOKEN_TYPES.map((t) => <option key={t} value={t}>{t === "Percentage" ? "Percentage (%)" : "Amount (₹)"}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Token Value</label>
+                  <input type="number" value={form.TokenValue} disabled={!!applicationId && !canEditUnitSelection}
+                    onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))} className={inputCls}
+                    placeholder={form.TokenType === "Percentage" ? "% of total" : "₹ amount"} />
+                </div>
+                <div>
+                  <label className={labelCls}>Booking Amount (₹)</label>
+                  <input type="number" value={form.BookingAmount} disabled={!!applicationId && !canEditUnitSelection}
+                    onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))} className={inputCls}
+                    placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : ""} />
+                </div>
+                <div>
+                  <label className={labelCls}>Payment Mode</label>
+                  <select value={form.PaymentMode} disabled={!!applicationId && !canEditUnitSelection}
+                    onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))} className={inputCls}>
+                    <option value="">Select</option>
+                    {PAY_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -1303,6 +1512,8 @@ const CrmApplication: React.FC = () => {
               projectId={form.ProjectId}
               blockId={form.BlockId}
               computedTotal={computedTotal}
+              canEdit={canEditUnitSelection}
+              wizardAppStatus={wizardAppStatus}
             />
           )}
 
@@ -1419,7 +1630,7 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 2 && (
-                <button onClick={() => setStep(3)}
+                <button onClick={() => advanceStep(3)}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
                   Next <ChevronRight size={14} />
                 </button>
@@ -1431,13 +1642,13 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 4 && (
-                <button onClick={() => setStep(5)}
+                <button onClick={() => advanceStep(5)}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
-                <button onClick={() => setStep(6)}
+                <button onClick={() => advanceStep(6)}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
                   Next <ChevronRight size={14} />
                 </button>
@@ -1570,9 +1781,13 @@ const CrmApplication: React.FC = () => {
                     <div><span className="text-muted-foreground">Company:</span> {a.CompanyName || "—"}</div>
                     <div><span className="text-muted-foreground">Project:</span> {a.ProjectMasterName || a.InterestedProject || "—"}</div>
                     <div><span className="text-muted-foreground">Preferred Unit:</span> {a.PreferredUnitName || a.InterestedUnit || "—"}</div>
-                    <div><span className="text-muted-foreground">Type:</span> {[a.PropertyType, a.BhkPreference].filter(Boolean).join(" · ") || "—"}</div>
+                    <div><span className="text-muted-foreground">Type:</span> {
+                      [a.PropertyType, a.BhkPreference].filter(Boolean).join(" · ")
+                      || [a.UnitTypeFromMaster, a.UnitAreaSqFt ? `${a.UnitAreaSqFt} sqft` : null].filter(Boolean).join(" · ")
+                      || "—"
+                    }</div>
                   </div>
-                  {a.UnitUnavailableForBooking && (
+                  {!!a.UnitUnavailableForBooking && (
                     <div className="flex items-center gap-1.5 text-xs text-red-600 pt-2 border-t border-border">
                       <XCircle size={12} /> This unit is currently booked or held by a different application — a booking can't be created until it's re-picked.
                     </div>
@@ -1584,8 +1799,9 @@ const CrmApplication: React.FC = () => {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                     <div><span className="text-muted-foreground">Rate/sqft:</span> {a.RatePerSqFt ? `₹${Number(a.RatePerSqFt).toLocaleString("en-IN")}` : "—"}</div>
                     <div><span className="text-muted-foreground">Payment Plan:</span> {a.PaymentPlanName || "Default 7-stage split"}</div>
-                    <div><span className="text-muted-foreground">Token:</span> {a.TokenValue != null ? `${a.TokenValue}${a.TokenType === "Percentage" ? "%" : " ₹"}` : "—"}</div>
+                    <div><span className="text-muted-foreground">Token:</span> {a.TokenValue != null ? `${a.TokenType === "Percentage" ? `${a.TokenValue}%` : `₹${Number(a.TokenValue).toLocaleString("en-IN")}`}` : "—"}</div>
                     <div><span className="text-muted-foreground">Booking Amount:</span> {a.BookingAmount != null ? `₹${Number(a.BookingAmount).toLocaleString("en-IN")}` : "—"}</div>
+                    <div><span className="text-muted-foreground">Payment Mode:</span> {a.PaymentMode || "—"}</div>
                   </div>
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
@@ -1908,7 +2124,15 @@ const BankDetailsStep: React.FC<{
 const ParkingSelectionStep: React.FC<{
   applicationId: number; projectId: string; blockId: string;
   computedTotal: number;
-}> = ({ applicationId, projectId, blockId, computedTotal }) => {
+  // Same Draft/Pending gate as canEditUnitSelection on the parent — parking
+  // picked here is still just an Application-stage hold (see crmParking.js
+  // POST /standalone), converted into a real CrmParkingAllotment only once
+  // the Application's Booking exists, so it has to stop moving at the exact
+  // same point the unit does: once Approved, a Booking either already exists
+  // or is expected imminently, and the pick can't change out from under it.
+  canEdit: boolean;
+  wizardAppStatus: string | null;
+}> = ({ applicationId, projectId, blockId, computedTotal, canEdit, wizardAppStatus }) => {
   const { data: allotments = [], refetch: refetchParking } = useQuery({
     queryKey: ["crm-app-parking", applicationId],
     queryFn: async () => {
@@ -2001,7 +2225,14 @@ const ParkingSelectionStep: React.FC<{
 
       {/* Already-added allotments */}
       <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
+          {!canEdit && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+              <Lock size={11} /> Locked ({wizardAppStatus})
+            </span>
+          )}
+        </div>
         {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
@@ -2015,7 +2246,9 @@ const ParkingSelectionStep: React.FC<{
                     </span>
                   )}
                 </span>
-                <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                {canEdit && (
+                  <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                )}
               </div>
             ))}
           </div>
@@ -2025,7 +2258,7 @@ const ParkingSelectionStep: React.FC<{
       </div>
 
       {/* Add parking — pick a type, then (if it has fixed slots) pick a slot */}
-      {!projectId ? (
+      {!canEdit ? null : !projectId ? (
         <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
       ) : (availableRates as any[]).length === 0 ? (
         <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>

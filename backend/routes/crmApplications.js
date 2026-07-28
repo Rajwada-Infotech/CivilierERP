@@ -28,7 +28,7 @@ const APP_SELECT = `
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
-    a.AssignedTo, a.AssignedBy, a.Status, a.Notes,
+    a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
     a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
     a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
@@ -41,6 +41,14 @@ const APP_SELECT = `
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
     proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName, um.BlockId AS BlockId,
+    -- The Application's own PropertyType/BhkPreference are free-text intake
+    -- fields nothing in the current wizard actually populates (no step asks
+    -- for them), so they're blank on every application created here. The
+    -- picked Unit already carries this (its own dropdown shows "UnitType ·
+    -- AreaSqFt sqft" at pick time — see CrmApplication.tsx step 1) — surface
+    -- it here too so the detail dialog's "Type" line isn't permanently "—"
+    -- for every application that has a real unit on it.
+    um.UnitType AS UnitTypeFromMaster, um.AreaSqFt AS UnitAreaSqFt,
     -- Customer-master fields, auto-fetched here so the Application page
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
@@ -220,9 +228,42 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId, Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
     const existingUnitId = existing.recordset[0].PreferredUnitId || null;
+    const existingStatus = existing.recordset[0].Status;
+
+    // Company/Project/Unit/Payment Plan can move freely pre-approval (the
+    // frontend wizard's own Edit toggle on the Project/Unit tree relies on
+    // this) but never after — the moment an Application is Approved, a real
+    // Booking either already exists or is expected imminently
+    // (createCrmBookingRecord requires Status='Approved' before it will
+    // create one), so silently repointing PreferredUnitId here would move
+    // the deal onto different inventory out from under that Booking. This
+    // is the server-side twin of the frontend's canEditUnitSelection check
+    // (CrmApplication.tsx) — kept here too since PUT /:id is reachable
+    // directly, not only through the wizard UI.
+    const changingUnitSelection =
+      b.CompanyId !== undefined || b.ProjectId !== undefined ||
+      b.PreferredUnitId !== undefined || b.PaymentPlanId !== undefined;
+    if (changingUnitSelection && !["Draft", "Pending"].includes(existingStatus)) {
+      return res.status(400).json({
+        error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
+      });
+    }
+
+    // Token/Booking Amount/Payment Mode follow the same Draft/Pending-only
+    // lock as the Company/Project/Unit/Payment Plan tree above — a Booking
+    // may already exist off these numbers once approved (see
+    // createCrmBookingRecord), so they can't be silently repointed after.
+    const changingFinancialTerms =
+      b.TokenType !== undefined || b.TokenValue !== undefined ||
+      b.BookingAmount !== undefined || b.PaymentMode !== undefined;
+    if (changingFinancialTerms && !["Draft", "Pending"].includes(existingStatus)) {
+      return res.status(400).json({
+        error: `Cannot change Token/Booking Amount/Payment Mode once the application is ${existingStatus} — this is locked after approval.`,
+      });
+    }
 
     // Contact identity fields (Mobile/AltMobile/Email) get the same
     // protection Status already had — but tighter, since these are used as
@@ -336,6 +377,12 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
       .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
       .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled !== undefined ? (b.BrokerageSplitEnabled ? 1 : 0) : null)
+      // Wizard resume progress. Clamped to the 1-6 step range the frontend
+      // stepper actually has; CurrentStep only ever moves forward (see the
+      // CASE below) — it tracks the furthest point reached, not merely the
+      // last one visited, so clicking Back and closing the dialog doesn't
+      // erase progress already made.
+      .input("cstep", sql.TinyInt,      b.CurrentStep != null && !isNaN(parseInt(b.CurrentStep)) ? Math.min(6, Math.max(1, parseInt(b.CurrentStep))) : null)
       .query(`
         UPDATE dbo.CrmApplication SET
           ApplicantName = ISNULL(@name, ApplicantName),
@@ -358,6 +405,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
           Notes = @note,
+          CurrentStep = CASE WHEN @cstep IS NOT NULL AND @cstep > CurrentStep THEN @cstep ELSE CurrentStep END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
       `);
