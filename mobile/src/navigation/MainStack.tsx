@@ -12,6 +12,8 @@ import InvoicePreviewScreen from "@/screens/finance/InvoicePreviewScreen";
 import MaterialDashboardScreen from "@/screens/material/MaterialDashboardScreen";
 import VehicleInOutListScreen from "@/screens/material/VehicleInOutListScreen";
 import PurchaseOrderListScreen from "@/screens/material/PurchaseOrderListScreen";
+import GRNListScreen from "@/screens/material/GRNListScreen";
+import MaterialRequestListScreen from "@/screens/material/MaterialRequestListScreen";
 import ContractListScreen from "@/screens/finance/ContractListScreen";
 import ContractDetailScreen from "@/screens/finance/ContractDetailScreen";
 import NewContractScreen from "@/screens/finance/NewContractScreen";
@@ -48,6 +50,8 @@ export type MainStackParamList = {
   MaterialDashboard: undefined;
   VehicleInOut: undefined;
   PurchaseOrder: undefined;
+  GRN: undefined;
+  MaterialRequest: undefined;
   Contract: undefined;
   ContractDetail: { id: number };
   NewContract: { id?: number } | undefined;
@@ -77,6 +81,8 @@ export default function MainStack() {
       <Stack.Screen name="MaterialDashboard" component={MaterialDashboardScreen} options={{ title: "Material" }} />
       <Stack.Screen name="VehicleInOut" component={VehicleInOutListScreen} options={{ title: "Vehicle In/Out" }} />
       <Stack.Screen name="PurchaseOrder" component={PurchaseOrderListScreen} options={{ title: "Purchase Orders" }} />
+      <Stack.Screen name="GRN" component={GRNListScreen} options={{ title: "GRN" }} />
+      <Stack.Screen name="MaterialRequest" component={MaterialRequestListScreen} options={{ title: "Material Requests" }} />
       <Stack.Screen name="Contract" component={ContractListScreen} options={{ title: "Contracts" }} />
       <Stack.Screen name="ContractDetail" component={ContractDetailScreen} options={{ title: "Contract" }} />
       <Stack.Screen name="NewContract" component={NewContractScreen} options={{ title: "New Contract" }} />
