@@ -1,0 +1,12 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, ec2-wsl]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deploy script
+        run: bash deploy.sh
