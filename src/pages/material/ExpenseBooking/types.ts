@@ -142,6 +142,12 @@ export interface ExpenseRecord {
   /** Every GRN id merged into this invoice when it combines multiple GRNs
    *  raised against the same PO — eSourceId is only the primary/first one. */
   linkedGrnIds?: number[] | null;
+  /** Doc numbers for linkedGrnIds, for display (LinkedDocBadge) — the list
+   *  endpoint doesn't resolve these today, so this is always undefined at
+   *  read time; the badge falls back to sourceDocNo (the primary GRN) when
+   *  it's empty. Kept typed here so callers that DO have doc numbers handy
+   *  (e.g. right after combining GRNs client-side) can still pass them. */
+  linkedGrnDocNos?: string[] | null;
 
   // ── Invoice Details (Step 6 spec) ───────────────────────────────────────────
   /** Vendor/supplier invoice number (from their physical invoice) */

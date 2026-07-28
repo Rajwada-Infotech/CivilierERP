@@ -228,7 +228,7 @@ async function fetchGRNAttachments(pool, actor) {
 async function fetchContractAttachments(pool, actor) {
   if (actor.role === "customer") return [];
   const result = await pool.request().query(`
-    SELECT ContractId, DocNo, Attachments, CreatedBy, CreatedAt
+    SELECT ContractId, DocNo, Attachments, CreatedBy, CreatedAt, Status, UpdatedAt
     FROM dbo.Contract
     WHERE Attachments IS NOT NULL AND Attachments <> ''
   `);
@@ -237,6 +237,14 @@ async function fetchContractAttachments(pool, actor) {
     let atts;
     try { atts = JSON.parse(r.Attachments); } catch { continue; }
     if (!Array.isArray(atts)) continue;
+    // Soft-deleted contracts keep their Attachments JSON for a 7-day grace
+    // window (see recordsRetentionService.js, which nulls it out after
+    // that) — surface that here so Records can show "pending deletion" and
+    // how many days are left, instead of the file looking permanent.
+    const isDeleted = r.Status === "Deleted";
+    const purgeAt = isDeleted && r.UpdatedAt
+      ? new Date(new Date(r.UpdatedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
     atts.forEach((a, i) => {
       rows.push({
         source: "contract",
@@ -253,11 +261,40 @@ async function fetchContractAttachments(pool, actor) {
         // non-http(s) string as a relative API path, so a data: URI 404'd.
         // Point at the real streaming endpoint instead.
         url: `/api/contract/${r.ContractId}/attachment/${i}`,
+        pendingDeletion: isDeleted,
+        purgeAt,
       });
     });
   }
   rows.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
   return rows;
+}
+
+// Personal Vault — strictly owner-scoped (no admin-sees-all override, unlike
+// every other source above): these are explicitly personal files, private
+// to whoever uploaded them, matching the ownership check already enforced
+// in personalVault.js's own routes.
+async function fetchPersonalVaultAttachments(pool, actor) {
+  if (!actor.id) return [];
+  const result = await pool.request().input("OwnerId", sql.Int, actor.id).query(`
+    SELECT Id, FolderName, FileName, MimeType, FileSize, UploadedAt
+    FROM dbo.PersonalVaultFiles
+    WHERE OwnerId = @OwnerId
+    ORDER BY UploadedAt DESC
+  `);
+  return result.recordset.map((r) => ({
+    source: "personal",
+    sourceId: r.Id,
+    module: "Personal Vault",
+    docRef: r.FolderName,
+    docLabel: r.FolderName,
+    filename: r.FileName,
+    mimeType: r.MimeType,
+    size: r.FileSize,
+    uploadedBy: null,
+    uploadedAt: r.UploadedAt,
+    url: `/api/personal-vault/file/${r.Id}`,
+  }));
 }
 
 // ─── Registry of sources ─────────────────────────────────────────────────────
@@ -266,9 +303,12 @@ async function fetchContractAttachments(pool, actor) {
 const SOURCES = [
   { key: "ticket", label: "Ticket", fetch: fetchTicketAttachments },
   { key: "vehicle", label: "Vehicle In/Out", fetch: fetchVehicleAttachments },
-  { key: "vault", label: "Document Vault", fetch: fetchVaultDocuments },
+  // "vault" (Follow-Up's dbo.FollowupDocumentVault) deliberately disconnected —
+  // the Follow-Up module is stray/unused for now. fetchVaultDocuments is left
+  // defined above, not deleted, so this is a one-line re-add if that changes.
   { key: "grn", label: "GRN", fetch: fetchGRNAttachments },
   { key: "contract", label: "Contract", fetch: fetchContractAttachments },
+  { key: "personal", label: "Personal Vault", fetch: fetchPersonalVaultAttachments },
 ];
 
 // ─── GET /api/records — unified list ─────────────────────────────────────────

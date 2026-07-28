@@ -228,6 +228,9 @@ interface POListItem {
   remarks: string;
   poType: string;
   sourceWODocNo: string | null;
+  /** MR this PO is tagged to — direct or, for a Quotation-sourced PO, the
+   *  Quotation's own MR (see backend's EffectiveMRDocNo). */
+  effectiveMRDocNo: string | null;
 }
 
 const PO_EXPORT_COLUMNS: ExportColumn[] = [
@@ -1036,6 +1039,7 @@ const PurchaseOrderMaster: React.FC = () => {
         remarks: item.Remarks ?? "",
         poType: item.POType ?? "Direct",
         sourceWODocNo: item.SourceWODocNo ?? null,
+        effectiveMRDocNo: item.EffectiveMRDocNo ?? null,
       })),
     [dbItems, suppliers, companies, allProjects],
   );
@@ -2553,6 +2557,23 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     ),
                   },
                   {
+                    id: "effectiveMRDocNo",
+                    accessorKey: "effectiveMRDocNo",
+                    header: "MR Ref",
+                    size: 130,
+                    meta: { className: "hidden lg:table-cell" },
+                    cell: ({ getValue }: any) => {
+                      const v = getValue() as string | null;
+                      return v ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                          {v}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      );
+                    },
+                  },
+                  {
                     id: "totalAmount",
                     accessorKey: "totalAmount",
                     header: "Amount",
@@ -3022,13 +3043,17 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     ))}
                   </div>
                   {/* Source document references */}
-                  {(viewingPO.SourceMRDocNo ||
+                  {(viewingPO.EffectiveMRDocNo ||
+                    viewingPO.SourceMRDocNo ||
                     viewingPO.SourceWODocNo ||
                     viewingPO.SourceWDDocNo) && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {viewingPO.SourceMRDocNo && (
+                      {(viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo) && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                          <Link2 size={9} /> MR: {viewingPO.SourceMRDocNo}
+                          <Link2 size={9} /> MR: {viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}
+                          {!viewingPO.SourceMRDocNo && viewingPO.EffectiveMRDocNo && (
+                            <span className="opacity-60 font-normal">(via Quotation)</span>
+                          )}
                         </span>
                       )}
                       {viewingPO.SourceWODocNo && (
@@ -3054,6 +3079,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       </p>
                     </div>
                   )}
+                  <DocumentChainPanel
+                    docType="po"
+                    id={viewingPO.PurchaseOrderID ?? viewingPO.purchaseOrderID ?? null}
+                  />
                 </div>
 
                 {/* Supplier / Billing / Project panels */}
