@@ -27,12 +27,6 @@ const CO_APPLICANT_API = "/api/crm/co-applicants";
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
-// Mirrors CrmBooking.tsx's own PAY_MODES/TOKEN_TYPES so Payment Mode/Token
-// Type picked here read back identically once CrmBooking.tsx auto-fetches
-// them from the Application (see its TokenType/PaymentMode "(from
-// Application)" read-only fields).
-const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
-const TOKEN_TYPES = ["Percentage", "Amount"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
 
 const statusColor: Record<string, string> = {
@@ -48,7 +42,6 @@ const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
   ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "",
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
-  TokenType: "", TokenValue: "", BookingAmount: "", PaymentMode: "",
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
@@ -235,6 +228,18 @@ const CrmApplication: React.FC = () => {
     queryKey: ["crm-app-co-applicants", viewingAppId],
     queryFn: async () => {
       const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${viewingAppId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!viewingAppId,
+  });
+  // Same shape/endpoint as the wizard's own detailParkingAllotments (see
+  // ParkingSelectionStep) but keyed by viewingAppId — the read-only preview
+  // dialog is a separate query scope from the wizard, so it needs its own
+  // fetch to show the Financials card's Parking breakdown.
+  const { data: viewingAppParking = [] } = useQuery({
+    queryKey: ["crm-app-parking", viewingAppId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${PARKING_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
     },
     enabled: !!viewingAppId,
@@ -521,10 +526,6 @@ const CrmApplication: React.FC = () => {
         PaymentPlanId: app.PaymentPlanId ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
-        TokenType: app.TokenType || "",
-        TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
-        BookingAmount: app.BookingAmount != null ? String(app.BookingAmount) : "",
-        PaymentMode: app.PaymentMode || "",
         Source: app.Source || "",
         PlatformId: app.PlatformId ? String(app.PlatformId) : "",
         CampaignId: app.CampaignId ? String(app.CampaignId) : "",
@@ -591,10 +592,6 @@ const CrmApplication: React.FC = () => {
         PaymentPlanId: form.PaymentPlanId || null,
         RatePerSqFt: form.RatePerSqFt || null,
         DateOfApply: form.DateOfApply || null,
-        TokenType: form.TokenType || null,
-        TokenValue: form.TokenValue !== "" ? form.TokenValue : null,
-        BookingAmount: form.BookingAmount !== "" ? form.BookingAmount : null,
-        PaymentMode: form.PaymentMode || null,
         Source: form.Source || null,
         PlatformId: form.PlatformId || null,
         CampaignId: form.CampaignId || null,
@@ -1321,40 +1318,6 @@ const CrmApplication: React.FC = () => {
                 </div>
               </div>
 
-              {/* Token/Booking Amount/Payment Mode — same lock rule as the
-                  Company/Project/Unit/Payment Plan tree (canEditUnitSelection):
-                  once the application is past Draft/Pending these financial
-                  terms freeze too, since a Booking may already exist off them. */}
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <label className={labelCls}>Token Type</label>
-                  <select value={form.TokenType} disabled={!!applicationId && !canEditUnitSelection}
-                    onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))} className={inputCls}>
-                    <option value="">Select</option>
-                    {TOKEN_TYPES.map((t) => <option key={t} value={t}>{t === "Percentage" ? "Percentage (%)" : "Amount (₹)"}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Token Value</label>
-                  <input type="number" value={form.TokenValue} disabled={!!applicationId && !canEditUnitSelection}
-                    onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))} className={inputCls}
-                    placeholder={form.TokenType === "Percentage" ? "% of total" : "₹ amount"} />
-                </div>
-                <div>
-                  <label className={labelCls}>Booking Amount (₹)</label>
-                  <input type="number" value={form.BookingAmount} disabled={!!applicationId && !canEditUnitSelection}
-                    onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))} className={inputCls}
-                    placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : ""} />
-                </div>
-                <div>
-                  <label className={labelCls}>Payment Mode</label>
-                  <select value={form.PaymentMode} disabled={!!applicationId && !canEditUnitSelection}
-                    onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))} className={inputCls}>
-                    <option value="">Select</option>
-                    {PAY_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
 
               {/* Source — deep chain, not a flat label. Auto-fetched and
                   locked when the selected customer has a linked lead with a
@@ -1748,6 +1711,24 @@ const CrmApplication: React.FC = () => {
           ) : (() => {
             const a = viewingAppDetail.application;
             const booking = (viewingAppDetail.bookings || [])[0];
+            // Unit price — same Area × Rate math as the wizard's own
+            // computedTotal, computed here straight off the fetched
+            // application/unit fields rather than wizard state (this dialog
+            // is a separate read-only view, never inside the wizard).
+            const unitArea = Number(a.UnitAreaSqFt) || 0;
+            const unitRate = Number(a.RatePerSqFt) || 0;
+            const unitTotal = unitArea && unitRate ? Math.round(unitArea * unitRate) : 0;
+            const parkingRows = viewingAppParking as any[];
+            const parkingTotal = parkingRows.reduce((s, p) => s + (Number(p.TotalAmount) || 0), 0);
+            // Same plan lookup + milestone math as the wizard's step-1 plan
+            // preview (selectedPaymentPlan/selectedPlanMilestones) — reused
+            // here against the already-cached payment-plans list instead of
+            // a second fetch, keyed off this application's own PaymentPlanId.
+            const plan = (paymentPlans as any[]).find((p: any) => String(p.Id) === String(a.PaymentPlanId)) || null;
+            const planMilestones = parseMilestones(plan?.MilestonesJson);
+            const planBookingAmount = Number(plan?.BookingAmount || 0);
+            const planRemainder = Math.max(0, unitTotal - planBookingAmount);
+            const grandTotal = unitTotal + parkingTotal;
             return (
               <div className="space-y-4">
                 <div className="rounded-xl border border-border p-4 space-y-2">
@@ -1796,13 +1777,63 @@ const CrmApplication: React.FC = () => {
 
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Financials</h3>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div><span className="text-muted-foreground">Rate/sqft:</span> {a.RatePerSqFt ? `₹${Number(a.RatePerSqFt).toLocaleString("en-IN")}` : "—"}</div>
-                    <div><span className="text-muted-foreground">Payment Plan:</span> {a.PaymentPlanName || "Default 7-stage split"}</div>
-                    <div><span className="text-muted-foreground">Token:</span> {a.TokenValue != null ? `${a.TokenType === "Percentage" ? `${a.TokenValue}%` : `₹${Number(a.TokenValue).toLocaleString("en-IN")}`}` : "—"}</div>
-                    <div><span className="text-muted-foreground">Booking Amount:</span> {a.BookingAmount != null ? `₹${Number(a.BookingAmount).toLocaleString("en-IN")}` : "—"}</div>
-                    <div><span className="text-muted-foreground">Payment Mode:</span> {a.PaymentMode || "—"}</div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Unit Price</span>
+                    <span className="font-medium text-foreground">
+                      {unitArea && unitRate
+                        ? `${unitArea} sqft × ₹${unitRate.toLocaleString("en-IN")}/sqft = ₹${unitTotal.toLocaleString("en-IN")}`
+                        : "—"}
+                    </span>
                   </div>
+
+                  {parkingRows.length > 0 && (
+                    <div className="pt-2 border-t border-border space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Parking ({parkingRows.length})</span>
+                        <span className="font-medium text-foreground">₹{parkingTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                      {parkingRows.map((p: any) => (
+                        <div key={p.Id} className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
+                          <span>{p.CurrentParkingType}{p.SlotNo ? ` — Slot ${p.SlotNo}` : ` × ${p.Quantity}`}{p.Kind === "Hold" ? " (Held)" : ""}</span>
+                          <span>₹{Number(p.TotalAmount).toLocaleString("en-IN")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-border space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Payment Plan</span>
+                      <span className="font-medium text-foreground">{a.PaymentPlanName || "—"}</span>
+                    </div>
+                    {plan && planMilestones.length > 0 ? (
+                      <>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
+                          <span>Booking</span>
+                          <span className="font-medium text-foreground">₹{planBookingAmount.toLocaleString("en-IN")}</span>
+                        </div>
+                        {planMilestones.slice(1).map((m, i) => (
+                          <div key={i} className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
+                            <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                            <span className="font-medium text-foreground shrink-0">
+                              {unitTotal ? `₹${Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground pl-2">{a.PaymentPlanName ? "No milestone breakdown set on this plan." : "Set once a Payment Plan is picked."}</p>
+                    )}
+                  </div>
+
+                  {(unitTotal > 0 || parkingTotal > 0) && (
+                    <div className="pt-2 border-t border-border flex items-center justify-between text-xs font-semibold">
+                      <span>Total</span>
+                      <span className="text-primary">₹{grandTotal.toLocaleString("en-IN")}</span>
+                    </div>
+                  )}
+
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
                       <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}

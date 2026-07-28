@@ -252,19 +252,6 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       });
     }
 
-    // Token/Booking Amount/Payment Mode follow the same Draft/Pending-only
-    // lock as the Company/Project/Unit/Payment Plan tree above — a Booking
-    // may already exist off these numbers once approved (see
-    // createCrmBookingRecord), so they can't be silently repointed after.
-    const changingFinancialTerms =
-      b.TokenType !== undefined || b.TokenValue !== undefined ||
-      b.BookingAmount !== undefined || b.PaymentMode !== undefined;
-    if (changingFinancialTerms && !["Draft", "Pending"].includes(existingStatus)) {
-      return res.status(400).json({
-        error: `Cannot change Token/Booking Amount/Payment Mode once the application is ${existingStatus} — this is locked after approval.`,
-      });
-    }
-
     // Contact identity fields (Mobile/AltMobile/Email) get the same
     // protection Status already had — but tighter, since these are used as
     // the customer portal's own login credentials (email as username,
