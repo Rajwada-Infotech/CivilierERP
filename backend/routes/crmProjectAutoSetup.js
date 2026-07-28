@@ -120,9 +120,23 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     const shortCode = await ensureProjectShortCode(pool, {
       Id: project.Id, Name: project.Name, ShortName: resolveShortCode(project),
     });
+
+    // Surfaces the exact class of gap that caused the Royal Garden mix-up:
+    // real, active Units under this project with no FloorNo at all can't be
+    // represented in the per-floor tree (syncExistingStructure above only
+    // ever backfills Units that already have one), so they'd otherwise sit
+    // invisible here while still showing up in Unit Matrix — flagged to the
+    // UI instead of silently doing nothing about them.
+    const legacyCount = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT COUNT(*) AS c FROM dbo.UnitMaster u
+      JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+    `);
+
     res.json({
       project: { Id: project.Id, Name: project.Name, ShortCode: shortCode },
       shortCodeValid: isValidShortCode(shortCode),
+      legacyUnitCount: legacyCount.recordset[0].c,
       blocks: blocks.recordset,
       floors: floors.recordset,
     });

@@ -76,6 +76,23 @@ const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 b
 const labelCls = "text-xs text-muted-foreground block mb-1";
 const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
+// Consistent section header across the Blocks/Floors/Units cards — a small
+// colored icon badge instead of a bare icon, so the three sections read as
+// distinct, color-coded areas of one page rather than a numbered "Step 1/2/3"
+// wizard (this is a resumable, all-editable dashboard now, not a strict
+// linear flow — the label shouldn't pretend otherwise).
+const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; done?: boolean; right?: React.ReactNode }> =
+  ({ icon: Icon, colorClass, title, done, right }) => (
+    <div className="flex items-center gap-2">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${colorClass}`}>
+        <Icon size={13} />
+      </span>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {done && <CheckCircle2 size={13} className="text-green-600" />}
+      {right}
+    </div>
+  );
+
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
   // Top-level toggle between this page's Block/Floor/Unit wizard and the
@@ -99,6 +116,12 @@ const CrmProjectAutoSetup: React.FC = () => {
   // was using yet. Starts open for a brand-new project (nothing to add
   // "more" to) and auto-collapses again after a successful add.
   const [showAddBlockForm, setShowAddBlockForm] = useState(false);
+  // Rename/delete on Blocks and Floors are locked behind an explicit "Edit"
+  // toggle rather than always live on hover — someone just visiting to see
+  // the project plan shouldn't be greeted by pencils and × buttons on every
+  // chip; editing is a deliberate mode you step into and back out of.
+  const [blocksEditMode, setBlocksEditMode] = useState(false);
+  const [floorsEditMode, setFloorsEditMode] = useState(false);
   const [expandedFloorId, setExpandedFloorId] = useState<number | null>(null);
   const [floorUnits, setFloorUnits] = useState<Record<number, any[]>>({});
   const [loadingUnitsFloorId, setLoadingUnitsFloorId] = useState<number | null>(null);
@@ -519,11 +542,11 @@ const CrmProjectAutoSetup: React.FC = () => {
         <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1 w-fit">
           <button
             onClick={() => setActiveTab("setup")}
-            className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
               activeTab === "setup" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Block / Floor / Unit Setup
+            <Building2 size={14} /> Block / Floor / Unit Setup
           </button>
           <button
             onClick={() => setActiveTab("parking")}
@@ -557,6 +580,16 @@ const CrmProjectAutoSetup: React.FC = () => {
           </div>
         )}
 
+        {/* Flags the exact class of gap that caused a real mix-up once
+            before: active Units under this project with no Floor at all
+            can't show up in the tree below, so this surfaces them instead
+            of silently doing nothing about them. */}
+        {projectId && status && status.legacyUnitCount > 0 && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
+            {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} on this project {status.legacyUnitCount === 1 ? "has" : "have"} no Floor assigned and won't appear in the tree below — resolve them in <a href="/crm/setup/unit-master" className="underline">Unit Master</a> (assign a floor, or deactivate if they're stale/duplicate data) before relying on this page as the full picture.
+          </div>
+        )}
+
         {projectId && status && (
           <>
             {/* Always-on structure tree — a resumable, at-a-glance view of
@@ -568,92 +601,119 @@ const CrmProjectAutoSetup: React.FC = () => {
                 step cards below still do the actual editing, but a
                 completed Block/Floor/Unit no longer needs a "Generate"-
                 shaped form left open to prove it exists. */}
-            {blocks.length > 0 && (
-              <div className={cardCls}>
-                <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                  <Building2 size={14} className="text-primary" /> {status.project?.Name}
-                  <span className="text-[11px] font-normal text-muted-foreground">
-                    ({blocks.length} block{blocks.length === 1 ? "" : "s"})
-                  </span>
-                </h3>
-                <div className="space-y-1">
-                  {blocks.map((b) => {
-                    const blockFloors = floorsByBlock.get(b.Id) || [];
-                    const totalUnits = blockFloors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
-                    const pendingFloors = blockFloors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0);
-                    const isExpanded = !!treeExpandedBlocks[b.Id];
-                    // What's still pending for this block, in plain words,
-                    // so resuming mid-setup never needs guesswork about
-                    // which step comes next.
-                    const pendingLabel = !blockFloors.length
-                      ? "Pending: set up floors"
-                      : pendingFloors.length
-                        ? `Pending: generate units on ${pendingFloors.length} floor${pendingFloors.length === 1 ? "" : "s"}`
-                        : null;
-                    return (
-                      <div key={b.Id} className="text-xs">
-                        <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
-                          className="w-full flex items-center gap-1.5 py-1 hover:text-primary text-left">
-                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          <Building2 size={11} className="text-muted-foreground" />
-                          <span className="font-medium">{b.BlockName}</span>
-                          <span className="text-muted-foreground">
-                            — {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}, {totalUnits} unit{totalUnits === 1 ? "" : "s"} generated
-                          </span>
-                          {pendingLabel ? (
-                            <span className="text-amber-600 ml-auto">{pendingLabel}</span>
-                          ) : blockFloors.length > 0 ? (
-                            <CheckCircle2 size={12} className="text-green-600 ml-auto" />
-                          ) : null}
-                        </button>
-                        {isExpanded && (
-                          <div className="ml-5 pl-3 border-l border-border space-y-0.5 pb-1">
-                            {blockFloors.length === 0 ? (
-                              <div className="text-muted-foreground py-0.5">No floors yet.</div>
-                            ) : (
-                              blockFloors.map((f) => (
-                                <div key={f.Id} className="flex items-center gap-1.5 py-0.5">
-                                  <Layers size={10} className="text-muted-foreground" />
-                                  <span>Floor {f.FloorLabel}</span>
-                                  {f.IsGenerated ? (
-                                    <span className="text-muted-foreground flex items-center gap-1">
-                                      <Lock size={9} /> {f.GeneratedUnitCount} unit{f.GeneratedUnitCount === 1 ? "" : "s"} generated
-                                    </span>
-                                  ) : f.HasUnits && f.UnitCount > 0 ? (
-                                    <span className="text-amber-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned — not generated yet</span>
-                                  ) : (
-                                    <span className="text-muted-foreground">no units planned</span>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        )}
+            {blocks.length > 0 && (() => {
+              const totalFloors = floors.length;
+              const totalUnitsGenerated = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+              const pendingFloorCount = floors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0).length;
+              return (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="p-4 pb-3 flex items-center gap-2 border-b border-border bg-muted/20">
+                    <Building2 size={16} className="text-primary shrink-0" />
+                    <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
+                  </div>
+                  {/* Stat strip — the at-a-glance numbers a person actually
+                      scans for first, ahead of the per-block detail below. */}
+                  <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+                    {[
+                      { label: "Blocks", value: blocks.length },
+                      { label: "Floors", value: totalFloors },
+                      { label: "Units generated", value: totalUnitsGenerated },
+                      { label: "Floors pending", value: pendingFloorCount, accent: pendingFloorCount > 0 },
+                    ].map((stat) => (
+                      <div key={stat.label} className="px-4 py-2.5 text-center">
+                        <div className={`text-lg font-semibold ${stat.accent ? "text-amber-600" : "text-foreground"}`}>{stat.value}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{stat.label}</div>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
+                  <div className="p-2">
+                    {blocks.map((b) => {
+                      const blockFloors = floorsByBlock.get(b.Id) || [];
+                      const totalUnits = blockFloors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+                      const pendingFloors = blockFloors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0);
+                      const isExpanded = !!treeExpandedBlocks[b.Id];
+                      // What's still pending for this block, in plain words,
+                      // so resuming mid-setup never needs guesswork about
+                      // which step comes next.
+                      const pendingLabel = !blockFloors.length
+                        ? "Set up floors"
+                        : pendingFloors.length
+                          ? `Generate units on ${pendingFloors.length} floor${pendingFloors.length === 1 ? "" : "s"}`
+                          : null;
+                      return (
+                        <div key={b.Id} className="text-xs rounded-lg hover:bg-muted/30">
+                          {/* Same 4-column layout as the stat-strip header
+                              above (Name | Floors | Units | Status), so this
+                              row actually fills the row's width with real
+                              data instead of one left-aligned label and a
+                              badge stranded far to the right. */}
+                          <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
+                            className="w-full grid grid-cols-4 items-center gap-2 px-2 py-1.5 text-left">
+                            <span className="flex items-center gap-2 min-w-0">
+                              {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+                              <span className="font-medium truncate">{b.BlockName}</span>
+                            </span>
+                            <span className="text-muted-foreground">{blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}</span>
+                            <span className="text-muted-foreground">{totalUnits} unit{totalUnits === 1 ? "" : "s"} generated</span>
+                            <span>
+                              {pendingLabel ? (
+                                <span className="text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full">{pendingLabel}</span>
+                              ) : blockFloors.length > 0 ? (
+                                <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+                                  <CheckCircle2 size={11} /> Done
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                          {isExpanded && (
+                            <div className="ml-6 pl-3 border-l border-border pb-1.5">
+                              <BlockFloorTree
+                                blockFloors={blockFloors}
+                                expandedFloorId={expandedFloorId}
+                                onToggleFloor={handleToggleExpandFloor}
+                                floorUnits={floorUnits}
+                                loadingUnitsFloorId={loadingUnitsFloorId}
+                                editingUnitId={editingUnitId}
+                                editingUnit={editingUnit}
+                                savingUnitId={savingUnitId}
+                                onStartEditUnit={startEditUnit}
+                                onEditUnitChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                                onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                                onSaveUnit={handleSaveUnit}
+                                onDeleteUnit={handleDeleteUnit}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Step 1 — Blocks. Collapsed state is a single dense row —
                 header, chips, and the add-affordance all inline — instead
                 of stacked sections, since at rest there's nothing here but
                 a handful of short labels. */}
-            <div className={cardCls}>
+            <div className={`${cardCls} border-l-2 border-l-violet-500`}>
               <div className="flex items-center flex-wrap gap-x-2 gap-y-1.5">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5 shrink-0">
-                  <Building2 size={14} className="text-primary" /> Blocks
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center bg-violet-500/10 text-violet-600">
+                    <Building2 size={13} />
+                  </span>
+                  <h3 className="text-sm font-semibold">Blocks</h3>
                   {step1Done && <CheckCircle2 size={13} className="text-green-600" />}
-                </h3>
+                </div>
 
-                {/* Rename/delete actions stay hidden until you hover a chip,
-                    so the row reads as plain labels at rest instead of a
-                    wall of pencils and × buttons (backend still refuses
-                    delete with a clear reason if anything exists
-                    underneath it — see getBlockLockReason). */}
+                {/* Locked, plain-label chips by default — someone just here
+                    to see the project plan gets a calm, read-only list, not
+                    a row of pencils/× (backend still refuses delete with a
+                    clear reason if anything exists underneath it — see
+                    getBlockLockReason). Rename/delete only appear once
+                    blocksEditMode is switched on via the toggle below. */}
                 {blocks.map((b) => (
-                  <span key={b.Id} className="group flex items-center gap-1 text-[11px] pl-1.5 pr-1 py-0.5 rounded-full bg-muted/50 border border-border font-medium">
+                  <span key={b.Id} className={`flex items-center gap-1 text-[11px] pl-2 pr-1.5 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-muted/70 border border-border" : "bg-muted/40"}`}>
                     {editingBlockId === b.Id ? (
                       <input autoFocus type="text" value={editingBlockName}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
@@ -662,21 +722,39 @@ const CrmProjectAutoSetup: React.FC = () => {
                         onBlur={() => handleRenameBlock(b)}
                         onKeyDown={(e) => { if (e.key === "Enter") handleRenameBlock(b); if (e.key === "Escape") setEditingBlockId(null); }}
                         className="w-14 bg-transparent border-b border-primary outline-none" />
-                    ) : (
+                    ) : blocksEditMode ? (
                       <>
                         <span>{b.BlockName}</span>
                         <button onClick={() => { setEditingBlockId(b.Id); setEditingBlockName(b.BlockName); }}
-                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity">
-                          <Pencil size={8} />
+                          className="text-muted-foreground hover:text-primary">
+                          <Pencil size={9} />
                         </button>
                         <button onClick={() => handleDeleteBlock(b)}
-                          className="text-muted-foreground opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-600 transition-opacity">
+                          className="text-muted-foreground hover:text-red-600">
                           <X size={10} />
                         </button>
                       </>
+                    ) : (
+                      // View mode — clicking a Block name drills into its
+                      // Floors (and from there, into real Units), same tree
+                      // interaction as the overview card above; sharing
+                      // treeExpandedBlocks state means expanding it here
+                      // also shows it expanded up there.
+                      <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
+                        className="flex items-center gap-1 hover:text-primary">
+                        {treeExpandedBlocks[b.Id] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
+                        {b.BlockName}
+                      </button>
                     )}
                   </span>
                 ))}
+
+                {step1Done && (
+                  <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
+                    className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
+                    {blocksEditMode ? "Done" : "Edit"}
+                  </button>
+                )}
 
                 {/* "Add More Blocks" only opens on demand — a collapsed
                     project already has its blocks; there's no reason to keep
@@ -691,6 +769,30 @@ const CrmProjectAutoSetup: React.FC = () => {
                   </button>
                 )}
               </div>
+
+              {/* Expanded Block(s) — its Floor tree, drilling further into
+                  real Units per Floor, same as clicking through the
+                  overview card above. */}
+              {blocks.filter((b) => treeExpandedBlocks[b.Id]).map((b) => (
+                <div key={b.Id} className="rounded-lg border border-border/50 p-2 text-xs">
+                  <div className="font-medium mb-1">{b.BlockName}</div>
+                  <BlockFloorTree
+                    blockFloors={floorsByBlock.get(b.Id) || []}
+                    expandedFloorId={expandedFloorId}
+                    onToggleFloor={handleToggleExpandFloor}
+                    floorUnits={floorUnits}
+                    loadingUnitsFloorId={loadingUnitsFloorId}
+                    editingUnitId={editingUnitId}
+                    editingUnit={editingUnit}
+                    savingUnitId={savingUnitId}
+                    onStartEditUnit={startEditUnit}
+                    onEditUnitChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                    onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                    onSaveUnit={handleSaveUnit}
+                    onDeleteUnit={handleDeleteUnit}
+                  />
+                </div>
+              ))}
 
               {(!step1Done || showAddBlockForm) && (
                 <div className={step1Done ? "pt-2 mt-2 border-t border-border space-y-3" : "space-y-3"}>
@@ -749,13 +851,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                 block is always a safe no-op (POST /floors only ever adds
                 what's missing). */}
             {step1Done && (
-              <div className={cardCls}>
-                <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                  <Layers size={14} className="text-primary" /> Step 2 — Floors
-                  {step2Done && <CheckCircle2 size={13} className="text-green-600" />}
-                </h3>
+              <div className={`${cardCls} border-l-2 border-l-cyan-500`}>
+                <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="Floor Plan" done={step2Done} right={
+                  step2Done && (
+                    <button onClick={() => setFloorsEditMode((v) => !v)}
+                      className={`ml-auto text-[11px] px-2 py-0.5 rounded-full font-medium ${floorsEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
+                      {floorsEditMode ? "Done" : "Edit"}
+                    </button>
+                  )
+                } />
 
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
                   {blocks.map((b) => {
                     const blockFloors = floorsByBlock.get(b.Id) || [];
                     const hasFloors = blockFloors.length > 0;
@@ -769,25 +875,53 @@ const CrmProjectAutoSetup: React.FC = () => {
                           // Collapsed tree row — this is the state a
                           // completed block sits in, instead of the input
                           // staying open forever.
-                          <div className="flex items-center flex-wrap gap-1.5">
-                            <span className="text-xs font-medium w-20 shrink-0 flex items-center gap-1">
-                              {b.BlockName} <CheckCircle2 size={11} className="text-green-600" />
-                            </span>
-                            <div className="flex flex-wrap items-center gap-1">
-                              {blockFloors.map((f) => (
-                                <span key={f.Id} className="group flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground">
-                                  {f.FloorLabel}
-                                  <button onClick={() => handleDeleteFloor(f)}
-                                    className="opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-600 transition-opacity">
-                                    <X size={9} />
-                                  </button>
-                                </span>
-                              ))}
+                          <div>
+                            <div className="flex items-center flex-wrap gap-1.5">
+                              <span className="text-xs font-medium w-20 shrink-0 flex items-center gap-1">
+                                {b.BlockName} <CheckCircle2 size={11} className="text-green-600" />
+                              </span>
+                              <div className="flex flex-wrap items-center gap-1">
+                                {blockFloors.map((f) => (
+                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                    {/* Generated floors are clickable in view
+                                        mode — same drill-into-Units tree as
+                                        the overview card/Blocks section. */}
+                                    {!floorsEditMode && f.IsGenerated ? (
+                                      <button onClick={() => handleToggleExpandFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
+                                    ) : (
+                                      <span>{f.FloorLabel}</span>
+                                    )}
+                                    {floorsEditMode && (
+                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
+                                        <X size={9} />
+                                      </button>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                              <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))}
+                                className="text-[11px] text-primary hover:underline ml-auto">
+                                + Add more floors
+                              </button>
                             </div>
-                            <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))}
-                              className="text-[11px] text-primary hover:underline ml-auto">
-                              + Add more floors
-                            </button>
+                            {(() => {
+                              const expandedFloor = blockFloors.find((f) => f.Id === expandedFloorId);
+                              return expandedFloor ? (
+                                <FloorUnitList
+                                  floorId={expandedFloor.Id}
+                                  units={floorUnits[expandedFloor.Id]}
+                                  loading={loadingUnitsFloorId === expandedFloor.Id}
+                                  editingUnitId={editingUnitId}
+                                  editingUnit={editingUnit}
+                                  savingUnitId={savingUnitId}
+                                  onStartEdit={startEditUnit}
+                                  onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                                  onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                                  onSave={handleSaveUnit}
+                                  onDelete={handleDeleteUnit}
+                                />
+                              ) : null;
+                            })()}
                           </div>
                         ) : (
                           <div className="space-y-1.5">
@@ -807,16 +941,39 @@ const CrmProjectAutoSetup: React.FC = () => {
                             {hasFloors && (
                               <div className="flex flex-wrap items-center gap-1 pl-[92px]">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className="group flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground">
-                                    {f.FloorLabel}
-                                    <button onClick={() => handleDeleteFloor(f)}
-                                      className="opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-600 transition-opacity">
-                                      <X size={9} />
-                                    </button>
+                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                    {!floorsEditMode && f.IsGenerated ? (
+                                      <button onClick={() => handleToggleExpandFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
+                                    ) : (
+                                      <span>{f.FloorLabel}</span>
+                                    )}
+                                    {floorsEditMode && (
+                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
+                                        <X size={9} />
+                                      </button>
+                                    )}
                                   </span>
                                 ))}
                               </div>
                             )}
+                            {(() => {
+                              const expandedFloor = blockFloors.find((f) => f.Id === expandedFloorId);
+                              return expandedFloor ? (
+                                <FloorUnitList
+                                  floorId={expandedFloor.Id}
+                                  units={floorUnits[expandedFloor.Id]}
+                                  loading={loadingUnitsFloorId === expandedFloor.Id}
+                                  editingUnitId={editingUnitId}
+                                  editingUnit={editingUnit}
+                                  savingUnitId={savingUnitId}
+                                  onStartEdit={startEditUnit}
+                                  onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                                  onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                                  onSave={handleSaveUnit}
+                                  onDelete={handleDeleteUnit}
+                                />
+                              ) : null;
+                            })()}
                           </div>
                         )}
                       </div>
@@ -832,14 +989,12 @@ const CrmProjectAutoSetup: React.FC = () => {
               </div>
             )}
 
-            {/* Step 3 — Units */}
+            {/* Unit Types & Generation */}
             {step2Done && (
-              <div className={cardCls}>
-                <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                  <Ruler size={14} className="text-primary" /> Step 3 — Units
-                </h3>
+              <div className={`${cardCls} border-l-2 border-l-amber-500`}>
+                <SectionHeader icon={Ruler} colorClass="bg-amber-500/10 text-amber-600" title="Unit Types & Generation" />
 
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
                     const rows = templates[b.Id] || [];
                     const nonGroundFloors = (floorsByBlock.get(b.Id) || []).filter((f) => f.FloorNo !== 0);
@@ -1087,6 +1242,74 @@ const CrmProjectAutoSetup: React.FC = () => {
 // Master endpoint (already enforces the booking/hold/Application lock).
 // Deleting every unit here is what then lets the Floor itself be deleted
 // in Step 2 above.
+// A Block's Floor list, each generated Floor clickable to drill down into
+// its real Units (via FloorUnitList) — the same tree interaction reused in
+// three places: the always-on overview card, the Blocks section, and the
+// Floor Plan section, so clicking a Block or Floor name behaves identically
+// everywhere it appears instead of only working in one spot.
+const BlockFloorTree: React.FC<{
+  blockFloors: any[];
+  expandedFloorId: number | null;
+  onToggleFloor: (f: any) => void;
+  floorUnits: Record<number, any[]>;
+  loadingUnitsFloorId: number | null;
+  editingUnitId: number | null;
+  editingUnit: { UnitName: string; UnitType: string; AreaSqFt: string } | null;
+  savingUnitId: number | null;
+  onStartEditUnit: (unit: any) => void;
+  onEditUnitChange: (patch: Partial<{ UnitName: string; UnitType: string; AreaSqFt: string }>) => void;
+  onCancelEditUnit: () => void;
+  onSaveUnit: (floorId: number, unit: any) => void;
+  onDeleteUnit: (floorId: number, unit: any) => void;
+}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit }) => (
+  <div className="space-y-0.5">
+    {blockFloors.length === 0 ? (
+      <div className="text-muted-foreground py-0.5">No floors yet.</div>
+    ) : (
+      blockFloors.map((f) => (
+        <div key={f.Id}>
+          {f.IsGenerated ? (
+            <button onClick={() => onToggleFloor(f)}
+              className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-primary">
+              {expandedFloorId === f.Id ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
+              <Layers size={10} className="text-muted-foreground shrink-0" />
+              <span className="shrink-0">Floor {f.FloorLabel}</span>
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Lock size={9} /> {f.GeneratedUnitCount} unit{f.GeneratedUnitCount === 1 ? "" : "s"} generated
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 py-0.5 pl-[15px]">
+              <Layers size={10} className="text-muted-foreground shrink-0" />
+              <span className="shrink-0">Floor {f.FloorLabel}</span>
+              {f.HasUnits && f.UnitCount > 0 ? (
+                <span className="text-amber-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned — not generated yet</span>
+              ) : (
+                <span className="text-muted-foreground">no units planned</span>
+              )}
+            </div>
+          )}
+          {expandedFloorId === f.Id && (
+            <FloorUnitList
+              floorId={f.Id}
+              units={floorUnits[f.Id]}
+              loading={loadingUnitsFloorId === f.Id}
+              editingUnitId={editingUnitId}
+              editingUnit={editingUnit}
+              savingUnitId={savingUnitId}
+              onStartEdit={onStartEditUnit}
+              onEditChange={onEditUnitChange}
+              onCancelEdit={onCancelEditUnit}
+              onSave={onSaveUnit}
+              onDelete={onDeleteUnit}
+            />
+          )}
+        </div>
+      ))
+    )}
+  </div>
+);
+
 const FloorUnitList: React.FC<{
   floorId: number;
   units: any[] | undefined;
@@ -1099,63 +1322,105 @@ const FloorUnitList: React.FC<{
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
-}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => (
-  <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
-    {loading ? (
-      <div className="text-[11px] text-muted-foreground">Loading...</div>
-    ) : (units || []).length === 0 ? (
-      <div className="text-[11px] text-muted-foreground">No units left on this floor.</div>
-    ) : (units || []).map((u) => {
-      const lockReason = u.LockBookingNo ? `booked (${u.LockBookingNo})`
-        : u.LockHoldId ? "on hold"
-        : u.LockApplicationNo ? `applied (${u.LockApplicationNo})`
-        : null;
-      const isEditing = editingUnitId === u.Id && editingUnit;
-      return (
-        <div key={u.Id} className="flex items-center justify-between gap-2 text-[11px]">
-          {isEditing ? (
-            <span className="grid grid-cols-[minmax(160px,1fr)_92px_76px] gap-1 flex-1">
-              <input autoFocus value={editingUnit.UnitName}
-                autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                name={`unit-name-${u.Id}`}
-                onChange={(e) => onEditChange({ UnitName: e.target.value })}
-                className="h-7 rounded border border-border bg-background px-2 font-mono outline-none focus:border-primary" />
-              <select value={editingUnit.UnitType}
-                onChange={(e) => onEditChange({ UnitType: e.target.value })}
-                className="h-7 rounded border border-border bg-background px-1 outline-none focus:border-primary">
-                {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="Area"
-                onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
-                className="h-7 rounded border border-border bg-background px-2 outline-none focus:border-primary" />
-            </span>
-          ) : (
-          <span className="font-mono">{u.UnitName}{u.UnitType ? ` — ${u.UnitType}` : ""}</span>
-          )}
-          <span className="flex items-center gap-2">
-            {lockReason && <span className="text-amber-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>}
-            {isEditing ? (
-              <>
-                <button onClick={() => onSave(floorId, u)} disabled={savingUnitId === u.Id}
-                  className="text-primary hover:underline disabled:opacity-40">Save</button>
-                <button onClick={onCancelEdit} className="text-muted-foreground hover:text-foreground">Cancel</button>
-              </>
-            ) : (
-              <>
-                <button onClick={() => onStartEdit(u)} disabled={!!lockReason}
-                  className="text-muted-foreground hover:text-primary disabled:opacity-40"><Pencil size={10} /></button>
-                <button onClick={() => onDelete(floorId, u)} disabled={!!lockReason}
-                  className="text-muted-foreground hover:text-red-600 disabled:opacity-40"><X size={10} /></button>
-              </>
-            )}
-          </span>
+}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
+  // Tapping a unit expands it into a small detail panel (status + real
+  // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
+  // at the far edge of the row. Local to this floor's list — each floor
+  // tracks its own expanded unit independently.
+  const [expandedUnitId, setExpandedUnitId] = useState<number | null>(null);
+
+  return (
+    <div className="ml-4 mt-1 border-l border-border pl-3">
+      {loading ? (
+        <div className="text-[11px] text-muted-foreground py-1">Loading...</div>
+      ) : (units || []).length === 0 ? (
+        <div className="text-[11px] text-muted-foreground py-1">No units left on this floor.</div>
+      ) : (
+        // A responsive card grid instead of one full-width row per unit —
+        // uses the available width on a wide screen instead of a single
+        // narrow column with a name on the left and buttons stranded far
+        // off to the right.
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 py-1">
+          {(units || []).map((u) => {
+            const lockReason = u.LockBookingNo ? `Booked — ${u.LockBookingNo}`
+              : u.LockHoldId ? "On hold"
+              : u.LockApplicationNo ? `Applied — ${u.LockApplicationNo}`
+              : null;
+            const isEditing = editingUnitId === u.Id && editingUnit;
+            const isExpanded = expandedUnitId === u.Id;
+            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-amber-500" : u.LockApplicationNo ? "bg-amber-500" : "bg-green-500";
+
+            if (isEditing) {
+              return (
+                <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 rounded-lg border border-primary/40 bg-muted/20 p-2 space-y-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                    <input autoFocus value={editingUnit.UnitName}
+                      autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                      name={`unit-name-${u.Id}`}
+                      onChange={(e) => onEditChange({ UnitName: e.target.value })}
+                      placeholder="Unit name"
+                      className="h-7 rounded border border-border bg-background px-2 text-[11px] font-mono outline-none focus:border-primary" />
+                    <select value={editingUnit.UnitType}
+                      onChange={(e) => onEditChange({ UnitType: e.target.value })}
+                      className="h-7 rounded border border-border bg-background px-1 text-[11px] outline-none focus:border-primary">
+                      {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="Area (sqft)"
+                      onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
+                      className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={onCancelEdit} className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:text-foreground">Cancel</button>
+                    <button onClick={() => onSave(floorId, u)} disabled={savingUnitId === u.Id}
+                      className="text-[11px] px-2 py-1 rounded bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-40">
+                      Save
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={u.Id}
+                className={`rounded-lg border p-2 text-[11px] cursor-pointer transition-colors ${isExpanded ? "border-primary/50 bg-primary/5" : "border-border/60 bg-muted/20 hover:bg-muted/40"}`}
+                onClick={() => setExpandedUnitId(isExpanded ? null : u.Id)}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-mono font-semibold truncate">{u.UnitName}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
+                </div>
+                <div className="text-muted-foreground truncate">
+                  {u.UnitType || "No type set"}{u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
+                </div>
+
+                {isExpanded && (
+                  <div onClick={(e) => e.stopPropagation()} className="mt-1.5 pt-1.5 border-t border-border/60 space-y-1.5">
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Status:</span>
+                      {lockReason ? (
+                        <span className="text-amber-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>
+                      ) : (
+                        <span className="text-green-600">Available</span>
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={() => onStartEdit(u)} disabled={!!lockReason}
+                        className="text-primary hover:underline disabled:opacity-40 disabled:no-underline">Edit</button>
+                      <button onClick={() => onDelete(floorId, u)} disabled={!!lockReason}
+                        className="text-red-600 hover:underline disabled:opacity-40 disabled:no-underline">Delete</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      );
-    })}
-    <a href="/crm/setup/unit-master" className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
-      edit details in Unit Master <ExternalLink size={9} />
-    </a>
-  </div>
-);
+      )}
+      <a href="/crm/setup/unit-master" className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
+        edit details in Unit Master <ExternalLink size={9} />
+      </a>
+    </div>
+  );
+};
 
 export default CrmProjectAutoSetup;

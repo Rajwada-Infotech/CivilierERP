@@ -452,14 +452,26 @@ export function UnitMatrixPage() {
     enabled: !!projectId,
   });
 
+  // Block first, then Floor within each block — mirrors the real physical
+  // map (Tower A1's floors, then Tower A2's floors, ...) instead of mixing
+  // every block's same-numbered floor into one combined "Floor 1" group
+  // when viewing "All blocks".
   const grouped = useMemo(() => {
-    const byFloor = new Map<string, MatrixUnit[]>();
+    const byBlock = new Map<string, Map<string, MatrixUnit[]>>();
     for (const u of units) {
-      const key = u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
-      if (!byFloor.has(key)) byFloor.set(key, []);
-      byFloor.get(key)!.push(u);
+      const blockKey = u.BlockName || "Unassigned Block";
+      const floorKey = u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
+      if (!byBlock.has(blockKey)) byBlock.set(blockKey, new Map());
+      const floors = byBlock.get(blockKey)!;
+      if (!floors.has(floorKey)) floors.set(floorKey, []);
+      floors.get(floorKey)!.push(u);
     }
-    return Array.from(byFloor.entries()).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(byBlock.entries())
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(([blockName, floorMap]) => ({
+        blockName,
+        floors: Array.from(floorMap.entries()).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })),
+      }));
   }, [units]);
 
   const stats = useMemo(() => {
@@ -572,47 +584,57 @@ export function UnitMatrixPage() {
             ) : units.length === 0 ? (
               <div className="py-20 text-center text-muted-foreground text-sm">No units found for this selection</div>
             ) : (
-              <div className="space-y-6">
-                {grouped.map(([floor, floorUnits]) => (
-                  <div key={floor}>
-                    <div className="flex items-center gap-2 mb-2.5 text-sm font-semibold text-foreground">
-                      <Layers size={14} className="text-muted-foreground" />
-                      {floor}
+              <div className="space-y-8">
+                {grouped.map(({ blockName, floors }) => (
+                  <div key={blockName}>
+                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-border text-base font-bold text-foreground">
+                      <Building2 size={16} className="text-primary" />
+                      {blockName}
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                      {floorUnits.map((u) => (
-                        <button
-                          key={u.Id}
-                          onClick={() => {
-                            if (u.Status === "Available") setHoldTarget(u);
-                            else if (u.Status === "OnHold" || u.Status === "Booked") setInfoTarget(u);
-                          }}
-                          disabled={u.Status === "Blocked"}
-                          className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
-                            u.Status !== "Blocked" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
-                          }`}
-                          title={u.BlockName ? `${u.BlockName} — ${u.UnitName}` : u.UnitName}
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
-                            <span
-                              className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                                u.Status === "OnHold" && isOverdue(u.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[u.Status]
-                              }`}
-                            >
-                              {u.Status === "OnHold" ? (isOverdue(u.HoldUntil) ? "Overdue" : "Hold") : u.Status}
-                            </span>
+                    <div className="space-y-6 pl-1">
+                      {floors.map(([floor, floorUnits]) => (
+                        <div key={floor}>
+                          <div className="flex items-center gap-2 mb-2.5 text-sm font-semibold text-foreground">
+                            <Layers size={14} className="text-muted-foreground" />
+                            {floor}
                           </div>
-                          <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                            {u.Status === "Booked" ? (u.ApplicantName || u.BookingNo || "—")
-                              : u.Status === "OnHold" ? (
-                                <>
-                                  <Clock size={11} className="shrink-0" />
-                                  {(u.HoldApplicantName || u.ApplicantName)} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
-                                </>
-                              ) : "—"}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                            {floorUnits.map((u) => (
+                              <button
+                                key={u.Id}
+                                onClick={() => {
+                                  if (u.Status === "Available") setHoldTarget(u);
+                                  else if (u.Status === "OnHold" || u.Status === "Booked") setInfoTarget(u);
+                                }}
+                                disabled={u.Status === "Blocked"}
+                                className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
+                                  u.Status !== "Blocked" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
+                                }`}
+                                title={u.BlockName ? `${u.BlockName} — ${u.UnitName}` : u.UnitName}
+                              >
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                  <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
+                                  <span
+                                    className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                                      u.Status === "OnHold" && isOverdue(u.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[u.Status]
+                                    }`}
+                                  >
+                                    {u.Status === "OnHold" ? (isOverdue(u.HoldUntil) ? "Overdue" : "Hold") : u.Status}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                                  {u.Status === "Booked" ? (u.ApplicantName || u.BookingNo || "—")
+                                    : u.Status === "OnHold" ? (
+                                      <>
+                                        <Clock size={11} className="shrink-0" />
+                                        {(u.HoldApplicantName || u.ApplicantName)} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
+                                      </>
+                                    ) : "—"}
+                                </div>
+                              </button>
+                            ))}
                           </div>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   </div>
