@@ -12,7 +12,7 @@ import {
   PortalMode, getStoredPortalMode, applyPortalMode,
 } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
 const MODE_OPTIONS: { key: PortalMode; label: string; icon: any }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -41,9 +41,9 @@ function MiniStat({ icon: Icon, label, value }: { icon: any; label: string; valu
 // all pulled from the same live tables the staff CRM reads, in one glance,
 // instead of a bare contact-details form.
 const PortalProfile: React.FC = () => {
-  const { me, timeline } = useOutletContext<Ctx>();
+  const { me, timeline, applicationId } = useOutletContext<Ctx>();
   const navigate = useNavigate();
-  const { data: tickets = [] } = useQuery({ queryKey: ["portal-tickets"], queryFn: fetchTickets });
+  const { data: tickets = [] } = useQuery({ queryKey: ["portal-tickets", applicationId], queryFn: () => fetchTickets(applicationId) });
   const [accent, setAccentState] = useState(getStoredPortalAccent());
   const [mode, setModeState] = useState<PortalMode>(getStoredPortalMode());
 

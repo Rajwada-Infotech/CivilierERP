@@ -231,24 +231,9 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
             <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
           </div>
 
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users2 size={14} className="text-primary" /> Co-Applicant (optional)</h3>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: "CoApplicantName", label: "Name" },
-                { key: "CoApplicantMobile", label: "Mobile" },
-                { key: "CoApplicantPanNo", label: "PAN" },
-                { key: "CoApplicantRelation", label: "Relation" },
-              ].map(({ key, label }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type="text" value={(form as any)[key]} readOnly={locked}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className={inputCls} />
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* Co-applicants are now managed at the Application level, not on the Customer record.
+               Each Application has its own independent co-applicants — use the Co-Applicant
+               tab in the Application wizard to add them. */}
 
           <div className="rounded-xl border border-border p-4 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Notes</h3>
@@ -527,24 +512,7 @@ const CrmCustomers: React.FC = () => {
               inputCls="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
             />
 
-            <div className="rounded-lg border border-border p-3 space-y-3">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicant (optional)</label>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: "CoApplicantName", label: "Name" },
-                  { key: "CoApplicantMobile", label: "Mobile" },
-                  { key: "CoApplicantPanNo", label: "PAN" },
-                  { key: "CoApplicantRelation", label: "Relation" },
-                ].map(({ key, label }) => (
-                  <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                    <input type="text" value={(form as any)[key]}
-                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* Co-applicants moved to the Application wizard — Add Co-Applicant tab */}
 
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Notes</label>

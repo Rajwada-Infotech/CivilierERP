@@ -8,14 +8,14 @@ import {
   UploadCloud, Clock, XCircle,
 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDocument, proposeAgreementDate, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
+import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, respondAgreement, respondSalesDeed, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
   GOLD, GOLD_SOFT, INK, VIOLET, HAIRLINE, SURFACE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
 } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
 function mimeIcon(mime: string | null | undefined, size = 16) {
   if (!mime) return <FileIcon size={size} className="text-slate-400 shrink-0" />;
@@ -84,7 +84,7 @@ function DocPreviewDialog({ doc, onClose }: { doc: any; onClose: () => void }) {
   );
 }
 
-function UploadDocDialog({ doc, onClose, onUploaded }: { doc: any; onClose: () => void; onUploaded: () => void }) {
+function UploadDocDialog({ doc, applicationId, onClose, onUploaded }: { doc: any; applicationId: number; onClose: () => void; onUploaded: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const isResubmit = doc.Status === "Rejected";
@@ -93,7 +93,7 @@ function UploadDocDialog({ doc, onClose, onUploaded }: { doc: any; onClose: () =
     if (!file) { toast.error("Choose a file first"); return; }
     setSaving(true);
     try {
-      await uploadAgreementDocument(doc.Id, file);
+      await uploadAgreementDoc(doc.Id, file, applicationId);
       toast.success("Document submitted for review");
       onUploaded();
     } catch (e: any) {
@@ -142,8 +142,8 @@ function UploadDocDialog({ doc, onClose, onUploaded }: { doc: any; onClose: () =
 }
 
 function ProposeDateDialog({
-  currentProposal, companyProposal, onClose, onProposed,
-}: { currentProposal: string | null; companyProposal: string | null; onClose: () => void; onProposed: () => void }) {
+  currentProposal, companyProposal, applicationId, onClose, onProposed,
+}: { currentProposal: string | null; companyProposal: string | null; applicationId: number; onClose: () => void; onProposed: () => void }) {
   const [date, setDate] = useState(currentProposal ? String(currentProposal).slice(0, 10) : "");
   const [saving, setSaving] = useState(false);
 
@@ -151,7 +151,7 @@ function ProposeDateDialog({
     if (!date) { toast.error("Pick a date"); return; }
     setSaving(true);
     try {
-      const res = await proposeAgreementDate(date);
+      const res = await proposeAgreementDate(date, applicationId);
       toast.success(res.agreementDateSubmittedForApproval
         ? "Both sides now agree — sent to our team for final sign-off"
         : "Your proposed date was sent to our team");
@@ -269,15 +269,15 @@ function RespondDialog({
 }
 
 const PortalAgreement: React.FC = () => {
-  const { timeline } = useOutletContext<Ctx>();
+  const { timeline, applicationId } = useOutletContext<Ctx>();
   const qc = useQueryClient();
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
   const [uploadDoc, setUploadDoc] = useState<any | null>(null);
   const [respondFor, setRespondFor] = useState<"agreement" | "salesDeed" | null>(null);
   const [proposeDateOpen, setProposeDateOpen] = useState(false);
 
-  const { data: agreement } = useQuery({ queryKey: ["portal-agreement"], queryFn: fetchAgreement });
-  const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents"], queryFn: fetchAgreementDocuments });
+  const { data: agreement } = useQuery({ queryKey: ["portal-agreement", applicationId], queryFn: () => fetchAgreement(applicationId) });
+  const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents", applicationId], queryFn: () => fetchAgreementDocuments(applicationId) });
 
   // Two distinct piles: documents still waiting on the customer (requested
   // but never uploaded, or returned for correction) vs. documents that
@@ -286,14 +286,16 @@ const PortalAgreement: React.FC = () => {
   const onFile = (documents as any[]).filter((d) => d.FileName && d.Status !== "Rejected");
   const mandatoryOutstanding = needsAction.some((d: any) => d.IsMandatory);
 
-  const respond = async (endpoint: string, decision: "Approve" | "Recheck", remarks: string) => {
+  const respond = async (type: "agreement" | "salesDeed", decision: "Approve" | "Recheck", remarks: string) => {
+    // The customer-facing UI calls it "Recheck"; the backend stores it as "Reject"
+    const apiDecision: "Approve" | "Reject" = decision === "Approve" ? "Approve" : "Reject";
     try {
-      const res = await fetch(`${API}${endpoint}`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ decision, remarks }) });
-      if (!res.ok) throw new Error((await res.json()).error);
+      if (type === "agreement") await respondAgreement(applicationId, apiDecision, remarks);
+      else await respondSalesDeed(applicationId, apiDecision, remarks);
       toast.success(decision === "Approve" ? "Approved — thank you!" : "Recheck requested");
       setRespondFor(null);
       qc.invalidateQueries({ queryKey: ["portal-timeline"] });
-      qc.invalidateQueries({ queryKey: ["portal-agreement"] });
+      qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -369,7 +371,7 @@ const PortalAgreement: React.FC = () => {
           )}
 
           <div className="px-5 sm:px-6 pb-5">
-            {agreement.CustomerApprovalStatus === "Pending" ? (
+            {agreement.CustomerApprovalStatus === "Pending" && !!agreement.SentToCustomerAt ? (
               mandatoryOutstanding ? (
                 <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#8A6D14" }}>
                   <UploadCloud size={16} /> Upload the required document{needsAction.filter((d: any) => d.IsMandatory).length > 1 ? "s" : ""} above before responding
@@ -491,10 +493,11 @@ const PortalAgreement: React.FC = () => {
         <ProposeDateDialog
           currentProposal={agreement.ProposedDateByCustomer}
           companyProposal={agreement.ProposedDateByCompany}
+          applicationId={applicationId}
           onClose={() => setProposeDateOpen(false)}
           onProposed={() => {
             setProposeDateOpen(false);
-            qc.invalidateQueries({ queryKey: ["portal-agreement"] });
+            qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
             qc.invalidateQueries({ queryKey: ["portal-timeline"] });
           }}
         />
@@ -502,10 +505,11 @@ const PortalAgreement: React.FC = () => {
       {uploadDoc && (
         <UploadDocDialog
           doc={uploadDoc}
+          applicationId={applicationId}
           onClose={() => setUploadDoc(null)}
           onUploaded={() => {
             setUploadDoc(null);
-            qc.invalidateQueries({ queryKey: ["portal-agreement-documents"] });
+            qc.invalidateQueries({ queryKey: ["portal-agreement-documents", applicationId] });
           }}
         />
       )}
@@ -529,7 +533,7 @@ const PortalAgreement: React.FC = () => {
                 ]
           }
           onClose={() => setRespondFor(null)}
-          onSubmit={(decision, remarks) => respond(respondFor === "agreement" ? "/agreement/respond" : "/sales-deed/respond", decision, remarks)}
+          onSubmit={(decision, remarks) => respond(respondFor === "agreement" ? "agreement" : "salesDeed", decision, remarks)}
         />
       )}
     </div>

@@ -81,11 +81,11 @@ const MATERIAL_NAV_TREE: NavTree = [
     label: "Transaction",
     icon: Receipt,
     children: [
-      { label: "Material Request", icon: ClipboardList },
+      { label: "Material Request", icon: ClipboardList, nav: "MaterialRequest" },
       { label: "Quotation", icon: FileCheck2 },
       { label: "Purchase Order", icon: FileText, nav: "PurchaseOrder" },
       { label: "Vehicle In/Out", icon: Ship, nav: "VehicleInOut" },
-      { label: "GRN", icon: Package },
+      { label: "GRN", icon: Package, nav: "GRN" },
       { label: "Issues", icon: ArchiveRestore },
       { label: "Issue Return", icon: RotateCcw },
     ],

@@ -21,26 +21,48 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// POST /login — email + mobile-as-password (or the password the customer set later)
+// POST /login — email + password (mobile number initially, forced reset on first
+// login — unchanged). Identity anchor is CustomerId (migration 254); email is
+// the UX credential resolved via CrmCustomer → CrmCustomerPortalUser.
+// UQ_CrmCustomer_Email (migration 255, filtered on active nonblank emails)
+// guarantees the lookup is always unambiguous — no silent wrong-row risk.
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
     const pool = getPool();
-    const result = await pool.request().input("em", sql.NVarChar(200), email.trim().toLowerCase())
-      .query("SELECT * FROM dbo.CrmCustomerPortalUser WHERE Email = @em AND IsActive = 1");
+
+    // Resolve Email → CrmCustomer → CrmCustomerPortalUser
+    const result = await pool.request()
+      .input("em", sql.NVarChar(200), email.trim().toLowerCase())
+      .query(`
+        SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
+               pu.MustChangePassword, pu.IsActive, pu.Email
+        FROM dbo.CrmCustomer c
+        JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = c.Id
+        WHERE LOWER(LTRIM(RTRIM(c.Email))) = @em
+          AND c.IsActive = 1
+      `);
+    if (result.recordset.length > 1) {
+      return res.status(409).json({
+        error: "This email matches more than one customer record. Please contact the sales office to confirm your mobile number.",
+      });
+    }
     const user = result.recordset[0];
     if (!user) return res.status(401).json({ error: "Invalid email or password" });
+    if (!user.IsActive) return res.status(401).json({ error: "This portal account has been deactivated" });
 
     const ok = await bcrypt.compare(password, user.PasswordHash);
     if (!ok) return res.status(401).json({ error: "Invalid email or password" });
 
-    await pool.request().input("id", sql.Int, user.Id)
+    await pool.request().input("id", sql.Int, user.PortalUserId)
       .query("UPDATE dbo.CrmCustomerPortalUser SET LastLoginAt = SYSDATETIME() WHERE Id = @id");
 
+    // JWT carries customerId only — applicationId is a request-scoped param,
+    // validated per-request against customerId, never embedded in the token.
     const token = jwt.sign(
-      { type: "crm_portal", portalUserId: user.Id, applicationId: user.ApplicationId, email: user.Email },
+      { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -52,21 +74,13 @@ router.post("/login", async (req, res) => {
   }
 });
 
+
 router.use(portalAuth);
 
 // Server-side enforcement of (1) account deactivation and (2) the forced
-// first-login password reset. The JWT itself carries neither signal and is
-// valid for 7 days regardless — until now nothing re-checked either flag
-// per-request, so:
-//   - staff deactivating a portal account (IsActive=0) had no actual effect
-//     until the customer's existing token happened to expire on its own
-//   - a customer could keep using the account indefinitely, still on the
-//     mobile-number password, by navigating directly to any other portal
-//     URL instead of the one that forces a reset right after login
-// IsActive is checked first and blocks EVERY route with no exception (a
-// deactivated account can't even reach /change-password — there's nothing
-// left to protect access to). MustChangePassword only blocks routes other
-// than /change-password, which is the one place that actually resolves it.
+// first-login password reset. IsActive is checked first and blocks EVERY
+// route with no exception. MustChangePassword only blocks routes other than
+// /change-password, which is the one place that actually resolves it.
 router.use(async (req, res, next) => {
   try {
     const pool = getPool();
@@ -105,30 +119,91 @@ router.post("/change-password", async (req, res) => {
   }
 });
 
-// GET /me — applicant + booking summary
+// ─── Ownership-check helper ───────────────────────────────────────────────────
+// Every detail route passes an applicationId param; this validates it belongs
+// to the authenticated customer before allowing the request through.
+// Returns the validated integer applicationId on success, throws 403 on failure.
+// This is the server-side enforcement of Option A: JWT carries customerId,
+// applicationId is a request-scoped param, validated here on every request.
+async function resolveAndAssertApplication(pool, req, res) {
+  const raw = req.query.applicationId || req.params.applicationId;
+  const appId = parseInt(raw, 10);
+  if (!appId || isNaN(appId)) {
+    res.status(400).json({ error: "applicationId is required" });
+    return null;
+  }
+  const check = await pool.request()
+    .input("aid", sql.Int, appId)
+    .input("cid", sql.Int, req.portalUser.customerId)
+    .query(`
+      SELECT a.Id
+      FROM dbo.CrmApplication a
+      WHERE a.Id = @aid
+        AND a.CustomerId = @cid
+        AND a.IsActive = 1
+    `);
+  if (!check.recordset.length) {
+    res.status(403).json({ error: "Application not found or does not belong to this account" });
+    return null;
+  }
+  return appId;
+}
+
+// ─── GET /applications — summary listing of ALL applications for this customer ─
+// This is the new landing page after login: every Application + its Booking
+// stage, so the customer can pick which unit's timeline to view.
+router.get("/applications", async (req, res) => {
+  try {
+    const pool = getPool();
+    const customerId = req.portalUser.customerId;
+    const result = await pool.request().input("cid", sql.Int, customerId).query(`
+      SELECT
+        a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Status AS ApplicationStatus,
+        a.InterestedProject, a.CreatedAt AS ApplicationDate,
+        b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName,
+        b.Status AS BookingStatus, b.GrandTotal, b.BookingDate,
+        ag.Status AS AgreementStatus, ag.SentToCustomerAt,
+        ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
+        sd.Status AS SalesDeedStatus, sd.CustomerApprovalStatus AS DeedCustomerApprovalStatus,
+        h.Status AS HandoverStatus, h.ActualHandoverDate
+      FROM dbo.CrmApplication a
+      LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
+      LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
+      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
+      LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
+      WHERE a.CustomerId = @cid AND a.IsActive = 1
+      ORDER BY a.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-portal] GET /applications error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /me — customer profile from the CrmCustomer record ──────────────────
 router.get("/me", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
-    const app = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT a.Id, a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email, a.InterestedProject, a.Status
-      FROM dbo.CrmApplication a WHERE a.Id = @aid AND a.IsActive = 1
+    const result = await pool.request().input("cid", sql.Int, req.portalUser.customerId).query(`
+      SELECT c.Id, c.CustomerNo, c.CustomerName AS Name, c.Mobile, c.Email, c.Address, c.City, c.State
+      FROM dbo.CrmCustomer c WHERE c.Id = @cid
     `);
-    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
-    res.json(app.recordset[0]);
+    if (!result.recordset.length) return res.status(404).json({ error: "Customer record not found" });
+    res.json(result.recordset[0]);
   } catch (e) {
     console.error("[crm-portal] GET /me error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /timeline — step-by-step milestone view. Brokerage is never queried
-// or included here, by design — the customer only ever sees their own
-// application/booking/agreement/payment/handover progression.
+// ─── GET /timeline — per-application step-by-step milestone view ─────────────
+// Requires ?applicationId= — validated against req.portalUser.customerId.
 router.get("/timeline", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
 
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.ProjectName, b.TotalValue, b.BookingAmount,
@@ -177,7 +252,7 @@ router.get("/timeline", async (req, res) => {
                ProposedDateByCompany, ProposedDateByCustomer, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','Rejected')) AS DocumentsNeedingAction
-        FROM dbo.CrmAgreement WHERE BookingId = @bid
+        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
@@ -193,10 +268,7 @@ router.get("/timeline", async (req, res) => {
         SELECT TOP 1 Id, NoticeNo, Status, OfferedDate, ResponseDeadline, SentAt, AcknowledgedAt, DisputedAt, DisputeReason
         FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status <> 'Draft' ORDER BY CreatedAt DESC
       `),
-      // Construction progress is a project-wide broadcast (Foundation/
-      // Superstructure/etc apply to every unit in the project, not just this
-      // customer's), so it's matched on the booking's real ProjectId — the
-      // same link every other module inherits — not a free-text project name.
+      // Construction progress is project-wide, matched on the booking's real ProjectId.
       bk.ProjectId
         ? pool.request().input("pid", sql.Int, bk.ProjectId)
             .query("SELECT UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC")
@@ -238,16 +310,13 @@ router.get("/timeline", async (req, res) => {
   }
 });
 
-// GET /agreement — full agreement text/terms once it has been sent to the customer
-// GET /invoices — every invoice generated for the customer's booking(s),
-// visible the moment staff generates one (no separate "send" gate — an
-// invoice is a record of a real transaction the customer is entitled to
-// see, unlike the Agreement/Sales Deed which need a deliberate publish
-// step for a document still being negotiated).
+// GET /invoices — every invoice for the selected application's booking.
+// Requires ?applicationId=
 router.get("/invoices", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.CreatedAt,
              b.BookingNo, b.UnitNo
@@ -263,10 +332,12 @@ router.get("/invoices", async (req, res) => {
   }
 });
 
+// GET /agreement — requires ?applicationId=
 router.get("/agreement", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.AgreementNo, ag.Status, ag.AgreementDate, ag.LegalName, ag.LegalAddress,
              ag.PanNo, ag.AadhaarNo, ag.VersionNo, ag.CreatedAt,
@@ -279,10 +350,7 @@ router.get("/agreement", async (req, res) => {
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
-    // Not having an agreement shared yet is a normal, expected state for a
-    // customer early in their journey — not an error — so this returns 200
-    // with a null body instead of 404, same as every other "nothing yet"
-    // lookup in this file (loan detail, bank detail, etc.).
+    // Not having an agreement shared yet is a normal, expected state — 200 + null.
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-portal] GET /agreement error:", e.message);
@@ -293,15 +361,12 @@ router.get("/agreement", async (req, res) => {
 const AGREEMENT_UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
 if (!fs.existsSync(AGREEMENT_UPLOAD_DIR)) fs.mkdirSync(AGREEMENT_UPLOAD_DIR, { recursive: true });
 
-// GET /agreement/documents — every document attached to the customer's own
-// agreement, once it's been shared. Scoped strictly to their own
-// ApplicationId — a customer can never see another buyer's documents.
-// Includes documents staff has *requested* but the customer hasn't uploaded
-// yet (Status='Requested', no file) so the portal can prompt for them.
+// GET /agreement/documents — requires ?applicationId=
 router.get("/agreement/documents", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT d.Id, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
              d.FileName, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
@@ -340,12 +405,7 @@ const portalDocUpload = multer({
 });
 
 // Deletes a just-uploaded temp file, but only after confirming it actually
-// resolves inside AGREEMENT_UPLOAD_DIR — multer's own filename() above
-// already strips anything but [a-zA-Z0-9._-] from the original filename
-// before writing to disk, so req.file.path can't genuinely escape that
-// directory, but this makes the guarantee explicit at the point of deletion
-// rather than relying on that sanitization alone (and satisfies static
-// analysis that can't trace through the multer storage config).
+// resolves inside AGREEMENT_UPLOAD_DIR (path-traversal guard).
 function safeUnlinkUpload(filePath) {
   if (!filePath) return;
   const resolved = path.resolve(filePath);
@@ -353,19 +413,15 @@ function safeUnlinkUpload(filePath) {
   fs.unlink(resolved, () => {});
 }
 
-// POST /agreement/documents/:docId/upload — the customer fulfils a document
-// staff requested (or re-submits after a rejection). Only ever allowed
-// against their own agreement's document rows, and only while that row is
-// still open for submission — a document already Verified (or one that was
-// never requested from them, i.e. a staff-attached exhibit) can't be
-// touched from this endpoint.
+// POST /agreement/documents/:docId/upload — requires ?applicationId=
 router.post("/agreement/documents/:docId/upload", (req, res) => {
   portalDocUpload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     try {
       const pool = getPool();
-      const appId = req.portalUser.applicationId;
+      const appId = await resolveAndAssertApplication(pool, req, res);
+      if (appId === null) { safeUnlinkUpload(req.file.path); return; }
       const docId = parseInt(req.params.docId, 10);
 
       const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
@@ -419,12 +475,12 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
   });
 });
 
-// GET /agreement/documents/file/:docId — stream a document's file, but only
-// if it genuinely belongs to this customer's own sent agreement.
+// GET /agreement/documents/file/:docId — requires ?applicationId=
 router.get("/agreement/documents/file/:docId", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const docId = parseInt(req.params.docId);
     const result = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
       SELECT d.FileName, d.FilePath, d.MimeType
@@ -449,12 +505,13 @@ router.get("/agreement/documents/file/:docId", async (req, res) => {
   }
 });
 
-// POST /agreement/respond — customer approves or requests a recheck
+// POST /agreement/respond — requires ?applicationId=
 router.post("/agreement/respond", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
-    const { decision, remarks, proposedDate } = req.body; // decision: "Approve" | "Recheck"
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const { decision, remarks, proposedDate } = req.body;
     if (!["Approve", "Recheck"].includes(decision)) return res.status(400).json({ error: "decision must be Approve or Recheck" });
     if (decision === "Recheck" && !String(remarks || "").trim()) {
       return res.status(400).json({ error: "Remarks are required when requesting a recheck" });
@@ -480,8 +537,6 @@ router.post("/agreement/respond", async (req, res) => {
     const agreementId = agreementRow.Id;
 
     if (decision === "Approve") {
-      // Preserve the prior customer-proposed date (if any) in history before
-      // it's overwritten.
       if (proposedDate) {
         await pool.request()
           .input("agid", sql.Int, agreementId)
@@ -500,10 +555,6 @@ router.post("/agreement/respond", async (req, res) => {
             ProposedDateByCustomer = ISNULL(@pdc, ProposedDateByCustomer)
           WHERE Id = @id
         `);
-      // The customer just approved and (optionally) proposed a date — if it
-      // now matches the company's proposed date, it goes to a super_admin
-      // for sign-off (DateApprovalStatus='Pending'), not straight to
-      // AgreementDate.
       await maybeResolveAgreementDate(pool, agreementId);
       await syncLegalMilestoneStep(pool, agreementRow.BookingId, "MutualAgreement", null);
     } else {
@@ -519,11 +570,6 @@ router.post("/agreement/respond", async (req, res) => {
           WHERE Id = @id
         `);
 
-      // Not a legal-content edit — VersionNo doesn't bump — but Version
-      // History should still surface *why* the customer bounced it back,
-      // not just silently sit at RecheckRequested. Snapshot the current
-      // (unchanged) content, tagged with the customer's own remarks.
-      // CreatedBy is NULL here (no staff actor — this came from the portal).
       await pool.request()
         .input("agid", sql.Int, agreementId)
         .input("ver",  sql.Int, agreementRow.VersionNo)
@@ -551,8 +597,6 @@ router.post("/agreement/respond", async (req, res) => {
         VALUES (@agid, @act, @rem, 'Customer', NULL, @aname, SYSDATETIME())
       `);
 
-    // Staff never otherwise learns the customer acted — this is the
-    // connection back from portal to CRM that closes the loop.
     if (agreementRow.AssignedTo) {
       await emitNotification(pool, agreementRow.AssignedTo,
         decision === "Approve" ? "crm_agreement_customer_approved" : "crm_agreement_recheck_requested",
@@ -577,19 +621,12 @@ router.post("/agreement/respond", async (req, res) => {
   }
 });
 
-// POST /agreement/propose-date — the customer's side of date negotiation,
-// independent of the Approve/Recheck decision. /agreement/respond only ever
-// lets a proposed date piggyback on the *first* approval action and then
-// blocks entirely once approved ("already been approved") — so if staff
-// proposes a date only after the customer has already approved the
-// agreement's content (the normal order per the workflow spec: content
-// approval happens before date negotiation), the customer previously had no
-// way to respond at all. This endpoint is the customer's mirror of the
-// staff side's PUT /:id/propose-date, usable any time after approval.
+// POST /agreement/propose-date — requires ?applicationId=
 router.post("/agreement/propose-date", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const { proposedDate } = req.body;
     if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
 
@@ -625,10 +662,6 @@ router.post("/agreement/propose-date", async (req, res) => {
       .input("pdc", sql.Date, proposedDate)
       .query("UPDATE dbo.CrmAgreement SET ProposedDateByCustomer = @pdc WHERE Id = @id");
 
-    // A match here no longer confirms the date outright — it moves to
-    // DateApprovalStatus='Pending' and waits on a super_admin sign-off
-    // (PUT /:id/date/approve), same gate the company's own propose-date
-    // action goes through.
     const submittedForApproval = await maybeResolveAgreementDate(pool, agreementId);
 
     if (agreementRow.AssignedTo) {
@@ -653,12 +686,12 @@ router.post("/agreement/propose-date", async (req, res) => {
   }
 });
 
-// POST /sales-deed/respond - customer approves or requests recheck on the
-// sales deed after staff publish it to the portal.
+// POST /sales-deed/respond — requires ?applicationId=
 router.post("/sales-deed/respond", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const { decision, remarks } = req.body;
     if (!["Approve", "Recheck"].includes(decision)) return res.status(400).json({ error: "decision must be Approve or Recheck" });
     if (decision === "Recheck" && !String(remarks || "").trim()) {
@@ -679,11 +712,6 @@ router.post("/sales-deed/respond", async (req, res) => {
     const deedRow = deed.recordset[0];
 
     if (decision === "Approve") {
-      // Auto-flow: customer approval is one of the "both sides" — the
-      // moment it lands, Director approval (the next gate before Handover)
-      // opens up on its own, matching the spec's "APPROVAL FROM BOTH SIDES
-      // -> DIRECTOR APPROVAL" chain instead of waiting on a separate manual
-      // "submit for director approval" click.
       await pool.request()
         .input("id", sql.Int, deedRow.Id)
         .query(`
@@ -731,18 +759,13 @@ router.post("/sales-deed/respond", async (req, res) => {
   }
 });
 
-// POST /possession-notice/respond — the customer's side of the possession
-// notice: acknowledge it (they've received/accepted the handover offer) or
-// dispute it (something's wrong — a reason is mandatory, same as the
-// staff-side mark-disputed endpoint). This is the one step in the Closure
-// sequence that previously had no customer-facing counterpart at all —
-// staff could send a notice but the customer had no way to respond to it
-// from their own portal.
+// POST /possession-notice/respond — requires ?applicationId=
 router.post("/possession-notice/respond", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
-    const { decision, reason } = req.body; // decision: "Acknowledge" | "Dispute"
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const { decision, reason } = req.body;
     if (!["Acknowledge", "Dispute"].includes(decision)) return res.status(400).json({ error: "decision must be Acknowledge or Dispute" });
     if (decision === "Dispute" && !String(reason || "").trim()) {
       return res.status(400).json({ error: "A reason is required to dispute the possession notice" });
@@ -792,14 +815,12 @@ router.post("/possession-notice/respond", async (req, res) => {
   }
 });
 
-// GET /tickets — every support ticket raised against the customer's booking,
-// staff-raised or self-raised. Only customer-safe fields — no AssignedTo
-// staff identity, no internal AssigneeName, matches the "never expose
-// internal discussions" rule the same way the rest of this file does.
+// GET /tickets — requires ?applicationId=
 router.get("/tickets", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT t.Id, t.TicketNo, t.Category, t.Priority, t.Subject, t.Description,
              t.Status, t.ResolvedAt, t.ResolutionNotes, t.CustomerRating, t.CustomerFeedback,
@@ -816,13 +837,12 @@ router.get("/tickets", async (req, res) => {
   }
 });
 
-// POST /tickets — customer raises a new support/legal/modification request.
-// Always lands as Normal priority, Open status — staff re-prioritize from
-// the regular Service Ticket queue, same as any other ticket.
+// POST /tickets — requires ?applicationId=
 router.post("/tickets", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     const { category, subject, description } = req.body;
     if (!CUSTOMER_TICKET_CATEGORIES.includes(category)) {
       return res.status(400).json({ error: `category must be one of: ${CUSTOMER_TICKET_CATEGORIES.join(", ")}` });
@@ -831,7 +851,7 @@ router.post("/tickets", async (req, res) => {
 
     const booking = await pool.request().input("aid", sql.Int, appId)
       .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 AND Status <> 'Cancelled' ORDER BY CreatedAt DESC");
-    if (!booking.recordset.length) return res.status(400).json({ error: "No active booking found for your account" });
+    if (!booking.recordset.length) return res.status(400).json({ error: "No active booking found for this application" });
     const bookingId = booking.recordset[0].Id;
 
     const ticketNo = await getNextDocNumber(pool, "SVC", "SVC");
@@ -870,25 +890,18 @@ router.post("/tickets", async (req, res) => {
 });
 
 // Only these CrmAgreementApprovalLog actions are safe to show a customer —
-// everything else (SeniorApprove/SeniorReject, the internal in-house review)
-// is staff-only, same "never expose internal review" rule the rest of this
-// file follows for brokerage/AssignedTo/etc.
+// everything else (SeniorApprove/SeniorReject, internal review) is staff-only.
 const CUSTOMER_VISIBLE_LOG_ACTIONS = [
   "SendToCustomer", "CustomerApprove", "CustomerRecheck",
   "AgreementDateSubmittedForApproval", "AgreementDateConfirmed", "AgreementDateRejected",
 ];
 
-// GET /activity — a single chronological feed of everything that's actually
-// happened on this customer's application: agreement lifecycle events,
-// payments received, documents reviewed, and support tickets. Requested
-// specifically so the portal isn't just a set of static status pages — the
-// customer can see the real communication/approval trail behind each one,
-// the same way staff can via CrmAgreementApprovalLog, minus anything
-// internal-only (senior review, brokerage, AssignedTo identities).
+// GET /activity — chronological feed for one application. Requires ?applicationId=
 router.get("/activity", async (req, res) => {
   try {
     const pool = getPool();
-    const appId = req.portalUser.applicationId;
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
 
     const [agreementLog, payments, documents, tickets] = await Promise.all([
       pool.request().input("aid", sql.Int, appId)

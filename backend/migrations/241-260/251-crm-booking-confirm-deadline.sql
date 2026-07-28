@@ -8,5 +8,13 @@
 -- to keep showing a live countdown on a still-Pending/unpaid Booking, and by
 -- the crm-booking-confirm-expiry SLA sweep to auto-expire it if the window
 -- passes with the Booking still unconfirmed.
-ALTER TABLE dbo.CrmBooking ADD ConfirmDeadline DATETIME2(3) NULL;
+IF COL_LENGTH('dbo.CrmBooking', 'ConfirmDeadline') IS NULL
+BEGIN
+  ALTER TABLE dbo.CrmBooking ADD ConfirmDeadline DATETIME2(3) NULL;
+  PRINT 'Added CrmBooking.ConfirmDeadline';
+END
+ELSE
+BEGIN
+  PRINT 'CrmBooking.ConfirmDeadline already exists — skipped';
+END
 GO

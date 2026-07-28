@@ -19,6 +19,11 @@ const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 
+function normalizeEmail(value) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  return trimmed || null;
+}
+
 class CrmCreationError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -40,6 +45,20 @@ async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, lead
     .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
   if (existing.recordset.length) return existing.recordset[0].Id;
 
+  const normalizedEmail = normalizeEmail(email);
+  if (normalizedEmail) {
+    const byEmail = await pool.request().input("email", sql.NVarChar(200), normalizedEmail)
+      .query(`
+        SELECT TOP 1 CustomerNo, CustomerName
+        FROM dbo.CrmCustomer
+        WHERE IsActive = 1 AND LOWER(LTRIM(RTRIM(Email))) = @email
+      `);
+    if (byEmail.recordset.length) {
+      const row = byEmail.recordset[0];
+      throw new CrmCreationError(`A customer with this email already exists - ${row.CustomerNo} (${row.CustomerName})`, 409);
+    }
+  }
+
   const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
   try {
     const result = await pool.request()
@@ -48,7 +67,7 @@ async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, lead
       .input("name",  sql.NVarChar(200), name || "Unknown")
       .input("mob",   sql.NVarChar(20),  mobile)
       .input("alt",   sql.NVarChar(20),  altMobile || null)
-      .input("email", sql.NVarChar(200), email || null)
+      .input("email", sql.NVarChar(200), normalizedEmail)
       .input("cb",    sql.Int,           actorUserId)
       .query(`
         INSERT INTO dbo.CrmCustomer (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, CreatedBy, CreatedAt)
@@ -62,7 +81,8 @@ async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, lead
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) {
       const retry = await pool.request().input("mob", sql.NVarChar(20), mobile)
         .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-      return retry.recordset[0]?.Id || null;
+      if (retry.recordset[0]?.Id) return retry.recordset[0].Id;
+      throw new CrmCreationError("A customer with this email already exists", 409);
     }
     throw e;
   }
