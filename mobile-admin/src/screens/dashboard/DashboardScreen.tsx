@@ -21,16 +21,16 @@ import { FadeSlideIn } from "@/components/FadeSlideIn";
 function StatCard({ label, value, icon: Icon, accent }: { label: string; value: number | string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string }) {
   return (
     <View
-      className="flex-1 min-w-[45%] rounded-2xl p-4"
+      className="flex-1 min-w-[30%] rounded-xl p-2.5"
       style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
     >
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="p-1.5 rounded-lg" style={{ backgroundColor: `${accent}22` }}>
-          <Icon size={14} color={accent} />
+      <View className="flex-row items-center gap-1.5 mb-1.5">
+        <View className="p-1 rounded-md" style={{ backgroundColor: `${accent}22` }}>
+          <Icon size={11} color={accent} />
         </View>
       </View>
-      <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 22 }}>{value}</Text>
-      <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.medium, marginTop: 2 }}>{label}</Text>
+      <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 16 }}>{value}</Text>
+      <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.medium, marginTop: 1 }}>{label}</Text>
     </View>
   );
 }
@@ -140,7 +140,7 @@ export default function DashboardScreen() {
                 <ActivityIndicator color={colors.mutedForeground} />
               </View>
             ) : (
-              <View className="flex-row flex-wrap gap-3">
+              <View className="flex-row flex-wrap gap-2">
                 <StatCard label="Total users" value={data?.stats.totalUsers ?? 0} icon={Users} accent="#a855f7" />
                 <StatCard label="Active users" value={data?.stats.activeUsers ?? 0} icon={UserCheck} accent="#10b981" />
                 <StatCard label="Roles" value={data?.stats.totalRoles ?? 0} icon={Layers} accent="#06b6d4" />

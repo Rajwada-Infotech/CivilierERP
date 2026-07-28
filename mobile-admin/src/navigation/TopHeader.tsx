@@ -6,11 +6,14 @@
 import { View, Text, Image, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
+import { useQuery } from "@tanstack/react-query";
 import { Bell } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsAdmin } from "@/auth/adminAccess";
 import { useAppVersion } from "@/hooks/useAppVersion";
+import { fetchInbox } from "@/api/approvalInboxApi";
 import { navigate } from "./navigationRef";
 
 function initialsOf(name?: string) {
@@ -25,7 +28,20 @@ function initialsOf(name?: string) {
 
 export function TopHeader({ route }: NativeStackHeaderProps) {
   const { currentUser } = useAuth();
+  const isAdmin = useIsAdmin();
   const { appVersion, isLoading } = useAppVersion();
+
+  // Bell badge — count of records currently awaiting this admin's approval,
+  // same query the Approval Inbox screen itself uses (shared cache, so
+  // opening the inbox doesn't trigger a second fetch).
+  const { data: inboxItems } = useQuery({
+    queryKey: ["approval-inbox"],
+    queryFn: fetchInbox,
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+  const pendingCount = inboxItems?.length ?? 0;
 
   return (
     <SafeAreaView
@@ -52,6 +68,17 @@ export function TopHeader({ route }: NativeStackHeaderProps) {
             style={{ backgroundColor: `${colors.muted}` }}
           >
             <Bell size={15} color={colors.mutedForeground} />
+            {pendingCount > 0 && (
+              <View
+                style={{
+                  position: "absolute", top: -2, right: -2, minWidth: 16, height: 16, paddingHorizontal: 3,
+                  borderRadius: 8, backgroundColor: colors.destructive, alignItems: "center", justifyContent: "center",
+                  borderWidth: 1.5, borderColor: colors.background,
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 9, fontFamily: fonts.heading.bold }}>{pendingCount > 99 ? "99+" : pendingCount}</Text>
+              </View>
+            )}
           </Pressable>
           <Pressable onPress={() => navigate("Profile")}>
             <View className="w-8 h-8 rounded-full items-center justify-center" style={{ backgroundColor: colors.primary }}>
