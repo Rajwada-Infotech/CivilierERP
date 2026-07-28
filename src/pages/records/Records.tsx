@@ -588,7 +588,7 @@ function VaultUnlockPanel({
       <p className="text-sm font-heading font-semibold text-foreground">"{folderName}" is password-protected</p>
       {!forgotOpen ? (
         <>
-          <div className="flex items-center gap-2 mt-1 w-56">
+          <div className="flex items-center gap-3 mt-1 w-80">
             <PasswordInput
               autoFocus
               value={password}
@@ -962,7 +962,7 @@ function RecordsFolderBrowser({
         ) : (
           <div>
             {currentModule.source === "personal" && (
-              <div className="flex items-center gap-2 mx-3 mt-3 mb-1 flex-wrap">
+              <div className="flex items-center gap-3 mx-3 mt-3 mb-1 flex-wrap">
                 <AddFilesButton folderName={currentDocRef.docRef} onUploaded={handleChanged} vaultToken={currentToken} />
                 <button
                   onClick={() => setPasswordDialogFolder(currentDocRef.docRef)}
@@ -1040,13 +1040,17 @@ function NewFolderDialog({
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setFolderName("");
-      setPassword("");
-      setFiles([]);
-    }
-  }, [open]);
+  // Deliberately NOT reset via a useEffect keyed on `open` — that pattern
+  // clears the form on every re-render where the dialog happens to still be
+  // open (e.g. a records refresh firing mid-fill), wiping what the user just
+  // typed before they'd even clicked Create. Reset only on the two actions
+  // that actually end the "filling in a folder" session: a successful create,
+  // or an explicit cancel.
+  const resetForm = () => {
+    setFolderName("");
+    setPassword("");
+    setFiles([]);
+  };
 
   const handleCreate = async () => {
     const name = folderName.trim();
@@ -1063,6 +1067,7 @@ function NewFolderDialog({
       await uploadToPersonalVault(name, files, password.trim() || undefined);
       toast.success(`"${name}" created`);
       onCreated();
+      resetForm();
       onClose();
     } catch (e: any) {
       toast.error(e.message || "Failed to create folder");
@@ -1071,8 +1076,13 @@ function NewFolderDialog({
     }
   };
 
+  const handleCancel = () => {
+    resetForm();
+    onClose();
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && handleCancel()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="font-heading text-base flex items-center gap-2">
@@ -1128,7 +1138,7 @@ function NewFolderDialog({
         </div>
         <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           >
             Cancel
