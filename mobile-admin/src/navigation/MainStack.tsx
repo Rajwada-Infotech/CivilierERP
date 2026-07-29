@@ -2,12 +2,26 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import NotificationsScreen from "@/screens/dashboard/NotificationsScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
+import ApprovalInboxScreen from "@/screens/admin/ApprovalInboxScreen";
+import ApprovalSetupScreen from "@/screens/admin/ApprovalSetupScreen";
+import PostApprovalRightsScreen from "@/screens/admin/PostApprovalRightsScreen";
+import PasswordResetScreen from "@/screens/admin/PasswordResetScreen";
+import MenuRightsScreen from "@/screens/admin/MenuRightsScreen";
+import WidgetRightsScreen from "@/screens/admin/WidgetRightsScreen";
+import FinYearRightsScreen from "@/screens/admin/FinYearRightsScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
   Dashboard: undefined;
   Notifications: undefined;
   Profile: undefined;
+  ApprovalInbox: undefined;
+  ApprovalSetup: undefined;
+  PostApprovalRights: undefined;
+  PasswordReset: undefined;
+  MenuRights: undefined;
+  WidgetRights: undefined;
+  FinYearRights: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -23,6 +37,13 @@ export default function MainStack() {
       <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: "Dashboard" }} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
+      <Stack.Screen name="ApprovalInbox" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
+      <Stack.Screen name="ApprovalSetup" component={ApprovalSetupScreen} options={{ title: "Approval Setup" }} />
+      <Stack.Screen name="PostApprovalRights" component={PostApprovalRightsScreen} options={{ title: "Post Approval Rights" }} />
+      <Stack.Screen name="PasswordReset" component={PasswordResetScreen} options={{ title: "Password Reset" }} />
+      <Stack.Screen name="MenuRights" component={MenuRightsScreen} options={{ title: "Menu Rights" }} />
+      <Stack.Screen name="WidgetRights" component={WidgetRightsScreen} options={{ title: "Widgets Rights" }} />
+      <Stack.Screen name="FinYearRights" component={FinYearRightsScreen} options={{ title: "Financial Year Rights" }} />
     </Stack.Navigator>
   );
 }

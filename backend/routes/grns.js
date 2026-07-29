@@ -58,7 +58,7 @@ function parseGRNItems(grnItems) {
 /**
  * Sum (base + GST) for every line item.
  * base     = rate ├ù billingQty  (or stored totalAmount when positive)
- * gstPct   = per-item GST % carried from PO ΓåÆ GRN line (field: gstPct)
+ * gstPct   = per-item GST % carried from PO → GRN line (field: gstPct)
  * The result is stored in GoodsReceiptNotes.TotalAmount (incl. GST) so
  * it can be directly compared with PurchaseOrders.TotalAmount (also incl. GST).
  */
@@ -218,7 +218,7 @@ router.get("/grn-gst-data", async (req, res) => {
   try {
     const pool = getPool();
 
-    // ΓöÇΓöÇ 1. Fetch GRN header + linked PO/supplier/company context ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 1. Fetch GRN header + linked PO/supplier/company context ────────────
     const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
       .query(`
         SELECT
@@ -273,7 +273,7 @@ router.get("/grn-gst-data", async (req, res) => {
         lines: [],
       });
 
-    // ΓöÇΓöÇ 2. Determine tax mode (intra vs inter state) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 2. Determine tax mode (intra vs inter state) ─────────────────────────
     const vendorState = (hdr.VendorState || "").trim().toLowerCase();
     const companyState = (hdr.CompanyState || "").trim().toLowerCase();
     const taxMode =
@@ -281,14 +281,14 @@ router.get("/grn-gst-data", async (req, res) => {
         ? "cgst_sgst"
         : "igst";
 
-    // ΓöÇΓöÇ 3. Fetch HSN/GST% for every itemId present in GRN items ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 3. Fetch HSN/GST% for every itemId present in GRN items ─────────────
     //    Items store GST% directly when saved, but we re-fetch from ItemMaster
     //    as the authoritative source for accuracy.
     const itemIds = [...new Set(grnItems.map((i) => i.itemId).filter(Boolean))];
 
-    let hsnMap = {}; // itemId ΓåÆ { hsnCode, gstPercent }
+    let hsnMap = {}; // itemId → { hsnCode, gstPercent }
     if (itemIds.length > 0) {
-      // Build parameterised list  @p0, @p1, ΓÇª
+      // Build parameterised list  @p0, @p1, …
       const req2 = pool.request();
       const placeholders = itemIds.map((id, idx) => {
         req2.input(`p${idx}`, sql.NVarChar(50), String(id));
@@ -307,7 +307,7 @@ router.get("/grn-gst-data", async (req, res) => {
       }
     }
 
-    // ΓöÇΓöÇ 4. Compute per-line GST ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 4. Compute per-line GST ──────────────────────────────────────────────
     let dominantGstPct = 0;
     const lines = grnItems.map((item, idx) => {
       const receivedQty = Number(item.receivedQty || item.quantity || 0);
@@ -366,7 +366,7 @@ router.get("/grn-gst-data", async (req, res) => {
       };
     });
 
-    // ΓöÇΓöÇ 5. Aggregate totals ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 5. Aggregate totals ──────────────────────────────────────────────────
     const totals = lines.reduce(
       (acc, l) => ({
         taxableAmount: acc.taxableAmount + l.taxableAmount,
@@ -437,7 +437,7 @@ router.get("/suppliers", async (req, res) => {
   }
 });
 
-// ΓöÇΓöÇ GET /filtered ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── GET /filtered ─────────────────────────────────────────────────────────────
 // Filter GRNs by supplierId, projectId, companyId.
 // We join via PurchaseOrders for company/project filters because GRN itself
 // does not carry those columns directly.
@@ -507,7 +507,7 @@ router.get("/filtered", async (req, res) => {
 });
 
 // GET all GRNs
-// NOTE: GRNItems is intentionally NOT normalised here ΓÇö the list endpoint
+// NOTE: GRNItems is intentionally NOT normalised here — the list endpoint
 // returns raw strings (or null) which is fine for picker row counts.
 // The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
@@ -541,7 +541,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.DocYear,
         -- Derive a FinYear string so the expense-booking picker can filter correctly.
         -- Dash-format GRNs store the calendar year of GRN date in DocYear (e.g. 2026).
-        -- Indian FY runs AprΓÇôMar: if GRN month >= 4 the FY starts that year, else previous year.
+        -- Indian FY runs Apr–Mar: if GRN month >= 4 the FY starts that year, else previous year.
         CASE
           WHEN grn.DocYear IS NOT NULL THEN
             CASE
@@ -753,7 +753,7 @@ async function createGRNInternal(pool, body, userEmail) {
     // Resolve effective doc date: use client-supplied if valid and not future, else today
     const effectiveDocDate = (docDate && docDate <= todayStr) ? docDate : todayStr;
 
-    // ΓöÇΓöÇ Guard: a GRN can only be raised against an Approved PO ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── Guard: a GRN can only be raised against an Approved PO ────────────────
     if (poId) {
       const poStatusCheck = await pool
         .request()
@@ -791,13 +791,13 @@ async function createGRNInternal(pool, body, userEmail) {
         ? parseInt(clientDocTypeId, 10)
         : null;
 
-      // ΓöÇΓöÇ Auto-resolve GRN prefix from parent chain ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      // ── Auto-resolve GRN prefix from parent chain ────────────────────────────
       // If no explicit docTypeId was passed but we have a parentDocNo, derive the
       // correct prefix automatically:
-      //   parent starts with ExB-PO-  ΓåÆ  ExB-PO-GRN
-      //   parent starts with ExB-WO-  ΓåÆ  ExB-WO-GRN
-      //   parent starts with ExB-     ΓåÆ  ExB-GRN
-      //   otherwise                   ΓåÆ  GRN
+      //   parent starts with ExB-PO-  →  ExB-PO-GRN
+      //   parent starts with ExB-WO-  →  ExB-WO-GRN
+      //   parent starts with ExB-     →  ExB-GRN
+      //   otherwise                   →  GRN
       if (!resolvedDocTypeId) {
         const grnPrefix = resolveGRNPrefix(parentDocNo);
         resolvedDocTypeId = await resolveDocTypeId(pool, sql, grnPrefix);
@@ -835,10 +835,10 @@ async function createGRNInternal(pool, body, userEmail) {
       // already held an exclusive lock on this row from the INSERT below.
       // The UPDATE would block waiting on that lock, but the only thing that
       // could release the lock (transaction.commit()) was sequenced AFTER the
-      // UPDATE ΓÇö a self-deadlock that hung until the client request timeout
+      // UPDATE — a self-deadlock that hung until the client request timeout
       // fired (ETIMEOUT), every single time a GRN was created. Resolving the
       // godown first and inserting it directly removes the second statement
-      // ΓÇö and the deadlock ΓÇö entirely.
+      // — and the deadlock — entirely.
       let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
       if (!resolvedGodownId) {
         // Try to get ProjectId from the PO if not provided in body
@@ -916,7 +916,7 @@ async function createGRNInternal(pool, body, userEmail) {
       // nobody has actually approved receipt of.
       await transaction.commit();
 
-      // backPatchRecordId uses pool directly ΓÇö must run after commit
+      // backPatchRecordId uses pool directly — must run after commit
       await backPatchRecordId(
         pool,
         sql,
@@ -925,7 +925,7 @@ async function createGRNInternal(pool, body, userEmail) {
         grnId,
       );
 
-      // ΓöÇΓöÇ Update parent PO status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      // ── Update parent PO status ───────────────────────────────────────────────
       // Check if all ordered quantities are now received; set status accordingly.
       if (poId) {
         try {
@@ -952,7 +952,7 @@ async function createGRNInternal(pool, body, userEmail) {
             // GRN totals, causing POs to never be marked Received.
             const totalOrdered = Number(poRow.POTotalAmount || 0);
             // Only promote PO to "Received" when all items are fully received.
-            // Never write "Partially Received" back to PO ΓÇö that belongs on GRN.
+            // Never write "Partially Received" back to PO — that belongs on GRN.
             const newPOStatus =
               poRow.GRNCount > 0 &&
               totalOrdered > 0 &&
@@ -976,7 +976,7 @@ async function createGRNInternal(pool, body, userEmail) {
             }
           }
         } catch (poErr) {
-          // Non-fatal ΓÇö GRN was saved; PO status update is best-effort
+          // Non-fatal — GRN was saved; PO status update is best-effort
           console.warn(
             "PO status update after GRN failed (non-fatal):",
             poErr.message,
@@ -990,7 +990,7 @@ async function createGRNInternal(pool, body, userEmail) {
 
     // PascalCase matching the actual column name, consistent with every
     // other internal creation function this session (PurchaseOrderID,
-    // SaleOrderID, SaleInvoiceID, etc.) ΓÇö callers besides this route's own
+    // SaleOrderID, SaleInvoiceID, etc.) — callers besides this route's own
     // POST / handler (e.g. the Inter-Company Stock Transfer orchestrator)
     // rely on this exact shape.
     return { GRNID: grnId, DocNo: finalDocNo };
@@ -1010,7 +1010,7 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
 
-    // Auto-submit: transition Draft ΓåÆ Pending immediately after creation.
+    // Auto-submit: transition Draft → Pending immediately after creation.
     try {
       await transition(
         "goods-receipt",
@@ -1082,7 +1082,7 @@ router.put(
 
     const pool = getPool();
 
-    // ΓöÇΓöÇ Guard: a GRN can only be linked to an Approved PO ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
     if (poId) {
       const poStatusCheck = await pool
         .request()
@@ -1163,11 +1163,11 @@ router.put(
 
       if (resultingStatus === "Approved") {
         // Preserve the godown that was set when the GRN was created.
-        // Must read via `transaction`, not `pool` ΓÇö the UPDATE above is still
+        // Must read via `transaction`, not `pool` — the UPDATE above is still
         // uncommitted and holds a lock on this row on the transaction's
         // connection. A read from a different pooled connection would block
         // waiting on that lock until transaction.commit() runs, but commit()
-        // is sequenced after this read ΓÇö the same self-deadlock as the POST
+        // is sequenced after this read — the same self-deadlock as the POST
         // handler's old GodownID UPDATE, just with a SELECT instead.
         const grnGodownRes = await transaction
           .request()
@@ -1209,8 +1209,8 @@ router.put(
   },
 );
 
-// GET /:id/can-delete ΓÇö check whether GRN can be safely deleted
-// Chain: GRN ΓåÆ ExpenseBooking ΓåÆ NewPayment ΓåÆ BankReconciliation
+// GET /:id/can-delete — check whether GRN can be safely deleted
+// Chain: GRN → ExpenseBooking → NewPayment → BankReconciliation
 router.get("/:id/can-delete", async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
   if (!Number.isFinite(grnId) || grnId <= 0)
@@ -1218,7 +1218,7 @@ router.get("/:id/can-delete", async (req, res) => {
   try {
     const pool = getPool();
 
-    // ΓöÇΓöÇ 1. Linked expense bookings ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 1. Linked expense bookings ────────────────────────────────────────────
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
         SELECT eb.Eid, eb.EDocNo, eb.EStatus
         FROM dbo.ExpenseBooking eb
@@ -1236,7 +1236,7 @@ router.get("/:id/can-delete", async (req, res) => {
 
     const docNoList = expCheck.recordset.map((e) => e.EDocNo).filter(Boolean);
 
-    // ΓöÇΓöÇ 2. BRS-cleared payments ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 2. BRS-cleared payments ───────────────────────────────────────────────
     if (docNoList.length > 0) {
       const brsReq = pool.request();
       const brsParams = docNoList.map((d, i) => {
@@ -1266,7 +1266,7 @@ router.get("/:id/can-delete", async (req, res) => {
         });
       }
 
-      // ΓöÇΓöÇ 3. Uncleared payments ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      // ── 3. Uncleared payments ─────────────────────────────────────────────
       const payReq = pool.request();
       const payParams = docNoList.map((d, i) => {
         payReq.input(`pdn${i}`, sql.NVarChar(100), d);
@@ -1293,7 +1293,7 @@ router.get("/:id/can-delete", async (req, res) => {
       }
     }
 
-    // ΓöÇΓöÇ 4. Expense bookings exist but no payments yet ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 4. Expense bookings exist but no payments yet ─────────────────────────
     return res.json({
       deletable: false,
       reason: "has_expense",
@@ -1313,7 +1313,7 @@ router.delete(
     const grnId = parseInt(req.params.id, 10);
     const pool = getPool();
 
-    // ΓöÇΓöÇ Guard: linked expense bookings ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── Guard: linked expense bookings ────────────────────────────────────────
     const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT COUNT(*) AS cnt
       FROM dbo.ExpenseBooking eb
@@ -1392,7 +1392,7 @@ router.delete(
             const grnCount = Number(poRow.GRNCount || 0);
 
             // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
-            // fully cover the PO total ΓÇö meaning it's no longer fully received.
+            // fully cover the PO total — meaning it's no longer fully received.
             const shouldRevert =
               poRow.POStatus === "Received" &&
               (grnCount === 0 || totalReceived < totalOrdered);
@@ -1428,7 +1428,7 @@ router.delete(
   },
 );
 
-// ΓöÇΓöÇ PUT /:id/submit ΓÇö Draft/Partially Received ΓåÆ Pending ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── PUT /:id/submit — Draft/Partially Received → Pending ──────────────────────
 router.put(
   "/:id/submit",
   requirePageRight("grn-master", "edit"),
@@ -1455,7 +1455,7 @@ router.put(
   },
 );
 
-// ΓöÇΓöÇ PUT /:id/approve ΓÇö Pending ΓåÆ Approved ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
 router.put(
   "/:id/approve",
   requirePageRight("grns", "edit"),
@@ -1487,7 +1487,7 @@ router.put(
   },
 );
 
-// ΓöÇΓöÇ PUT /:id/reject ΓÇö Pending ΓåÆ Rejected ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put(
   "/:id/reject",
   requirePageRight("grns", "edit"),
@@ -1528,7 +1528,7 @@ router.put(
   },
 );
 
-// ΓöÇΓöÇ GET /:id/gst-breakdown ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── GET /:id/gst-breakdown ────────────────────────────────────────────────────
 // Returns GRN items enriched with HSN code + CGST/SGST rates from Item_Master_Group.
 // Each item has: itemId, itemName, uom, receivedQty, rate, totalAmountInclGST,
 //               hsnCode, cgstRate, sgstRate, baseAmount, cgstAmount, sgstAmount, gstAmount
@@ -1925,7 +1925,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 // -- GET /:id/pending-items --
 // Returns items from a GRN that still have remainingQty > 0.
 // These are items ordered on the linked PO but not yet fully received.
-// Used to surface "pending items" directly on the GRN ΓÇö replacing the old
+// Used to surface "pending items" directly on the GRN — replacing the old
 // auto-draft expense booking approach.
 router.get("/:id/pending-items", async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
@@ -1975,7 +1975,7 @@ router.get("/:id/pending-items", async (req, res) => {
       }));
 
     // Use PO's stored total (incl. GST) minus all GRN receipts against it
-    // as the true pending value ΓÇö more accurate than summing remainingQty * rate
+    // as the true pending value — more accurate than summing remainingQty * rate
     // which omits GST and any rate amendments made after GRN entry.
     const poTotal = Number(row.POTotal || 0);
     const poTotalReceived = Number(row.POTotalReceived || 0);
@@ -1984,7 +1984,7 @@ router.get("/:id/pending-items", async (req, res) => {
         ? Math.max(0, poTotal - poTotalReceived)
         : pendingItems.reduce((s, i) => s + i.pendingAmount, 0);
 
-    // Other GRNs for the same PO (partial receipts ΓÇö excludes this GRN and rejected ones)
+    // Other GRNs for the same PO (partial receipts — excludes this GRN and rejected ones)
     let partialGRNs = [];
     if (row.POID) {
       const otherGRNsResult = await pool.request()
@@ -2029,12 +2029,12 @@ router.get("/:id/pending-items", async (req, res) => {
   }
 });
 
-// ΓöÇΓöÇΓöÇ POST /from-transfer/:transferId ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── POST /from-transfer/:transferId ──────────────────────────────────────────
 // Create a GRN from a Stock Transfer document.
 //
 // Flow:
 //   1. Fetch the StockTransfer by ID (validate it exists & is Completed).
-//   2. Map TransferItems ΓåÆ GRNItems (receivedQty = transferred qty).
+//   2. Map TransferItems → GRNItems (receivedQty = transferred qty).
 //   3. Target godown = ToGodownID of the transfer (stock already landed there).
 //   4. Lock a GRN doc-number using the standard "GRN" prefix (same series as all GRNs).
 //   5. Insert GoodsReceiptNotes row (no POID / SupplierID required).
@@ -2055,7 +2055,7 @@ router.post(
 
     const pool = getPool();
 
-    // ΓöÇΓöÇ 1. Fetch transfer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 1. Fetch transfer ──────────────────────────────────────────────────────
     let transfer;
     try {
       const trResult = await pool
@@ -2096,7 +2096,7 @@ router.post(
       return res.status(500).json({ error: err.message });
     }
 
-    // ΓöÇΓöÇ 2. Check for duplicate GRN (idempotency guard) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 2. Check for duplicate GRN (idempotency guard) ──────────────────────
     const dupCheck = await pool
       .request()
       .input("SourceTransferID", sql.Int, transferId)
@@ -2119,7 +2119,7 @@ router.post(
         : String(transfer.TransferDate).slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
-    // ΓöÇΓöÇ 3. Map TransferItems ΓåÆ GRNItems ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── 3. Map TransferItems → GRNItems ────────────────────────────────────────
     const grnItems = transfer.TransferItems.map((item) => ({
       itemId: String(item.itemId),
       itemName: item.itemName || item.itemId,
@@ -2138,7 +2138,7 @@ router.post(
     try {
       await transaction.begin();
 
-      // ΓöÇΓöÇ 4. Lock doc number using the standard "GRN" prefix ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      // ── 4. Lock doc number using the standard "GRN" prefix ───────────────────
       // Transfer GRNs share the same GRN-YYYY-NNNNN number series as all other
       // GRNs. The source transfer is tracked via SourceTransferDocNo (Ref Doc).
       const resolvedDocTypeId = await resolveDocTypeId(pool, sql, "GRN");
@@ -2163,7 +2163,7 @@ router.post(
           ? parseInt(parts[parts.length - 1], 10) || null
           : null;
 
-      // ΓöÇΓöÇ 5. Insert GoodsReceiptNotes ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      // ── 5. Insert GoodsReceiptNotes ────────────────────────────────────────
       const grnResult = await transaction
         .request()
         .input("GRNNo", sql.NVarChar(50), finalDocNo)
@@ -2220,7 +2220,7 @@ router.post(
         grnId,
       );
 
-      // Auto-submit: Draft ΓåÆ Pending
+      // Auto-submit: Draft → Pending
       try {
         const { transition } = require("../services/approvalService");
         await transition(
@@ -2259,7 +2259,7 @@ router.post(
   },
 );
 
-// ΓöÇΓöÇΓöÇ GET /by-transfer/:transferId ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── GET /by-transfer/:transferId ─────────────────────────────────────────────
 // Returns all GRNs linked to a specific stock transfer (for UI badge/check).
 router.get("/by-transfer/:transferId", async (req, res) => {
   const transferId = parseInt(req.params.transferId, 10);
@@ -2310,7 +2310,7 @@ router.get("/by-vehicle-in-out/:id", async (req, res) => {
   }
 });
 
-// ΓöÇΓöÇΓöÇ GRN Attachments ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── GRN Attachments ──────────────────────────────────────────────────────────
 // Mirrors the Vehicle In/Out attachment pattern: files stored as binary in
 // the DB (not disk), uploaded while the form is still being filled out
 // (GRNID = NULL), then linked to the GRN once it's actually saved.
@@ -2357,7 +2357,7 @@ function parseIdList(raw) {
   return [];
 }
 
-// ΓöÇΓöÇ POST /upload ΓÇö GRN attachments (stored in DB, not disk) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── POST /upload — GRN attachments (stored in DB, not disk) ──────────────────
 // Accepts multiple files at once (images, videos, documents, etc).
 router.post(
   "/upload",
@@ -2419,7 +2419,7 @@ router.post(
   },
 );
 
-// ΓöÇΓöÇ GET /attachment/:attachId ΓÇö stream binary from DB ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── GET /attachment/:attachId — stream binary from DB ─────────────────────────
 router.get("/attachment/:attachId", async (req, res) => {
   try {
     const attachId = parseInt(req.params.attachId, 10);
@@ -2452,7 +2452,7 @@ router.get("/attachment/:attachId", async (req, res) => {
   }
 });
 
-// ΓöÇΓöÇ DELETE /attachment/:attachId ΓÇö remove a single attachment ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── DELETE /attachment/:attachId — remove a single attachment ────────────────
 router.delete(
   "/attachment/:attachId",
   requirePageRight("grn-master", "delete"),
