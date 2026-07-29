@@ -771,6 +771,19 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
   const bookingRow = booking.recordset[0];
   if (!bookingRow || !bookingRow.BookingAmount) return null;
 
+  // Auto-generation is only ever meant to fire for the booking (token)
+  // payment itself, once it's fully paid — not for any milestone-wise
+  // payment that comes after. crmBookings.js's ready-for-approval already
+  // gates on this via checkBookingApprovalReadiness before calling here,
+  // but that's a call-site guarantee, not a data-layer one — re-check the
+  // first milestone directly so this function stays correct even if a
+  // future call site is added without that same gate.
+  const firstMilestone = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+  `);
+  const fm = firstMilestone.recordset[0];
+  if (!fm || !(fm.AmountDue > 0) || Number(fm.AmountPaid) < Number(fm.AmountDue)) return null;
+
   const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
   const result = await pool.request()
     .input("no",   sql.NVarChar(30),  invoiceNo)

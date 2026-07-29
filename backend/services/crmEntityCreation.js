@@ -392,48 +392,79 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
 }
 
-// Payment Plan Master no longer scopes a plan to a Company/Project/Block/
-// Unit — a plan is just a reusable milestone template. Which plans apply to
-// a given unit is decided the other way round: Unit Master tags 1+ plans
-// onto the unit (dbo.CrmUnitPaymentPlan). This is the single place that
-// turns (unit, requested plan) into the actual plan to save, used by both
-// Application creation/edit and Booking creation so the same rule always
-// applies:
+// Which plans "apply" to a given Unit is a 4-tier cascade, stopping at the
+// first non-empty tier: the Unit's own tags (dbo.CrmUnitPaymentPlan) -> its
+// Block's tags (dbo.CrmBlockPaymentPlan) -> its Project's tags
+// (dbo.CrmPaymentPlanProject) -> every active plan (the original, still-live
+// last resort — Project/Block tagging is optional, so an untagged plan
+// never disappears entirely). This is the single source of truth both
+// resolveApplicationPaymentPlan below and every "which plans can I pick
+// from" dropdown (Unit Master's own chip-picker, the Application wizard)
+// call, so the UI and the actual save-time validation can never disagree.
+async function getApplicablePaymentPlans(pool, { unitId, blockId, projectId }) {
+  const queryTags = async (table, column, id) => {
+    const r = await pool.request().input("id", sql.Int, id).query(`
+      SELECT pp.Id, pp.PlanName, pp.BookingAmount
+      FROM dbo.${table} t
+      JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = t.PlanId AND pp.IsActive = 1
+      WHERE t.${column} = @id AND t.IsActive = 1
+      ORDER BY pp.PlanName
+    `);
+    return r.recordset;
+  };
+
+  if (unitId) {
+    const t = await queryTags("CrmUnitPaymentPlan", "UnitId", unitId);
+    if (t.length) return t;
+  }
+  if (blockId) {
+    const t = await queryTags("CrmBlockPaymentPlan", "BlockId", blockId);
+    if (t.length) return t;
+  }
+  if (projectId) {
+    const t = await queryTags("CrmPaymentPlanProject", "ProjectId", projectId);
+    if (t.length) return t;
+  }
+  const all = await pool.request().query(`
+    SELECT Id, PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE IsActive = 1 ORDER BY PlanName
+  `);
+  return all.recordset;
+}
+
+// This is the single place that turns (unit, requested plan) into the
+// actual plan to save, used by both Application creation/edit and Booking
+// creation so the same rule always applies:
 //   - No unit yet -> no plan question yet (returns null).
-//   - Unit has exactly one tagged plan and none was explicitly picked ->
-//     that plan is the obvious default.
-//   - Unit has 0 or 2+ tagged plans and none was explicitly picked -> a
-//     plan is mandatory now, so this throws rather than silently picking.
-//   - Unit has 1+ tagged plans -> an explicit pick must be one of them.
-//   - Unit has none tagged -> any active plan is acceptable.
+//   - Exactly one applicable plan (see getApplicablePaymentPlans's cascade)
+//     and none was explicitly picked -> that plan is the obvious default.
+//   - 0 or 2+ applicable plans and none was explicitly picked -> a plan is
+//     mandatory now, so this throws rather than silently picking.
+//   - 1+ applicable plans -> an explicit pick must be one of them.
+//   - Nothing tagged anywhere in the Unit's hierarchy -> any active plan is
+//     acceptable (the cascade's own final fallback already covers this).
 async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPlanId }) {
   if (!preferredUnitId) return null;
 
-  const tagged = await pool.request().input("uid", sql.Int, preferredUnitId)
-    .query(`
-      SELECT upp.PlanId, pp.PlanName
-      FROM dbo.CrmUnitPaymentPlan upp
-      JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = upp.PlanId AND pp.IsActive = 1
-      WHERE upp.UnitId = @uid AND upp.IsActive = 1
-    `);
-  const taggedIds = tagged.recordset.map((r) => r.PlanId);
+  const unitRow = await pool.request().input("uid", sql.Int, preferredUnitId)
+    .query("SELECT BlockId, ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
+  const { BlockId, ProjectId } = unitRow.recordset[0] || {};
+
+  const applicable = await getApplicablePaymentPlans(pool, { unitId: preferredUnitId, blockId: BlockId, projectId: ProjectId });
+  const applicableIds = applicable.map((r) => r.Id);
 
   if (!paymentPlanId) {
-    if (taggedIds.length === 1) return taggedIds[0];
+    if (applicableIds.length === 1) return applicableIds[0];
     throw new CrmCreationError(
-      taggedIds.length > 1
-        ? "This unit has multiple tagged payment plans — select one."
+      applicableIds.length > 1
+        ? "This unit has multiple applicable payment plans — select one."
         : "A Payment Plan is required for this unit."
     );
   }
 
   const planId = parseInt(paymentPlanId);
-  if (taggedIds.length && !taggedIds.includes(planId)) {
-    throw new CrmCreationError("Selected Payment Plan is not tagged to this unit.");
+  if (!applicableIds.includes(planId)) {
+    throw new CrmCreationError("Selected Payment Plan is not applicable to this unit.");
   }
-  const exists = await pool.request().input("pid", sql.Int, planId)
-    .query("SELECT Id FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid AND IsActive = 1");
-  if (!exists.recordset.length) throw new CrmCreationError("Selected payment plan does not exist or is inactive");
   return planId;
 }
 
@@ -459,24 +490,21 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
-  // The Application must have actually cleared its own Approved-role gate
-  // (crmApplications.js PUT /:id/approve, admin/super_admin/dba-tier) before
-  // a Booking can exist for it. Enforced here -- the single choke point
-  // every caller (the /approve auto-create path AND the manual/fallback
-  // POST /api/crm/bookings route, which only checks "crm-bookings":"create"
-  // and never checks Application-approval rights) goes through -- because
-  // this function ends by force-advancing the Application to 'Approved'
-  // (see advanceApplicationStatus(..., { force: true }) below). Without this
-  // check, the manual booking-creation escape hatch could be used to
-  // silently rubber-stamp a Draft/Pending/Rejected/Cancelled Application
-  // into Approved, bypassing the real approval workflow and its role gate
-  // entirely -- the booking creation itself becoming the de facto approval.
+  // There is no separate Application-approval gate anymore — a Booking can
+  // be created straight from a submitted (Pending) Application, no admin
+  // approval step in between (Booking Approval and Broker Approval are what
+  // actually go through review now, both triggered off the Booking itself —
+  // see crmBookings.js's ready-for-approval and crmWorkflowGuards.js's
+  // maybeAutoCreateBrokerage). This still blocks the genuinely dead states —
+  // an Application that was Rejected (legacy data; nothing sets this
+  // anymore), Cancelled, or Expired has no business getting a Booking.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
+  const deadStatuses = ["Rejected", "Cancelled", "Expired"];
+  if (appRow.recordset[0].IsActive === false || deadStatuses.includes(appRow.recordset[0].Status)) {
     throw new CrmCreationError(
-      `Application must be Approved before a Booking can be created (current status: ${appRow.recordset[0].Status})`, 400);
+      `A Booking can't be created for an application that is ${appRow.recordset[0].Status} — only a Rejected/Cancelled/Expired application is blocked`, 400);
   }
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
@@ -726,5 +754,5 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, resolveApplicationPaymentPlan,
+  generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans,
 };
