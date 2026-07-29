@@ -955,7 +955,7 @@ function ConfigForm({
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 gradient-accent text-white font-semibold px-5"
+            className="gap-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 text-white font-semibold px-5"
             onClick={submit}
             disabled={saving}
           >
@@ -1197,7 +1197,7 @@ export default function ApprovalSetup() {
         action={
           mode === "list" && canCreate && (
             <Button
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
               onClick={() => {
                 setEditing(null);
                 setMode("new");
@@ -1255,7 +1255,7 @@ export default function ApprovalSetup() {
                 </p>
                 {canCreate && (
                   <Button
-                    className="gradient-accent text-white gap-1.5 font-semibold"
+                    className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 text-white gap-1.5 font-semibold"
                     onClick={() => {
                       setEditing(null);
                       setMode("new");

@@ -114,7 +114,7 @@ export default function WhatsAppSetup() {
 
                   {rights.canEdit && (
                     <div className="flex justify-end">
-                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
                         {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         Save Configuration
                       </Button>

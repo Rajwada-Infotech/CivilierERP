@@ -220,7 +220,7 @@ export default function Signature() {
                       !formData.owner.trim() ||
                       saveMutation.isPending
                     }
-                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                    className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                   >
                     {saveMutation.isPending ? (
                       <Loader2 size={14} className="animate-spin" />

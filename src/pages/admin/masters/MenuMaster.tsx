@@ -183,7 +183,7 @@ const MenuMasterPage: React.FC = () => {
               />
             </div>
             {rights.canCreate && (
-              <Button onClick={openCreate} size="sm" className="gap-1.5">
+              <Button onClick={openCreate} size="sm" className="gap-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
                 <Plus size={15} />
                 New Menu Entry
               </Button>
@@ -303,7 +303,7 @@ const MenuMasterPage: React.FC = () => {
               <X size={13} className="mr-1" />
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={isPending || !name.trim()} size="sm">
+            <Button onClick={handleSubmit} disabled={isPending || !name.trim()} size="sm" className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
               <CheckCircle2 size={13} className="mr-1" />
               {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
             </Button>

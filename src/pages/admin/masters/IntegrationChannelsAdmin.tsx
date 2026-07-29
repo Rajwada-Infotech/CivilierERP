@@ -222,7 +222,7 @@ export default function IntegrationChannelsAdmin() {
         icon={Plug}
         action={
           rights.canCreate && (
-            <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button onClick={openAdd} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
               <Plus className="h-4 w-4" />
               Add Channel
             </Button>
@@ -408,7 +408,7 @@ export default function IntegrationChannelsAdmin() {
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button onClick={handleSave} disabled={saving} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
               {saving ? "Saving…" : editing ? "Save Changes" : "Create Channel"}
             </Button>
           </DialogFooter>

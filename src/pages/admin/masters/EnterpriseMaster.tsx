@@ -708,9 +708,9 @@ export default function EnterpriseMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
-              <Plus size={16} /> Add Enterprise
+              <Plus size={13} /> Add Enterprise
             </button>
           )
         }
@@ -784,7 +784,7 @@ export default function EnterpriseMaster() {
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {t === "legal" ? "Legal / Compliance" : t}
                 </button>
@@ -981,7 +981,7 @@ export default function EnterpriseMaster() {
               <button
                 onClick={handleSave}
                 disabled={saving || !form.name?.trim()}
-                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 {saving ? "Saving…" : editId ? "Update" : "Save"}
               </button>

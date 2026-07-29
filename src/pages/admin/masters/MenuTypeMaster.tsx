@@ -226,7 +226,7 @@ const MenuTypeMaster: React.FC = () => {
         icon={LayoutList}
         action={
           rights.canCreate && (
-            <Button onClick={openCreate} size="sm" className="gap-1.5">
+            <Button onClick={openCreate} size="sm" className="gap-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
               <Plus size={15} />
               New Menu Type
             </Button>
@@ -398,7 +398,7 @@ const MenuTypeMaster: React.FC = () => {
                 <X size={13} className="mr-1" />
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending} size="sm">
+              <Button type="submit" disabled={isPending} size="sm" className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
                 <CheckCircle2 size={13} className="mr-1" />
                 {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
               </Button>
