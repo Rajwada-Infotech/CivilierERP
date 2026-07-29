@@ -1,13 +1,15 @@
 // RN port of src/pages/material/PurchaseOrderMaster.tsx (web) — the
 // largest page in the Material module (5,095 lines). Scope trimmed per
-// agreement: Direct + From-MR creation, full GST/UOM engine, single detail
-// modal. Deferred to web-only: Quotation/Work Order/Work Design sourcing,
+// agreement: Direct + From-MR + From-Quotation (L1 Chart award, via
+// route.params.qtPrefill below) creation, full GST/UOM engine, single
+// detail modal. Deferred to web-only: Work Order/Work Design sourcing,
 // CSV import/export, print, embedded chat, and the multi-step delete-
 // dependency dialog (mobile does a simple can-delete check + one alert
 // instead of the 4-branch remediation UI).
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { ShoppingCart, Search, X, Plus, Eye, Pencil, Trash2, ShieldOff, AlertCircle } from "lucide-react-native";
 import { colors } from "@/theme/colors";
@@ -16,11 +18,12 @@ import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   getPurchaseOrders, canDeletePurchaseOrder, deletePurchaseOrder,
-  type PurchaseOrder,
+  type PurchaseOrder, type QTPOPrefill,
 } from "@/api/purchaseOrdersApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { PurchaseOrderFormModal } from "./purchaseOrder/PurchaseOrderFormModal";
 import { PurchaseOrderDetailModal } from "./purchaseOrder/PurchaseOrderDetailModal";
+import type { MainStackParamList } from "@/navigation/MainStack";
 
 const PAGE_SIZE = 15;
 const PO_TYPE_TABS: { key: string; label: string }[] = [
@@ -85,12 +88,22 @@ export default function PurchaseOrderListScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const rights = usePageRights("purchase-orders");
+  const route = useRoute<RouteProp<MainStackParamList, "PurchaseOrder">>();
   const [search, setSearch] = useState("");
   const [poTypeFilter, setPoTypeFilter] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [qtPrefill, setQtPrefill] = useState<QTPOPrefill | null>(null);
+
+  useEffect(() => {
+    if (route.params?.qtPrefill) {
+      setQtPrefill(route.params.qtPrefill);
+      setEditingId(null);
+      setFormOpen(true);
+    }
+  }, [route.params?.qtPrefill]);
 
   const {
     data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch,
@@ -240,7 +253,10 @@ export default function PurchaseOrderListScreen() {
         />
       )}
 
-      <PurchaseOrderFormModal visible={formOpen} editingId={editingId} onClose={() => { setFormOpen(false); setEditingId(null); }} />
+      <PurchaseOrderFormModal
+        visible={formOpen} editingId={editingId} qtPrefill={qtPrefill}
+        onClose={() => { setFormOpen(false); setEditingId(null); setQtPrefill(null); }}
+      />
       <PurchaseOrderDetailModal recordId={viewingId} onClose={() => setViewingId(null)} />
     </View>
   );

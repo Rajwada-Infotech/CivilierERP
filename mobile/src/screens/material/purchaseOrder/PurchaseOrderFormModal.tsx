@@ -1,13 +1,15 @@
 // RN port of PurchaseOrderMaster.tsx's create/edit form. Scope (agreed):
-// Direct entry + "Load from Material Request" dropdown only — Quotation/
-// Work Order/Work Design prefills arrive via web-only navigation state from
-// pages that don't exist on mobile yet. The GST-split resolver and the
+// Direct entry + "Load from Material Request" dropdown + L1Chart award
+// prefill (qtPrefill prop, set by PurchaseOrderListScreen from route params
+// when L1ChartScreen navigates here) — Work Order/Work Design prefills
+// still arrive via web-only navigation state from pages that don't exist on
+// mobile yet. The GST-split resolver and the
 // UOM-conversion engine (category-wide + per-item tagged alternates) ARE
 // replicated faithfully since they're core to a correct PO total, not
 // polish — see purchaseOrdersApi.ts's resolveLineGstSplit/convert* exports.
 // Payment Terms is a plain text field here (web also offers a T&C-master
 // multi-select — dropped for v1, non-essential to correctness).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,7 +24,7 @@ import {
   getSupplierDetails, getCompanyDetails, getApprovedMRList, getMRPOPrefill,
   fetchDocTypes, fetchNextDocNumber,
   resolveLineGstSplit, relevantUOMs, convertRate, alternatesForItem, getItemUomFactor, convertItemRate, convertItemQuantity,
-  type CreatePOPayload, type MRPOPrefill, type ItemUOMAlternate, type UOMOption,
+  type CreatePOPayload, type MRPOPrefill, type QTPOPrefill, type ItemUOMAlternate, type UOMOption,
 } from "@/api/purchaseOrdersApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
 
@@ -109,13 +111,14 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 function normState(v?: string | null) { return String(v || "").trim().toLowerCase(); }
 
 export function PurchaseOrderFormModal({
-  visible, editingId, onClose,
-}: { visible: boolean; editingId: number | null; onClose: () => void }) {
+  visible, editingId, qtPrefill, onClose,
+}: { visible: boolean; editingId: number | null; qtPrefill?: QTPOPrefill | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [lineItems, setLineItems] = useState<LineItem[]>([blankLine()]);
   const [sourceMR, setSourceMR] = useState<{ id: number; docNo: string } | null>(null);
+  const [sourceQT, setSourceQT] = useState<{ id: number; docNo: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
   const [poDocNo, setPoDocNo] = useState("");
@@ -133,6 +136,7 @@ export function PurchaseOrderFormModal({
       setForm(blankForm());
       setLineItems([blankLine()]);
       setSourceMR(null);
+      setSourceQT(null);
       setMrFilterCompanyId("");
       setMrFilterProjectId("");
     }
@@ -157,7 +161,7 @@ export function PurchaseOrderFormModal({
   const { data: approvedMRs = [], isLoading: approvedMRsLoading } = useQuery({
     queryKey: ["po-form-approved-mrs", mrFilterCompanyId, mrFilterProjectId],
     queryFn: () => getApprovedMRList({ companyId: mrFilterCompanyId || undefined, projectId: mrFilterProjectId || undefined }),
-    enabled: visible && editingId == null && !sourceMR,
+    enabled: visible && editingId == null && !sourceMR && !sourceQT,
   });
 
   const { data: supplierDetails } = useQuery({
@@ -330,6 +334,55 @@ export function PurchaseOrderFormModal({
     }
   };
 
+  // Award from L1Chart's comparison — unlike MR prefill this also carries a
+  // chosen supplier and per-line Rate (the winning bid), so it seeds the
+  // cart fully priced instead of qty-only. GST split still goes through the
+  // same resolveLineGstSplit used everywhere else, not anything QT-specific.
+  const applyQTPrefill = (prefill: QTPOPrefill) => {
+    const matchCompany = companies.find((c) => c.id === String(prefill.CompanyId));
+    const matchProject = projects.find((p) => p.id === String(prefill.ProjectId));
+    const matchSupplier = suppliers.find((s) => s.id === String(prefill.SupplierId));
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId, companyName: matchCompany?.name ?? prev.companyName,
+      projectId: matchProject?.id ?? prev.projectId, projectName: matchProject?.name ?? prev.projectName,
+      supplierId: matchSupplier?.id ?? String(prefill.SupplierId), supplierName: matchSupplier?.name ?? prefill.SupplierName ?? prev.supplierName,
+      remarks: prefill.Remarks || prev.remarks,
+    }));
+    const prefillLines: LineItem[] = prefill.items.map((it) => {
+      const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(Number(it.M_CGST ?? 0), Number(it.M_SGST ?? 0), Number(it.M_IGST ?? 0), 0, isIntraState);
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch = uoms.find((u) => (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) || (uomNameNorm && u.name.toLowerCase() === uomNameNorm));
+      const quantity = Number(it.Quantity) || 1;
+      const rate = Number(it.Rate ?? 0);
+      const baseAmount = quantity * rate;
+      const taxAmount = (baseAmount * gstRate) / 100;
+      return {
+        id: uid(), itemId: it.ItemId || "", itemName: it.ItemName || "", itemDescription: "",
+        quantity, uomId: uomMatch?.id ?? null, unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
+        rate, cgstRate, sgstRate, igstRate, gstRate, taxAmount, amount: baseAmount + taxAmount,
+        mrItemId: null, mrPendingQty: null,
+      };
+    });
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceQT({ id: prefill.QuotationId, docNo: prefill.DocNo });
+  };
+
+  // Applied once master data (companies/projects/suppliers/uoms) is loaded —
+  // qtPrefill arrives as soon as the modal opens (via navigation params),
+  // before those queries resolve, so this can't be a plain mount effect.
+  const appliedQtPrefillRef = useRef<QTPOPrefill | null>(null);
+  useEffect(() => {
+    if (!visible) { appliedQtPrefillRef.current = null; return; }
+    if (editingId != null || !qtPrefill) return;
+    if (appliedQtPrefillRef.current === qtPrefill) return;
+    if (companies.length === 0 || uoms.length === 0 || suppliers.length === 0) return;
+    applyQTPrefill(qtPrefill);
+    appliedQtPrefillRef.current = qtPrefill;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editingId, qtPrefill, companies, projects, uoms, suppliers]);
+
   const validate = (): string | null => {
     if (!form.companyId) return "Company is required.";
     if (!form.projectId) return "Project is required.";
@@ -376,7 +429,9 @@ export function PurchaseOrderFormModal({
       finYear: form.finYear || null,
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
-      POType: sourceMR ? "Normal" : "Direct",
+      SourceQTId: sourceQT?.id ?? null,
+      SourceQTDocNo: sourceQT?.docNo ?? null,
+      POType: sourceQT ? "QPO" : sourceMR ? "Normal" : "Direct",
     };
     setSaving(true);
     try {
@@ -456,7 +511,7 @@ export function PurchaseOrderFormModal({
               </Text>
             </View>
 
-            {editingId == null && !sourceMR && (
+            {editingId == null && !sourceMR && !sourceQT && (
               <View className="rounded-xl p-3.5 mb-4" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
                 <View className="flex-row items-center gap-1.5 mb-2.5">
                   <ClipboardList size={12} color="#059669" />
@@ -485,6 +540,11 @@ export function PurchaseOrderFormModal({
             {!!sourceMR && (
               <View className="rounded-lg px-3 py-2 mb-4 self-start" style={{ backgroundColor: "#3b82f615", borderWidth: 1, borderColor: "#3b82f630" }}>
                 <Text style={{ color: "#3b82f6", fontSize: 10.5, fontFamily: fonts.body.semibold }}>Sourced from MR: {sourceMR.docNo}</Text>
+              </View>
+            )}
+            {!!sourceQT && (
+              <View className="rounded-lg px-3 py-2 mb-4 self-start" style={{ backgroundColor: "#8b5cf615", borderWidth: 1, borderColor: "#8b5cf630" }}>
+                <Text style={{ color: "#8b5cf6", fontSize: 10.5, fontFamily: fonts.body.semibold }}>Awarded from L1 Chart: {sourceQT.docNo}</Text>
               </View>
             )}
 

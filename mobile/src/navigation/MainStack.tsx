@@ -14,6 +14,17 @@ import VehicleInOutListScreen from "@/screens/material/VehicleInOutListScreen";
 import PurchaseOrderListScreen from "@/screens/material/PurchaseOrderListScreen";
 import GRNListScreen from "@/screens/material/GRNListScreen";
 import MaterialRequestListScreen from "@/screens/material/MaterialRequestListScreen";
+import MaterialIssuesListScreen from "@/screens/material/MaterialIssuesListScreen";
+import MaterialIssueReturnListScreen from "@/screens/material/MaterialIssueReturnListScreen";
+import ShortCloseScreen from "@/screens/material/ShortCloseScreen";
+import L1ChartScreen from "@/screens/material/L1ChartScreen";
+import StockScreen from "@/screens/material/StockScreen";
+import StockLedgerScreen from "@/screens/material/StockLedgerScreen";
+import StockTransferListScreen from "@/screens/material/StockTransferListScreen";
+import DebitNoteListScreen from "@/screens/material/DebitNoteListScreen";
+import AmendmentListScreen from "@/screens/material/AmendmentListScreen";
+import FixedAssetListScreen from "@/screens/material/FixedAssetListScreen";
+import type { QTPOPrefill } from "@/api/purchaseOrdersApi";
 import ContractListScreen from "@/screens/finance/ContractListScreen";
 import ContractDetailScreen from "@/screens/finance/ContractDetailScreen";
 import NewContractScreen from "@/screens/finance/NewContractScreen";
@@ -49,9 +60,31 @@ export type MainStackParamList = {
   InvoicePreview: { id: string };
   MaterialDashboard: undefined;
   VehicleInOut: undefined;
-  PurchaseOrder: undefined;
+  // qtPrefill is set by L1ChartScreen's "Create Purchase Order" award action
+  // (mirrors web's navigate("/material/purchase-order", { state: { qtPrefill } }))
+  // — PurchaseOrderListScreen auto-opens the create form with it prefilled.
+  PurchaseOrder: { qtPrefill?: QTPOPrefill } | undefined;
   GRN: undefined;
   MaterialRequest: undefined;
+  MaterialIssues: undefined;
+  MaterialIssueReturn: undefined;
+  ShortClose: undefined;
+  L1Chart: undefined;
+  Stock: undefined;
+  // Mobile-only ledger drill-down (web never wired up its own ledger API) —
+  // reached from StockScreen either scoped to one item or a whole godown.
+  StockLedger: {
+    itemId?: string;
+    itemName?: string;
+    godownId?: number;
+    godownName?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } | undefined;
+  StockTransfer: undefined;
+  DebitNote: undefined;
+  Amendment: undefined;
+  FixedAssetRecord: undefined;
   Contract: undefined;
   ContractDetail: { id: number };
   NewContract: { id?: number } | undefined;
@@ -83,6 +116,16 @@ export default function MainStack() {
       <Stack.Screen name="PurchaseOrder" component={PurchaseOrderListScreen} options={{ title: "Purchase Orders" }} />
       <Stack.Screen name="GRN" component={GRNListScreen} options={{ title: "GRN" }} />
       <Stack.Screen name="MaterialRequest" component={MaterialRequestListScreen} options={{ title: "Material Requests" }} />
+      <Stack.Screen name="MaterialIssues" component={MaterialIssuesListScreen} options={{ title: "Material Issues" }} />
+      <Stack.Screen name="MaterialIssueReturn" component={MaterialIssueReturnListScreen} options={{ title: "Issue Return" }} />
+      <Stack.Screen name="ShortClose" component={ShortCloseScreen} options={{ title: "Short Close" }} />
+      <Stack.Screen name="L1Chart" component={L1ChartScreen} options={{ title: "L1 Chart" }} />
+      <Stack.Screen name="Stock" component={StockScreen} options={{ title: "Stock" }} />
+      <Stack.Screen name="StockLedger" component={StockLedgerScreen} options={{ title: "Ledger" }} />
+      <Stack.Screen name="StockTransfer" component={StockTransferListScreen} options={{ title: "Stock Transfer" }} />
+      <Stack.Screen name="DebitNote" component={DebitNoteListScreen} options={{ title: "Debit Note" }} />
+      <Stack.Screen name="Amendment" component={AmendmentListScreen} options={{ title: "Amendment" }} />
+      <Stack.Screen name="FixedAssetRecord" component={FixedAssetListScreen} options={{ title: "Fixed Asset Record" }} />
       <Stack.Screen name="Contract" component={ContractListScreen} options={{ title: "Contracts" }} />
       <Stack.Screen name="ContractDetail" component={ContractDetailScreen} options={{ title: "Contract" }} />
       <Stack.Screen name="NewContract" component={NewContractScreen} options={{ title: "New Contract" }} />
