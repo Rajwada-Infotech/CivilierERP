@@ -837,7 +837,7 @@ const ActivityBrowser: React.FC = () => {
                 onClick={() => setPage(p)}
                 className={`rounded-lg border px-3 py-1.5 text-xs ${
                   p === activity.page
-                    ? "border-primary gradient-accent text-white font-semibold"
+                    ? "border-transparent bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold shadow-sm"
                     : "border-border hover:bg-muted"
                 }`}
               >

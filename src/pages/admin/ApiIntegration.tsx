@@ -302,7 +302,7 @@ export default function ApiIntegration() {
                 <Button
                   type="submit"
                   disabled={isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                 >
                   {isSaving ? (
                     <Loader2 size={14} className="animate-spin" />
@@ -411,7 +411,7 @@ export default function ApiIntegration() {
                             <Button
                               type="submit"
                               disabled={isSaving}
-                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                             >
                               {isSaving && <Loader2 size={14} className="animate-spin" />}
                               Save Changes

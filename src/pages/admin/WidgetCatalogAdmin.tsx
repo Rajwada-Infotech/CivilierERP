@@ -170,6 +170,7 @@ function WidgetForm({
         </Button>
         <Button
           size="sm"
+          className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
           onClick={() => onSubmit(form)}
           disabled={loading || !form.key || !form.label || !form.iconKey || !form.category}
         >
@@ -261,7 +262,7 @@ export default function WidgetCatalogAdmin() {
               Refresh
             </Button>
             {rights.canCreate && (
-              <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
+              <Button size="sm" className="h-8 text-xs gap-1 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
                 <Plus size={12} /> Add widget
               </Button>
             )}

@@ -438,7 +438,7 @@ export default function AdminProfile() {
                       <button
                         onClick={() => updateMutation.mutate()}
                         disabled={updateMutation.isPending}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-all"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white text-sm font-heading font-semibold hover:opacity-90 disabled:opacity-50 transition-all"
                       >
                         {updateMutation.isPending ? (
                           <Loader2 size={13} className="animate-spin" />
@@ -681,7 +681,7 @@ export default function AdminProfile() {
                 <button
                   onClick={handleAvatarSave}
                   disabled={!avatarPreview || avatarUploadMutation.isPending}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white text-sm font-heading font-semibold hover:opacity-90 disabled:opacity-40 transition-all"
                 >
                   {avatarUploadMutation.isPending ? (
                     <Loader2 size={13} className="animate-spin" />

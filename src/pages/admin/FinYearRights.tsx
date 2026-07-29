@@ -423,7 +423,7 @@ function FinYearDialog({
             <button
               type="submit"
               disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isSaving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {isSaving ? "Saving…" : editing ? "Save Changes" : "Create Year"}
@@ -533,9 +533,9 @@ export default function FinYearRights() {
             <button
               onClick={openAdd}
               disabled={isLoading}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all disabled:opacity-50"
             >
-              <Plus size={14} />
+              <Plus size={13} />
               New Year
             </button>
           )

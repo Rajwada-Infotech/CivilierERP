@@ -373,9 +373,9 @@ export default function GodownAdmin() {
           rights.canCreate && (
             <button
               onClick={openAdd}
-              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-3.5 w-3.5" />
               Add Godown
             </button>
           )
@@ -760,7 +760,7 @@ export default function GodownAdmin() {
             <Button
               onClick={handleSubmit}
               disabled={isSaving}
-              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
             </Button>

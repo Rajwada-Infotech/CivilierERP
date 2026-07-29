@@ -259,7 +259,7 @@ function ResetDialog({
           <button
             onClick={handleReset}
             disabled={!canSubmit}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {loading ? (
               <RefreshCw size={13} className="animate-spin" />
@@ -463,7 +463,7 @@ export default function PasswordReset() {
                   onClick={() => setRoleFilter(role)}
                   className={`px-3 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
                     roleFilter === role
-                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent shadow-sm"
                       : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
                   }`}
                 >

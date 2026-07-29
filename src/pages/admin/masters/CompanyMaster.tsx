@@ -843,9 +843,9 @@ export default function CompanyMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
-              <Plus size={16} /> Add Company
+              <Plus size={13} /> Add Company
             </button>
           )
         }
@@ -920,7 +920,7 @@ export default function CompanyMaster() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {tab}
                 </button>
@@ -1163,7 +1163,7 @@ export default function CompanyMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
