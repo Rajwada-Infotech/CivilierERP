@@ -7,6 +7,30 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
+const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+
+// A Block can be tagged with 1+ Payment Plans (dbo.CrmBlockPaymentPlan,
+// many-to-many) — the middle tier of the Project -> Block -> Unit cascade
+// (see crmEntityCreation.js's getApplicablePaymentPlans). Same
+// deactivate-then-MERGE pattern as unitMaster.js's own
+// syncUnitPaymentPlanTags / crmPaymentPlans.js's syncPaymentPlanProjectTags.
+async function syncBlockPaymentPlanTags(pool, blockId, planIds) {
+  await pool.request().input("bid", sql.Int, blockId)
+    .query("UPDATE dbo.CrmBlockPaymentPlan SET IsActive = 0 WHERE BlockId = @bid");
+  for (const planId of planIds) {
+    if (!Number.isFinite(planId)) continue;
+    await pool.request()
+      .input("bid", sql.Int, blockId)
+      .input("pid", sql.Int, planId)
+      .query(`
+        MERGE dbo.CrmBlockPaymentPlan AS tgt
+        USING (SELECT @bid AS BlockId, @pid AS PlanId) AS src
+        ON tgt.BlockId = src.BlockId AND tgt.PlanId = src.PlanId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (BlockId, PlanId, IsActive, CreatedAt) VALUES (src.BlockId, src.PlanId, 1, SYSDATETIME());
+      `);
+  }
+}
 
 bumpCacheVersion("block-master").catch(() => {});
 
@@ -35,10 +59,18 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.CreatedAt,
         b.UpdatedAt,
         COALESCE(unitLock.LockBookingNo, parkLock.LockBookingNo) AS LockBookingNo,
-        COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId
+        COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId,
+        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
+      OUTER APPLY (
+        SELECT STRING_AGG(CAST(bpp.PlanId AS VARCHAR(20)), ',') AS PlanIds,
+               STRING_AGG(pp.PlanName, ', ') AS PlanNames
+        FROM dbo.CrmBlockPaymentPlan bpp
+        JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = bpp.PlanId
+        WHERE bpp.BlockId = b.Id AND bpp.IsActive = 1
+      ) planTags
       OUTER APPLY (
         SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
         FROM dbo.UnitMaster u
@@ -88,12 +120,46 @@ router.get(
   },
 );
 
+// GET /applicable-payment-plans?projectId= — dropdown source for the
+// Block-level Payment Plan tagger: the Project's own tagged plans (falling
+// back further up the cascade — ultimately "all active plans" — only if the
+// Project itself has nothing tagged, same rule the whole hierarchy uses).
+router.get("/applicable-payment-plans", async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    const pool = getPool();
+    const plans = await getApplicablePaymentPlans(pool, { projectId });
+    res.json(plans);
+  } catch (err) {
+    console.error("[block-master] GET /applicable-payment-plans error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST — add block
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { ProjectId, BlockName, IsActive } = req.body;
+  const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Every tagged Payment Plan must actually be applicable to this Block's
+    // Project (the whole point of the cascade — a Block can't offer a plan
+    // its own Project never offered it). Same defensive shape
+    // resolveApplicationPaymentPlan already uses to reject an out-of-scope
+    // pick at the Unit level.
+    let validPlanIds = [];
+    if (Array.isArray(PaymentPlanIds) && PaymentPlanIds.length) {
+      const requested = PaymentPlanIds.map((x) => parseInt(x, 10)).filter(Number.isFinite);
+      const applicable = await getApplicablePaymentPlans(pool, { projectId: parseInt(ProjectId, 10) });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      const invalid = requested.filter((id) => !applicableIds.has(id));
+      if (invalid.length) {
+        return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block's Project." });
+      }
+      validPlanIds = requested;
+    }
 
     // Guard against duplicate blocks — same reasoning as unitMaster.js:
     // without this, deleting a block and re-adding one with the same
@@ -125,11 +191,12 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
             UpdatedAt = @UpdatedAt
           WHERE Id = @Id
         `);
+      if (Array.isArray(PaymentPlanIds)) await syncBlockPaymentPlanTags(pool, existing.Id, validPlanIds);
       await bumpCacheVersion("block-master");
       return res.json({ message: "Block reactivated successfully" });
     }
 
-    await pool
+    const inserted = await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockName", sql.NVarChar(100), BlockName)
@@ -137,8 +204,10 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.BlockMaster (ProjectId, BlockName, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@ProjectId, @BlockName, @IsActive, @CreatedBy, @CreatedAt)
       `);
+    if (validPlanIds.length) await syncBlockPaymentPlanTags(pool, inserted.recordset[0].Id, validPlanIds);
     await bumpCacheVersion("block-master");
     res.json({ message: "Block added successfully" });
   } catch (err) {
@@ -156,10 +225,24 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update block
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockName, IsActive } = req.body;
+  const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    // Same defensive check as POST — every tagged plan must be applicable
+    // to this Block's (possibly just-changed) Project.
+    let validPlanIds = null;
+    if (Array.isArray(PaymentPlanIds)) {
+      const requested = PaymentPlanIds.map((x) => parseInt(x, 10)).filter(Number.isFinite);
+      const applicable = await getApplicablePaymentPlans(pool, { projectId: parseInt(ProjectId, 10) });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      const invalid = requested.filter((pid) => !applicableIds.has(pid));
+      if (invalid.length) {
+        return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block's Project." });
+      }
+      validPlanIds = requested;
+    }
 
     // Same duplicate guard as POST — prevent renaming a block into a
     // collision with another existing row. Edit itself is never locked
@@ -178,6 +261,14 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       return res.status(409).json({ error: `Block "${BlockName}" already exists in this Project.` });
     }
 
+    // Tag sync deliberately runs AFTER the main UPDATE below, not before —
+    // matching this file's own POST handler (insert/reactivate both write
+    // the core row first, tags second) and unitMaster.js's PUT. The
+    // duplicate check above is only a pre-check; the UPDATE itself can
+    // still fail on a race the pre-check missed (see the UNIQUE backstop in
+    // the catch block). Syncing tags first would leave them committed even
+    // if that happens, while the client sees an error and assumes nothing
+    // was saved.
     await pool
       .request()
       .input("Id", sql.Int, parseInt(id))
@@ -194,6 +285,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+
+    if (validPlanIds) await syncBlockPaymentPlanTags(pool, parseInt(id), validPlanIds);
+
     await bumpCacheVersion("block-master");
     res.json({ message: "Block updated successfully" });
   } catch (err) {

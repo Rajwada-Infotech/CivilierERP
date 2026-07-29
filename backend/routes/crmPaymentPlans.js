@@ -30,13 +30,15 @@ function validateItems(items) {
   return null;
 }
 
-// Scope (Company/Project/Block/Unit) removed entirely — a Payment Plan is
-// now just a reusable milestone template (Name + Description + Milestones).
-// Which units a plan applies to is decided the other way round now: Unit
-// Master tags 1+ plans onto a unit (dbo.CrmUnitPaymentPlan), and the
-// Application wizard's Payment Plan dropdown offers exactly those tags (or
-// every active plan, if the unit has none tagged) — see unitMaster.js and
-// crmEntityCreation.js's resolveApplicationPaymentPlan.
+// A plan can be tagged to 1+ Projects (dbo.CrmPaymentPlanProject,
+// many-to-many, optional — an untagged plan just never appears in a
+// Project/Block-filtered dropdown but is still offered as part of the
+// final "all active plans" fallback everywhere). This is the TOP tier of
+// the Project -> Block -> Unit cascade Unit Master's own tags
+// (dbo.CrmUnitPaymentPlan) and the new Block tags
+// (dbo.CrmBlockPaymentPlan) sit below — see
+// crmEntityCreation.js's getApplicablePaymentPlans/resolveApplicationPaymentPlan
+// for the single place that walks the whole cascade.
 const PLAN_SELECT = `
   SELECT p.Id, p.PlanName, p.Description, p.BookingAmount, p.IsActive, p.CreatedAt,
          (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
@@ -45,9 +47,37 @@ const PLAN_SELECT = `
           FROM dbo.CrmPaymentPlanTemplateItem i
           WHERE i.PlanTemplateId = p.Id
           ORDER BY i.MilestoneNo
-          FOR JSON PATH) AS MilestonesJson
+          FOR JSON PATH) AS MilestonesJson,
+         proj.ProjectIds, proj.ProjectNames
   FROM dbo.CrmPaymentPlanTemplate p
+  OUTER APPLY (
+    SELECT STRING_AGG(CAST(cpp.ProjectId AS VARCHAR(20)), ',') AS ProjectIds,
+           STRING_AGG(e.name, ', ') AS ProjectNames
+    FROM dbo.CrmPaymentPlanProject cpp
+    JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P'
+    WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1
+  ) proj
 `;
+
+// Same deactivate-then-MERGE pattern as unitMaster.js's own
+// syncUnitPaymentPlanTags, one tier up the hierarchy.
+async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
+  await pool.request().input("pid", sql.Int, planId)
+    .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid");
+  for (const projectId of projectIds) {
+    if (!Number.isFinite(projectId)) continue;
+    await pool.request()
+      .input("pid", sql.Int, planId)
+      .input("proj", sql.Int, projectId)
+      .query(`
+        MERGE dbo.CrmPaymentPlanProject AS tgt
+        USING (SELECT @pid AS PlanId, @proj AS ProjectId) AS src
+        ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
+      `);
+  }
+}
 
 // GET / — every plan. ?isActive=1 filters to active-only (used by Unit
 // Master's tag picker and the Application wizard's dropdown); the plan
@@ -125,6 +155,10 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     }
 
     await tx.commit();
+
+    const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map((x) => parseInt(x, 10)) : [];
+    if (projectIds.length) await syncPaymentPlanProjectTags(pool, planId, projectIds);
+
     res.status(201).json({ success: true, id: planId });
   } catch (e) {
     await tx.rollback();
@@ -195,6 +229,13 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
     }
 
     await tx.commit();
+
+    // Only touches Project tags if the caller actually sent the array — same
+    // "don't clobber on a partial edit" reasoning as BookingAmount above.
+    if (Array.isArray(b.ProjectIds)) {
+      const projectIds = b.ProjectIds.map((x) => parseInt(x, 10));
+      await syncPaymentPlanProjectTags(pool, id, projectIds);
+    }
 
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id AND IsActive = 1");

@@ -8,6 +8,7 @@ import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
+const DROPDOWN_API = "/api/business/dropdown";
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
@@ -22,6 +23,18 @@ type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string };
 
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Company is the real top of this hierarchy (dbo.enterprise: business_type
+// 'C' is a Project's business_type 'P' parent via company_id) — same shared
+// dropdown endpoint every other Company->Project chain in the app already
+// uses. fetchProjects above already returns each Project's CompanyId.
+async function fetchCompanies(): Promise<{ id: number; name: string }[]> {
+  try {
+    const r = await fetchWithAuth(DROPDOWN_API);
+    if (!r.ok) return [];
+    const data = await r.json();
+    return data.companies ?? [];
+  } catch { return []; }
 }
 async function fetchStatus(projectId: string): Promise<any> {
   const r = await fetchWithAuth(`${API}/status?projectId=${projectId}`);
@@ -101,6 +114,10 @@ const CrmProjectAutoSetup: React.FC = () => {
   // refetches anything on the other side, and Parking keeps its own
   // Project selection/state entirely, so nothing here is shared with it.
   const [activeTab, setActiveTab] = useState<"setup" | "parking">("setup");
+  // Strict Company -> Project gate — a Project can only be picked once its
+  // Company is chosen, matching the same cascade now enforced in
+  // BlockMaster.tsx/UnitMaster.tsx/ParkingMaster.tsx/ParkingSlotMaster.tsx.
+  const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [blockCount, setBlockCount] = useState("2");
   const [namingScheme, setNamingScheme] = useState<NamingScheme>("Alphabetical");
@@ -168,7 +185,12 @@ const CrmProjectAutoSetup: React.FC = () => {
   // on demand (e.g. to prep the template before adding more floors later).
   const [unitTemplateOpenFor, setUnitTemplateOpenFor] = useState<Record<number, boolean>>({});
 
+  const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const projectsForCompany = useMemo(
+    () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
+    [projects, companyId],
+  );
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["crm-auto-project-setup-status", projectId],
     queryFn: () => fetchStatus(projectId),
@@ -583,10 +605,27 @@ const CrmProjectAutoSetup: React.FC = () => {
         ) : (
         <>
         <div className={cardCls}>
+          <label className={labelCls}>Company</label>
+          <select
+            value={companyId}
+            onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }}
+            className={inputCls}
+          >
+            <option value="">Select company</option>
+            {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+          </select>
+        </div>
+
+        <div className={cardCls}>
           <label className={labelCls}>Project</label>
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={inputCls}>
-            <option value="">Select project</option>
-            {(projects as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            disabled={!companyId}
+            className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
+            {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
           </select>
         </div>
 

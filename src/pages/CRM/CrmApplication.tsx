@@ -124,6 +124,11 @@ async function fetchBrokers(): Promise<any[]> {
 async function fetchPaymentPlans(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/crm/payment-plans"); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Blocks' own tagged PaymentPlanIds — the middle tier of the Project ->
+// Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
+async function fetchBlockPlanTags(): Promise<any[]> {
+  try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 // Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
 // MilestonesJson column — reused here so the brief plan-preview card below
@@ -264,6 +269,7 @@ const CrmApplication: React.FC = () => {
   const { data: channelPartners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchChannelPartners, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
   // — react-query dedupes/caches across the two, so the Details tab (Step
   // 6) can show the parking total without firing its own separate fetch.
@@ -315,17 +321,37 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
-  // A unit's tagged plans (set in Unit Master) constrain the choice; a unit
-  // with no tags at all leaves every active plan on the table. Either way a
-  // plan must be picked once a unit is on the application — there's no more
-  // "leave blank for the default split" option.
+  // Project -> Block -> Unit cascade (see crmEntityCreation.js's
+  // getApplicablePaymentPlans, the same source of truth the backend uses to
+  // validate the actual save) — stop at the first non-empty tier: the
+  // Unit's own tags, else its Block's, else its Project's, else every
+  // active plan. Either way a plan must be picked once a unit is on the
+  // application — there's no more "leave blank for the default split" option.
   const unitTaggedPaymentPlans = useMemo(() => {
     if (!selectedUnit?.PaymentPlanIds) return [];
     const taggedIds: string[] = String(selectedUnit.PaymentPlanIds).split(",").filter(Boolean);
     return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
   }, [paymentPlans, selectedUnit]);
+  const blockTaggedPaymentPlans = useMemo(() => {
+    if (!selectedUnit?.BlockId) return [];
+    const blockRow = (blockPlanTags as any[]).find((b: any) => String(b.Id) === String(selectedUnit.BlockId));
+    if (!blockRow?.PaymentPlanIds) return [];
+    const taggedIds: string[] = String(blockRow.PaymentPlanIds).split(",").filter(Boolean);
+    return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
+  }, [paymentPlans, blockPlanTags, selectedUnit]);
+  const projectTaggedPaymentPlans = useMemo(() => {
+    if (!selectedUnit?.ProjectId) return [];
+    return (paymentPlans as any[]).filter((p: any) =>
+      p.IsActive && p.ProjectIds && String(p.ProjectIds).split(",").includes(String(selectedUnit.ProjectId)));
+  }, [paymentPlans, selectedUnit]);
   const activePaymentPlans = useMemo(() => (paymentPlans as any[]).filter((p: any) => p.IsActive), [paymentPlans]);
-  const applicablePaymentPlans = unitTaggedPaymentPlans.length ? unitTaggedPaymentPlans : activePaymentPlans;
+  const applicablePaymentPlans = unitTaggedPaymentPlans.length
+    ? unitTaggedPaymentPlans
+    : blockTaggedPaymentPlans.length
+      ? blockTaggedPaymentPlans
+      : projectTaggedPaymentPlans.length
+        ? projectTaggedPaymentPlans
+        : activePaymentPlans;
 
   // Resume is only meaningful for a genuinely incomplete application. In
   // practice that's Status='Pending' — POST / (createCrmApplicationRecord)
@@ -1269,8 +1295,14 @@ const CrmApplication: React.FC = () => {
                         <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
                       ))}
                     </select>
-                    {!unitTaggedPaymentPlans.length && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans tagged in Unit Master — showing every active plan instead.</p>
+                    {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
+                    )}
+                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
+                    )}
+                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
+                      <p className="text-[11px] text-muted-foreground mt-1">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
                     )}
 
                     {/* Brief plan breakdown — Booking is the plan's own

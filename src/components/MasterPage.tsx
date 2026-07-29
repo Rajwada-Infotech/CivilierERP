@@ -55,6 +55,13 @@ export interface FieldDef {
   defaultValue?: string | boolean | string[];
   placeholder?: string;
   mode?: string;
+  /** For a "select" field that depends on a parent field (e.g. Project
+   * depends on Company) — return true to disable this field and show
+   * disabledPlaceholder instead of the normal "Select..." + options, so a
+   * child field can never be picked before its parent, and never silently
+   * falls back to showing every row unfiltered. */
+  disabledWhen?: (form: Record<string, unknown>) => boolean;
+  disabledPlaceholder?: string;
   render?: (props: {
     value: unknown;
     onChange: (v: unknown) => void;
@@ -589,46 +596,54 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       />
                     </div>
                   ) : field.type === "select" ? (
-                    <div className="relative">
-                      <select
-                        value={(form[field.name] as string) || ""}
-                        onChange={(e) =>
-                          updateField(field.name, e.target.value, field)
-                        }
-                        className={`${inputBase} appearance-none pr-9 ${errors[field.name] ? "border-destructive" : "border-border"}`}
-                      >
-                        <option value="">Select...</option>
-                        {(() => {
-                          let opts: { value: string; label: string }[] = [];
-                          const editingRow = editingId
-                            ? data.find((r) => r._id === editingId)
-                            : undefined;
-                          if (field.optionsProvider) {
-                            opts = field.optionsProvider(
-                              data,
-                              editingRow?._id,
-                              form,
-                            );
-                          } else if (asyncOptionsCache[field.name]) {
-                            opts = asyncOptionsCache[field.name];
-                          } else if (field.options) {
-                            opts = field.options.map((o) => ({
-                              value: o,
-                              label: o,
-                            }));
-                          }
-                          return opts.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
+                    (() => {
+                      const isDisabled = field.disabledWhen?.(form) ?? false;
+                      return (
+                        <div className="relative">
+                          <select
+                            value={(form[field.name] as string) || ""}
+                            onChange={(e) =>
+                              updateField(field.name, e.target.value, field)
+                            }
+                            disabled={isDisabled}
+                            className={`${inputBase} appearance-none pr-9 ${errors[field.name] ? "border-destructive" : "border-border"} ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                          >
+                            <option value="">
+                              {isDisabled ? (field.disabledPlaceholder ?? "Select...") : "Select..."}
                             </option>
-                          ));
-                        })()}
-                      </select>
-                      <ChevronDown
-                        size={14}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                            {!isDisabled && (() => {
+                              let opts: { value: string; label: string }[] = [];
+                              const editingRow = editingId
+                                ? data.find((r) => r._id === editingId)
+                                : undefined;
+                              if (field.optionsProvider) {
+                                opts = field.optionsProvider(
+                                  data,
+                                  editingRow?._id,
+                                  form,
+                                );
+                              } else if (asyncOptionsCache[field.name]) {
+                                opts = asyncOptionsCache[field.name];
+                              } else if (field.options) {
+                                opts = field.options.map((o) => ({
+                                  value: o,
+                                  label: o,
+                                }));
+                              }
+                              return opts.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ));
+                            })()}
+                          </select>
+                          <ChevronDown
+                            size={14}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                        </div>
+                      );
+                    })()
                   ) : field.type === "textarea" ? (
                     <textarea
                       value={(form[field.name] as string) || ""}

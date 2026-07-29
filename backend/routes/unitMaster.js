@@ -8,6 +8,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
+const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 
 bumpCacheVersion("unit-master").catch(() => {});
 
@@ -135,14 +136,49 @@ router.get("/blocks", async (req, res) => {
   }
 });
 
+// GET /applicable-payment-plans?blockId=&projectId= — the bottom tier of
+// the cascade (see crmEntityCreation.js's getApplicablePaymentPlans): the
+// Block's own tagged plans if any, else the Project's, else every active
+// plan. This is what Unit Master's own Payment Plan chip-picker now offers,
+// instead of always listing every active plan regardless of hierarchy.
+router.get("/applicable-payment-plans", async (req, res) => {
+  try {
+    const blockId = parseInt(req.query.blockId, 10);
+    const projectId = parseInt(req.query.projectId, 10);
+    const pool = getPool();
+    const plans = await getApplicablePaymentPlans(pool, {
+      blockId: Number.isFinite(blockId) ? blockId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+    });
+    res.json(plans);
+  } catch (err) {
+    console.error("[unit-master] GET /applicable-payment-plans error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST — add unit
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
   const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
-  const planIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
+  const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const createdBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
     const pool = getPool();
+
+    // Every tagged plan must be within this Unit's own applicable cascade
+    // (Block's tags -> Project's tags -> all active) — same defensive shape
+    // blockMaster.js uses one tier up.
+    let planIds = [];
+    if (requestedPlanIds.length) {
+      const applicable = await getApplicablePaymentPlans(pool, { blockId: parseInt(BlockId, 10), projectId: parseInt(ProjectId, 10) });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      const invalid = requestedPlanIds.filter((pid) => !applicableIds.has(pid));
+      if (invalid.length) {
+        return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Unit." });
+      }
+      planIds = requestedPlanIds;
+    }
 
     // Guard against duplicate units. Without this, deleting (soft-deleting)
     // a unit and later re-adding one with the same Project+Block+UnitName
@@ -218,11 +254,22 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
-  const planIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
+  const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
     const pool = getPool();
+
+    let planIds = [];
+    if (requestedPlanIds.length) {
+      const applicable = await getApplicablePaymentPlans(pool, { blockId: parseInt(BlockId, 10), projectId: parseInt(ProjectId, 10) });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      const invalid = requestedPlanIds.filter((pid) => !applicableIds.has(pid));
+      if (invalid.length) {
+        return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Unit." });
+      }
+      planIds = requestedPlanIds;
+    }
 
     // Same duplicate guard as POST — prevent editing a unit's name/block
     // into a collision with another existing row.
@@ -275,7 +322,9 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
-    await syncUnitPaymentPlanTags(pool, parseInt(id), planIds);
+    if (Array.isArray(PaymentPlanIds)) {
+      await syncUnitPaymentPlanTags(pool, parseInt(id), planIds);
+    }
     await bumpCacheVersion("unit-master");
     logAudit({ module: "UnitMaster", recordId: parseInt(id), recordNo: UnitName, action: "Updated", changedBy: userName });
     res.json({ message: "Unit updated successfully" });

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Pencil, Layers, ListChecks } from "lucide-react";
+import { Plus, Trash2, Pencil, Layers, ListChecks, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
@@ -32,6 +32,21 @@ async function fetchAll(): Promise<any[]> {
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Company -> Project source for the Tagged Projects picker below. Company
+// is the real top of this hierarchy (dbo.enterprise: business_type 'C' is a
+// Project's business_type 'P' parent via company_id) — this reuses the same
+// shared dropdown endpoint CrmApplication.tsx/BlockMaster.tsx/UnitMaster.tsx
+// already use for their own Company -> Project chains, so the chip picker
+// below can group projects under their Company instead of one flat list.
+async function fetchCompanyProjectDropdown(): Promise<{
+  companies: { id: number; name: string }[];
+  projects: { id: number; name: string; company_id: number }[];
+}> {
+  try {
+    const r = await fetchWithAuth("/api/business/dropdown");
+    return r.ok ? r.json() : { companies: [], projects: [] };
+  } catch { return { companies: [], projects: [] }; }
 }
 async function fetchPlanDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -72,6 +87,17 @@ const CrmPaymentPlans: React.FC = () => {
   // as the authoritative Booking amount for any booking tagged to this plan.
   const [bookingAmount, setBookingAmount] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
+  // Which Projects this plan is tagged to — the top tier of the Project ->
+  // Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
+  // Optional: an untagged plan still participates in every level's "all
+  // active plans" fallback, it just never appears in a Project-filtered list.
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  // Dropdown-wise Add-a-Project flow for the Tagged Projects field below —
+  // Company picked first, Project narrows to that Company's list and stays
+  // disabled until then (same disciplined Company->Project gate every other
+  // master page in the app now uses), then "+ Add" appends it to projectIds.
+  const [tagCompanyId, setTagCompanyId] = useState("");
+  const [tagProjectId, setTagProjectId] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Read-only preview, opened by tapping a card. Built straight from the
@@ -82,6 +108,38 @@ const CrmPaymentPlans: React.FC = () => {
 
   const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
+  const { data: dropdownData } = useQuery({ queryKey: ["business-dropdown"], queryFn: fetchCompanyProjectDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdownData?.companies ?? [];
+  const projects = dropdownData?.projects ?? [];
+  // Lookups for the dropdown-wise Add-a-Project flow and the selected-chips
+  // list below — a plan can legitimately tag Projects across multiple
+  // Companies, so Company here is just which list the Project dropdown
+  // narrows to, not a hard single-Company gate on the whole field.
+  const companiesById = useMemo(() => new Map(companies.map((c) => [String(c.id), c])), [companies]);
+  const projectsById = useMemo(() => new Map(projects.map((p) => [String(p.id), p])), [projects]);
+  const projectsForTagCompany = useMemo(
+    () => (tagCompanyId
+      ? projects.filter((p) => String(p.company_id) === tagCompanyId && !projectIds.includes(String(p.id)))
+      : []),
+    [projects, tagCompanyId, projectIds],
+  );
+  const selectedTaggedProjects = useMemo(
+    () => projectIds
+      .map((id) => {
+        const p = projectsById.get(id);
+        if (!p) return null;
+        const company = companiesById.get(String(p.company_id));
+        return { id, name: p.name, companyName: company?.name ?? "" };
+      })
+      .filter((x): x is { id: string; name: string; companyName: string } => x !== null),
+    [projectIds, projectsById, companiesById],
+  );
+
+  const handleAddTaggedProject = () => {
+    if (!tagProjectId) return;
+    setProjectIds((prev) => (prev.includes(tagProjectId) ? prev : [...prev, tagProjectId]));
+    setTagProjectId("");
+  };
 
   // Item 0 is always "Booking" — a fixed ₹ figure decided per booking, never
   // a slice of the plan's 100%. Only the milestones that come after Booking
@@ -93,6 +151,8 @@ const CrmPaymentPlans: React.FC = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setBookingAmount("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
+    setProjectIds([]);
+    setTagCompanyId(""); setTagProjectId("");
   };
 
   const openCreate = () => { resetForm(); setDialogOpen(true); };
@@ -106,6 +166,8 @@ const CrmPaymentPlans: React.FC = () => {
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
     setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
+    setProjectIds(plan.ProjectIds ? String(plan.ProjectIds).split(",") : []);
+    setTagCompanyId(""); setTagProjectId("");
     setItems(
       (planItems as any[]).length
         ? planItems.map((i: any) => ({
@@ -145,6 +207,7 @@ const CrmPaymentPlans: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
+          ProjectIds: projectIds.map((x) => parseInt(x)).filter(Number.isFinite),
         }),
       });
       const data = await res.json();
@@ -340,6 +403,94 @@ const CrmPaymentPlans: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
               <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
                 className={inputCls} />
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Tagged Projects</label>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Optional — leave empty and this plan still shows up everywhere as a fallback option.
+                Tag it to one or more Projects to make it selectable from Block/Unit Payment Plan pickers under those Projects.
+              </p>
+
+              {/* Dropdown-wise add flow — pick a Company, then a Project
+                  under it, then Add. Same Company -> Project gate used
+                  everywhere else in the app (Project stays disabled with a
+                  plain-language hint until a Company is chosen), so this
+                  reads the same way for a non-technical user as every other
+                  master page instead of a wall of always-visible toggle chips. */}
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                    <select
+                      value={tagCompanyId}
+                      onChange={(e) => { setTagCompanyId(e.target.value); setTagProjectId(""); }}
+                      className={inputCls}
+                    >
+                      <option value="">Select company</option>
+                      {companies.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <select
+                      value={tagProjectId}
+                      onChange={(e) => setTagProjectId(e.target.value)}
+                      disabled={!tagCompanyId}
+                      className={`${inputCls} ${!tagCompanyId ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <option value="">
+                        {!tagCompanyId
+                          ? "Select a Company first"
+                          : projectsForTagCompany.length === 0
+                            ? "All projects already tagged"
+                            : "Select project"}
+                      </option>
+                      {projectsForTagCompany.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddTaggedProject}
+                    disabled={!tagProjectId}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Already-tagged Projects — shown as removable chips, each
+                  labeled with its Company so it's unambiguous which is which
+                  even when Projects across different Companies are tagged
+                  at once. */}
+              <div className="mt-2.5">
+                {selectedTaggedProjects.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">No projects tagged yet — add one above.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedTaggedProjects.map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30"
+                      >
+                        <span>
+                          {p.name}
+                          {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setProjectIds((prev) => prev.filter((x) => x !== p.id))}
+                          title={`Remove ${p.name}`}
+                          className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
