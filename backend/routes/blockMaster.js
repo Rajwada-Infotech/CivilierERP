@@ -6,7 +6,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { getBlockLockReason } = require("../services/crmHierarchyLocks");
+const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 
 bumpCacheVersion("block-master").catch(() => {});
 
@@ -205,12 +205,18 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-// DELETE — soft delete (IsActive = 0), matching the platform-wide convention
-// and unitMaster.js's own fix for this exact problem: there are no DB-level
-// FK constraints in this system, so a hard DELETE here would leave every
-// UnitMaster row with this BlockId pointing at nothing. Also refuses to
-// delete a Block that still has a Booked or OnHold Unit under it (see
-// getBlockLockReason above).
+// DELETE — a real, permanent removal (not a soft IsActive=0 flag left
+// sitting in the grid forever). Two checks run first, in order:
+//   1. getBlockLockReason — the usual business rule: refuses while any
+//      ACTIVE Unit/Parking Slot exists under it (booked, held, applied, or
+//      even just plain unbooked — "clear the child first").
+//   2. getBlockHardDeleteBlockers — dbo.BlockMaster is the target of real SQL
+//      Server FK constraints (UnitMaster.BlockId, ParkingSlot.BlockId,
+//      RoomMaster.BlockId, ParkingMaster.BlockId, DailyLabourEntry.BlockId —
+//      confirmed via sys.foreign_keys), so even a fully deactivated child row
+//      still physically blocks a hard DELETE. This check catches that and
+//      reports it clearly instead of letting a raw SQL FK-violation surface.
+// Only once BOTH come back clear does the row actually get removed.
 router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -236,13 +242,20 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       });
     }
 
+    const hardBlockers = await getBlockHardDeleteBlockers(pool, id);
+    if (hardBlockers) {
+      return res.status(409).json({
+        error: `Block "${BlockName}" ${hardBlockers}.`,
+      });
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, id)
-      .query("UPDATE dbo.BlockMaster SET IsActive = 0 WHERE Id = @Id");
+      .query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
 
     await bumpCacheVersion("block-master");
-    res.json({ message: `Block "${BlockName}" deactivated successfully` });
+    res.json({ message: `Block "${BlockName}" deleted` });
   } catch (err) {
     console.error("[block-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });

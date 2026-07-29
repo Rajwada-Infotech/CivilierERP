@@ -6,7 +6,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
-const { getBlockLockReason, getFloorLockReason } = require("../services/crmHierarchyLocks");
+const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -248,7 +248,6 @@ router.put("/blocks/:id", requirePageRight("crm-auto-project-setup", "edit"), as
 // at a now-inactive Block, once it's gone.
 router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
   const pool = getPool();
-  const updatedBy = req.user?.userId || null;
   try {
     const id = parseInt(req.params.id, 10);
     const existing = await pool.request().input("id", sql.Int, id)
@@ -261,13 +260,20 @@ router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"
       return res.status(409).json({ error: `Block "${BlockName}" ${lockReason} and cannot be deleted. Delete its Units/Parking Slots first.` });
     }
 
+    // Real, permanent removal — dbo.BlockMaster is the target of real SQL
+    // Server FK constraints (see blockMaster.js's own DELETE route for the
+    // full list), so a hard delete still has to check for those regardless
+    // of the business-lock check above already passing.
+    const hardBlockers = await getBlockHardDeleteBlockers(pool, id);
+    if (hardBlockers) {
+      return res.status(409).json({ error: `Block "${BlockName}" ${hardBlockers}.` });
+    }
+
     const tx = pool.transaction();
     await tx.begin();
     try {
-      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, updatedBy)
-        .query("UPDATE dbo.BlockMaster SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
-      await tx.request().input("bid", sql.Int, id)
-        .query("UPDATE dbo.CrmProjectAutoSetupFloor SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE BlockId = @bid AND IsActive = 1");
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.BlockMaster WHERE Id = @id");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid");
       await tx.commit();
     } catch (e) {
       await tx.rollback();
@@ -621,8 +627,10 @@ router.delete("/floors/:id", requirePageRight("crm-auto-project-setup", "delete"
       return res.status(409).json({ error: `Floor "${floor.FloorLabel}" ${lockReason} and cannot be deleted. Delete the unit(s) first.` });
     }
 
+    // No FK references this table (it's just this wizard's own scaffold),
+    // so a real permanent delete is safe here with no further checks.
     await pool.request().input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmProjectAutoSetupFloor SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      .query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id");
     res.json({ message: `Floor "${floor.FloorLabel}" deleted` });
   } catch (e) {
     console.error("[crm-project-auto-setup] DELETE /floors/:id error:", e.message);

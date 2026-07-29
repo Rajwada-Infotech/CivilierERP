@@ -7,7 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { getUnitLockReason } = require("../services/crmHierarchyLocks");
+const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 
 bumpCacheVersion("unit-master").catch(() => {});
 
@@ -295,17 +295,27 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
 // CrmBooking snapshots UnitNo/BlockName/UnitType/AreaSqFt onto its own row
 // at creation time rather than re-joining UnitMaster live.
 //
-// Refuses to delete/deactivate a Booked or OnHold unit (see getUnitLockReason
-// above) — deactivating a booked unit makes it read as "Blocked" instead of
-// "Booked" in the unit matrix, which is what happened to A1-1001 and is the
-// most likely reason it got recreated as a duplicate row rather than the
+// Refuses to delete a Booked or OnHold unit (see getUnitLockReason above) —
+// deactivating a booked unit made it read as "Blocked" instead of "Booked"
+// in the unit matrix, which is what happened to A1-1001 and is the most
+// likely reason it got recreated as a duplicate row rather than the
 // underlying problem being noticed and fixed.
+//
+// This is now a real, permanent DELETE, not a soft IsActive=0 flag left
+// sitting in the grid as a ghost "Inactive" row. Two checks run first:
+//   1. getUnitLockReason — booked/held/applied.
+//   2. getUnitHardDeleteBlockers — dbo.UnitMaster is the target of real SQL
+//      Server FK constraints (CrmApplication.PreferredUnitId,
+//      CrmBooking.UnitId, CrmUnitChangeLog, DailyLabourEntry.UnitId,
+//      FollowupApplications.UnitId, RoomMaster.UnitId — confirmed via
+//      sys.foreign_keys), so even a HISTORICAL/terminal reference (e.g. a
+//      long-Cancelled Application) still physically blocks a hard DELETE.
+// Only once both come back clear does the row actually get removed.
 router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
   const userName = req.user?.name || req.user?.email || null;
-  const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
     const existing = await pool
@@ -323,15 +333,17 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
       });
     }
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .input("UpdatedBy", sql.Int, updatedBy)
-      .input("UpdatedAt", sql.DateTime2(3), new Date())
-      .query("UPDATE dbo.UnitMaster SET IsActive = 0, UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt WHERE Id = @Id");
+    const hardBlockers = await getUnitHardDeleteBlockers(pool, id);
+    if (hardBlockers) {
+      return res.status(409).json({
+        error: `Unit "${UnitName}" ${hardBlockers}.`,
+      });
+    }
+
+    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.UnitMaster WHERE Id = @Id");
     await bumpCacheVersion("unit-master");
     logAudit({ module: "UnitMaster", recordId: id, recordNo: UnitName, action: "Deleted", changedBy: userName });
-    res.json({ message: `Unit "${UnitName}" deactivated successfully` });
+    res.json({ message: `Unit "${UnitName}" deleted` });
   } catch (err) {
     console.error("[unit-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });

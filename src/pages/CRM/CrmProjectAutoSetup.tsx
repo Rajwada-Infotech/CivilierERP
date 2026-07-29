@@ -122,7 +122,18 @@ const CrmProjectAutoSetup: React.FC = () => {
   // chip; editing is a deliberate mode you step into and back out of.
   const [blocksEditMode, setBlocksEditMode] = useState(false);
   const [floorsEditMode, setFloorsEditMode] = useState(false);
-  const [expandedFloorId, setExpandedFloorId] = useState<number | null>(null);
+  // The Block→Floor→Unit drill-down tree appears in FOUR separate places on
+  // this page (the always-on overview card, the Blocks section, the Floor
+  // Plan section, and Unit Types & Generation) — each needs its OWN
+  // "which floor is expanded" state. Sharing one variable across all four
+  // (the original bug) meant clicking a floor in any one place also
+  // silently expanded that same floor in every other place using it.
+  // floorUnits/loadingUnitsFloorId stay shared — that's just a fetched-data
+  // cache, safe to reuse regardless of which section triggered the fetch.
+  const [expandedFloorId, setExpandedFloorId] = useState<number | null>(null); // Unit Types & Generation
+  const [overviewExpandedFloorId, setOverviewExpandedFloorId] = useState<number | null>(null);
+  const [blocksExpandedFloorId, setBlocksExpandedFloorId] = useState<number | null>(null);
+  const [floorPlanExpandedFloorId, setFloorPlanExpandedFloorId] = useState<number | null>(null);
   const [floorUnits, setFloorUnits] = useState<Record<number, any[]>>({});
   const [loadingUnitsFloorId, setLoadingUnitsFloorId] = useState<number | null>(null);
   // Per-block Unit Type template (e.g. 2x 2BHK + 2x 3BHK) — applies to every
@@ -144,10 +155,12 @@ const CrmProjectAutoSetup: React.FC = () => {
   // default for a block with zero floors (nothing to summarize yet) or once
   // the user explicitly asks to add more via this toggle.
   const [floorFormOpenFor, setFloorFormOpenFor] = useState<Record<number, boolean>>({});
-  // Collapsed by default per block in the always-on structure tree at the
-  // top of the page — expanding one block's Floors doesn't force every
-  // other block open too.
+  // Collapsed by default per block — the always-on structure tree and the
+  // Blocks section each get their own independent copy of this (same
+  // "shared state expands everything at once" reasoning as the floor state
+  // above), so expanding a block in one doesn't also expand it in the other.
   const [treeExpandedBlocks, setTreeExpandedBlocks] = useState<Record<number, boolean>>({});
+  const [blocksExpandedBlocks, setBlocksExpandedBlocks] = useState<Record<number, boolean>>({});
   // Step 3 (Units) gets the same collapse-when-done treatment as Steps 1 & 2:
   // once every eligible floor in a block has real Units generated, the
   // template editor + per-floor controls collapse into a locked summary row
@@ -376,9 +389,12 @@ const CrmProjectAutoSetup: React.FC = () => {
     }
   };
 
-  const handleToggleExpandFloor = async (f: any) => {
-    if (expandedFloorId === f.Id) { setExpandedFloorId(null); return; }
-    setExpandedFloorId(f.Id);
+  // Shared by all four independent "which floor is expanded" states below —
+  // takes the current value + its own setter so each call site's toggle
+  // only ever touches its own state, never any other section's.
+  const toggleFloorGeneric = async (f: any, current: number | null, setCurrent: (v: number | null) => void) => {
+    if (current === f.Id) { setCurrent(null); return; }
+    setCurrent(f.Id);
     if (floorUnits[f.Id]) return;
     setLoadingUnitsFloorId(f.Id);
     try {
@@ -389,6 +405,10 @@ const CrmProjectAutoSetup: React.FC = () => {
       setLoadingUnitsFloorId(null);
     }
   };
+  const handleToggleExpandFloor = (f: any) => toggleFloorGeneric(f, expandedFloorId, setExpandedFloorId); // Unit Types & Generation
+  const handleToggleOverviewFloor = (f: any) => toggleFloorGeneric(f, overviewExpandedFloorId, setOverviewExpandedFloorId);
+  const handleToggleBlocksFloor = (f: any) => toggleFloorGeneric(f, blocksExpandedFloorId, setBlocksExpandedFloorId);
+  const handleToggleFloorPlanFloor = (f: any) => toggleFloorGeneric(f, floorPlanExpandedFloorId, setFloorPlanExpandedFloorId);
 
   // Deletes straight through the existing Unit Master endpoint — it already
   // enforces the (now Application-aware) Unit-level lock check, so nothing
@@ -669,8 +689,8 @@ const CrmProjectAutoSetup: React.FC = () => {
                             <div className="ml-6 pl-3 border-l border-border pb-1.5">
                               <BlockFloorTree
                                 blockFloors={blockFloors}
-                                expandedFloorId={expandedFloorId}
-                                onToggleFloor={handleToggleExpandFloor}
+                                expandedFloorId={overviewExpandedFloorId}
+                                onToggleFloor={handleToggleOverviewFloor}
                                 floorUnits={floorUnits}
                                 loadingUnitsFloorId={loadingUnitsFloorId}
                                 editingUnitId={editingUnitId}
@@ -737,12 +757,12 @@ const CrmProjectAutoSetup: React.FC = () => {
                     ) : (
                       // View mode — clicking a Block name drills into its
                       // Floors (and from there, into real Units), same tree
-                      // interaction as the overview card above; sharing
-                      // treeExpandedBlocks state means expanding it here
-                      // also shows it expanded up there.
-                      <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
+                      // interaction as the overview card above — but with
+                      // its own independent expand state (blocksExpandedBlocks),
+                      // so expanding it here doesn't also expand it up there.
+                      <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
                         className="flex items-center gap-1 hover:text-primary">
-                        {treeExpandedBlocks[b.Id] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
+                        {blocksExpandedBlocks[b.Id] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                         {b.BlockName}
                       </button>
                     )}
@@ -773,13 +793,13 @@ const CrmProjectAutoSetup: React.FC = () => {
               {/* Expanded Block(s) — its Floor tree, drilling further into
                   real Units per Floor, same as clicking through the
                   overview card above. */}
-              {blocks.filter((b) => treeExpandedBlocks[b.Id]).map((b) => (
+              {blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
                 <div key={b.Id} className="rounded-lg border border-border/50 p-2 text-xs">
                   <div className="font-medium mb-1">{b.BlockName}</div>
                   <BlockFloorTree
                     blockFloors={floorsByBlock.get(b.Id) || []}
-                    expandedFloorId={expandedFloorId}
-                    onToggleFloor={handleToggleExpandFloor}
+                    expandedFloorId={blocksExpandedFloorId}
+                    onToggleFloor={handleToggleBlocksFloor}
                     floorUnits={floorUnits}
                     loadingUnitsFloorId={loadingUnitsFloorId}
                     editingUnitId={editingUnitId}
@@ -887,7 +907,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                         mode — same drill-into-Units tree as
                                         the overview card/Blocks section. */}
                                     {!floorsEditMode && f.IsGenerated ? (
-                                      <button onClick={() => handleToggleExpandFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
+                                      <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
@@ -905,7 +925,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </button>
                             </div>
                             {(() => {
-                              const expandedFloor = blockFloors.find((f) => f.Id === expandedFloorId);
+                              const expandedFloor = blockFloors.find((f) => f.Id === floorPlanExpandedFloorId);
                               return expandedFloor ? (
                                 <FloorUnitList
                                   floorId={expandedFloor.Id}
@@ -943,7 +963,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 {blockFloors.map((f) => (
                                   <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
                                     {!floorsEditMode && f.IsGenerated ? (
-                                      <button onClick={() => handleToggleExpandFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
+                                      <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
@@ -957,7 +977,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </div>
                             )}
                             {(() => {
-                              const expandedFloor = blockFloors.find((f) => f.Id === expandedFloorId);
+                              const expandedFloor = blockFloors.find((f) => f.Id === floorPlanExpandedFloorId);
                               return expandedFloor ? (
                                 <FloorUnitList
                                   floorId={expandedFloor.Id}
