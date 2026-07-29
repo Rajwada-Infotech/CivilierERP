@@ -323,9 +323,10 @@ const materialSetupItems = [
 const followupSetupItems = [
   {
     icon: ClipboardList,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
+    label: "Task Master",
+    path: "/followup/setup/task-master",
+    color: "text-teal-500",
+    pageKey: "task-master",
   },
 ];
 

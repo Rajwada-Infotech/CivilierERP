@@ -407,7 +407,7 @@ const RoleMaster: React.FC = () => {
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
                 onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold text-white shadow-sm bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 transition-all"
               >
                 <Users size={15} />
                 {editingId ? "Update" : "Save Role"}

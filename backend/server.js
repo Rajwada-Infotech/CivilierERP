@@ -9,7 +9,6 @@ const cors = require("cors");
 const compression = require("compression");
 
 const { connectDB, closeDB } = require("./db");
-const { startEscalationEngine } = require("./escalationEngine");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
@@ -227,44 +226,7 @@ const ALL_ROUTES = [
   { path: "/api/widgets", file: "./routes/widgets" },
   { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
   { path: "/api/reminders", file: "./routes/tenantReminders" },
-  { path: "/api/followup-log", file: "./routes/followupLog" },
   { path: "/api/applicants", file: "./routes/applicants" },
-  // /api/followup-applications, /api/followup-unit-selections, /api/followup-bookings
-  // retired — route modules left on disk but no longer mounted. 0 live rows in
-  // FollowupApplications/FollowupUnitSelections/FollowupBookings (confirmed live).
-  // CRM > Applications/Bookings (crmApplications.js/crmBookings.js) is the real,
-  // actively-developed system — it also enforces UnitMaster availability checks
-  // that the Followup routes never did, which was a double-booking risk.
-  // The underlying tables stay in place; other still-active Followup routes
-  // (NOC, SalesDeed, Payments, Demands, etc.) still join against them directly.
-  // /api/payment-plan-master (PaymentTermMaster) is deliberately NOT touched here —
-  // it is shared with the unrelated Material Expense Booking module.
-  // /api/followup-agreements retired — the route module (routes/followupAgreements.js)
-  // is left on disk but no longer mounted. 0 live rows in dbo.FollowupAgreements;
-  // CRM > Documents > Agreements (crmAgreements.js) is the real, actively-developed
-  // Agreement system. The table itself stays (still read directly by other
-  // followup* routes' joins), only this CRUD endpoint is retired.
-  { path: "/api/followup-noc", file: "./routes/followupNoc" },
-  { path: "/api/followup-sales-deed", file: "./routes/followupSalesDeed" },
-  { path: "/api/followup-handover", file: "./routes/followupHandover" },
-  {
-    path: "/api/followup-construction-updates",
-    file: "./routes/followupConstructionUpdates",
-  },
-  { path: "/api/followup-demands", file: "./routes/followupDemands" },
-  { path: "/api/followup-payments", file: "./routes/followupPayments" },
-  // /api/followup-welcome-calls, /api/followup-legal-milestones retired alongside
-  // the applications/bookings/unit-selections routes above — 0 live rows, superseded
-  // by CRM > Welcome Calls (crmWelcomeCalls.js) and crmLegalMilestones.js.
-  {
-    path: "/api/followup-pre-possession",
-    file: "./routes/followupPrePossession",
-  },
-  {
-    path: "/api/followup-possession-notice",
-    file: "./routes/followupPossessionNotice",
-  },
-  { path: "/api/followup-dashboard", file: "./routes/followupDashboard" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
@@ -274,6 +236,7 @@ const ALL_ROUTES = [
   { path: "/api/parking-master", file: "./routes/parkingMaster" },
   { path: "/api/parking-slot-master", file: "./routes/parkingSlotMaster" },
   { path: "/api/extra-charge-master", file: "./routes/extraChargeMaster" },
+  { path: "/api/task-master", file: "./routes/taskMaster" },
   { path: "/api/unit-matrix", file: "./routes/unitMatrix" },
   { path: "/api/parking-matrix", file: "./routes/parkingMatrix" },
   { path: "/api/business", file: "./routes/businessRoutes" },
@@ -297,17 +260,6 @@ const ALL_ROUTES = [
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
   { path: "/api/lookups", file: "./routes/lookups" },
-  // /api/followup-agreement-workflow retired alongside /api/followup-agreements
-  // above — 0 live rows in dbo.FollowupAgreementWorkflows. The table stays
-  // (escalationEngine.js still reads it directly), only this CRUD endpoint
-  // is retired; nothing writes to the table anymore so it stays empty.
-  {
-    path: "/api/followup-document-vault",
-    file: "./routes/followupDocumentVault",
-  },
-  { path: "/api/followup-communicator", file: "./routes/followupCommunicator" },
-  { path: "/api/followup-audit-log", file: "./routes/followupAuditLog" },
-  { path: "/api/followup-escalation", file: "./routes/followupEscalation" },
   { path: "/api/sa/social-media", file: "./routes/saSocialMedia" },
   { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
   { path: "/api/sa/ads", file: "./routes/saAds" },
@@ -623,7 +575,6 @@ async function startServer() {
     const server = httpServer.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
-      startEscalationEngine();
       startCrmSlaEngine();
     });
 
