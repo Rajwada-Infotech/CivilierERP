@@ -1,0 +1,38 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.5.0
+ignore:
+  SNYK-JS-IMAGESIZE-17295814:
+    - '*':
+        reason: >-
+          Only reachable through metro@0.83.3's own bundler internals
+          (image-size is imported directly by Metro's source, build-time
+          only — never shipped in the app bundle). The patched release is
+          an ESM-only 2.x major with a different export shape that Metro's
+          code isn't written against; forcing it risks breaking asset
+          dimension probing on every build. Exploitation would require
+          feeding a crafted malicious image into a trusted local build,
+          which isn't a realistic path here. Revisit once Expo/Metro bump
+          their own image-size pin to 2.x.
+        expires: 2026-10-27T00:00:00.000Z
+  SNYK-JS-IMAGESIZE-17295816:
+    - '*':
+        reason: >-
+          Second CVE for the same image-size@1.2.1 finding via
+          metro@0.83.3 — see SNYK-JS-IMAGESIZE-17295814 for the full
+          rationale.
+        expires: 2026-10-27T00:00:00.000Z
+  SNYK-JS-INFLIGHT-6095116:
+    - '*':
+        reason: >-
+          Only reachable via glob@7.2.3, itself only pulled in by three
+          devDependency-only chains: chromium-edge-launcher (Hermes
+          debugger launcher), @react-native/codegen (build-time codegen),
+          and babel-jest/test-exclude (Jest tooling). None of these ship
+          in the app bundle. inflight's bug is a resource leak under
+          sustained reuse in a long-running process — irrelevant to
+          short-lived local dev/build/test runs. No patched inflight
+          release was ever published; the real fix is those three
+          packages migrating off glob@7 upstream, which isn't something
+          an override here can safely force.
+        expires: 2026-10-27T00:00:00.000Z
+patch: {}
