@@ -124,6 +124,11 @@ async function fetchBrokers(): Promise<any[]> {
 async function fetchPaymentPlans(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/crm/payment-plans"); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Blocks' own tagged PaymentPlanIds — the middle tier of the Project ->
+// Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
+async function fetchBlockPlanTags(): Promise<any[]> {
+  try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 // Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
 // MilestonesJson column — reused here so the brief plan-preview card below
@@ -264,6 +269,7 @@ const CrmApplication: React.FC = () => {
   const { data: channelPartners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchChannelPartners, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
   // — react-query dedupes/caches across the two, so the Details tab (Step
   // 6) can show the parking total without firing its own separate fetch.
@@ -291,8 +297,19 @@ const CrmApplication: React.FC = () => {
   }, [projects, form.CompanyId]);
   const unitsForProject = useMemo(() => {
     if (!form.ProjectId) return [];
-    return (units as any[]).filter((u: any) => String(u.ProjectId) === form.ProjectId);
-  }, [units, form.ProjectId]);
+    // A unit is unavailable the moment it's got an active Booking or an
+    // active (non-expired) Hold on it — see unit-master GET /'s
+    // LockBookingNo/LockHoldId, the same signals crmApplications.js already
+    // uses for the "Unit unavailable" badge. Keep showing this
+    // application's own already-picked unit even if it's now locked (that
+    // lock is very likely this application's own Draft/Pending hold on
+    // itself) so resuming/editing doesn't strand the form on a unit that
+    // silently vanished from the list.
+    return (units as any[]).filter((u: any) =>
+      String(u.ProjectId) === form.ProjectId
+      && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.PreferredUnitId)
+    );
+  }, [units, form.ProjectId, form.PreferredUnitId]);
   const blocksForProject = useMemo(() => {
     const map = new Map<string, string>();
     unitsForProject.forEach((u: any) => { if (u.BlockId) map.set(String(u.BlockId), u.BlockName); });
@@ -315,17 +332,37 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
-  // A unit's tagged plans (set in Unit Master) constrain the choice; a unit
-  // with no tags at all leaves every active plan on the table. Either way a
-  // plan must be picked once a unit is on the application — there's no more
-  // "leave blank for the default split" option.
+  // Project -> Block -> Unit cascade (see crmEntityCreation.js's
+  // getApplicablePaymentPlans, the same source of truth the backend uses to
+  // validate the actual save) — stop at the first non-empty tier: the
+  // Unit's own tags, else its Block's, else its Project's, else every
+  // active plan. Either way a plan must be picked once a unit is on the
+  // application — there's no more "leave blank for the default split" option.
   const unitTaggedPaymentPlans = useMemo(() => {
     if (!selectedUnit?.PaymentPlanIds) return [];
     const taggedIds: string[] = String(selectedUnit.PaymentPlanIds).split(",").filter(Boolean);
     return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
   }, [paymentPlans, selectedUnit]);
+  const blockTaggedPaymentPlans = useMemo(() => {
+    if (!selectedUnit?.BlockId) return [];
+    const blockRow = (blockPlanTags as any[]).find((b: any) => String(b.Id) === String(selectedUnit.BlockId));
+    if (!blockRow?.PaymentPlanIds) return [];
+    const taggedIds: string[] = String(blockRow.PaymentPlanIds).split(",").filter(Boolean);
+    return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
+  }, [paymentPlans, blockPlanTags, selectedUnit]);
+  const projectTaggedPaymentPlans = useMemo(() => {
+    if (!selectedUnit?.ProjectId) return [];
+    return (paymentPlans as any[]).filter((p: any) =>
+      p.IsActive && p.ProjectIds && String(p.ProjectIds).split(",").includes(String(selectedUnit.ProjectId)));
+  }, [paymentPlans, selectedUnit]);
   const activePaymentPlans = useMemo(() => (paymentPlans as any[]).filter((p: any) => p.IsActive), [paymentPlans]);
-  const applicablePaymentPlans = unitTaggedPaymentPlans.length ? unitTaggedPaymentPlans : activePaymentPlans;
+  const applicablePaymentPlans = unitTaggedPaymentPlans.length
+    ? unitTaggedPaymentPlans
+    : blockTaggedPaymentPlans.length
+      ? blockTaggedPaymentPlans
+      : projectTaggedPaymentPlans.length
+        ? projectTaggedPaymentPlans
+        : activePaymentPlans;
 
   // Resume is only meaningful for a genuinely incomplete application. In
   // practice that's Status='Pending' — POST / (createCrmApplicationRecord)
@@ -577,7 +614,9 @@ const CrmApplication: React.FC = () => {
   const handleCreateAndNext = async () => {
     if (!form.CustomerId) { toast.error("Select a customer"); return; }
     if (!form.CompanyId || !form.ProjectId) { toast.error("Select a company and project"); return; }
-    if (form.PreferredUnitId && !form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
+    if (!form.PreferredUnitId) { toast.error("Select a unit"); return; }
+    if (form.RatePerSqFt === "" || Number(form.RatePerSqFt) <= 0) { toast.error("Enter a valid Rate (₹/sqft)"); return; }
+    if (!form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
     setSaving(true);
     try {
       // Shared Company/Project/Unit/Payment Plan + intake fields step 1 owns.
@@ -698,18 +737,35 @@ const CrmApplication: React.FC = () => {
     try {
       await saveApplicationFields({ Notes: form.Notes || null });
       // Actually submits the application — this is what triggers the 72h
-      // auto-hold on the picked Unit/Parking server-side (see crmApplications.js
-      // PUT /:id/submit). Before this call the wizard only ever PUT individual
-      // step fields; nothing marked the application as "fully filed."
+      // auto-hold on the picked Unit/Parking server-side, AND now also
+      // attempts to create the Booking straight away (see crmApplications.js
+      // PUT /:id/submit) — there is no separate admin-approval step in
+      // between anymore. Before this call the wizard only ever PUT
+      // individual step fields; nothing marked the application as "fully
+      // filed."
       const subRes = await fetchWithAuth(`${API}/${applicationId}/submit`, { method: "PUT" });
-      if (!subRes.ok) { const d = await subRes.json().catch(() => ({})); throw new Error(d.error || "Submit failed"); }
-      toast.success("Application submitted — unit/parking held for 72 hours, pending admin approval");
+      const subData = await subRes.json().catch(() => ({}));
+      if (!subRes.ok) throw new Error(subData.error || "Submit failed");
       setDialogOpen(false);
       resetWizard();
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
       qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       qc.invalidateQueries({ queryKey: ["unit-master"] });
+      if (subData.booking?.BookingNo) {
+        // Booking auto-created — go straight to it instead of leaving staff
+        // to find it themselves, matching the "no approval step in between"
+        // change: Application submitted -> Booking exists -> Booking page.
+        toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+        navigate(`/crm/bookings?applicationId=${applicationId}`);
+      } else if (subData.bookingError) {
+        // Auto-create failed (e.g. a unit-hold conflict in the interim) —
+        // the Application itself still submitted fine; staff can retry via
+        // the "Create Booking" button on the Applications list.
+        toast.warning(`Application submitted, but the booking couldn't be created automatically: ${subData.bookingError}`);
+      } else {
+        toast.success("Application submitted");
+      }
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -746,12 +802,11 @@ const CrmApplication: React.FC = () => {
     }
   };
 
-  // The single place a Booking is ever created from — this Application's
-  // own row, once it's Approved and (per Stage) doesn't have one yet. Same
-  // fields Approval's own auto-booking passes to createCrmBookingRecord
-  // (see crmApplications.js PUT /:id/approve); this exists as the retry for
-  // when that auto-create silently failed (e.g. a stale hold conflict) —
-  // there is no separate "New Booking" form anywhere else in the app.
+  // The manual retry path — Submitting an Application already auto-creates
+  // its Booking (see crmApplications.js PUT /:id/submit); this exists purely
+  // for when that auto-create didn't happen (no unit picked yet at submit
+  // time, or a stale hold conflict) — there is no separate "New Booking"
+  // form anywhere else in the app.
   const [creatingBookingId, setCreatingBookingId] = useState<number | null>(null);
 
   // Cancel confirmation state — a destructive, one-way action (backend has no
@@ -811,6 +866,7 @@ const CrmApplication: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to create booking");
       toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      navigate(`/crm/bookings?applicationId=${a.Id}`);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -940,9 +996,14 @@ const CrmApplication: React.FC = () => {
                       <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
                     </button>
                   )}
-                  {/* submitOnly: Approve/Reject only ever happen from the Admin
-                      Approval Inbox (admin/super_admin/dba), never self-service here.
-                      Approval now also auto-creates the Booking — see crmApplications.js. */}
+                  {/* There is no Application-level Approve/Reject anymore —
+                      this renders nothing for a normal Pending application
+                      (submitOnly hides Approve/Reject even if status were
+                      Pending, and Approved/Cancelled/Expired render nothing
+                      either way). It only still shows a "Submit" button for
+                      the legacy case of an application some old data has
+                      sitting at Rejected — a real resubmit back to Pending,
+                      see crmApplications.js PUT /:id/submit. */}
                   <ApprovalActions
                     status={a.Status}
                     recordId={a.Id}
@@ -953,11 +1014,12 @@ const CrmApplication: React.FC = () => {
                       if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
                     }}
                   />
-                  {/* Approval auto-creates the Booking; this only ever shows up
-                      when that auto-create didn't happen (e.g. a unit-hold
-                      conflict at the time) — the sole retry path, no separate
-                      "New Booking" form exists anywhere else. */}
-                  {a.Status === "Approved" && (
+                  {/* Submitting the Application auto-creates the Booking; this
+                      only ever shows up when that auto-create didn't happen
+                      (no unit was picked yet, or a unit-hold conflict at the
+                      time) — the sole retry path, no separate "New Booking"
+                      form exists anywhere else. */}
+                  {!["Rejected", "Cancelled", "Expired"].includes(a.Status) && a.Stage !== "Converted" && (
                     a.UnitUnavailableForBooking ? (
                       <span
                         className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
@@ -1208,7 +1270,7 @@ const CrmApplication: React.FC = () => {
                         setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
-                      <option value="">Any block</option>
+                      <option value="">Select block</option>
                       {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
                     </select>
                   </div>
@@ -1219,7 +1281,7 @@ const CrmApplication: React.FC = () => {
                         setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
                       }}
                       className={inputCls}>
-                      <option value="">Any floor</option>
+                      <option value="">Select floor</option>
                       {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
                     </select>
                   </div>
@@ -1227,7 +1289,23 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>Unit *</label>
                     <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                       onChange={(e) => {
-                        setForm((f) => ({ ...f, PreferredUnitId: e.target.value, PaymentPlanId: "" }));
+                        // Unit can be picked before Block/Floor are chosen —
+                        // the dropdown already falls back to the full
+                        // project's unit list when they're empty (see
+                        // unitsForBlock/unitsForFloor). Whichever way it was
+                        // reached, backfill Block/Floor from the picked
+                        // unit's own record so downstream logic that keys off
+                        // them (Parking's blockId scoping, Block-tagged
+                        // Payment Plans) still narrows correctly instead of
+                        // silently staying project-wide.
+                        const picked = (unitsForProject as any[]).find((u: any) => String(u.Id) === e.target.value);
+                        setForm((f) => ({
+                          ...f,
+                          PreferredUnitId: e.target.value,
+                          BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
+                          FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
+                          PaymentPlanId: "",
+                        }));
                       }}
                       className={inputCls}>
                       <option value="">Select unit</option>
@@ -1269,8 +1347,14 @@ const CrmApplication: React.FC = () => {
                         <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
                       ))}
                     </select>
-                    {!unitTaggedPaymentPlans.length && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans tagged in Unit Master — showing every active plan instead.</p>
+                    {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
+                    )}
+                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
+                    )}
+                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
+                      <p className="text-[11px] text-muted-foreground mt-1">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
                     )}
 
                     {/* Brief plan breakdown — Booking is the plan's own
@@ -1308,7 +1392,7 @@ const CrmApplication: React.FC = () => {
                   <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>Rate (₹/sqft)</label>
+                  <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
                   <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
                 </div>
                 <div>
@@ -1619,7 +1703,7 @@ const CrmApplication: React.FC = () => {
               {step === 6 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
-                  {saving ? "Saving..." : "Save & Close"}
+                  {saving ? "Submitting..." : "Submit Application"}
                 </button>
               )}
             </div>

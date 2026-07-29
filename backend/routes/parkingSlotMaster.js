@@ -6,7 +6,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { getParkingSlotLockReason } = require("../services/crmHierarchyLocks");
+const { getParkingSlotLockReason, getParkingSlotHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 
 const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
@@ -187,14 +187,16 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-// DELETE — soft delete (IsActive = 0), matching the platform-wide convention
-// (and unitMaster.js's fix for the same problem): there are no DB-level FK
-// constraints here, so a hard DELETE would leave CrmParkingAllotment rows
-// pointing at nothing. Refuses to delete a Booked or OnHold slot.
+// DELETE — a real, permanent removal (not a soft IsActive=0 flag left
+// sitting in the grid forever). Two checks run first: getParkingSlotLockReason
+// (booked/held), then getParkingSlotHardDeleteBlockers — dbo.ParkingSlot is
+// the target of a real SQL Server FK (CrmParkingAllotment.ParkingSlotId,
+// confirmed via sys.foreign_keys), so even a historical/inactive allotment
+// still physically blocks a hard DELETE. Only once both are clear does the
+// row actually get removed.
 router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
     const existing = await pool.request().input("Id", sql.Int, id)
@@ -209,13 +211,16 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       });
     }
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .input("UpdatedBy", sql.Int, updatedBy)
-      .query("UPDATE dbo.ParkingSlot SET IsActive = 0, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
+    const hardBlockers = await getParkingSlotHardDeleteBlockers(pool, id);
+    if (hardBlockers) {
+      return res.status(409).json({
+        error: `Parking slot "${SlotNo}" ${hardBlockers}.`,
+      });
+    }
+
+    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingSlot WHERE Id = @Id");
     await bumpCacheVersion("parking-slot-master");
-    res.json({ message: `Parking slot "${SlotNo}" deactivated successfully` });
+    res.json({ message: `Parking slot "${SlotNo}" deleted` });
   } catch (err) {
     console.error("[parking-slot-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });

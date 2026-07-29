@@ -15,6 +15,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/parking-slot-master";
+const DROPDOWN_API = "/api/business/dropdown";
 const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
 async function fetchSlots(): Promise<any[]> {
@@ -22,33 +23,52 @@ async function fetchSlots(): Promise<any[]> {
   if (!res.ok) throw new Error("Failed to fetch parking slots");
   return res.json().catch(() => ({}));
 }
-async function fetchProjectOptions(): Promise<{ value: string; label: string }[]> {
-  const res = await fetchWithAuth("/api/unit-master/projects");
-  if (!res.ok) throw new Error("Failed to fetch projects");
-  const data: { Id: number; Name: string }[] = await res.json().catch(() => ({}));
-  return data.map((p) => ({ value: String(p.Id), label: p.Name }));
-}
 
 // Real, individually numbered parking inventory — distinct from Parking
 // Master (which is only the pricing rate). This is what the Parking Matrix
 // renders and what a sale actually allots against.
+// Company -> Project -> Block, each strictly gated behind its parent
+// (disabledWhen in MasterPage.tsx) so this can never fall back to showing
+// every row unfiltered.
 const fields: FieldDef[] = [
+  {
+    name: "companyId",
+    label: "Company",
+    type: "select",
+    required: true,
+    optionsProvider: (_data, _currentId, form) => {
+      const companies: { id: number; name: string }[] = (form?.__companies as any) ?? [];
+      return companies.map((c) => ({ value: String(c.id), label: c.name }));
+    },
+  },
   {
     name: "projectId",
     label: "Project",
     type: "select",
     required: true,
-    asyncOptions: fetchProjectOptions,
+    disabledWhen: (form) => !form?.companyId,
+    disabledPlaceholder: "Select a Company first",
+    optionsProvider: (_data, _currentId, form) => {
+      const projects: { id: number; name: string; company_id: number }[] = (form?.__projects as any) ?? [];
+      const selectedCompany = form?.companyId as string | undefined;
+      if (!selectedCompany) return [];
+      return projects
+        .filter((p) => String(p.company_id) === selectedCompany)
+        .map((p) => ({ value: String(p.id), label: p.name }));
+    },
   },
   {
     name: "blockId",
     label: "Block",
     type: "select",
+    disabledWhen: (form) => !form?.projectId,
+    disabledPlaceholder: "Select a Project first",
     optionsProvider: (_data, _currentId, form) => {
       const blocks: { Id: number; Name: string; ProjectId: number }[] = (form?.__blocks as any) ?? [];
       const selectedProject = form?.projectId as string | undefined;
+      if (!selectedProject) return [];
       return blocks
-        .filter((b) => (selectedProject ? String(b.ProjectId) === selectedProject : true))
+        .filter((b) => String(b.ProjectId) === selectedProject)
         .map((b) => ({ value: String(b.Id), label: b.Name }));
     },
   },
@@ -123,6 +143,24 @@ const ParkingSlotMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Company -> Project source data for the two new cascade fields above.
+  // Same shared dropdown endpoint every other Company->Project chain in the
+  // app (BlockMaster.tsx, UnitMaster.tsx, CrmApplication.tsx) already uses.
+  const { data: dropdownData } = useQuery<{
+    companies: { id: number; name: string }[];
+    projects: { id: number; name: string; company_id: number }[];
+  }>({
+    queryKey: ["business-dropdown"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(DROPDOWN_API);
+      if (!res.ok) throw new Error("Failed to fetch company/project dropdown");
+      return res.json().catch(() => ({ companies: [], projects: [] }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const companies = dropdownData?.companies ?? [];
+  const projectsList = dropdownData?.projects ?? [];
+
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(slots)) return [];
     return slots.map((item) => {
@@ -130,8 +168,13 @@ const ParkingSlotMaster: React.FC = () => {
       const lockAllotmentId = item.LockAllotmentId ?? null;
       const lockBookingNo = item.LockBookingNo ?? null;
       const lockHoldId = item.LockHoldId ?? null;
+      // A slot's own row only carries ProjectId — the Company shown/edited
+      // here is derived from the Project's own company_id so an existing
+      // slot reopens with the correct Company already selected.
+      const project = projectsList.find((p) => p.id === item.ProjectId);
       return {
         _id: String(item.Id),
+        companyId: project ? String(project.company_id) : "",
         projectId: String(item.ProjectId),
         projectName: item.ProjectName ?? "",
         blockId: item.BlockId ? String(item.BlockId) : "",
@@ -145,9 +188,12 @@ const ParkingSlotMaster: React.FC = () => {
         status: computeStatus({ isActive, lockAllotmentId, lockHoldId }),
       };
     });
-  }, [slots]);
+  }, [slots, projectsList]);
 
-  const blocksPatch = React.useMemo(() => ({ __blocks: allBlocks }), [allBlocks]);
+  const blocksPatch = React.useMemo(
+    () => ({ __blocks: allBlocks, __companies: companies, __projects: projectsList }),
+    [allBlocks, companies, projectsList],
+  );
 
   const toPayload = (r: Record<string, any>) => ({
     ProjectId: parseInt(r.projectId),
@@ -205,8 +251,11 @@ const ParkingSlotMaster: React.FC = () => {
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           externalFormPatch={blocksPatch}
-          externalFormPatchKey={allBlocks.length}
+          externalFormPatchKey={`${allBlocks.length}:${companies.length}:${projectsList.length}`}
           onFieldChange={(form, fieldName) => {
+            if (fieldName === "companyId") {
+              return { ...form, projectId: "", blockId: "" };
+            }
             if (fieldName === "projectId") {
               return { ...form, blockId: "" };
             }

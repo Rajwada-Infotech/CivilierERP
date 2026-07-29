@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -16,6 +16,15 @@ const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const SA_LEADS_API = "/api/sa/leads";
+const BANK_DETAIL_API = "/api/crm/customer-bank-details";
+const PROJECT_BANK_API = "/api/crm/project-banks";
+const BANK_MASTER_API = "/api/bank-master";
+
+const EMPTY_BANK = {
+  BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
+  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
+  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
+};
 
 const OUTCOMES = ["Welcomed", "NotReachable", "RequestedCallback", "VoiceMail", "Busy", "SwitchedOff"];
 const outcomeColor: Record<string, string> = {
@@ -68,12 +77,50 @@ async function fetchBookingById(bookingId: number): Promise<any | null> {
   try {
     const r = await fetchWithAuth(`${BKG_API}/${bookingId}`);
     if (!r.ok) return null;
-    const d = await r.json();
+    // GET /api/crm/bookings/:id returns { booking: {...}, customer, ... } —
+    // not the flat booking row itself.
+    const { booking: d } = await r.json();
+    if (!d) return null;
     return { BookingId: d.Id, BookingNo: d.BookingNo, ApplicantName: d.ApplicantName, Mobile: d.Mobile, ProjectName: d.ProjectName, UnitNo: d.UnitNo };
   } catch { return null; }
 }
 async function fetchCallContext(bookingId: number): Promise<any | null> {
   try { const r = await fetchWithAuth(`${API}/${bookingId}/call-context`); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function fetchBankDetail(bookingId: number): Promise<any | null> {
+  try { const r = await fetchWithAuth(`${BANK_DETAIL_API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
+}
+// Full loan/bank-preference record — the call-context endpoint only carries
+// a trimmed subset (BankName/LoanAmount/SanctionStatus/LoanAccountNo); this
+// is the same GET the Home Loan Tracking page itself uses, so the expanded
+// Bank Preference card can show Branch/RM name/contact/disbursed amount too
+// without a second bespoke endpoint.
+async function fetchLoanDetail(bookingId: number): Promise<any | null> {
+  try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/loan`); return r.ok ? r.json() : null; } catch { return null; }
+}
+// Real milestone schedule for the expandable Payment Plan card — same
+// endpoint CrmBookingDetail.tsx's own "Payment Plan" tab reads .milestones
+// off of.
+async function fetchBookingMilestones(bookingId: number): Promise<any[]> {
+  try {
+    const r = await fetchWithAuth(`${BKG_API}/${bookingId}`);
+    if (!r.ok) return [];
+    const d = await r.json();
+    return d.milestones || [];
+  } catch { return []; }
+}
+// Full invoice rows (Description/Status/CreatedByName included) — richer
+// than call-context's trimmed InvoiceNo/InvoiceType/Amount/InvoiceDate-only
+// projection, so the click-to-detail dialog doesn't need its own endpoint.
+async function fetchBookingInvoices(bookingId: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchAllBanks(): Promise<any[]> {
+  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 function mimeIcon(mime: string | null | undefined) {
@@ -172,8 +219,27 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
   const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", DepositBankId: "", Notes: "" });
   const [recordingOnAccount, setRecordingOnAccount] = useState(false);
+
+  // Nominee & Bank Details — done inline here now instead of a "go to
+  // Customer Bank & Nominee page" link, same shape/API CrmBookingDetail.tsx's
+  // own Bank Details tab uses (both read/write the one CrmCustomerBankDetail
+  // row keyed by BookingId). Starts locked/read-only — same "re-verify"
+  // pattern as this file's own EditCallDialog — since this is often already
+  // on file from the Application stage; the point of showing it here is to
+  // confirm it out loud with the customer on the call, not silently retype it.
+  const [bank, setBank] = useState({ ...EMPTY_BANK });
+  const [bankLoaded, setBankLoaded] = useState(false);
+  const [bankSaving, setBankSaving] = useState(false);
+  const [bankLocked, setBankLocked] = useState(true);
+
+  // Which Financial Summary card is expanded — Payment Plan and Bank
+  // Preference are collapsed by default; tapping either flexes it open to
+  // show the real detail (milestone schedule / full loan record) instead of
+  // just the one-line teaser.
+  const [expandedCard, setExpandedCard] = useState<"plan" | "bank" | null>(null);
+  const [viewingInvoice, setViewingInvoice] = useState<any | null>(null);
 
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: checklist, refetch: refetchChecklist } = useQuery({
@@ -192,8 +258,86 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryKey: ["crm-co-applicants", booking.BookingId],
     queryFn: () => fetchCoApplicants(booking.BookingId),
   });
+  // Only fetched once its card is actually expanded — no point loading the
+  // full milestone schedule / full loan record on every call just to show a
+  // one-line teaser.
+  const { data: milestones = [] } = useQuery({
+    queryKey: ["crm-welcome-milestones", booking.BookingId],
+    queryFn: () => fetchBookingMilestones(booking.BookingId),
+    enabled: expandedCard === "plan",
+  });
+  const { data: loanDetail, isLoading: loanLoading } = useQuery({
+    queryKey: ["crm-welcome-loan", booking.BookingId],
+    queryFn: () => fetchLoanDetail(booking.BookingId),
+    enabled: expandedCard === "bank",
+  });
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-welcome-project-banks", callContext?.booking?.ProjectId],
+    queryFn: () => fetchProjectBanks(callContext?.booking?.ProjectId),
+    enabled: onAccountDialog && !!callContext?.booking?.ProjectId,
+  });
+  const { data: allBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"],
+    queryFn: fetchAllBanks,
+    enabled: onAccountDialog,
+    staleTime: 5 * 60_000,
+  });
+  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+
+  useEffect(() => {
+    let cancelled = false;
+    setBankLoaded(false);
+    fetchBankDetail(booking.BookingId).then((d) => {
+      if (cancelled) return;
+      setBank({
+        BankName: d?.BankName || "", BranchName: d?.BranchName || "", AccountNo: d?.AccountNo || "",
+        IfscCode: d?.IfscCode || "", AccountHolderName: d?.AccountHolderName || "",
+        PanNo: d?.PanNo || "", AadhaarNo: d?.AadhaarNo || "",
+        Occupation: d?.Occupation || "", AnnualIncome: d?.AnnualIncome != null ? String(d.AnnualIncome) : "",
+        NomineeName: d?.NomineeName || "", NomineeRelation: d?.NomineeRelation || "",
+        NomineeDob: d?.NomineeDob ? String(d.NomineeDob).slice(0, 10) : "",
+        NomineeContact: d?.NomineeContact || "", NomineeAddress: d?.NomineeAddress || "",
+      });
+    }).finally(() => { if (!cancelled) setBankLoaded(true); });
+    return () => { cancelled = true; };
+  }, [booking.BookingId]);
 
   const invalidateQueue = () => qc.invalidateQueries({ queryKey: ["crm-welcome-queue"] });
+
+  // Saving here also refetches the checklist — Bank/Nominee completeness
+  // feeds both the checklist strip AND (server-side) the Agreement
+  // auto-creation gate (maybeAutoCreateAgreement), so this is the one save
+  // that can silently unlock a Draft Agreement the moment it lands.
+  const handleSaveBank = async () => {
+    setBankSaving(true);
+    try {
+      const res = await fetchWithAuth(`${BANK_DETAIL_API}/booking/${booking.BookingId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bank),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success("Bank & Nominee details saved");
+      setBankLocked(true);
+      refetchChecklist();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBankSaving(false);
+    }
+  };
+
+  // Full invoice rows aren't in call-context's trimmed projection — fetch
+  // the real list (same endpoint CrmBookingDetail.tsx's own Invoices tab
+  // reads) on demand and pull out the one that was tapped, rather than
+  // needing a dedicated single-invoice endpoint that doesn't exist.
+  const handleViewInvoice = async (invoiceNo: string) => {
+    const list = await fetchBookingInvoices(booking.BookingId);
+    const found = list.find((i: any) => i.InvoiceNo === invoiceNo);
+    if (found) setViewingInvoice(found);
+    else toast.error("Could not load invoice detail");
+  };
 
   const handleLogCall = async () => {
     // Without this, "Log Call" happily saves a row with nothing but who
@@ -254,20 +398,30 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
 
   // "If the customer is paying extra amount" — recorded straight from the
   // call as an on-account deposit, not tied to any milestone yet.
+  // Matches the real detailed form CrmPaymentMilestones.tsx's own "Deposit
+  // On-Account" dialog uses (Amount/ReceivedDate/PaymentMode/TransactionRef/
+  // DepositBankId/Notes) — this is the same backend endpoint and the same
+  // customer-wise on-account tracking, not a separate ad-hoc mini-form. A
+  // deposit recorded here shows up identically on the Payment Milestones
+  // page's own on-account list, and auto-sweeps onto the next-due milestone
+  // server-side (autoApplyOnAccount).
   const handleRecordOnAccount = async () => {
     if (!onAccountForm.Amount) { toast.error("Amount is required"); return; }
     setRecordingOnAccount(true);
     try {
+      const bankName = onAccountForm.DepositBankId
+        ? (bankOptions as any[]).find((b: any) => String(b.BId) === onAccountForm.DepositBankId)?.BName
+        : undefined;
       const res = await fetchWithAuth(`${PAY_API}/booking/${booking.BookingId}/on-account`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...onAccountForm, Amount: parseFloat(onAccountForm.Amount) }),
+        body: JSON.stringify({ ...onAccountForm, Amount: parseFloat(onAccountForm.Amount), DepositBankName: bankName }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
       setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", PaymentMode: "", TransactionRef: "", Notes: "" });
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", DepositBankId: "", Notes: "" });
       refetchCallContext();
     } catch (e: any) {
       toast.error(e.message);
@@ -370,7 +524,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <PhoneCall size={18} className="text-primary" />
@@ -378,322 +532,489 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
           </DialogTitle>
         </DialogHeader>
 
-        {/* ── Customer Snapshot — everything the telecaller needs on-screen
-             DURING the call, in one glance ── */}
-        {callContext && (
-          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5 items-start">
+          {/* ══════════ LEFT — customer, booking, unit/parking & financial
+              context. Persistent reference panel: everything the telecaller
+              needs to see stays in view while the right side is worked. ══════════ */}
+          <div className="space-y-3 lg:sticky lg:top-0">
+            <div className="rounded-xl border border-border bg-muted/10 p-3.5 space-y-3">
               <ContactActionBar
-                applicantName={callContext.customer?.CustomerName || booking.ApplicantName}
-                mobile={callContext.customer?.Mobile || booking.Mobile}
-                email={callContext.customer?.Email || null}
+                applicantName={callContext?.customer?.CustomerName || booking.ApplicantName}
+                mobile={callContext?.customer?.Mobile || booking.Mobile}
+                email={callContext?.customer?.Email || null}
               />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2 border-t border-border">
+                <Building2 size={12} className="shrink-0" />
+                <span className="truncate">{callContext?.booking?.ProjectName || booking.ProjectName || "—"}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Car size={12} className="shrink-0" />
+                <span className="truncate">Unit {callContext?.booking?.UnitNo || booking.UnitNo || "—"}</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border p-3.5 space-y-2.5">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Financial Summary</h4>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-border bg-background p-2.5">
+                  <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Total Value</div>
+                  <div className="font-bold text-sm">{fmt(callContext?.booking?.GrandTotal ?? callContext?.booking?.TotalValue)}</div>
+                </div>
+                <div className={`rounded-lg border p-2.5 ${(callContext?.outstanding?.balance ?? 0) > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
+                  <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Outstanding</div>
+                  <div className={`font-bold text-sm ${(callContext?.outstanding?.balance ?? 0) > 0 ? "text-amber-700" : ""}`}>{fmt(callContext?.outstanding?.balance)}</div>
+                </div>
+              </div>
+              {/* Payment Plan — tap to flex open the real milestone
+                  schedule instead of just the plan name. */}
+              <div className="rounded-lg border border-border bg-background overflow-hidden">
+                <button type="button" onClick={() => setExpandedCard((c) => c === "plan" ? null : "plan")}
+                  className="w-full text-left p-2.5 text-xs hover:bg-muted/30">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="flex items-center gap-1 text-muted-foreground"><ClipboardCheck size={11} /> Payment Plan</span>
+                    <ChevronRight size={12} className={`text-muted-foreground transition-transform ${expandedCard === "plan" ? "rotate-90" : ""}`} />
+                  </div>
+                  <div className="font-medium text-sm truncate" title={callContext?.booking?.PaymentPlanName}>{callContext?.booking?.PaymentPlanName || "7-stage default"}</div>
+                </button>
+                {expandedCard === "plan" && (
+                  <div className="border-t border-border px-2.5 py-2 space-y-1 bg-muted/10">
+                    {milestones.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground">No milestone schedule generated yet.</p>
+                    ) : milestones.map((m: any) => (
+                      <div key={m.Id} className="flex items-center justify-between text-[11px]">
+                        <span className="text-foreground/90 truncate">{m.MilestoneNo}. {m.MilestoneName}</span>
+                        <span className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-muted-foreground">{fmt(m.AmountDue)}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full border font-medium ${m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/40 border-border"}`}>{m.Status}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bank Preference (home loan) — a genuinely separate record
+                  from the customer's own Nominee & Bank Details below (that's
+                  KYC/refund banking; this is which bank is financing the
+                  purchase). Tap to flex open the full loan record, sourced
+                  straight from the same GET the Home Loan Tracking page
+                  itself uses (dbo.CrmLoanDetail via GET /:id/loan) rather
+                  than the trimmed subset call-context carries. */}
+              <div className="rounded-lg border border-border bg-background overflow-hidden">
+                <button type="button" onClick={() => setExpandedCard((c) => c === "bank" ? null : "bank")}
+                  className="w-full text-left p-2.5 text-xs hover:bg-muted/30">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="flex items-center gap-1 text-muted-foreground"><Landmark size={11} /> Bank Preference (Home Loan)</span>
+                    <ChevronRight size={12} className={`text-muted-foreground transition-transform ${expandedCard === "bank" ? "rotate-90" : ""}`} />
+                  </div>
+                  <div className="font-medium text-sm truncate" title={callContext?.loan?.BankName}>{callContext?.loan?.BankName || "Not on file"}</div>
+                </button>
+                {expandedCard === "bank" && (
+                  <div className="border-t border-border px-2.5 py-2 space-y-1 bg-muted/10 text-[11px]">
+                    {loanLoading ? (
+                      <p className="text-muted-foreground">Loading...</p>
+                    ) : !loanDetail ? (
+                      <p className="text-muted-foreground">No loan/bank preference on file — record one from the Home Loan Tracking page.</p>
+                    ) : (
+                      <>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Bank / Branch</span><span className="font-medium">{loanDetail.BankName || "—"}{loanDetail.BranchName ? ` · ${loanDetail.BranchName}` : ""}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Loan Amount</span><span className="font-medium">{fmt(loanDetail.LoanAmount)}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Sanction Status</span><span className="font-medium">{loanDetail.SanctionStatus || "NotApplied"}</span></div>
+                        {loanDetail.DisbursedAmount > 0 && (
+                          <div className="flex justify-between"><span className="text-muted-foreground">Disbursed</span><span className="font-medium">{fmt(loanDetail.DisbursedAmount)}</span></div>
+                        )}
+                        {loanDetail.LoanAccountNo && (
+                          <div className="flex justify-between"><span className="text-muted-foreground">Loan A/c No.</span><span className="font-medium font-mono">{loanDetail.LoanAccountNo}</span></div>
+                        )}
+                        {loanDetail.RmName && (
+                          <div className="flex justify-between"><span className="text-muted-foreground">RM</span><span className="font-medium">{loanDetail.RmName}{loanDetail.RmContact ? ` · ${loanDetail.RmContact}` : ""}</span></div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {(callContext?.invoices?.length ?? 0) > 0 && (
+                <div className="text-xs pt-1 border-t border-border">
+                  <span className="text-muted-foreground block mb-1">Invoices</span>
+                  <div className="flex flex-wrap gap-1">
+                    {callContext.invoices.map((inv: any) => (
+                      <button key={inv.InvoiceNo} type="button" onClick={() => handleViewInvoice(inv.InvoiceNo)}
+                        className="inline-block px-1.5 py-0.5 rounded border border-border font-mono text-[11px] hover:bg-muted hover:border-primary/40">
+                        {inv.InvoiceNo} ({fmt(inv.Amount)})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(callContext?.onAccount?.availableBalance ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium pt-1 border-t border-border">
+                  <Wallet size={12} className="shrink-0" /> {fmt(callContext?.onAccount.availableBalance)} on account, not yet applied
+                </div>
+              )}
               <button onClick={() => setOnAccountDialog(true)}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100">
-                <Wallet size={13} /> Customer Paying Extra? Record On-Account
+                className="w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-foreground font-medium hover:bg-muted">
+                <Wallet size={13} /> Record On-Account Deposit
               </button>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div className="rounded-lg border border-border bg-background p-3">
-                <div className="flex items-center gap-1 text-muted-foreground mb-1"><IndianRupee size={12} /> Total Value</div>
-                <div className="font-bold text-sm">{fmt(callContext.booking?.GrandTotal ?? callContext.booking?.TotalValue)}</div>
-              </div>
-              <div className={`rounded-lg border p-3 ${callContext.outstanding?.balance > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
-                <div className="flex items-center gap-1 text-muted-foreground mb-1"><IndianRupee size={12} /> Outstanding</div>
-                <div className={`font-bold text-sm ${callContext.outstanding?.balance > 0 ? "text-amber-700" : ""}`}>{fmt(callContext.outstanding?.balance)}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-background p-3">
-                <div className="flex items-center gap-1 text-muted-foreground mb-1"><ClipboardCheck size={12} /> Payment Plan</div>
-                <div className="font-medium text-sm truncate" title={callContext.booking?.PaymentPlanName}>{callContext.booking?.PaymentPlanName || "7-stage default"}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-background p-3">
-                <div className="flex items-center gap-1 text-muted-foreground mb-1"><Landmark size={12} /> Bank Preference</div>
-                <div className="font-medium text-sm truncate" title={callContext.loan?.BankName}>{callContext.loan?.BankName || "Not on file"}</div>
-              </div>
-            </div>
-
-            {callContext.invoices?.length > 0 && (
-              <div className="text-xs">
-                <span className="text-muted-foreground">Invoices: </span>
-                {callContext.invoices.map((inv: any) => (
-                  <span key={inv.InvoiceNo} className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-border font-mono">{inv.InvoiceNo} ({fmt(inv.Amount)})</span>
+            {/* Progress stepper — a vertical readout of the same checklist
+                fields the working area's own sections keep in sync (each
+                save on the right refetches this), so a completed step
+                reflects here immediately instead of staff needing to guess. */}
+            {checklist && (
+              <div className="rounded-xl border border-border p-3.5 space-y-1.5">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Booking Readiness</h4>
+                {[
+                  { label: "Welcome Call", done: checklist.welcomeCall.done },
+                  { label: "Documents Verified", done: checklist.documents.total > 0 && checklist.documents.verified === checklist.documents.total },
+                  { label: "Co-Applicant Added", done: checklist.coApplicants.count > 0 },
+                  { label: "Bank & Nominee", done: checklist.bankDetails.complete },
+                  { label: "NOC Issued", done: checklist.noc.some((n: any) => n.Status === "Issued") },
+                  { label: "Agreement", done: !!checklist.agreement },
+                ].map((s) => (
+                  <div key={s.label} className="flex items-center gap-2 text-xs py-0.5">
+                    <span className={`flex items-center justify-center w-4 h-4 rounded-full shrink-0 ${s.done ? "bg-emerald-500 text-white" : "border border-border text-transparent"}`}>
+                      {s.done && <Check size={10} />}
+                    </span>
+                    <span className={s.done ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
+                  </div>
                 ))}
               </div>
             )}
-            {callContext.onAccount?.availableBalance > 0 && (
-              <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium">
-                <Wallet size={12} /> {fmt(callContext.onAccount.availableBalance)} sitting on account, not yet applied to a milestone
-              </div>
-            )}
           </div>
-        )}
 
-        {/* ── Checklist strip ── */}
-        {checklist && (
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
-            {[
-              { label: "Call", done: checklist.welcomeCall.done },
-              { label: "Docs", done: checklist.documents.total > 0 && checklist.documents.verified === checklist.documents.total },
-              { label: "Co-App.", done: checklist.coApplicants.count > 0 },
-              { label: "Bank", done: checklist.bankDetails.complete },
-              { label: "NOC", done: checklist.noc.some((n: any) => n.Status === "Issued") },
-              { label: "Agreement", done: !!checklist.agreement },
-            ].map((s) => (
-              <div key={s.label} className={`rounded-lg border p-2 text-[11px] font-medium ${s.done ? "border-green-200 bg-green-50 text-green-700" : "border-border bg-muted/30 text-muted-foreground"}`}>
-                {s.done && <Check size={11} className="inline mr-0.5 -mt-0.5" />} {s.label}
+          {/* ══════════ RIGHT — the actual working area ══════════ */}
+          <div className="space-y-4 min-w-0">
+            {/* ── Log Call ── */}
+            <div className="rounded-xl border border-border p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-primary" /> Log This Call</h3>
+                {/* Live duration timer — a genuinely dynamic touch: start it the
+                    moment the call connects, it counts up on-screen, and Duration
+                    below auto-fills from it when stopped. */}
+                <div className="flex items-center gap-2">
+                  {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
+                  <button type="button" onClick={() => setTimerRunning((r) => !r)}
+                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
+                      timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    }`}>
+                    <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
+                  </button>
+                </div>
               </div>
-            ))}
-          </div>
-        )}
 
-        {/* ── Log Call ── */}
-        <div className="rounded-xl border border-border p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-primary" /> Log This Call</h3>
-            {/* Live duration timer — a genuinely dynamic touch: start it the
-                moment the call connects, it counts up on-screen, and Duration
-                below auto-fills from it when stopped. */}
-            <div className="flex items-center gap-2">
-              {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
-              <button type="button" onClick={() => setTimerRunning((r) => !r)}
-                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
-                  timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                }`}>
-                <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Called By</label>
+                  {calledByLocked ? (
+                    <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
+                      <span className="text-sm text-foreground truncate">{currentUser?.name || "Self"} <span className="text-xs text-muted-foreground">(you)</span></span>
+                      <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
+                    </div>
+                  ) : (
+                    <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                      <option value="">— Self —</option>
+                      {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
+                  <input type="datetime-local" value={form.CallDate}
+                    onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Duration (seconds) {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer)</span> : ""}
+                  </label>
+                  <input type="number" value={form.DurationSeconds}
+                    onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                    placeholder={timerSeconds > 0 ? String(timerSeconds) : "e.g. 180"} />
+                </div>
+              </div>
+
+              {/* Quick-pick outcome chips — one tap instead of a dropdown, colored
+                  to match the same outcomeColor scheme used everywhere else this
+                  value is shown (queue, history, edit dialog). */}
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Outcome</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {OUTCOMES.map((o) => (
+                    <button key={o} type="button" onClick={() => setForm((f) => ({ ...f, Outcome: o }))}
+                      className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+                        form.Outcome === o ? outcomeColor[o] : "border-border text-muted-foreground hover:bg-muted/40"
+                      }`}>
+                      {form.Outcome === o && <Check size={11} className="inline mr-1 -mt-0.5" />}{o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Schedule Follow-up Call</label>
+                  <input type="date" value={form.NextCallDate}
+                    onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Preferred Agreement Date</label>
+                  <input type="date" value={form.PreferredAgreementDate}
+                    onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><StickyNote size={11} /> Notes</label>
+                <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+                  rows={3} placeholder="What was discussed on this call..."
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
+                <input type="checkbox" checked={form.PaymentPlanConfirmed}
+                  onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
+                  className="rounded border-border" />
+                <ClipboardCheck size={13} className="text-muted-foreground" />
+                Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
+              </label>
+
+              {/* Dynamic custom fields */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-muted-foreground flex items-center gap-1"><ListPlus size={11} /> Additional Fields</label>
+                  <button onClick={() => setCustomFields((f) => [...f, { key: "", value: "" }])}
+                    className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                    <Plus size={11} /> Add Field
+                  </button>
+                </div>
+                {customFields.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 mb-1.5">
+                    <input placeholder="Field name" value={f.key}
+                      onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="Value" value={f.value}
+                      onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
+                      className="text-muted-foreground hover:text-red-600 shrink-0">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={handleLogCall} disabled={saving || !form.Outcome}
+                title={!form.Outcome ? "Select an outcome above first" : undefined}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Logging..." : "Log Call"}
               </button>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-              {calledByLocked ? (
-                <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
-                  <span className="text-sm text-foreground truncate">{currentUser?.name || "Self"} <span className="text-xs text-muted-foreground">(you)</span></span>
-                  <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
+            {/* ── Document Verification ── */}
+            <div className="rounded-xl border border-border p-4 space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
+
+              {docData.documents.map((d: any) => (
+                <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0 gap-2">
+                  <button
+                    onClick={() => (d.FilePath ? setPreviewDoc(d) : d.DocumentUrl && window.open(d.DocumentUrl, "_blank"))}
+                    disabled={!d.FilePath && !d.DocumentUrl}
+                    className="flex items-center gap-2 min-w-0 text-left disabled:cursor-default"
+                  >
+                    {mimeIcon(d.MimeType)}
+                    <span className="min-w-0">
+                      <span className="font-medium">{d.DocumentType}</span>
+                      {d.FileName && <span className="block text-[11px] text-muted-foreground truncate max-w-[220px]">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</span>}
+                    </span>
+                    {(d.FilePath || d.DocumentUrl) && <Eye size={13} className="text-muted-foreground shrink-0" />}
+                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
+                      className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                      {d.IsVerified ? "Verified" : "Mark Verified"}
+                    </button>
+                    <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Self —</option>
-                  {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              ))}
+
+              <div className="flex items-center gap-2 pt-1">
+                <select value={docType} onChange={(e) => setDocType(e.target.value)}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">Select document type</option>
+                  {docData.standardTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
                 </select>
+                <input type="file" multiple ref={fileInputRef}
+                  onChange={(e) => handleUploadFiles(e.target.files)}
+                  className="hidden" />
+                <button onClick={() => { if (!docType) { toast.error("Select a document type first"); return; } fileInputRef.current?.click(); }}
+                  disabled={uploading}
+                  className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0 flex items-center gap-1 disabled:opacity-40">
+                  <Upload size={13} /> {uploading ? "Uploading..." : "Upload File(s)"}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input placeholder="...or paste an external document URL instead" value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <button onClick={handleAddDoc} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0">
+                  + Add Link
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
+            </div>
+
+            {/* ── Co-Applicant — full detail cards, not a one-line summary ── */}
+            <div className="rounded-xl border border-border p-4 space-y-2.5">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
+              {coApplicants.length === 0 && !addingCo && (
+                <p className="text-xs text-muted-foreground">No co-applicant on this booking yet.</p>
+              )}
+              {coApplicants.map((c: any) => (
+                <div key={c.Id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-medium text-sm text-foreground">{c.Name}{c.Relation ? <span className="text-muted-foreground font-normal"> · {c.Relation}</span> : ""}</div>
+                    <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline shrink-0">Remove</button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-xs">
+                    <div><span className="text-muted-foreground block">Mobile</span>{c.Mobile || "—"}</div>
+                    <div><span className="text-muted-foreground block">Email</span>{c.Email || "—"}</div>
+                    <div><span className="text-muted-foreground block">PAN</span>{c.PanNo || "—"}</div>
+                    <div><span className="text-muted-foreground block">Aadhaar</span>{c.AadhaarNo || "—"}</div>
+                  </div>
+                </div>
+              ))}
+              {!addingCo ? (
+                <button onClick={() => setAddingCo(true)} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                  <Plus size={11} /> Add Co-Applicant
+                </button>
+              ) : (
+                <div className="space-y-2 pt-1 rounded-lg border border-border p-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input placeholder="Name *" value={coForm.Name} onChange={(e) => setCoForm((f) => ({ ...f, Name: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="Relation" value={coForm.Relation} onChange={(e) => setCoForm((f) => ({ ...f, Relation: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="Mobile" value={coForm.Mobile} onChange={(e) => setCoForm((f) => ({ ...f, Mobile: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="Email" value={coForm.Email} onChange={(e) => setCoForm((f) => ({ ...f, Email: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="PAN No." value={coForm.PanNo} onChange={(e) => setCoForm((f) => ({ ...f, PanNo: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    <input placeholder="Aadhaar No." value={coForm.AadhaarNo} onChange={(e) => setCoForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
+                      className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Save</button>
+                    <button onClick={() => setAddingCo(false)} className="text-xs px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                  </div>
+                </div>
               )}
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
-              <input type="datetime-local" value={form.CallDate}
-                onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">
-                Duration (seconds) {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer)</span> : ""}
-              </label>
-              <input type="number" value={form.DurationSeconds}
-                onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                placeholder={timerSeconds > 0 ? String(timerSeconds) : "e.g. 180"} />
-            </div>
-          </div>
 
-          {/* Quick-pick outcome chips — one tap instead of a dropdown, colored
-              to match the same outcomeColor scheme used everywhere else this
-              value is shown (queue, history, edit dialog). */}
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1.5">Outcome</label>
-            <div className="flex flex-wrap gap-1.5">
-              {OUTCOMES.map((o) => (
-                <button key={o} type="button" onClick={() => setForm((f) => ({ ...f, Outcome: o }))}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                    form.Outcome === o ? outcomeColor[o] : "border-border text-muted-foreground hover:bg-muted/40"
-                  }`}>
-                  {form.Outcome === o && <Check size={11} className="inline mr-1 -mt-0.5" />}{o}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Schedule Follow-up Call</label>
-              <input type="date" value={form.NextCallDate}
-                onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Preferred Agreement Date</label>
-              <input type="date" value={form.PreferredAgreementDate}
-                onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><StickyNote size={11} /> Notes</label>
-            <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={3} placeholder="What was discussed on this call..."
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-          </div>
-
-          <label className="flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
-            <input type="checkbox" checked={form.PaymentPlanConfirmed}
-              onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
-              className="rounded border-border" />
-            <ClipboardCheck size={13} className="text-muted-foreground" />
-            Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
-          </label>
-
-          {/* Dynamic custom fields */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-muted-foreground flex items-center gap-1"><ListPlus size={11} /> Additional Fields</label>
-              <button onClick={() => setCustomFields((f) => [...f, { key: "", value: "" }])}
-                className="text-xs text-primary hover:underline flex items-center gap-0.5">
-                <Plus size={11} /> Add Field
-              </button>
-            </div>
-            {customFields.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 mb-1.5">
-                <input placeholder="Field name" value={f.key}
-                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
-                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="Value" value={f.value}
-                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
-                  className="text-muted-foreground hover:text-red-600 shrink-0">
-                  <X size={14} />
-                </button>
+            {/* ── Nominee & Bank Details — done here, not a link to another
+                page. Starts locked/read-only (this is usually already on
+                file from the Application stage) — "Edit" unlocks it for a
+                genuine re-verify-on-the-call correction, and saving re-locks
+                automatically. Saving also refetches the checklist so "Bank &
+                Nominee" on the left updates immediately, and (server-side)
+                can unlock the Agreement auto-creation the moment this is the
+                last prerequisite still missing. ── */}
+            <div className="rounded-xl border border-border p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} /> Nominee & Bank Details</h3>
+                <div className="flex items-center gap-2">
+                  {checklist?.bankDetails.complete && (
+                    <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">Complete</span>
+                  )}
+                  {bankLoaded && bankLocked && (
+                    <button onClick={() => setBankLocked(false)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 border border-border rounded-lg font-medium hover:bg-muted">
+                      <Pencil size={11} /> Edit / Re-verify
+                    </button>
+                  )}
+                </div>
               </div>
-            ))}
-          </div>
+              {bankLocked && (
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
+                  <Lock size={10} /> Locked for viewing — read this back to the customer to confirm, or click "Edit / Re-verify" to correct it.
+                </p>
+              )}
+              {!bankLoaded ? (
+                <p className="text-xs text-muted-foreground py-2">Loading...</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+                    {[
+                      { key: "BankName", label: "Bank Name" },
+                      { key: "BranchName", label: "Branch Name" },
+                      { key: "AccountNo", label: "Account Number" },
+                      { key: "IfscCode", label: "IFSC Code" },
+                      { key: "AccountHolderName", label: "Account Holder Name" },
+                      { key: "PanNo", label: "PAN Number" },
+                      { key: "AadhaarNo", label: "Aadhaar Number" },
+                      { key: "Occupation", label: "Occupation" },
+                      { key: "AnnualIncome", label: "Annual Income", type: "number" },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <label className="text-[11px] text-muted-foreground block mb-1">{f.label}</label>
+                        <input type={f.type || "text"} value={(bank as any)[f.key] || ""}
+                          disabled={bankLocked}
+                          onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
+                          className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                    {[
+                      { key: "NomineeName", label: "Nominee Name" },
+                      { key: "NomineeRelation", label: "Relation" },
+                      { key: "NomineeDob", label: "Nominee DOB", type: "date" },
+                      { key: "NomineeContact", label: "Nominee Contact" },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <label className="text-[11px] text-muted-foreground block mb-1">{f.label}</label>
+                        <input type={f.type || "text"} value={(bank as any)[f.key] || ""}
+                          disabled={bankLocked}
+                          onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
+                          className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
+                      </div>
+                    ))}
+                    <div className="col-span-2 md:col-span-4">
+                      <label className="text-[11px] text-muted-foreground block mb-1">Nominee Address</label>
+                      <textarea value={bank.NomineeAddress} disabled={bankLocked}
+                        onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
+                        rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none disabled:opacity-60 disabled:cursor-not-allowed" />
+                    </div>
+                  </div>
+                  {!bankLocked && (
+                    <div className="flex gap-2">
+                      <button onClick={handleSaveBank} disabled={bankSaving}
+                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        {bankSaving ? "Saving..." : "Save Bank & Nominee Details"}
+                      </button>
+                      <button onClick={() => setBankLocked(true)}
+                        className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
-          <button onClick={handleLogCall} disabled={saving || !form.Outcome}
-            title={!form.Outcome ? "Select an outcome above first" : undefined}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Logging..." : "Log Call"}
-          </button>
+          </div>
         </div>
 
-        {/* ── Document Verification ── */}
-        <div className="rounded-xl border border-border p-4 space-y-2">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
-
-          {docData.documents.map((d: any) => (
-            <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0 gap-2">
-              <button
-                onClick={() => (d.FilePath ? setPreviewDoc(d) : d.DocumentUrl && window.open(d.DocumentUrl, "_blank"))}
-                disabled={!d.FilePath && !d.DocumentUrl}
-                className="flex items-center gap-2 min-w-0 text-left disabled:cursor-default"
-              >
-                {mimeIcon(d.MimeType)}
-                <span className="min-w-0">
-                  <span className="font-medium">{d.DocumentType}</span>
-                  {d.FileName && <span className="block text-[11px] text-muted-foreground truncate max-w-[220px]">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</span>}
-                </span>
-                {(d.FilePath || d.DocumentUrl) && <Eye size={13} className="text-muted-foreground shrink-0" />}
-              </button>
-              <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
-                  className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                  {d.IsVerified ? "Verified" : "Mark Verified"}
-                </button>
-                <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600">
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-          ))}
-
-          <div className="flex items-center gap-2 pt-1">
-            <select value={docType} onChange={(e) => setDocType(e.target.value)}
-              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Select document type</option>
-              {docData.standardTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <input type="file" multiple ref={fileInputRef}
-              onChange={(e) => handleUploadFiles(e.target.files)}
-              className="hidden" />
-            <button onClick={() => { if (!docType) { toast.error("Select a document type first"); return; } fileInputRef.current?.click(); }}
-              disabled={uploading}
-              className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0 flex items-center gap-1 disabled:opacity-40">
-              <Upload size={13} /> {uploading ? "Uploading..." : "Upload File(s)"}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <input placeholder="...or paste an external document URL instead" value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
-              className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <button onClick={handleAddDoc} className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0">
-              + Add Link
-            </button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
-        </div>
-
-        {/* ── Co-Applicant ── */}
-        <div className="rounded-xl border border-border p-4 space-y-2">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
-          {coApplicants.map((c: any) => (
-            <div key={c.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
-              <div>
-                <span className="font-medium">{c.Name}</span>
-                {c.Relation && <span className="text-xs text-muted-foreground"> · {c.Relation}</span>}
-                {c.Mobile && <span className="text-xs text-muted-foreground"> · {c.Mobile}</span>}
-              </div>
-              <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline">Remove</button>
-            </div>
-          ))}
-          {!addingCo ? (
-            <button onClick={() => setAddingCo(true)} className="text-xs text-primary hover:underline flex items-center gap-0.5">
-              <Plus size={11} /> Add Co-Applicant
-            </button>
-          ) : (
-            <div className="space-y-2 pt-1">
-              <div className="grid grid-cols-2 gap-2">
-                <input placeholder="Name *" value={coForm.Name} onChange={(e) => setCoForm((f) => ({ ...f, Name: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="Relation" value={coForm.Relation} onChange={(e) => setCoForm((f) => ({ ...f, Relation: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="Mobile" value={coForm.Mobile} onChange={(e) => setCoForm((f) => ({ ...f, Mobile: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="Email" value={coForm.Email} onChange={(e) => setCoForm((f) => ({ ...f, Email: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="PAN No." value={coForm.PanNo} onChange={(e) => setCoForm((f) => ({ ...f, PanNo: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                <input placeholder="Aadhaar No." value={coForm.AadhaarNo} onChange={(e) => setCoForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Save</button>
-                <button onClick={() => setAddingCo(false)} className="text-xs px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Rest of the checklist: link out, don't duplicate ── */}
-        <div className="rounded-xl border border-border overflow-hidden">
-          {[
-            { label: "Communication Log", path: `/crm/communication?bookingId=${booking.BookingId}`, done: checklist?.welcomeCall.done, sub: "further follow-ups & tasks" },
-            { label: "Nominee & Bank Details", path: `/crm/customer-bank-details?bookingId=${booking.BookingId}`, done: checklist?.bankDetails.complete },
-            { label: "NOC", path: `/crm/noc?bookingId=${booking.BookingId}`, done: checklist?.noc?.some((n: any) => n.Status === "Issued"), sub: checklist?.noc?.length ? `${checklist.noc.length} raised` : "Not raised" },
-            { label: "Agreement", path: `/crm/agreements?bookingId=${booking.BookingId}`, done: !!checklist?.agreement, sub: checklist?.agreement?.Status || "Not yet created" },
-          ].map((row) => (
-            <button key={row.label} onClick={() => navigate(row.path)}
-              className="w-full flex items-center justify-between px-4 py-2.5 border-b border-border last:border-0 hover:bg-muted/20 text-left">
-              <div className="flex items-center gap-2 text-sm">
-                <span className={`w-2 h-2 rounded-full ${row.done ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-                {row.label}
-                {row.sub && <span className="text-xs text-muted-foreground">({row.sub})</span>}
-              </div>
-              <ChevronRight size={14} className="text-muted-foreground" />
-            </button>
-          ))}
-        </div>
-
-        <div className="flex justify-end pt-1">
+        <div className="flex justify-end pt-3 mt-1 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
         </div>
       </DialogContent>
@@ -703,28 +1024,69 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
 
     {/* On-Account Deposit Dialog */}
     <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Record On-Account Deposit</DialogTitle></DialogHeader>
-        <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due — held as a credit and applied to milestones as they come up, in order.</p>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> On-Account Deposit</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due at booking — held as a customer-wise credit and applied to milestones as they come up, in order. Same record you'll see on the Payment Milestones page.</p>
+
+        {/* Existing deposits for this booking — so this is visibly the same
+            customer-wise ledger the Payment Milestones page tracks, not a
+            one-off note that vanishes after this dialog closes. */}
+        {(callContext?.onAccount?.payments?.length ?? 0) > 0 && (
+          <div className="rounded-lg border border-border divide-y divide-border">
+            {callContext.onAccount.payments.map((p: any) => (
+              <div key={p.ReceiptNo} className="flex items-center justify-between px-3 py-2 text-xs">
+                <div>
+                  <span className="font-mono font-medium">{p.ReceiptNo}</span>
+                  <span className="text-muted-foreground"> · {fmt(p.Amount)}</span>
+                </div>
+                <span className={`px-2 py-0.5 rounded-full border font-medium ${
+                  p.Status === "Applied" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                  : p.Status === "PartiallyApplied" ? "text-amber-700 bg-amber-50 border-amber-200"
+                  : "text-blue-700 bg-blue-50 border-blue-200"
+                }`}>{p.Status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-            <input type="number" value={onAccountForm.Amount}
-              onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
+              <input type="number" value={onAccountForm.Amount}
+                onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
+              <input type="date" value={onAccountForm.ReceivedDate}
+                onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
+              <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <option value="">— Select —</option>
+                {["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"].map((m) => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
+              <input type="text" value={onAccountForm.TransactionRef}
+                onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-            <input type="text" value={onAccountForm.PaymentMode}
-              onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-              placeholder="e.g. UPI, NEFT, Cheque"
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-            <input type="text" value={onAccountForm.TransactionRef}
-              onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            <label className="text-xs text-muted-foreground block mb-1">Deposit Bank</label>
+            <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <option value="">— Select deposit bank —</option>
+              {(bankOptions as any[]).map((b: any) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+            </select>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
@@ -741,6 +1103,36 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Invoice detail dialog */}
+    {viewingInvoice && (
+      <Dialog open onOpenChange={(o) => !o && setViewingInvoice(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-primary" /> {viewingInvoice.InvoiceNo}</DialogTitle></DialogHeader>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="font-medium">{viewingInvoice.InvoiceType}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-semibold">{fmt(viewingInvoice.Amount)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{viewingInvoice.InvoiceDate ? String(viewingInvoice.InvoiceDate).slice(0, 10) : "—"}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium">{viewingInvoice.Status || "Generated"}</span></div>
+            {viewingInvoice.Description && (
+              <div className="pt-1 border-t border-border">
+                <span className="text-muted-foreground block mb-0.5">Description</span>
+                <span>{viewingInvoice.Description}</span>
+              </div>
+            )}
+            {viewingInvoice.CreatedByName && (
+              <div className="flex justify-between text-xs text-muted-foreground pt-1 border-t border-border">
+                <span>Generated by {viewingInvoice.CreatedByName}</span>
+                {viewingInvoice.CreatedAt && <span>{new Date(viewingInvoice.CreatedAt).toLocaleDateString("en-IN")}</span>}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end pt-2 border-t border-border">
+            <button onClick={() => setViewingInvoice(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )}
     </>
   );
 };

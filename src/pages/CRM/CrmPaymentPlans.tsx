@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Pencil, Layers, ListChecks } from "lucide-react";
+import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
@@ -32,6 +32,21 @@ async function fetchAll(): Promise<any[]> {
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Company -> Project source for the Tagged Projects picker below. Company
+// is the real top of this hierarchy (dbo.enterprise: business_type 'C' is a
+// Project's business_type 'P' parent via company_id) — this reuses the same
+// shared dropdown endpoint CrmApplication.tsx/BlockMaster.tsx/UnitMaster.tsx
+// already use for their own Company -> Project chains, so the chip picker
+// below can group projects under their Company instead of one flat list.
+async function fetchCompanyProjectDropdown(): Promise<{
+  companies: { id: number; name: string }[];
+  projects: { id: number; name: string; company_id: number }[];
+}> {
+  try {
+    const r = await fetchWithAuth("/api/business/dropdown");
+    return r.ok ? r.json() : { companies: [], projects: [] };
+  } catch { return { companies: [], projects: [] }; }
 }
 async function fetchPlanDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -72,7 +87,20 @@ const CrmPaymentPlans: React.FC = () => {
   // as the authoritative Booking amount for any booking tagged to this plan.
   const [bookingAmount, setBookingAmount] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
+  // Which Projects this plan is tagged to — the top tier of the Project ->
+  // Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
+  // Optional: an untagged plan still participates in every level's "all
+  // active plans" fallback, it just never appears in a Project-filtered list.
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  // Dropdown-wise Add-a-Project flow for the Tagged Projects field below —
+  // Company picked first, Project narrows to that Company's list and stays
+  // disabled until then (same disciplined Company->Project gate every other
+  // master page in the app now uses), then "+ Add" appends it to projectIds.
+  const [tagCompanyId, setTagCompanyId] = useState("");
+  const [tagProjectId, setTagProjectId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [isActive, setIsActive] = useState(true);
 
   // Read-only preview, opened by tapping a card. Built straight from the
   // list row's own MilestonesJson — no extra fetch, no loading flicker.
@@ -82,6 +110,55 @@ const CrmPaymentPlans: React.FC = () => {
 
   const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
+  const { data: dropdownData } = useQuery({ queryKey: ["business-dropdown"], queryFn: fetchCompanyProjectDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdownData?.companies ?? [];
+  const projects = dropdownData?.projects ?? [];
+  // Lookups for the dropdown-wise Add-a-Project flow and the selected-chips
+  // list below — a plan can legitimately tag Projects across multiple
+  // Companies, so Company here is just which list the Project dropdown
+  // narrows to, not a hard single-Company gate on the whole field.
+  const companiesById = useMemo(() => new Map(companies.map((c) => [String(c.id), c])), [companies]);
+  const projectsById = useMemo(() => new Map(projects.map((p) => [String(p.id), p])), [projects]);
+  const projectsForTagCompany = useMemo(
+    () => (tagCompanyId
+      ? projects.filter((p) => String(p.company_id) === tagCompanyId && !projectIds.includes(String(p.id)))
+      : []),
+    [projects, tagCompanyId, projectIds],
+  );
+  const selectedTaggedProjects = useMemo(
+    () => projectIds
+      .map((id) => {
+        const p = projectsById.get(id);
+        if (!p) return null;
+        const company = companiesById.get(String(p.company_id));
+        return { id, name: p.name, companyName: company?.name ?? "" };
+      })
+      .filter((x): x is { id: string; name: string; companyName: string } => x !== null),
+    [projectIds, projectsById, companiesById],
+  );
+  // Same resolution as selectedTaggedProjects above, but driven off the
+  // previewed plan's own ProjectIds rather than the edit form's local state
+  // — keeps the read-only preview showing live Project names too, not the
+  // ProjectNames string PLAN_SELECT also returns (which is only used as a
+  // fallback if the dropdown data hasn't loaded yet).
+  const previewTaggedProjects = useMemo(() => {
+    if (!previewPlan?.ProjectIds) return [];
+    return String(previewPlan.ProjectIds)
+      .split(",")
+      .map((id) => {
+        const p = projectsById.get(id);
+        if (!p) return null;
+        const company = companiesById.get(String(p.company_id));
+        return { id, name: p.name, companyName: company?.name ?? "" };
+      })
+      .filter((x): x is { id: string; name: string; companyName: string } => x !== null);
+  }, [previewPlan, projectsById, companiesById]);
+
+  const handleAddTaggedProject = () => {
+    if (!tagProjectId) return;
+    setProjectIds((prev) => (prev.includes(tagProjectId) ? prev : [...prev, tagProjectId]));
+    setTagProjectId("");
+  };
 
   // Item 0 is always "Booking" — a fixed ₹ figure decided per booking, never
   // a slice of the plan's 100%. Only the milestones that come after Booking
@@ -89,10 +166,24 @@ const CrmPaymentPlans: React.FC = () => {
   // not TotalValue itself — see generateMilestonesForBooking on the backend).
   const totalPct = items.slice(1).reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
+  // Whether "+ Add milestone" has anywhere left to point to — every row is
+  // fully wired to Milestone Master now (no free-typed fallback), so once
+  // every active, non-"Booking" master entry is already used somewhere in
+  // this plan, adding another blank row would just be a dead-end dropdown.
+  const milestoneMasterHasUnusedOptions = useMemo(() => {
+    const usedIds = new Set(items.slice(1).map((i) => i.MilestoneMasterId).filter(Boolean));
+    return (milestoneMaster as any[]).some(
+      (m: any) => m.IsActive && m.Name?.trim().toLowerCase() !== "booking" && !usedIds.has(String(m.Id)),
+    );
+  }, [milestoneMaster, items]);
+
   const resetForm = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setBookingAmount("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
+    setProjectIds([]);
+    setTagCompanyId(""); setTagProjectId("");
+    setIsActive(true);
   };
 
   const openCreate = () => { resetForm(); setDialogOpen(true); };
@@ -106,6 +197,9 @@ const CrmPaymentPlans: React.FC = () => {
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
     setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
+    setProjectIds(plan.ProjectIds ? String(plan.ProjectIds).split(",") : []);
+    setIsActive(plan.IsActive !== false && plan.IsActive !== 0);
+    setTagCompanyId(""); setTagProjectId("");
     setItems(
       (planItems as any[]).length
         ? planItems.map((i: any) => ({
@@ -124,6 +218,12 @@ const CrmPaymentPlans: React.FC = () => {
     }
     if (items.length < 2) { toast.error("Add at least one milestone after Booking"); return; }
     if (Math.round(totalPct * 100) !== 10000) { toast.error(`Post-Booking milestones must sum to 100% (currently ${totalPct}%)`); return; }
+    // Every row after Booking must be wired to a real Milestone Master entry
+    // — no more free-typed names — so block here before even hitting the
+    // network, matching the same requirement the backend enforces.
+    if (items.slice(1).some((it) => !it.MilestoneMasterId)) {
+      toast.error("Select a Milestone Master entry for every milestone row"); return;
+    }
     const seenMasterIds = new Set<string>();
     for (const it of items) {
       if (!it.MilestoneMasterId) continue;
@@ -145,6 +245,8 @@ const CrmPaymentPlans: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
+          ProjectIds: projectIds.map((x) => parseInt(x)).filter(Number.isFinite),
+          IsActive: isActive,
         }),
       });
       const data = await res.json();
@@ -167,7 +269,28 @@ const CrmPaymentPlans: React.FC = () => {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!window.confirm("Delete this payment plan? This cannot be undone.")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Payment plan deleted");
+      setPreviewPlan(null);
+      qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const previewMilestones = useMemo(() => parseMilestones(previewPlan?.MilestonesJson), [previewPlan]);
+  const previewAfterBookingTotal = useMemo(
+    () => Math.round(previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0) * 100) / 100,
+    [previewMilestones],
+  );
 
   return (
     <SalesAutoShell
@@ -221,6 +344,17 @@ const CrmPaymentPlans: React.FC = () => {
                   >
                     <Pencil size={13} />
                   </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); if (deletingId !== p.Id) handleDelete(p.Id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); if (deletingId !== p.Id) handleDelete(p.Id); } }}
+                    title="Delete plan"
+                    aria-disabled={deletingId === p.Id}
+                    className={`p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${deletingId === p.Id ? "pointer-events-none opacity-50" : ""}`}
+                  >
+                    <Trash2 size={13} />
+                  </span>
                 </div>
               </div>
 
@@ -260,56 +394,112 @@ const CrmPaymentPlans: React.FC = () => {
       {/* Read-only preview — tapping a card opens this instead of dropping
           straight into a greyed-out copy of the edit form. */}
       <Dialog open={!!previewPlan} onOpenChange={(o) => { if (!o) setPreviewPlan(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           {previewPlan && (
             <>
               <DialogHeader>
-                <DialogTitle className="font-heading flex items-start justify-between gap-2 pr-6">
-                  <div className="min-w-0">
-                    <div>{previewPlan.PlanName}</div>
-                    {previewPlan.Description && (
-                      <div className="text-xs font-normal text-muted-foreground mt-1">{previewPlan.Description}</div>
-                    )}
+                <DialogTitle className="font-heading">
+                  <div className="flex items-start justify-between gap-3 pr-6">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="mt-0.5 shrink-0 flex items-center justify-center w-10 h-10 rounded-xl bg-primary/15 text-primary">
+                        <Layers size={19} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-base leading-tight">{previewPlan.PlanName}</div>
+                        {previewPlan.Description && (
+                          <div className="text-xs font-normal text-muted-foreground mt-1">{previewPlan.Description}</div>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${
+                      previewPlan.IsActive
+                        ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
+                        : "text-muted-foreground bg-muted/50 border-border"
+                    }`}>
+                      {previewPlan.IsActive ? "Active" : "Inactive"}
+                    </span>
                   </div>
-                  <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                    previewPlan.IsActive
-                      ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
-                      : "text-muted-foreground bg-muted/50 border-border"
-                  }`}>
-                    {previewPlan.IsActive ? "Active" : "Inactive"}
-                  </span>
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <MilestoneBar milestones={previewMilestones} height="h-2.5" />
 
-                <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
-                  {previewMilestones.map((m, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-sm rounded-lg border border-border bg-muted/20 px-3 py-2">
-                      <span className={`mt-0.5 shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
-                        {i + 1}
-                      </span>
-                      <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
-                      <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
-                        {i === 0 ? `₹${Number(previewPlan.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
-                      </span>
+                {/* Stat strip — the three numbers worth knowing at a glance,
+                    pulled out of the old plain-text footer into real tiles. */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <ListChecks size={11} /> Milestones
                     </div>
-                  ))}
+                    <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
+                      {previewMilestones.length}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Calendar size={11} /> Created
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
+                      {previewPlan.CreatedAt ? new Date(previewPlan.CreatedAt).toLocaleDateString() : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Percent size={11} /> After Booking
+                    </div>
+                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-amber-600"}`}>
+                      {previewAfterBookingTotal}%
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-2">
-                  <span className="flex items-center gap-3">
-                    <span>{previewMilestones.length} milestone{previewMilestones.length === 1 ? "" : "s"}</span>
-                    {previewPlan.CreatedAt && <span>Created {new Date(previewPlan.CreatedAt).toLocaleDateString()}</span>}
-                  </span>
-                  <span className={Math.round(previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)) === 100 ? "text-green-600 dark:text-green-400 font-semibold" : "text-amber-600 font-semibold"}>
-                    {previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)}% total (after Booking)
-                  </span>
+                <div className="grid sm:grid-cols-[1.4fr_1fr] gap-4">
+                  <div className="space-y-1.5 max-h-[42vh] overflow-y-auto pr-1">
+                    {previewMilestones.map((m, i) => (
+                      <div key={i} className="relative flex items-center gap-2.5 text-sm rounded-lg border border-border bg-muted/20 pl-4 pr-3 py-2 overflow-hidden">
+                        <span className={`absolute left-0 top-0 bottom-0 w-1 ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`} />
+                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
+                        <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
+                          {i === 0 ? `₹${Number(previewPlan.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-muted/10 p-3 self-start">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
+                      <Building2 size={12} /> Tagged Projects
+                    </div>
+                    {previewTaggedProjects.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {previewTaggedProjects.map((p) => (
+                          <span key={p.id} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
+                            {p.name}
+                            {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    ) : previewPlan.ProjectNames ? (
+                      // Dropdown data (companies/projects) hasn't finished loading yet —
+                      // fall back to the plain names PLAN_SELECT already returned rather
+                      // than show nothing.
+                      <p className="text-xs text-foreground">{previewPlan.ProjectNames}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">Not tagged — offered as a fallback option everywhere instead.</p>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <div className="flex justify-end gap-2 pt-4 border-t border-border">
+                <button onClick={() => handleDelete(previewPlan.Id)} disabled={deletingId === previewPlan.Id}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-red-600 hover:bg-red-500/10 disabled:opacity-40 mr-auto">
+                  <Trash2 size={13} /> {deletingId === previewPlan.Id ? "Deleting..." : "Delete"}
+                </button>
                 <button onClick={() => setPreviewPlan(null)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
                 <button onClick={() => openEdit(previewPlan.Id)}
@@ -340,6 +530,112 @@ const CrmPaymentPlans: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
               <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
                 className={inputCls} />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              <div>
+                <div className="text-xs font-medium text-foreground">Status</div>
+                <p className="text-[11px] text-muted-foreground">
+                  {isActive ? "Active — offered wherever payment plans are picked." : "Inactive — hidden from pickers, kept for existing bookings/history."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsActive((v) => !v)}
+                role="switch"
+                aria-checked={isActive}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isActive ? "bg-green-500" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isActive ? "translate-x-4.5" : "translate-x-1"}`} />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Tagged Projects</label>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Optional — leave empty and this plan still shows up everywhere as a fallback option.
+                Tag it to one or more Projects to make it selectable from Block/Unit Payment Plan pickers under those Projects.
+              </p>
+
+              {/* Dropdown-wise add flow — pick a Company, then a Project
+                  under it, then Add. Same Company -> Project gate used
+                  everywhere else in the app (Project stays disabled with a
+                  plain-language hint until a Company is chosen), so this
+                  reads the same way for a non-technical user as every other
+                  master page instead of a wall of always-visible toggle chips. */}
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                    <select
+                      value={tagCompanyId}
+                      onChange={(e) => { setTagCompanyId(e.target.value); setTagProjectId(""); }}
+                      className={inputCls}
+                    >
+                      <option value="">Select company</option>
+                      {companies.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <select
+                      value={tagProjectId}
+                      onChange={(e) => setTagProjectId(e.target.value)}
+                      disabled={!tagCompanyId}
+                      className={`${inputCls} ${!tagCompanyId ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <option value="">
+                        {!tagCompanyId
+                          ? "Select a Company first"
+                          : projectsForTagCompany.length === 0
+                            ? "All projects already tagged"
+                            : "Select project"}
+                      </option>
+                      {projectsForTagCompany.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddTaggedProject}
+                    disabled={!tagProjectId}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Already-tagged Projects — shown as removable chips, each
+                  labeled with its Company so it's unambiguous which is which
+                  even when Projects across different Companies are tagged
+                  at once. */}
+              <div className="mt-2.5">
+                {selectedTaggedProjects.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">No projects tagged yet — add one above.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedTaggedProjects.map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30"
+                      >
+                        <span>
+                          {p.name}
+                          {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setProjectIds((prev) => prev.filter((x) => x !== p.id))}
+                          title={`Remove ${p.name}`}
+                          className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
@@ -386,20 +682,24 @@ const CrmPaymentPlans: React.FC = () => {
                         </span>
                         <div className="flex-1 min-w-0 space-y-2">
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">Source</label>
+                            <label className="text-[11px] text-muted-foreground block mb-1">Milestone *</label>
                             <select value={it.MilestoneMasterId}
                               onChange={(e) => {
                                 const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
                                 setItems((arr) => arr.map((x, i) => i === idx ? {
                                   ...x,
                                   MilestoneMasterId: e.target.value,
-                                  MilestoneName: master ? master.Name : x.MilestoneName,
+                                  MilestoneName: master ? master.Name : "",
                                 } : x));
                               }}
                               className={inputCls}>
-                              <option value="">✎ Custom milestone (type name below)</option>
+                              <option value="">Select a milestone…</option>
                               {(milestoneMaster as any[])
-                                .filter((m: any) => m.IsActive)
+                                // A milestone deactivated after being picked must stay selectable
+                                // on the row that already has it — otherwise the <select> has no
+                                // matching <option>, and an unnoticed Save silently detaches this
+                                // row from the master record it used to point at.
+                                .filter((m: any) => m.IsActive || String(m.Id) === it.MilestoneMasterId)
                                 // Don't offer "Booking" here — it's already the fixed row above.
                                 .filter((m: any) => m.Name?.trim().toLowerCase() !== "booking")
                                 // Each master milestone can only be used once per plan — hide it
@@ -410,29 +710,22 @@ const CrmPaymentPlans: React.FC = () => {
                                   <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
                                 ))}
                             </select>
+                            {!fromMaster && (
+                              <p className="text-[11px] text-amber-600 mt-1">
+                                {milestoneMasterHasUnusedOptions
+                                  ? "Pick a milestone above before saving."
+                                  : "No unused Milestone Master entries left — add one there first."}
+                              </p>
+                            )}
                           </div>
 
-                          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                            <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">Milestone Name</label>
-                              {fromMaster ? (
-                                <div className="w-full text-sm rounded px-2 py-1.5 bg-muted/40 border border-border text-foreground font-medium truncate" title={it.MilestoneName}>
-                                  {it.MilestoneName}
-                                </div>
-                              ) : (
-                                <input type="text" placeholder="e.g. Foundation, Handover" value={it.MilestoneName}
-                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value } : x))}
-                                  className={inputCls} />
-                              )}
-                            </div>
-                            <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
-                              <div className="relative w-24">
-                                <input type="number" placeholder="0" value={it.Percent}
-                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
-                                  className={`${inputCls} pr-6 text-right font-semibold`} />
-                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
-                              </div>
+                          <div>
+                            <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
+                            <div className="relative w-24">
+                              <input type="number" placeholder="0" value={it.Percent}
+                                onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
+                                className={`${inputCls} pr-6 text-right font-semibold`} />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
                             </div>
                           </div>
                         </div>
@@ -446,8 +739,19 @@ const CrmPaymentPlans: React.FC = () => {
                   );
                 })}
               </div>
-              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
-                className="text-xs text-primary hover:underline mt-2">+ Add milestone</button>
+              <button
+                onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
+                disabled={!milestoneMasterHasUnusedOptions}
+                className="text-xs text-primary hover:underline mt-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+              >
+                + Add milestone
+              </button>
+              {!milestoneMasterHasUnusedOptions && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Every active Milestone Master entry is already used in this plan —{" "}
+                  <a href="/crm/milestone-master" target="_blank" rel="noreferrer" className="underline">add more there</a> to include another.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

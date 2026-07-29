@@ -14,6 +14,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/block-master";
+const DROPDOWN_API = "/api/business/dropdown";
 
 async function fetchBlocks(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -21,29 +22,101 @@ async function fetchBlocks(): Promise<any[]> {
   return res.json().catch(() => ({}));
 }
 
-async function fetchProjectOptions(): Promise<
-  { value: string; label: string }[]
-> {
-  const res = await fetchWithAuth(`${API}/projects`);
-  if (!res.ok) throw new Error("Failed to fetch projects");
-  const data: { Id: number; Name: string }[] = await res.json().catch(() => ({}));
-  return data.map((p) => ({ value: String(p.Id), label: p.Name }));
-}
-
 // ── Fields ────────────────────────────────────────────────────────────────────
+// Company -> Project is the real top of this hierarchy (dbo.enterprise:
+// business_type='C' is a Project's business_type='P' parent via company_id)
+// — every other CRM entry point (e.g. CrmApplication.tsx) already gates
+// Project selection behind Company first. __companies/__projects are
+// injected via externalFormPatch below (same pattern as __blocks/__paymentPlans).
 const fields: FieldDef[] = [
+  {
+    name: "companyId",
+    label: "Company",
+    type: "select",
+    required: true,
+    optionsProvider: (_data, _currentId, form) => {
+      const companies: { id: number; name: string }[] = (form?.__companies as any) ?? [];
+      return companies.map((c) => ({ value: String(c.id), label: c.name }));
+    },
+  },
   {
     name: "projectId",
     label: "Project",
     type: "select",
     required: true,
-    asyncOptions: fetchProjectOptions,
+    // Strict cascade — a Project can only be picked once its Company is
+    // chosen; disabledWhen (MasterPage.tsx) locks the field and swaps in
+    // disabledPlaceholder until then, so this never falls back to showing
+    // every Project unfiltered.
+    disabledWhen: (form) => !form?.companyId,
+    disabledPlaceholder: "Select a Company first",
+    optionsProvider: (_data, _currentId, form) => {
+      const projects: { id: number; name: string; company_id: number }[] = (form?.__projects as any) ?? [];
+      const selectedCompany = form?.companyId as string | undefined;
+      if (!selectedCompany) return [];
+      return projects
+        .filter((p) => String(p.company_id) === selectedCompany)
+        .map((p) => ({ value: String(p.id), label: p.name }));
+    },
   },
   {
     name: "blockName",
     label: "Block Name",
     type: "text",
     required: true,
+  },
+  {
+    // Middle tier of the Project -> Block -> Unit Payment Plan cascade (see
+    // crmEntityCreation.js's getApplicablePaymentPlans). Only offers plans
+    // already tagged to this Block's Project — falling back to every active
+    // plan if the Project itself has nothing tagged, so an untagged Project
+    // never leaves this picker empty. Optional: an untagged Block just means
+    // Unit Master falls through to the Project's (or global) tags instead.
+    name: "paymentPlanIds",
+    label: "Payment Plans",
+    type: "custom",
+    fullWidth: true,
+    defaultValue: [],
+    render: ({ value, onChange, formData }) => {
+      const allPlans: any[] = ((formData?.__paymentPlans as any) ?? []).filter((p: any) => p.IsActive);
+      const projectId = formData?.projectId as string | undefined;
+      const taggedForProject = projectId
+        ? allPlans.filter((p: any) => p.ProjectIds && String(p.ProjectIds).split(",").includes(projectId))
+        : [];
+      const plans = taggedForProject.length ? taggedForProject : allPlans;
+      const selected: string[] = (value as string[]) || [];
+      if (!projectId) {
+        return <p className="text-[11px] text-muted-foreground">Select a Project first.</p>;
+      }
+      if (!plans.length) {
+        return <p className="text-[11px] text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
+      }
+      return (
+        <div>
+          {taggedForProject.length > 0 && (
+            <p className="text-[11px] text-muted-foreground mb-1.5">Showing this Project's tagged plans.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {plans.map((p) => {
+              const id = String(p.Id);
+              const isSelected = selected.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() =>
+                    onChange(isSelected ? selected.filter((x) => x !== id) : [...selected, id])
+                  }
+                  className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                >
+                  {p.PlanName}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    },
   },
   {
     name: "isActive",
@@ -79,26 +152,75 @@ const BlockMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Every active payment plan (with its tagged ProjectIds) — filtered
+  // client-side in the paymentPlanIds field's render by the form's currently
+  // selected project, same pattern UnitMaster.tsx uses for __blocks.
+  const { data: allPaymentPlans = [] } = useQuery<any[]>({
+    queryKey: ["block-master-payment-plans"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/crm/payment-plans");
+      if (!res.ok) throw new Error("Failed to fetch payment plans");
+      return res.json().catch(() => ([]));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Company -> Project source data for the two new cascade fields above.
+  // Same shared dropdown endpoint CrmApplication.tsx already uses for its
+  // own Company -> Project chain.
+  const { data: dropdownData } = useQuery<{
+    companies: { id: number; name: string }[];
+    projects: { id: number; name: string; company_id: number }[];
+  }>({
+    queryKey: ["business-dropdown"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(DROPDOWN_API);
+      if (!res.ok) throw new Error("Failed to fetch company/project dropdown");
+      return res.json().catch(() => ({ companies: [], projects: [] }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const companies = dropdownData?.companies ?? [];
+  const projectsList = dropdownData?.projects ?? [];
+
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(blocks)) return [];
-    return blocks.map((item) => ({
-      _id: String(item.Id),
-      projectId: String(item.ProjectId),
-      projectName: item.ProjectName ?? "",
-      blockName: item.BlockName ?? "",
-      isActive: Boolean(item.IsActive),
-      // MasterPage's built-in Active/Inactive pill only kicks in for a
-      // column keyed "status" — alias it here instead of showing the raw
-      // isActive boolean as literal "true"/"false" text.
-      status: Boolean(item.IsActive),
-      lockBookingNo: item.LockBookingNo ?? null,
-      lockHoldId: item.LockHoldId ?? null,
-    }));
-  }, [blocks]);
+    return blocks.map((item) => {
+      // A Block's own row only carries ProjectId — the Company shown/edited
+      // here is derived from the Project's own company_id so an existing
+      // Block reopens with the correct Company already selected instead of
+      // forcing a re-pick every edit.
+      const project = projectsList.find((p) => p.id === item.ProjectId);
+      return {
+        _id: String(item.Id),
+        companyId: project ? String(project.company_id) : "",
+        projectId: String(item.ProjectId),
+        projectName: item.ProjectName ?? "",
+        blockName: item.BlockName ?? "",
+        // PaymentPlanIds comes back as a comma-joined string from blockMaster.js's
+        // GET / STRING_AGG — split into the string[] the chip picker expects.
+        paymentPlanIds: item.PaymentPlanIds ? String(item.PaymentPlanIds).split(",") : [],
+        paymentPlanNames: item.PaymentPlanNames ?? "",
+        isActive: Boolean(item.IsActive),
+        // MasterPage's built-in Active/Inactive pill only kicks in for a
+        // column keyed "status" — alias it here instead of showing the raw
+        // isActive boolean as literal "true"/"false" text.
+        status: Boolean(item.IsActive),
+        lockBookingNo: item.LockBookingNo ?? null,
+        lockHoldId: item.LockHoldId ?? null,
+      };
+    });
+  }, [blocks, projectsList]);
+
+  const formDataPatch = React.useMemo(
+    () => ({ __paymentPlans: allPaymentPlans, __companies: companies, __projects: projectsList }),
+    [allPaymentPlans, companies, projectsList],
+  );
 
   const toPayload = (r: Record<string, any>) => ({
     ProjectId: parseInt(r.projectId),
     BlockName: r.blockName?.trim() || null,
+    PaymentPlanIds: Array.isArray(r.paymentPlanIds) ? r.paymentPlanIds.map((x: any) => parseInt(x)).filter(Number.isFinite) : [],
     IsActive: r.isActive !== false,
   });
 
@@ -151,6 +273,17 @@ const BlockMaster: React.FC = () => {
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        externalFormPatch={formDataPatch}
+        externalFormPatchKey={`${allPaymentPlans.length}:${companies.length}:${projectsList.length}`}
+        onFieldChange={(form, fieldName) => {
+          // Changing Company invalidates whatever Project was picked under
+          // the old one — same reset unitMaster.js's own projectId->blockId
+          // change already does one tier down.
+          if (fieldName === "companyId") {
+            return { ...form, projectId: "" };
+          }
+          return form;
+        }}
         // A Block with a Booked or OnHold Unit under it can't be deleted —
         // matches the server-side guard in blockMaster.js exactly. Editing
         // stays open (unlike Unit Master) since a rename/reassign here is
@@ -172,6 +305,7 @@ const BlockMaster: React.FC = () => {
           fields: [
             { key: "projectName", label: "Project" },
             { key: "blockName", label: "Block Name" },
+            { key: "paymentPlanNames", label: "Payment Plans" },
             { key: "status", label: "Status" },
           ],
         }}

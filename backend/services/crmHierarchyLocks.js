@@ -126,10 +126,79 @@ async function getProjectLockReason(pool, projectId) {
   return null;
 }
 
+// ── Hard-delete blockers ────────────────────────────────────────────────────
+// The getXLockReason functions above only ever check "active" business state
+// (booked/held/applied) — that's the right rule for the platform's normal
+// soft-delete (IsActive=0). A real hard DELETE is a different, stricter
+// question: dbo.BlockMaster/UnitMaster are targets of REAL SQL Server FK
+// constraints (confirmed via sys.foreign_keys — despite scattered comments
+// elsewhere in this codebase claiming "no DB-level FK constraints", several
+// do exist), so SQL Server itself will refuse the DELETE if ANY row in a
+// child table still references it — active OR inactive/soft-deleted. These
+// functions check that broader condition up front so the caller gets one
+// clear, specific reason instead of a raw SQL FK-violation error message.
+const BLOCK_HARD_DELETE_REFS = [
+  { table: "UnitMaster", column: "BlockId", label: "Unit(s)" },
+  { table: "ParkingSlot", column: "BlockId", label: "Parking Slot(s)" },
+  { table: "RoomMaster", column: "BlockId", label: "Room(s)" },
+  { table: "ParkingMaster", column: "BlockId", label: "Parking rate row(s)" },
+  { table: "DailyLabourEntry", column: "BlockId", label: "Daily Labour entry/entries" },
+];
+
+async function getBlockHardDeleteBlockers(pool, blockId) {
+  for (const ref of BLOCK_HARD_DELETE_REFS) {
+    const r = await pool.request().input("id", sql.Int, blockId)
+      .query(`SELECT COUNT(*) AS c FROM dbo.${ref.table} WHERE ${ref.column} = @id`);
+    if (r.recordset[0].c > 0) {
+      return `still has ${r.recordset[0].c} ${ref.label} referencing it (including any already-deactivated ones) — those must be permanently removed first, not just deactivated`;
+    }
+  }
+  return null;
+}
+
+const UNIT_HARD_DELETE_REFS = [
+  { table: "CrmApplication", column: "PreferredUnitId", label: "Application(s)" },
+  { table: "CrmBooking", column: "UnitId", label: "Booking(s)" },
+  { table: "CrmUnitChangeLog", column: "OldUnitId", label: "Unit change log entry/entries" },
+  { table: "CrmUnitChangeLog", column: "NewUnitId", label: "Unit change log entry/entries" },
+  { table: "DailyLabourEntry", column: "UnitId", label: "Daily Labour entry/entries" },
+  { table: "FollowupApplications", column: "UnitId", label: "Follow-Up Application(s)" },
+  { table: "RoomMaster", column: "UnitId", label: "Room(s)" },
+];
+
+async function getUnitHardDeleteBlockers(pool, unitId) {
+  for (const ref of UNIT_HARD_DELETE_REFS) {
+    const r = await pool.request().input("id", sql.Int, unitId)
+      .query(`SELECT COUNT(*) AS c FROM dbo.${ref.table} WHERE ${ref.column} = @id`);
+    if (r.recordset[0].c > 0) {
+      return `still has ${r.recordset[0].c} ${ref.label} referencing it (including historical/cancelled ones) — those must be resolved first`;
+    }
+  }
+  return null;
+}
+
+const PARKING_SLOT_HARD_DELETE_REFS = [
+  { table: "CrmParkingAllotment", column: "ParkingSlotId", label: "Allotment(s)" },
+];
+
+async function getParkingSlotHardDeleteBlockers(pool, slotId) {
+  for (const ref of PARKING_SLOT_HARD_DELETE_REFS) {
+    const r = await pool.request().input("id", sql.Int, slotId)
+      .query(`SELECT COUNT(*) AS c FROM dbo.${ref.table} WHERE ${ref.column} = @id`);
+    if (r.recordset[0].c > 0) {
+      return `still has ${r.recordset[0].c} ${ref.label} referencing it (including historical/inactive ones) — those must be resolved first`;
+    }
+  }
+  return null;
+}
+
 module.exports = {
   getUnitLockReason,
   getParkingSlotLockReason,
   getFloorLockReason,
   getBlockLockReason,
   getProjectLockReason,
+  getBlockHardDeleteBlockers,
+  getUnitHardDeleteBlockers,
+  getParkingSlotHardDeleteBlockers,
 };
