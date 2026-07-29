@@ -9,25 +9,48 @@ const { actorId } = require("../services/saAccess");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// Shared by POST / and PUT /:id. `items` here is everything AFTER Booking
-// (Booking itself is item #0 on the frontend and is never part of this
-// array's %-pool — see CrmPaymentPlans.tsx). Returns an error string, or
-// null if the items are valid.
-function validateItems(items) {
-  if (!items.length) return "At least one milestone item is required";
+// Shared by POST / and PUT /:id. `items[0]` is always "Booking" — a fixed ₹
+// concept stored on the plan itself (BookingAmount) and never sourced from
+// Milestone Master, so it's exempt from the check below. Every OTHER row
+// must name a real, active row in dbo.CrmMilestoneMaster — there is no more
+// "type a custom name" escape hatch, so a plan's milestone names can never
+// drift from that table. Returns { error } if invalid, or
+// { error: null, namesById } — the caller uses namesById (not the
+// client-supplied MilestoneName) as the actual value stored, so the name
+// persisted is always Milestone Master's own live name at save time, never
+// whatever the client happened to send.
+async function validateItems(pool, items) {
+  if (!items.length) return { error: "At least one milestone item is required" };
   const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
-  if (Math.round(totalPct * 100) !== 10000) return `Milestone percentages must sum to 100 (currently ${totalPct})`;
+  if (Math.round(totalPct * 100) !== 10000) return { error: `Milestone percentages must sum to 100 (currently ${totalPct})` };
+
   // Guard against the same master milestone (e.g. "Foundation") being picked
   // more than once across rows in the same plan — the Source dropdown is
   // meant to offer each milestone at most once per plan.
   const seenMasterIds = new Set();
-  for (const it of items) {
-    const mmid = it.MilestoneMasterId ? parseInt(it.MilestoneMasterId) : null;
-    if (mmid == null) continue;
-    if (seenMasterIds.has(mmid)) return `"${it.MilestoneName}" is selected more than once — each milestone can only appear once per plan`;
+  const mmids = [];
+  for (const it of items.slice(1)) {
+    const mmid = parseInt(it.MilestoneMasterId, 10);
+    if (!Number.isFinite(mmid)) return { error: "Every milestone must be selected from Milestone Master — free-typed milestone names are no longer supported." };
+    if (seenMasterIds.has(mmid)) return { error: "Each milestone can only appear once per plan" };
     seenMasterIds.add(mmid);
+    mmids.push(mmid);
   }
-  return null;
+
+  const result = await pool.request().query("SELECT Id, Name FROM dbo.CrmMilestoneMaster WHERE IsActive = 1");
+  const namesById = new Map(result.recordset.map((r) => [r.Id, r.Name]));
+  for (const mmid of mmids) {
+    if (!namesById.has(mmid)) {
+      return { error: "One or more selected milestones no longer exist (or are inactive) in Milestone Master — refresh and reselect." };
+    }
+    // "Booking" is a fixed ₹ concept handled entirely outside this array
+    // (see item #0) — it can never also appear as a % milestone row, even
+    // if someone posts its Milestone Master Id directly.
+    if (namesById.get(mmid).trim().toLowerCase() === "booking") {
+      return { error: `"Booking" is a fixed amount, not a % milestone, and can't be added here.` };
+    }
+  }
+  return { error: null, namesById };
 }
 
 // A plan can be tagged to 1+ Projects (dbo.CrmPaymentPlanProject,
@@ -140,7 +163,7 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     const bookingAmount = parseFloat(b.BookingAmount);
     if (!(bookingAmount >= 0)) return res.status(400).json({ error: "Booking Amount is required" });
     const items = Array.isArray(b.Items) ? b.Items : [];
-    const itemsError = validateItems(items);
+    const { error: itemsError, namesById } = await validateItems(pool, items);
     if (itemsError) return res.status(400).json({ error: itemsError });
 
     await tx.begin();
@@ -157,12 +180,17 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
     const planId = planResult.recordset[0].Id;
 
     for (let idx = 0; idx < items.length; idx++) {
+      const isBooking = idx === 0;
+      const mmid = isBooking ? null : parseInt(items[idx].MilestoneMasterId, 10);
       await tx.request()
         .input("pid",  sql.Int,           planId)
         .input("mno",  sql.Int,           idx + 1)
-        .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
-        .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
-        .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
+        // Always Milestone Master's own live Name — never the client-supplied
+        // MilestoneName — so this can never drift from that table. Booking
+        // is the one fixed exception: it has no Milestone Master row.
+        .input("mname",sql.NVarChar(200), isBooking ? "Booking" : namesById.get(mmid))
+        .input("mmid", sql.Int,           mmid)
+        .input("pct",  sql.Decimal(5,2),  isBooking ? 0 : parseFloat(items[idx].Percent))
         .query(`
           INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
           VALUES (@pid, @mno, @mname, @mmid, @pct)
@@ -196,9 +224,11 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
   const id = parseInt(req.params.id);
   const b = req.body;
   const items = Array.isArray(b.Items) ? b.Items : null;
+  let namesById = null;
   if (items) {
-    const itemsError = validateItems(items);
-    if (itemsError) return res.status(400).json({ error: itemsError });
+    const validated = await validateItems(pool, items);
+    if (validated.error) return res.status(400).json({ error: validated.error });
+    namesById = validated.namesById;
   }
   // Only touch BookingAmount if the caller actually sent one — PUT is also
   // used for lightweight Name/Description/IsActive edits that don't resend
@@ -230,12 +260,16 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       await tx.request().input("id", sql.Int, id)
         .query("DELETE FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id");
       for (let idx = 0; idx < items.length; idx++) {
+        const isBooking = idx === 0;
+        const mmid = isBooking ? null : parseInt(items[idx].MilestoneMasterId, 10);
         await tx.request()
           .input("pid",  sql.Int,           id)
           .input("mno",  sql.Int,           idx + 1)
-          .input("mname",sql.NVarChar(200), items[idx].MilestoneName)
-          .input("mmid", sql.Int,           items[idx].MilestoneMasterId ? parseInt(items[idx].MilestoneMasterId) : null)
-          .input("pct",  sql.Decimal(5,2),  parseFloat(items[idx].Percent))
+          // Always Milestone Master's own live Name — never the
+          // client-supplied MilestoneName — same reasoning as POST /.
+          .input("mname",sql.NVarChar(200), isBooking ? "Booking" : namesById.get(mmid))
+          .input("mmid", sql.Int,           mmid)
+          .input("pct",  sql.Decimal(5,2),  isBooking ? 0 : parseFloat(items[idx].Percent))
           .query(`
             INSERT INTO dbo.CrmPaymentPlanTemplateItem (PlanTemplateId, MilestoneNo, MilestoneName, MilestoneMasterId, [Percent])
             VALUES (@pid, @mno, @mname, @mmid, @pct)

@@ -124,6 +124,17 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Locked once the Booking is Approved — same "nothing left to edit"
+    // rule every other tab on the Booking Detail page enforces (Unit/Rate,
+    // Payment Plan, Parking/Extra Charges — see crmBookings.js's own
+    // Status === 'Approved' checks). Bank/KYC details are exactly as
+    // sensitive as those, so they get the same server-side gate rather than
+    // relying on the frontend alone to hide the Save button.
+    const bookingRow = await pool.request().input("bid", sql.Int, bid).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @bid");
+    if (bookingRow.recordset[0]?.Status === "Approved") {
+      return res.status(400).json({ error: "This booking is Approved — Bank/KYC details can no longer be edited." });
+    }
+
     const existing = await pool.request().input("bid", sql.Int, bid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
 
     const fields = {

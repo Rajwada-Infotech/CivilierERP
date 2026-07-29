@@ -484,29 +484,12 @@ router.get("/", async (req, res) => {
       `);
     }
 
-    if (!module || module === "crm-applications") {
-      queries.push(`
-        SELECT
-          'crm-applications'                    AS Module,
-          'CRM Application'                     AS ModuleLabel,
-          CAST(a.Id AS NVARCHAR)                AS RecordId,
-          a.ApplicationNo                       AS Reference,
-          a.CreatedAt                           AS RecordDate,
-          a.Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          a.ApplicantName                       AS SupplierName,
-          a.BudgetMax                           AS Amount,
-          ${NULL_EXTRA}
-          CAST(a.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
-          ''                                    AS ApprovedBy,
-          ''                                    AS ApprovedAt,
-          ''                                    AS RejectedBy,
-          ''                                    AS RejectionNote,
-          ISNULL(a.UpdatedAt, a.CreatedAt)      AS LastModified
-        FROM dbo.CrmApplication a
-        WHERE a.Status = 'Pending' AND a.IsActive = 1
-      `);
-    }
+    // crm-applications was removed here — Applications no longer go through
+    // an admin approval step (a Booking is auto-attempted straight off
+    // submission, see crmApplications.js PUT /:id/submit). Booking Approval
+    // and Broker Approval (below, crm-bookings / crm-brokerage) are what
+    // actually surface in this inbox now, both triggered off the Booking
+    // itself rather than the Application.
 
     if (!module || module === "crm-bookings") {
       queries.push(`

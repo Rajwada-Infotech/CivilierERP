@@ -1,18 +1,24 @@
 /**
  * CRM Application — the Cancel action and the AutoBooking cascade only.
  *
- * Draft -> Pending -> Approved/Rejected now goes through the shared
- * approvalService.js transition() engine (see crmApplications.js), so only
- * admin/super_admin/dba users acting from the Admin Approval Inbox can
- * approve or reject — not a self-service button on the application's own
- * page. This module keeps two things that engine doesn't cover:
+ * There is no Application-level approval step anymore — a Booking is
+ * created straight off a submitted (Pending) Application (see
+ * crmApplications.js PUT /:id/submit), no admin approve/reject gate in
+ * between. Approved is now purely a system-set marker meaning "this
+ * Application successfully became a real Booking" — reached exclusively via
+ * the AutoBooking force-advance below, the moment createCrmBookingRecord
+ * finishes. Rejected is legacy-only: nothing in current code sets it, but
+ * old data may still carry it, so it stays a valid terminal state
+ * (resubmittable back to Pending via PUT /:id/submit).
+ * This module keeps two things:
  *   - Cancel: a business action any editor can take, not an approval.
  *   - AutoBooking: booking creation force-advances the application to
- *     Approved as a system-triggered cascade, bypassing the human
- *     approval gate entirely (a real booking is stronger proof than a
- *     manual approval click).
+ *     Approved as a system-triggered cascade (a real booking is stronger
+ *     proof than any manual approval click ever was).
  * Every transition here is still written to CrmApplicationStatusLog for
- * audit purposes, distinct from ApprovalAuditLog (which the engine uses).
+ * audit purposes, distinct from ApprovalAuditLog (which approvalService.js's
+ * transition() engine uses — still called from PUT /:id/submit for the
+ * Rejected -> Pending resubmit case).
  */
 const { sql } = require("../db");
 
@@ -28,10 +34,9 @@ const APPLICATION_TRANSITIONS = {
   Pending:   ["Cancelled"],
   // Approved is deliberately NOT allowed to transition to Cancelled here.
   // Once an Application is Approved, "Cancel Application" is no longer the
-  // right tool — a real Booking either already exists or is expected to
-  // (createCrmBookingRecord requires Status = 'Approved' before it will
-  // create one), so undoing the deal from this point on has to go through
-  // the Booking's own Cancellation Request flow (crmCancellations.js:
+  // right tool — Approved only ever gets set by AutoBooking, meaning a real
+  // Booking now exists, so undoing the deal from this point on has to go
+  // through the Booking's own Cancellation Request flow (crmCancellations.js:
   // request -> admin-approved -> refund/parking/hold/amendment cascade),
   // not a single-step self-service action. This is what keeps "accidentally
   // applied, let me cancel and redo it" (fine pre-approval) distinct from

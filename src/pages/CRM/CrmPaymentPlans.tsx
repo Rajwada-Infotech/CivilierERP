@@ -166,6 +166,17 @@ const CrmPaymentPlans: React.FC = () => {
   // not TotalValue itself — see generateMilestonesForBooking on the backend).
   const totalPct = items.slice(1).reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
+  // Whether "+ Add milestone" has anywhere left to point to — every row is
+  // fully wired to Milestone Master now (no free-typed fallback), so once
+  // every active, non-"Booking" master entry is already used somewhere in
+  // this plan, adding another blank row would just be a dead-end dropdown.
+  const milestoneMasterHasUnusedOptions = useMemo(() => {
+    const usedIds = new Set(items.slice(1).map((i) => i.MilestoneMasterId).filter(Boolean));
+    return (milestoneMaster as any[]).some(
+      (m: any) => m.IsActive && m.Name?.trim().toLowerCase() !== "booking" && !usedIds.has(String(m.Id)),
+    );
+  }, [milestoneMaster, items]);
+
   const resetForm = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setBookingAmount("");
@@ -207,6 +218,12 @@ const CrmPaymentPlans: React.FC = () => {
     }
     if (items.length < 2) { toast.error("Add at least one milestone after Booking"); return; }
     if (Math.round(totalPct * 100) !== 10000) { toast.error(`Post-Booking milestones must sum to 100% (currently ${totalPct}%)`); return; }
+    // Every row after Booking must be wired to a real Milestone Master entry
+    // — no more free-typed names — so block here before even hitting the
+    // network, matching the same requirement the backend enforces.
+    if (items.slice(1).some((it) => !it.MilestoneMasterId)) {
+      toast.error("Select a Milestone Master entry for every milestone row"); return;
+    }
     const seenMasterIds = new Set<string>();
     for (const it of items) {
       if (!it.MilestoneMasterId) continue;
@@ -665,23 +682,23 @@ const CrmPaymentPlans: React.FC = () => {
                         </span>
                         <div className="flex-1 min-w-0 space-y-2">
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">Source</label>
+                            <label className="text-[11px] text-muted-foreground block mb-1">Milestone *</label>
                             <select value={it.MilestoneMasterId}
                               onChange={(e) => {
                                 const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
                                 setItems((arr) => arr.map((x, i) => i === idx ? {
                                   ...x,
                                   MilestoneMasterId: e.target.value,
-                                  MilestoneName: master ? master.Name : x.MilestoneName,
+                                  MilestoneName: master ? master.Name : "",
                                 } : x));
                               }}
                               className={inputCls}>
-                              <option value="">✎ Custom milestone (type name below)</option>
+                              <option value="">Select a milestone…</option>
                               {(milestoneMaster as any[])
                                 // A milestone deactivated after being picked must stay selectable
                                 // on the row that already has it — otherwise the <select> has no
-                                // matching <option>, silently falls back to "✎ Custom milestone",
-                                // and an unnoticed Save detaches this row from the master record.
+                                // matching <option>, and an unnoticed Save silently detaches this
+                                // row from the master record it used to point at.
                                 .filter((m: any) => m.IsActive || String(m.Id) === it.MilestoneMasterId)
                                 // Don't offer "Booking" here — it's already the fixed row above.
                                 .filter((m: any) => m.Name?.trim().toLowerCase() !== "booking")
@@ -693,29 +710,22 @@ const CrmPaymentPlans: React.FC = () => {
                                   <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
                                 ))}
                             </select>
+                            {!fromMaster && (
+                              <p className="text-[11px] text-amber-600 mt-1">
+                                {milestoneMasterHasUnusedOptions
+                                  ? "Pick a milestone above before saving."
+                                  : "No unused Milestone Master entries left — add one there first."}
+                              </p>
+                            )}
                           </div>
 
-                          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                            <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">Milestone Name</label>
-                              {fromMaster ? (
-                                <div className="w-full text-sm rounded px-2 py-1.5 bg-muted/40 border border-border text-foreground font-medium truncate" title={it.MilestoneName}>
-                                  {it.MilestoneName}
-                                </div>
-                              ) : (
-                                <input type="text" placeholder="e.g. Foundation, Handover" value={it.MilestoneName}
-                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value } : x))}
-                                  className={inputCls} />
-                              )}
-                            </div>
-                            <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
-                              <div className="relative w-24">
-                                <input type="number" placeholder="0" value={it.Percent}
-                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
-                                  className={`${inputCls} pr-6 text-right font-semibold`} />
-                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
-                              </div>
+                          <div>
+                            <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
+                            <div className="relative w-24">
+                              <input type="number" placeholder="0" value={it.Percent}
+                                onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
+                                className={`${inputCls} pr-6 text-right font-semibold`} />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
                             </div>
                           </div>
                         </div>
@@ -729,8 +739,19 @@ const CrmPaymentPlans: React.FC = () => {
                   );
                 })}
               </div>
-              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
-                className="text-xs text-primary hover:underline mt-2">+ Add milestone</button>
+              <button
+                onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
+                disabled={!milestoneMasterHasUnusedOptions}
+                className="text-xs text-primary hover:underline mt-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+              >
+                + Add milestone
+              </button>
+              {!milestoneMasterHasUnusedOptions && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Every active Milestone Master entry is already used in this plan —{" "}
+                  <a href="/crm/milestone-master" target="_blank" rel="noreferrer" className="underline">add more there</a> to include another.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

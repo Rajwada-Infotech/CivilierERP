@@ -843,38 +843,23 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
-    const type = b.InvoiceType || "Booking";
+    const type = b.InvoiceType || "Maintenance";
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // Booking-type invoices are the system-owned one-per-booking invoice —
-    // maybeAutoGenerateBookingInvoice already creates this at
-    // ready-for-approval, on the exact same InvoiceType='Booking' key. That
-    // fires before Status flips to 'Approved', the same window this manual
-    // route stays reachable in, so a staff member opening this dialog in
-    // between could otherwise insert a second Booking invoice with a
-    // different amount than the auto-generated one. Guard here too rather
-    // than relying on the frontend to prevent it.
-    let amount;
+    // Booking-type invoices are 100% system-owned — maybeAutoGenerateBookingInvoice
+    // creates the one-and-only Booking invoice automatically the moment the
+    // booking payment clears and staff hit Confirm & Book (ready-for-approval).
+    // This manual route is for every other invoice (Maintenance, Other, and
+    // any milestone-wise payment after booking) — it never accepts 'Booking'
+    // at all, so there's no window for staff to create or misprice it ahead
+    // of the real, payment-gated auto-generation.
     if (type === "Booking") {
-      const existing = await pool.request().input("bid", sql.Int, id)
-        .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
-      if (existing.recordset.length) {
-        return res.status(400).json({ error: "A Booking invoice already exists for this booking" });
-      }
-      // Never trust a client-submitted amount for the Booking invoice — it
-      // must match CrmBooking.BookingAmount, the same source
-      // maybeAutoGenerateBookingInvoice reads from, so this manual path
-      // can't record a different figure than what was actually booked.
-      const booking = await pool.request().input("bid", sql.Int, id)
-        .query("SELECT BookingAmount FROM dbo.CrmBooking WHERE Id = @bid");
-      amount = Number(booking.recordset[0]?.BookingAmount) || 0;
-      if (!amount) return res.status(400).json({ error: "Booking has no BookingAmount set" });
-    } else {
-      amount = parseFloat(b.Amount);
-      if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+      return res.status(400).json({ error: "Booking invoice is generated automatically once the booking payment is confirmed and the booking is submitted via Confirm & Book — it can't be created manually" });
     }
+    const amount = parseFloat(b.Amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
 
     const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
     const result = await pool.request()

@@ -180,13 +180,6 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/inter-company-transfer",
     label: "Inter-Company Transfers",
   },
-  "crm-applications": {
-    icon: ClipboardList,
-    color: "text-sky-500 bg-sky-500/10",
-    navPath: "/crm/applications",
-    apiEndpoint: "/api/crm/applications",
-    label: "CRM Applications",
-  },
   "crm-bookings": {
     icon: Home,
     color: "text-orange-500 bg-orange-500/10",
@@ -271,7 +264,7 @@ const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of

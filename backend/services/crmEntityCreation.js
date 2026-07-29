@@ -490,24 +490,21 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
-  // The Application must have actually cleared its own Approved-role gate
-  // (crmApplications.js PUT /:id/approve, admin/super_admin/dba-tier) before
-  // a Booking can exist for it. Enforced here -- the single choke point
-  // every caller (the /approve auto-create path AND the manual/fallback
-  // POST /api/crm/bookings route, which only checks "crm-bookings":"create"
-  // and never checks Application-approval rights) goes through -- because
-  // this function ends by force-advancing the Application to 'Approved'
-  // (see advanceApplicationStatus(..., { force: true }) below). Without this
-  // check, the manual booking-creation escape hatch could be used to
-  // silently rubber-stamp a Draft/Pending/Rejected/Cancelled Application
-  // into Approved, bypassing the real approval workflow and its role gate
-  // entirely -- the booking creation itself becoming the de facto approval.
+  // There is no separate Application-approval gate anymore — a Booking can
+  // be created straight from a submitted (Pending) Application, no admin
+  // approval step in between (Booking Approval and Broker Approval are what
+  // actually go through review now, both triggered off the Booking itself —
+  // see crmBookings.js's ready-for-approval and crmWorkflowGuards.js's
+  // maybeAutoCreateBrokerage). This still blocks the genuinely dead states —
+  // an Application that was Rejected (legacy data; nothing sets this
+  // anymore), Cancelled, or Expired has no business getting a Booking.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
+  const deadStatuses = ["Rejected", "Cancelled", "Expired"];
+  if (appRow.recordset[0].IsActive === false || deadStatuses.includes(appRow.recordset[0].Status)) {
     throw new CrmCreationError(
-      `Application must be Approved before a Booking can be created (current status: ${appRow.recordset[0].Status})`, 400);
+      `A Booking can't be created for an application that is ${appRow.recordset[0].Status} — only a Rejected/Cancelled/Expired application is blocked`, 400);
   }
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`

@@ -181,9 +181,17 @@ const CrmBooking: React.FC = () => {
   }, [selectedPlan]);
 
   const availableUnits = useMemo(() => {
-    const bookedIds = new Set((bookings as any[]).filter((b: any) => b.Status !== "Cancelled" && b.Status !== "Rejected").map((b: any) => b.UnitId));
-    return (units as any[]).filter((u: any) => u.IsActive && (!bookedIds.has(u.Id) || String(u.Id) === form.UnitId));
-  }, [units, bookings, form.UnitId]);
+    // Was filtering against the `bookings` query above — but that query is
+    // scoped to a single Application whenever this page is opened via
+    // ?applicationId= (the common "View Booking" deep link), so it would
+    // silently under-report every OTHER application's booked units as still
+    // available. unit-master's own LockBookingNo/LockHoldId (computed
+    // system-wide, not scoped to this page's filters) is the reliable
+    // source — same fields CrmApplication.tsx's own unit picker now uses.
+    return (units as any[]).filter((u: any) =>
+      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.UnitId)
+    );
+  }, [units, form.UnitId]);
 
   // The selected Application's own PreferredUnitId — auto-fetched and locked
   // here just like its other fields, since it's already been decided. Only
