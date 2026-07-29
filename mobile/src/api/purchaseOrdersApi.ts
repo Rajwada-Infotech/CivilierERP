@@ -2,11 +2,12 @@
 // GST-split resolver, and UOM-conversion engine inlined in
 // src/pages/material/PurchaseOrderMaster.tsx (5,095 lines — the largest
 // page in the whole Material module). Scope for mobile (agreed with user):
-// Direct + From-MR creation only (Quotation/Work Order/Work Design prefills
-// need those source pages on mobile first — not there yet); the GST/UOM
-// engine IS replicated faithfully since it's core to correctness, not
-// polish. Header-level Discount/GST config on CreatePOPayload is vestigial
-// on web itself (never set by the page's own toPayload()) — not ported.
+// Direct + From-MR + From-Quotation (L1 Chart award) creation; Work Order/
+// Work Design prefills still need those source pages on mobile first — not
+// there yet. The GST/UOM engine IS replicated faithfully since it's core to
+// correctness, not polish. Header-level Discount/GST config on
+// CreatePOPayload is vestigial on web itself (never set by the page's own
+// toPayload()) — not ported.
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 async function handleResponse<T = any>(res: Response): Promise<T> {
@@ -73,6 +74,8 @@ export interface CreatePOPayload {
   finYear?: string | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
+  SourceQTId?: number | null;
+  SourceQTDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO" | "QPO";
 }
 
@@ -112,6 +115,8 @@ export interface PurchaseOrder {
   SourceMRDocNo?: string | null;
   SourceWODocNo?: string | null;
   SourceWDDocNo?: string | null;
+  SourceQTId?: number | null;
+  SourceQTDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO" | "QPO";
 }
 
@@ -332,6 +337,31 @@ export const getApprovedMRList = (params?: { companyId?: string; projectId?: str
 
 export const getMRPOPrefill = (id: number | string) =>
   fetchWithAuth(`/api/material-requests/${id}/create-po-prefill`).then((r) => handleResponse<MRPOPrefill>(r));
+
+// ─── Quotation (L1 Chart award) → PO prefill ────────────────────────────────
+// Unlike MR prefill, this carries a chosen supplier's quoted Rate per line
+// (and the GST fields needed to resolve cgst/sgst/igst the same way any
+// other line item does) — the winning bid from L1Chart.tsx's comparison.
+
+export interface QTPOPrefillItem {
+  QuotationItemId: number; ItemId: string; ItemName: string; UOMCode: string; UOMName: string;
+  Quantity: number; Remarks?: string;
+  M_CGST: number | null; M_SGST: number | null; M_IGST: number | null;
+  Rate: number | null; SupplyDate: string | null; Quality: string | null;
+}
+
+export interface QTPOPrefill {
+  QuotationId: number; DocNo: string;
+  CompanyId: number | null; CompanyName: string;
+  ProjectId: number | null; ProjectName: string;
+  FinYearId: number | null; Remarks: string;
+  SupplierId: number; SupplierName: string | null;
+  SourceMRId?: number | null; SourceMRDocNo?: string | null;
+  items: QTPOPrefillItem[];
+}
+
+export const getQTPOPrefill = (quotationId: number | string, supplierId: number | string) =>
+  fetchWithAuth(`/api/quotations/${quotationId}/po-prefill?supplierId=${supplierId}`).then((r) => handleResponse<QTPOPrefill>(r));
 
 // ─── GST split resolver ─────────────────────────────────────────────────────
 // Items carry CGST, SGST, and IGST rates all at once in Item Master — which
