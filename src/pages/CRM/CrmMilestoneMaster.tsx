@@ -20,6 +20,8 @@ const CrmMilestoneMaster: React.FC = () => {
   const [name, setName] = useState("");
   const [sortOrder, setSortOrder] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [isActive, setIsActive] = useState(true);
   // Opens locked (read-only) whenever editing an existing row — "New
   // Milestone" opens unlocked since there's nothing existing to protect.
   const [locked, setLocked] = useState(false);
@@ -31,12 +33,14 @@ const CrmMilestoneMaster: React.FC = () => {
     setEditingId(null);
     setName(""); setSortOrder("");
     setLocked(false);
+    setIsActive(true);
   };
 
   const openEdit = (m: any) => {
     setEditingId(m.Id);
     setName(m.Name);
     setSortOrder(String(m.SortOrder));
+    setIsActive(m.IsActive !== false && m.IsActive !== 0);
     setLocked(true);
     setDialogOpen(true);
   };
@@ -52,6 +56,7 @@ const CrmMilestoneMaster: React.FC = () => {
         body: JSON.stringify({
           Name: name.trim(),
           SortOrder: sortOrder || 0,
+          IsActive: isActive,
         }),
       });
       const data = await res.json();
@@ -69,6 +74,8 @@ const CrmMilestoneMaster: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
+    if (!window.confirm("Delete this milestone? This cannot be undone.")) return;
+    setDeletingId(id);
     try {
       const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -77,6 +84,8 @@ const CrmMilestoneMaster: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -95,7 +104,8 @@ const CrmMilestoneMaster: React.FC = () => {
       cell: (i) => (
         <div className="flex items-center gap-1.5">
           <button onClick={() => openEdit(i.row.original)} className="p-1 text-muted-foreground hover:text-primary" title="Edit"><Pencil size={13} /></button>
-          <button onClick={() => handleDelete(i.row.original.Id)} className="p-1 text-muted-foreground hover:text-red-600" title="Delete"><Trash2 size={13} /></button>
+          <button onClick={() => handleDelete(i.row.original.Id)} disabled={deletingId === i.row.original.Id}
+            className="p-1 text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:pointer-events-none" title="Delete"><Trash2 size={13} /></button>
         </div>
       ) },
   ];
@@ -147,6 +157,24 @@ const CrmMilestoneMaster: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">Sort Order</label>
               <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)}
                 className={inputCls} />
+            </div>
+            <div className={`flex items-center justify-between rounded-lg border border-border px-3 py-2 ${locked ? "opacity-70" : ""}`}>
+              <div>
+                <div className="text-xs font-medium text-foreground">Status</div>
+                <p className="text-[11px] text-muted-foreground">
+                  {isActive ? "Active — offered in the payment plan step picker." : "Inactive — hidden from the picker, kept for history."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { if (!locked) setIsActive((v) => !v); }}
+                disabled={locked}
+                role="switch"
+                aria-checked={isActive}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isActive ? "bg-green-500" : "bg-muted-foreground/30"} ${locked ? "cursor-not-allowed" : ""}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isActive ? "translate-x-[18px]" : "translate-x-1"}`} />
+              </button>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

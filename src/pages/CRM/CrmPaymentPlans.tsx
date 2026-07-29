@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Pencil, Layers, ListChecks, X } from "lucide-react";
+import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
@@ -99,6 +99,8 @@ const CrmPaymentPlans: React.FC = () => {
   const [tagCompanyId, setTagCompanyId] = useState("");
   const [tagProjectId, setTagProjectId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [isActive, setIsActive] = useState(true);
 
   // Read-only preview, opened by tapping a card. Built straight from the
   // list row's own MilestonesJson — no extra fetch, no loading flicker.
@@ -134,6 +136,23 @@ const CrmPaymentPlans: React.FC = () => {
       .filter((x): x is { id: string; name: string; companyName: string } => x !== null),
     [projectIds, projectsById, companiesById],
   );
+  // Same resolution as selectedTaggedProjects above, but driven off the
+  // previewed plan's own ProjectIds rather than the edit form's local state
+  // — keeps the read-only preview showing live Project names too, not the
+  // ProjectNames string PLAN_SELECT also returns (which is only used as a
+  // fallback if the dropdown data hasn't loaded yet).
+  const previewTaggedProjects = useMemo(() => {
+    if (!previewPlan?.ProjectIds) return [];
+    return String(previewPlan.ProjectIds)
+      .split(",")
+      .map((id) => {
+        const p = projectsById.get(id);
+        if (!p) return null;
+        const company = companiesById.get(String(p.company_id));
+        return { id, name: p.name, companyName: company?.name ?? "" };
+      })
+      .filter((x): x is { id: string; name: string; companyName: string } => x !== null);
+  }, [previewPlan, projectsById, companiesById]);
 
   const handleAddTaggedProject = () => {
     if (!tagProjectId) return;
@@ -153,6 +172,7 @@ const CrmPaymentPlans: React.FC = () => {
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
     setProjectIds([]);
     setTagCompanyId(""); setTagProjectId("");
+    setIsActive(true);
   };
 
   const openCreate = () => { resetForm(); setDialogOpen(true); };
@@ -167,6 +187,7 @@ const CrmPaymentPlans: React.FC = () => {
     setDescription(plan.Description || "");
     setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
     setProjectIds(plan.ProjectIds ? String(plan.ProjectIds).split(",") : []);
+    setIsActive(plan.IsActive !== false && plan.IsActive !== 0);
     setTagCompanyId(""); setTagProjectId("");
     setItems(
       (planItems as any[]).length
@@ -208,6 +229,7 @@ const CrmPaymentPlans: React.FC = () => {
         body: JSON.stringify({
           PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
           ProjectIds: projectIds.map((x) => parseInt(x)).filter(Number.isFinite),
+          IsActive: isActive,
         }),
       });
       const data = await res.json();
@@ -230,7 +252,28 @@ const CrmPaymentPlans: React.FC = () => {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!window.confirm("Delete this payment plan? This cannot be undone.")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Payment plan deleted");
+      setPreviewPlan(null);
+      qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const previewMilestones = useMemo(() => parseMilestones(previewPlan?.MilestonesJson), [previewPlan]);
+  const previewAfterBookingTotal = useMemo(
+    () => Math.round(previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0) * 100) / 100,
+    [previewMilestones],
+  );
 
   return (
     <SalesAutoShell
@@ -284,6 +327,17 @@ const CrmPaymentPlans: React.FC = () => {
                   >
                     <Pencil size={13} />
                   </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); if (deletingId !== p.Id) handleDelete(p.Id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); if (deletingId !== p.Id) handleDelete(p.Id); } }}
+                    title="Delete plan"
+                    aria-disabled={deletingId === p.Id}
+                    className={`p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${deletingId === p.Id ? "pointer-events-none opacity-50" : ""}`}
+                  >
+                    <Trash2 size={13} />
+                  </span>
                 </div>
               </div>
 
@@ -323,56 +377,112 @@ const CrmPaymentPlans: React.FC = () => {
       {/* Read-only preview — tapping a card opens this instead of dropping
           straight into a greyed-out copy of the edit form. */}
       <Dialog open={!!previewPlan} onOpenChange={(o) => { if (!o) setPreviewPlan(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           {previewPlan && (
             <>
               <DialogHeader>
-                <DialogTitle className="font-heading flex items-start justify-between gap-2 pr-6">
-                  <div className="min-w-0">
-                    <div>{previewPlan.PlanName}</div>
-                    {previewPlan.Description && (
-                      <div className="text-xs font-normal text-muted-foreground mt-1">{previewPlan.Description}</div>
-                    )}
+                <DialogTitle className="font-heading">
+                  <div className="flex items-start justify-between gap-3 pr-6">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="mt-0.5 shrink-0 flex items-center justify-center w-10 h-10 rounded-xl bg-primary/15 text-primary">
+                        <Layers size={19} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-base leading-tight">{previewPlan.PlanName}</div>
+                        {previewPlan.Description && (
+                          <div className="text-xs font-normal text-muted-foreground mt-1">{previewPlan.Description}</div>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${
+                      previewPlan.IsActive
+                        ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
+                        : "text-muted-foreground bg-muted/50 border-border"
+                    }`}>
+                      {previewPlan.IsActive ? "Active" : "Inactive"}
+                    </span>
                   </div>
-                  <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                    previewPlan.IsActive
-                      ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
-                      : "text-muted-foreground bg-muted/50 border-border"
-                  }`}>
-                    {previewPlan.IsActive ? "Active" : "Inactive"}
-                  </span>
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <MilestoneBar milestones={previewMilestones} height="h-2.5" />
 
-                <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
-                  {previewMilestones.map((m, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-sm rounded-lg border border-border bg-muted/20 px-3 py-2">
-                      <span className={`mt-0.5 shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
-                        {i + 1}
-                      </span>
-                      <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
-                      <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
-                        {i === 0 ? `₹${Number(previewPlan.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
-                      </span>
+                {/* Stat strip — the three numbers worth knowing at a glance,
+                    pulled out of the old plain-text footer into real tiles. */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <ListChecks size={11} /> Milestones
                     </div>
-                  ))}
+                    <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
+                      {previewMilestones.length}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Calendar size={11} /> Created
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
+                      {previewPlan.CreatedAt ? new Date(previewPlan.CreatedAt).toLocaleDateString() : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Percent size={11} /> After Booking
+                    </div>
+                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-amber-600"}`}>
+                      {previewAfterBookingTotal}%
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-2">
-                  <span className="flex items-center gap-3">
-                    <span>{previewMilestones.length} milestone{previewMilestones.length === 1 ? "" : "s"}</span>
-                    {previewPlan.CreatedAt && <span>Created {new Date(previewPlan.CreatedAt).toLocaleDateString()}</span>}
-                  </span>
-                  <span className={Math.round(previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)) === 100 ? "text-green-600 dark:text-green-400 font-semibold" : "text-amber-600 font-semibold"}>
-                    {previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)}% total (after Booking)
-                  </span>
+                <div className="grid sm:grid-cols-[1.4fr_1fr] gap-4">
+                  <div className="space-y-1.5 max-h-[42vh] overflow-y-auto pr-1">
+                    {previewMilestones.map((m, i) => (
+                      <div key={i} className="relative flex items-center gap-2.5 text-sm rounded-lg border border-border bg-muted/20 pl-4 pr-3 py-2 overflow-hidden">
+                        <span className={`absolute left-0 top-0 bottom-0 w-1 ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`} />
+                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
+                        <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
+                          {i === 0 ? `₹${Number(previewPlan.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-muted/10 p-3 self-start">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
+                      <Building2 size={12} /> Tagged Projects
+                    </div>
+                    {previewTaggedProjects.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {previewTaggedProjects.map((p) => (
+                          <span key={p.id} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
+                            {p.name}
+                            {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    ) : previewPlan.ProjectNames ? (
+                      // Dropdown data (companies/projects) hasn't finished loading yet —
+                      // fall back to the plain names PLAN_SELECT already returned rather
+                      // than show nothing.
+                      <p className="text-xs text-foreground">{previewPlan.ProjectNames}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">Not tagged — offered as a fallback option everywhere instead.</p>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <div className="flex justify-end gap-2 pt-4 border-t border-border">
+                <button onClick={() => handleDelete(previewPlan.Id)} disabled={deletingId === previewPlan.Id}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-red-600 hover:bg-red-500/10 disabled:opacity-40 mr-auto">
+                  <Trash2 size={13} /> {deletingId === previewPlan.Id ? "Deleting..." : "Delete"}
+                </button>
                 <button onClick={() => setPreviewPlan(null)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
                 <button onClick={() => openEdit(previewPlan.Id)}
@@ -403,6 +513,24 @@ const CrmPaymentPlans: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
               <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
                 className={inputCls} />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              <div>
+                <div className="text-xs font-medium text-foreground">Status</div>
+                <p className="text-[11px] text-muted-foreground">
+                  {isActive ? "Active — offered wherever payment plans are picked." : "Inactive — hidden from pickers, kept for existing bookings/history."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsActive((v) => !v)}
+                role="switch"
+                aria-checked={isActive}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isActive ? "bg-green-500" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isActive ? "translate-x-4.5" : "translate-x-1"}`} />
+              </button>
             </div>
 
             <div>
@@ -550,7 +678,11 @@ const CrmPaymentPlans: React.FC = () => {
                               className={inputCls}>
                               <option value="">✎ Custom milestone (type name below)</option>
                               {(milestoneMaster as any[])
-                                .filter((m: any) => m.IsActive)
+                                // A milestone deactivated after being picked must stay selectable
+                                // on the row that already has it — otherwise the <select> has no
+                                // matching <option>, silently falls back to "✎ Custom milestone",
+                                // and an unnoticed Save detaches this row from the master record.
+                                .filter((m: any) => m.IsActive || String(m.Id) === it.MilestoneMasterId)
                                 // Don't offer "Booking" here — it's already the fixed row above.
                                 .filter((m: any) => m.Name?.trim().toLowerCase() !== "booking")
                                 // Each master milestone can only be used once per plan — hide it

@@ -43,8 +43,9 @@ const PLAN_SELECT = `
   SELECT p.Id, p.PlanName, p.Description, p.BookingAmount, p.IsActive, p.CreatedAt,
          (SELECT COUNT(*) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS ItemCount,
          (SELECT SUM([Percent]) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.PlanTemplateId = p.Id) AS TotalPercent,
-         (SELECT i.MilestoneName AS name, i.[Percent] AS pct
+         (SELECT ISNULL(mm.Name, i.MilestoneName) AS name, i.[Percent] AS pct
           FROM dbo.CrmPaymentPlanTemplateItem i
+          LEFT JOIN dbo.CrmMilestoneMaster mm ON mm.Id = i.MilestoneMasterId
           WHERE i.PlanTemplateId = p.Id
           ORDER BY i.MilestoneNo
           FOR JSON PATH) AS MilestonesJson,
@@ -101,10 +102,24 @@ router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, re
     const id = parseInt(req.params.id);
     const [planRes, itemsRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${PLAN_SELECT} WHERE p.Id = @id`),
-      pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id ORDER BY MilestoneNo"),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT i.*, mm.Name AS LiveMilestoneName
+        FROM dbo.CrmPaymentPlanTemplateItem i
+        LEFT JOIN dbo.CrmMilestoneMaster mm ON mm.Id = i.MilestoneMasterId
+        WHERE i.PlanTemplateId = @id
+        ORDER BY i.MilestoneNo
+      `),
     ]);
     if (!planRes.recordset[0]) return res.status(404).json({ error: "Payment plan not found" });
-    res.json({ plan: planRes.recordset[0], items: itemsRes.recordset });
+    // LiveMilestoneName comes from a LEFT JOIN to CrmMilestoneMaster, so a
+    // rename there is picked up here immediately; it's null for custom
+    // (MilestoneMasterId-less) rows and for Booking, which keep their
+    // originally-stored MilestoneName.
+    const items = itemsRes.recordset.map((it) => {
+      const { LiveMilestoneName, ...rest } = it;
+      return { ...rest, MilestoneName: LiveMilestoneName || it.MilestoneName };
+    });
+    res.json({ plan: planRes.recordset[0], items });
   } catch (e) {
     console.error("[crm-payment-plans] GET /:id error:", e.message);
     res.status(500).json({ error: e.message });
@@ -246,6 +261,49 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       return res.status(409).json({ error: "A plan with this name already exists" });
     }
     console.error("[crm-payment-plans] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id — blocked (409, no cascade) if this plan is in active use
+// anywhere up the hierarchy: already the PaymentPlanId on an active
+// Booking, or tagged to an active Project via CrmPaymentPlanProject. Same
+// "block, don't cascade-delete" shape as Milestone Master's own DELETE
+// guard above. Only checks the two tiers confirmed in this file — the
+// Unit/Block tag tables mentioned in PLAN_SELECT's comment
+// (CrmUnitPaymentPlan / CrmBlockPaymentPlan) aren't checked here yet since
+// their column names haven't been confirmed.
+router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (req, res) => {
+  const pool = getPool();
+  const id = parseInt(req.params.id);
+  try {
+    const [bookingUsage, projectUsage] = await Promise.all([
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id AND IsActive = 1"),
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentPlanProject WHERE PlanId = @id AND IsActive = 1"),
+    ]);
+    if (bookingUsage.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "This plan is applied to one or more active bookings — deactivate it instead of deleting." });
+    }
+    if (projectUsage.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "This plan is tagged to one or more active Projects — untag it or deactivate it instead of deleting." });
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id");
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanProject WHERE PlanId = @id");
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplate WHERE Id = @id");
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-payment-plans] DELETE error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
