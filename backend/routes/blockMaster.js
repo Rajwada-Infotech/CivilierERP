@@ -6,61 +6,18 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { getBlockLockReason } = require("../services/crmHierarchyLocks");
 
 bumpCacheVersion("block-master").catch(() => {});
 
-// Shared lock check — a Block cannot be deleted while any Unit OR Parking
-// slot under it is Booked or OnHold. Mirrors unitMaster.js's
-// getUnitLockReason (rolled up across every unit in the block) and
-// parkingSlotMaster.js's getParkingSlotLockReason (rolled up across every
-// slot in the block) run as two separate checks, so each stays a simple,
-// obviously-correct query rather than one fragile combined join. Editing a
+// Shared lock check — moved to services/crmHierarchyLocks.js so Block
+// Master, Unit Master, the Auto Project Setup page, and Project-level
+// deletion all agree on the exact same rule: a Block refuses deletion while
+// it has ANY active Unit or Parking Slot under it, not just a booked/held
+// one (a plain, never-booked Unit has to be deleted first too). Editing a
 // Block is still allowed even when locked (ProjectId/BlockName changes are
 // live-joined everywhere via BlockId, so they apply project-wide
 // immediately) — only DELETE is gated.
-async function getBlockLockReason(pool, blockId) {
-  const unitResult = await pool
-    .request()
-    .input("BlockId", sql.Int, blockId)
-    .query(`
-      SELECT TOP 1
-        bk.BookingNo,
-        h.Id AS HoldId
-      FROM dbo.UnitMaster u
-      LEFT JOIN dbo.CrmBooking bk
-        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-      WHERE u.BlockId = @BlockId AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
-    `);
-  if (unitResult.recordset.length) {
-    const row = unitResult.recordset[0];
-    return row.BookingNo ? `has a Unit with an active booking (${row.BookingNo})` : "has a Unit currently on hold";
-  }
-
-  const parkingResult = await pool
-    .request()
-    .input("BlockId", sql.Int, blockId)
-    .query(`
-      SELECT TOP 1
-        pa.Id AS AllotmentId,
-        bk.BookingNo,
-        h.Id AS HoldId
-      FROM dbo.ParkingSlot s
-      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-      WHERE s.BlockId = @BlockId AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
-    `);
-  if (parkingResult.recordset.length) {
-    const row = parkingResult.recordset[0];
-    if (row.AllotmentId) return row.BookingNo ? `has a Parking slot with an active booking (${row.BookingNo})` : "has a Parking slot currently allotted";
-    return "has a Parking slot currently on hold";
-  }
-
-  return null;
-}
 
 // GET all blocks — includes per-row lock fields (same OUTER APPLY shape as
 // unitMaster.js's LockBookingNo/LockHoldId columns) so the grid can grey out

@@ -6,40 +6,16 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { getParkingSlotLockReason } = require("../services/crmHierarchyLocks");
 
 const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
 bumpCacheVersion("parking-slot-master").catch(() => {});
 
-// Shared lock check — mirrors unitMaster.js's getUnitLockReason exactly,
-// using the same join shape parkingMatrix.js uses to compute Status, so
-// "locked" here can never drift from what the matrix shows. A slot is
-// locked (cannot be edited or deleted) if it has:
-//   - an active allotment — "Booked", whether it's tied to a CrmBooking
-//     (BookingId set) or stands alone against just an Application
-//     (BookingId NULL), or
-//   - an active, unexpired inventory hold — "OnHold"
-async function getParkingSlotLockReason(pool, id) {
-  const result = await pool
-    .request()
-    .input("Id", sql.Int, id)
-    .query(`
-      SELECT TOP 1
-        pa.Id AS AllotmentId,
-        bk.BookingNo,
-        h.Id AS HoldId
-      FROM dbo.ParkingSlot s
-      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-      WHERE s.Id = @Id AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
-    `);
-  if (!result.recordset.length) return null;
-  const row = result.recordset[0];
-  if (row.AllotmentId) return row.BookingNo ? `has an active booking (${row.BookingNo})` : "is currently allotted";
-  return "is currently on hold";
-}
+// Shared lock check — moved to services/crmHierarchyLocks.js. Mirrors
+// unitMaster.js's getUnitLockReason exactly, using the same join shape
+// parkingMatrix.js uses to compute Status, so "locked" here can never drift
+// from what the matrix shows.
 
 // GET all parking slots — includes per-row lock fields (same shape as
 // unitMaster.js's LockBookingNo/LockHoldId) so the grid can grey out

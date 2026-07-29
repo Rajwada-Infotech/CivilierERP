@@ -10,7 +10,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
 
-const EMPTY_FORM = { ApplicationId: "", ProjectId: "", BlockId: "", ParkingMasterId: "", ParkingSlotId: "", ParkingSlotNo: "", Quantity: "1", Notes: "" };
+const EMPTY_FORM = { ApplicationId: "", ProjectId: "", BlockId: "", ParkingMasterId: "", ParkingSlotId: "", Notes: "" };
 
 async function fetchAllotments(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -61,10 +61,22 @@ const CrmParkingBooking: React.FC = () => {
   const blocksForProject = useMemo(() =>
     form.ProjectId ? (blocks as any[]).filter((b: any) => String(b.ProjectId) === form.ProjectId) : (blocks as any[]),
     [blocks, form.ProjectId]);
+  // Every sale is now against a specific slot — a rate with zero matching
+  // Available rows in the fetched parking-matrix (whether because no slots
+  // were ever entered for that type, or because they're all taken) is
+  // disabled in the picker rather than falling back to a free-text slot
+  // number and quantity, same change made in CrmApplication.tsx
+  // ParkingSelectionStep.
   const ratesForScope = useMemo(() =>
-    (parkingRates as any[]).filter((r: any) =>
-      r.IsActive && (!form.ProjectId || String(r.ProjectId) === form.ProjectId) && (!r.BlockId || !form.BlockId || String(r.BlockId) === form.BlockId)
-    ), [parkingRates, form.ProjectId, form.BlockId]);
+    (parkingRates as any[])
+      .filter((r: any) =>
+        r.IsActive && (!form.ProjectId || String(r.ProjectId) === form.ProjectId) && (!r.BlockId || !form.BlockId || String(r.BlockId) === form.BlockId)
+      )
+      .map((r: any) => ({
+        ...r,
+        AvailableSlotCount: (slots as any[]).filter((s: any) => s.Status === "Available" && s.ParkingType === r.ParkingType).length,
+      })),
+    [parkingRates, form.ProjectId, form.BlockId, slots]);
   const selectedRate = ratesForScope.find((r: any) => String(r.Id) === form.ParkingMasterId);
   const availableSlots = useMemo(() =>
     (slots as any[]).filter((s: any) => s.Status === "Available" && (!selectedRate || s.ParkingType === selectedRate.ParkingType)),
@@ -83,6 +95,7 @@ const CrmParkingBooking: React.FC = () => {
   const handleCreate = async () => {
     if (!form.ApplicationId) { toast.error("Select a customer/application"); return; }
     if (!form.ParkingMasterId) { toast.error("Select a parking rate"); return; }
+    if (!form.ParkingSlotId) { toast.error("Select a parking slot"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/standalone`, {
@@ -91,9 +104,8 @@ const CrmParkingBooking: React.FC = () => {
         body: JSON.stringify({
           ApplicationId: form.ApplicationId,
           ParkingMasterId: form.ParkingMasterId,
-          ParkingSlotId: form.ParkingSlotId ? parseInt(form.ParkingSlotId) : null,
-          ParkingSlotNo: form.ParkingSlotId ? undefined : (form.ParkingSlotNo || null),
-          Quantity: parseInt(form.Quantity) || 1,
+          ParkingSlotId: parseInt(form.ParkingSlotId),
+          Quantity: 1,
           Notes: form.Notes || null,
           // This page sells parking standalone — no unit, no Booking will
           // ever get created to convert a hold into a real sale later. The
@@ -249,34 +261,32 @@ const CrmParkingBooking: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <select value={form.ParkingMasterId}
                 onChange={(e) => setForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
-                className="col-span-2 text-sm border border-border rounded px-2 py-1.5 bg-background">
+                className="text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select parking rate</option>
                 {ratesForScope.map((r: any) => (
-                  <option key={r.Id} value={String(r.Id)}>{r.ParkingType} — {inr(r.Charge)} (+{r.GstRate}% GST)</option>
+                  <option key={r.Id} value={String(r.Id)} disabled={r.AvailableSlotCount === 0}>
+                    {r.ParkingType} — {inr(r.Charge)} (+{r.GstRate}% GST)
+                    {r.AvailableSlotCount > 0 ? ` (${r.AvailableSlotCount} available)` : " — Not available (no slots free)"}
+                  </option>
                 ))}
               </select>
-              {availableSlots.length > 0 ? (
-                <select value={form.ParkingSlotId} onChange={(e) => setForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Slot (optional)</option>
-                  {availableSlots.map((s: any) => (
-                    <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
-                  ))}
-                </select>
-              ) : (
-                <input placeholder="Slot No." value={form.ParkingSlotNo}
-                  onChange={(e) => setForm((f) => ({ ...f, ParkingSlotNo: e.target.value }))}
-                  className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              )}
-              <input type="number" min={1} placeholder="Qty" value={form.Quantity}
-                onChange={(e) => setForm((f) => ({ ...f, Quantity: e.target.value }))}
-                className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              <select value={form.ParkingSlotId} onChange={(e) => setForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                disabled={!selectedRate}
+                className="text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50">
+                <option value="">{selectedRate ? "Select a slot" : "Pick a rate first"}</option>
+                {availableSlots.map((s: any) => (
+                  <option key={s.Id} value={String(s.Id)}>{s.SlotNo}{s.BlockName ? ` — ${s.BlockName}` : ""}</option>
+                ))}
+              </select>
             </div>
             {form.ProjectId && ratesForScope.length === 0 && (
               <p className="text-xs text-muted-foreground">No parking rate configured for this project/block yet — set one up in Matrix → Parking Matrix / Setup → Parking Master.</p>
+            )}
+            {form.ProjectId && ratesForScope.length > 0 && ratesForScope.every((r: any) => r.AvailableSlotCount === 0) && (
+              <p className="text-xs text-muted-foreground">No parking slots are currently available for this project/block — set them up in Parking Slot Master.</p>
             )}
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Notes</label>
@@ -286,7 +296,7 @@ const CrmParkingBooking: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={resetForm} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving}
+            <button onClick={handleCreate} disabled={saving || !form.ApplicationId || !form.ParkingMasterId || !form.ParkingSlotId}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Booking..." : "Book Parking"}
             </button>

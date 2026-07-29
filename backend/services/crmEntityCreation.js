@@ -9,10 +9,11 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
+const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
-const { guardAndConvertHold } = require("./crmHoldService");
+const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { createReceiptForMilestone } = require("../routes/crmPayments");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
@@ -147,26 +148,41 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     companyId = companyId || proj.recordset[0].company_id || null;
   }
   let unitName = b.InterestedUnit || null;
-  let unitDefaultPaymentPlanId = null;
-  let unitBlockId = null;
   if (b.PreferredUnitId) {
     const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-      .query("SELECT UnitName, BlockId, DefaultPaymentPlanId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+      .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
-    const unitRow = unit.recordset[0];
-    unitName = unitRow.UnitName;
-    unitBlockId = unitRow.BlockId || null;
-    unitDefaultPaymentPlanId = unitRow.DefaultPaymentPlanId || null;
+    unitName = unit.recordset[0].UnitName;
+
+    // Reject the pick up front if the unit is already spoken for — before any
+    // Application row exists to be rolled back. This is the actual fix for
+    // "a unit can be applied for multiple times": previously nothing here
+    // checked availability at all, and the real hold (crmHoldService.js) only
+    // ever got placed at the wizard's final submit step — leaving the entire
+    // creation-to-submit window (which can be hours or days, not a race) with
+    // no protection whatsoever, so the dropdown kept offering an already-
+    // picked unit to every other salesperson. Reuses the exact same checks
+    // placeHold() itself uses (assertEntityNotTaken + findActiveHold), so
+    // "available" can never mean something different here than it does
+    // anywhere else in the system. assertEntityNotTaken throws a plain Error
+    // (with .status set) rather than CrmCreationError — re-wrapped here so
+    // the POST / route's `instanceof CrmCreationError` check (which is what
+    // actually picks the right HTTP status) still fires correctly instead of
+    // silently falling through to a 500.
+    try {
+      await assertEntityNotTaken(pool, "Unit", parseInt(b.PreferredUnitId));
+    } catch (takenErr) {
+      throw new CrmCreationError(takenErr.message, takenErr.status || 409);
+    }
+    const existingHold = await findActiveHold(pool, "Unit", parseInt(b.PreferredUnitId));
+    if (existingHold) {
+      throw new CrmCreationError("This unit already has an active hold from another application", 409);
+    }
   }
-  const effectivePaymentPlanId = b.PaymentPlanId ? parseInt(b.PaymentPlanId) : unitDefaultPaymentPlanId;
-  if (effectivePaymentPlanId) {
-    await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
-      companyId: companyId || null,
-      projectId: b.ProjectId ? parseInt(b.ProjectId) : null,
-      blockId: unitBlockId,
-      unitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
-    });
-  }
+  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+    preferredUnitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
+    paymentPlanId: b.PaymentPlanId || null,
+  });
 
   const appNo = await getNextDocNumber(pool, "APP", "APP");
   let result;
@@ -240,6 +256,29 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   const applicationId = result.recordset[0].Id;
   await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actorUserId);
 
+  // Place the actual hold now that the Application (and its Id) exists —
+  // placeHold() itself re-does the availability + same-project checks
+  // authoritatively (it's the single source of truth every caller goes
+  // through), so this isn't just trusting the pre-check above blindly.
+  // A conflict here means a genuine last-moment race — another application's
+  // hold landed in the few milliseconds between the pre-check and this
+  // insert — the same order of magnitude as the mobile-number race
+  // findOrCreateCustomer already tolerates above. There's no transaction
+  // wrapping this function to roll the Application row back into, so this
+  // doesn't fail the whole creation; crmApplications.js's own submit-time
+  // placeHoldIfNeeded call remains the backstop that catches it if it's
+  // still unresolved by the time this application is submitted.
+  if (b.PreferredUnitId) {
+    try {
+      await placeHoldIfNeeded(pool, {
+        entityType: "Unit", entityId: parseInt(b.PreferredUnitId), applicationId, holdDays: 3,
+        reason: "Application created — auto-hold", userId: actorUserId,
+      });
+    } catch (holdErr) {
+      console.error("[crm-entity-creation] auto-hold on application creation failed:", holdErr.message);
+    }
+  }
+
   return { id: applicationId, ApplicationNo: appNo };
 }
 
@@ -261,7 +300,19 @@ const DEFAULT_MILESTONES = [
 async function generateMilestonesForBooking(pool, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   let milestones;
+  // Booking Amount is now set on the Payment Plan itself (at plan-creation
+  // time), not typed fresh per booking — see CrmPaymentPlans.tsx. When the
+  // booking is tagged to a plan, that plan's BookingAmount is authoritative
+  // and overrides whatever the Booking/Application form happened to send;
+  // the `bookingAmount` parameter only still matters as a fallback for
+  // bookings with no tagged plan (DEFAULT_MILESTONES) or a legacy plan saved
+  // before this field existed (BookingAmount IS NULL).
   if (paymentPlanId) {
+    const planRes = await pool.request().input("pid", sql.Int, parseInt(paymentPlanId))
+      .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+    const planBookingAmount = planRes.recordset[0]?.BookingAmount;
+    if (planBookingAmount != null) bookingAmount = Number(planBookingAmount);
+
     const planItems = await pool.request().input("pid", sql.Int, parseInt(paymentPlanId))
       .query("SELECT MilestoneNo, MilestoneName, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid ORDER BY MilestoneNo");
     milestones = planItems.recordset.map((r) => ({ no: r.MilestoneNo, name: r.MilestoneName, pct: r.Percent }));
@@ -285,14 +336,14 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   const MILESTONE_DEFAULT_INTERVAL_DAYS = 30;
   let runningDue = bookingDate ? new Date(bookingDate) : new Date();
 
-  // Milestone #1 ("booking amount") is a real ₹ figure the customer actually
-  // booked with — it can be any amount, not a fixed plan percentage. When one
-  // is known, it overrides the plan's own milestone-1 %/₹; the plan's other
-  // milestones are inserted at their normal plan-relative amounts below and
-  // then redistributed (after the loop) across whatever's actually left —
-  // (totalValue - bookingAmount) — preserving their relative weighting to
-  // each other, via the same machinery that handles a later total/override
-  // change (recalculateRemainingMilestones).
+  // Milestone #1 ("booking amount") is a real ₹ figure — now resolved above
+  // from the tagged plan's own BookingAmount (or the fallback param, for
+  // untagged/legacy plans). The plan's other milestones are inserted at
+  // their normal plan-relative amounts below and then redistributed (after
+  // the loop) across whatever's actually left — (totalValue - bookingAmount)
+  // — preserving their relative weighting to each other, via the same
+  // machinery that handles a later total/override change
+  // (recalculateRemainingMilestones).
   const bookingAmt = Number(bookingAmount) > 0 ? Number(bookingAmount) : 0;
   let milestone1Id = null;
 
@@ -341,100 +392,58 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
 }
 
-// A payment plan scoped to a specific Company/Project/Block/Unit must
-// actually match the booking it's being attached to — otherwise the scoping
-// built into the Payment Plan Master (see migration 182, extended with
-// UnitId for per-unit plans) is purely cosmetic, only ever enforced by which
-// options happen to be in a dropdown. NULL scope columns on the plan mean
-// "applies everywhere" and always pass. Project scope is many-to-many
-// (dbo.CrmPaymentPlanProject, migration 248) — a plan with zero linked
-// projects applies everywhere, one with 1+ links must include the booking's
-// project.
-async function validatePaymentPlanScope(pool, planId, { companyId, projectId, blockId, unitId }) {
-  const plan = await pool.request().input("pid", sql.Int, planId)
-    .query("SELECT PlanName, CompanyId, BlockId, UnitId FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
-  if (!plan.recordset.length) throw new CrmCreationError("Selected payment plan does not exist");
-  const p = plan.recordset[0];
-  if (p.CompanyId && p.CompanyId !== companyId) {
-    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different company`);
-  }
-  const links = await pool.request().input("pid", sql.Int, planId)
-    .query("SELECT ProjectId FROM dbo.CrmPaymentPlanProject WHERE PlanId = @pid AND IsActive = 1");
-  if (links.recordset.length && !links.recordset.some(r => r.ProjectId === projectId)) {
-    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different project`);
-  }
-  if (p.BlockId && p.BlockId !== blockId) {
-    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different block`);
-  }
-  if (p.UnitId && p.UnitId !== unitId) {
-    throw new CrmCreationError(`Payment plan "${p.PlanName}" is scoped to a different unit`);
-  }
-}
+// Payment Plan Master no longer scopes a plan to a Company/Project/Block/
+// Unit — a plan is just a reusable milestone template. Which plans apply to
+// a given unit is decided the other way round: Unit Master tags 1+ plans
+// onto the unit (dbo.CrmUnitPaymentPlan). This is the single place that
+// turns (unit, requested plan) into the actual plan to save, used by both
+// Application creation/edit and Booking creation so the same rule always
+// applies:
+//   - No unit yet -> no plan question yet (returns null).
+//   - Unit has exactly one tagged plan and none was explicitly picked ->
+//     that plan is the obvious default.
+//   - Unit has 0 or 2+ tagged plans and none was explicitly picked -> a
+//     plan is mandatory now, so this throws rather than silently picking.
+//   - Unit has 1+ tagged plans -> an explicit pick must be one of them.
+//   - Unit has none tagged -> any active plan is acceptable.
+async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPlanId }) {
+  if (!preferredUnitId) return null;
 
-// CrmCustomer's inline CoApplicantName/Mobile/PanNo/Relation fields are an
-// intake-time convenience capture (there's no booking yet at Customer/
-// Application stage). Once a booking exists, dbo.CrmCoApplicant — a proper
-// multi-row per-booking table — is the single source of truth (Welcome
-// Call's checklist and Booking Details both read from it). This seeds one
-// CrmCoApplicant row from the customer's intake data so that data isn't
-// silently lost, without making CrmCustomer's fields independently
-// authoritative going forward. Idempotent: skipped if the booking already
-// has any co-applicant rows, or if the customer never entered one.
-async function seedPrimaryCoApplicantFromCustomer(pool, bookingId, applicationId, actorUserId) {
-  const cust = await pool.request().input("appId", sql.Int, applicationId).query(`
-    SELECT c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation
-    FROM dbo.CrmCustomer c
-    JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
-    WHERE a.Id = @appId
-  `);
-  const row = cust.recordset[0];
-  if (!row?.CoApplicantName?.trim()) return;
-
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 Id FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1");
-  if (existing.recordset.length) return;
-
-  await pool.request()
-    .input("bid",  sql.Int, bookingId)
-    .input("name", sql.NVarChar(200), row.CoApplicantName.trim())
-    .input("rel",  sql.NVarChar(50), row.CoApplicantRelation || null)
-    .input("mob",  sql.NVarChar(20), row.CoApplicantMobile || null)
-    .input("pan",  sql.NVarChar(20), row.CoApplicantPanNo || null)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-seeded from customer intake")
-    .input("src",  sql.NVarChar(20), "CustomerIntake")
-    .input("cb",   sql.Int, actorUserId)
+  const tagged = await pool.request().input("uid", sql.Int, preferredUnitId)
     .query(`
-      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, SourceType, CreatedBy, CreatedAt)
-      VALUES (@bid, @name, @rel, @mob, @pan, @note, @src, @cb, SYSDATETIME())
+      SELECT upp.PlanId, pp.PlanName
+      FROM dbo.CrmUnitPaymentPlan upp
+      JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = upp.PlanId AND pp.IsActive = 1
+      WHERE upp.UnitId = @uid AND upp.IsActive = 1
     `);
+  const taggedIds = tagged.recordset.map((r) => r.PlanId);
+
+  if (!paymentPlanId) {
+    if (taggedIds.length === 1) return taggedIds[0];
+    throw new CrmCreationError(
+      taggedIds.length > 1
+        ? "This unit has multiple tagged payment plans — select one."
+        : "A Payment Plan is required for this unit."
+    );
+  }
+
+  const planId = parseInt(paymentPlanId);
+  if (taggedIds.length && !taggedIds.includes(planId)) {
+    throw new CrmCreationError("Selected Payment Plan is not tagged to this unit.");
+  }
+  const exists = await pool.request().input("pid", sql.Int, planId)
+    .query("SELECT Id FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid AND IsActive = 1");
+  if (!exists.recordset.length) throw new CrmCreationError("Selected payment plan does not exist or is inactive");
+  return planId;
 }
 
-// The seed above only fires once, at booking creation — if staff correct a
-// typo in the customer's co-applicant name/relation/mobile/PAN afterward
-// (CrmCustomers.tsx edit form), that edit silently never reached the
-// CrmCoApplicant row Welcome Call/Booking Details actually display, leaving
-// two now-mismatched copies of the same person's details. SourceType marks
-// exactly which row was auto-seeded (never a manually-added co-applicant),
-// so this can re-sync it without ever touching rows staff entered themselves.
-// Called from crmCustomers.js PUT /:id, alongside its other lockstep syncs.
-async function syncCoApplicantFromCustomerEdit(pool, customerId, updates) {
-  if (!updates.CoApplicantName?.trim()) return;
-  await pool.request()
-    .input("cid",  sql.Int, customerId)
-    .input("name", sql.NVarChar(200), updates.CoApplicantName.trim())
-    .input("rel",  sql.NVarChar(50), updates.CoApplicantRelation || null)
-    .input("mob",  sql.NVarChar(20), updates.CoApplicantMobile || null)
-    .input("pan",  sql.NVarChar(20), updates.CoApplicantPanNo || null)
-    .query(`
-      UPDATE ca SET
-        ca.Name = @name, ca.Relation = @rel, ca.Mobile = @mob, ca.PanNo = @pan,
-        ca.UpdatedAt = SYSDATETIME()
-      FROM dbo.CrmCoApplicant ca
-      JOIN dbo.CrmBooking b ON b.Id = ca.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE a.CustomerId = @cid AND ca.SourceType = 'CustomerIntake' AND ca.IsActive = 1
-    `);
-}
+// Co-Applicant capture now happens directly on the Application wizard's own
+// "Co-Applicant" tab (see crmCoApplicant.js's ApplicationId-keyed routes),
+// writing straight into dbo.CrmCoApplicant with BookingId left NULL until a
+// Booking exists -- CrmCustomer no longer holds or feeds this data at all.
+// So the only thing left to do here, once a Booking is created, is the same
+// ApplicationId -> BookingId backfill every other Application-stage capture
+// (bank/KYC, documents, parking) already gets a few lines below.
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
@@ -463,7 +472,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // into Approved, bypassing the real approval workflow and its role gate
   // entirely -- the booking creation itself becoming the de facto approval.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("SELECT Status, IsActive FROM dbo.CrmApplication WHERE Id = @aid");
+    .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
   if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
     throw new CrmCreationError(
@@ -472,7 +481,6 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
-           u.DefaultPaymentPlanId,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
            blk.BlockName
     FROM dbo.UnitMaster u
@@ -500,14 +508,16 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
-  const effectivePaymentPlanId = b.PaymentPlanId ? parseInt(b.PaymentPlanId) : (unitRow.DefaultPaymentPlanId || null);
-
-  if (effectivePaymentPlanId) {
-    await validatePaymentPlanScope(pool, effectivePaymentPlanId, {
-      companyId: unitRow.CompanyId || null, projectId: unitRow.ProjectId || null, blockId: unitRow.BlockId || null,
-      unitId: unitRow.Id || null,
-    });
-  }
+  // The Application already went through the mandatory-plan-selection gate
+  // (see resolveApplicationPaymentPlan in createCrmApplicationRecord / the
+  // PUT /:id route) — its own PaymentPlanId is the real, staff-confirmed
+  // choice, so that's the fallback here rather than re-deriving one. An
+  // explicit b.PaymentPlanId still wins if the caller is deliberately
+  // changing it at booking time.
+  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+    preferredUnitId: unitRow.Id,
+    paymentPlanId: b.PaymentPlanId || appRow.recordset[0].PaymentPlanId || null,
+  });
 
   const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
   const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
@@ -516,12 +526,25 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const tokenType = b.TokenType === "Amount" ? "Amount" : "Percentage";
   const tokenValue = b.TokenValue != null ? parseFloat(b.TokenValue) : null;
-  let bookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : 0;
-  if (tokenValue != null) {
-    bookingAmount = tokenType === "Percentage" && total
-      ? Math.round(total * tokenValue) / 100
-      : tokenValue;
+  // Booking Amount is ALWAYS the fixed ₹ figure set on the tagged Payment
+  // Plan itself (see CrmPaymentPlans.tsx) — never derived from a % of
+  // TotalValue, and never taken from the Booking form's own Token%/manual
+  // field. TokenType/TokenValue are still recorded below purely as a
+  // historical/display record of what was originally quoted — they no
+  // longer feed into the actual ₹ figure that gets deducted. A plan
+  // without a fixed BookingAmount set (e.g. an old plan saved before this
+  // field existed) can no longer produce a booking via a silent %
+  // fallback — staff must open the plan and set one first.
+  if (!effectivePaymentPlanId) {
+    throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
   }
+  const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
+    .query("SELECT PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+  const planRow = planRes.recordset[0];
+  if (!planRow || planRow.BookingAmount == null) {
+    throw new CrmCreationError(`Payment Plan "${planRow?.PlanName || effectivePaymentPlanId}" has no fixed Booking Amount set — open it in Payment Plan Master and set one before booking this unit.`);
+  }
+  const bookingAmount = Number(planRow.BookingAmount);
 
   const bookingNo = await getNextDocNumber(pool, "BKG", "BKG");
   const result = await pool.request()
@@ -570,6 +593,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const bookingId = result.recordset[0].Id;
 
+  // Unconditional, not just via guardAndConvertHold's own bump above — a
+  // CrmBooking row now exists against this unit regardless of whether a hold
+  // was there to convert (e.g. it expired in the seconds before this ran), and
+  // unit-master's GET / joins CrmBooking directly, so this is the one place
+  // that's guaranteed to run whenever that join's answer actually changes.
+  bumpCacheVersion("unit-master").catch(() => {});
+
   // The Application-stage capture (bank/KYC, documents, parking) was saved
   // keyed by ApplicationId with BookingId left NULL, since no Booking existed
   // yet at that point (see crmCustomerBankDetails.js/crmBookingDocuments.js/
@@ -582,6 +612,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
   await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+  // Co-Applicant is captured on the Application wizard's own tab (ApplicationId
+  // set, BookingId NULL) -- backfill BookingId now the same way the three
+  // backfills above just did, so Welcome Call/Booking Details (which read
+  // CrmCoApplicant by BookingId) actually find it.
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmCoApplicant SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
 
   // Application-stage slot picks are now only a temporary hold, not a real
   // allotment (see crmParking.js POST /standalone) — convert each one into a
@@ -625,8 +661,6 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // and hold-conversion above have linked any Application-stage parking
   // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
-
-  await seedPrimaryCoApplicantFromCustomer(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
 
   await generateMilestonesForBooking(pool, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
 
@@ -692,5 +726,5 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, validatePaymentPlanScope, syncCoApplicantFromCustomerEdit,
+  generateMilestonesForBooking, resolveApplicationPaymentPlan,
 };

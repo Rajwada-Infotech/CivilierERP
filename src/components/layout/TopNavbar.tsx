@@ -44,6 +44,7 @@ import {
   PlusCircle,
   Wallet,
   CalendarClock,
+  Wand2,
 } from "lucide-react";
 import {
   Crown,
@@ -390,6 +391,13 @@ const salesAutomationSetupItems = [
 // real (shared, followup-*) permission the route actually checks, so
 // visibility for non-privileged users matches the real access gate.
 const crmSetupItems = [
+  {
+    icon: Wand2,
+    label: "Auto Project Setup",
+    path: "/crm/setup/auto-project-setup",
+    color: "text-fuchsia-500",
+    pageKey: "crm-auto-project-setup",
+  },
   {
     icon: Users,
     label: "Customer Master",

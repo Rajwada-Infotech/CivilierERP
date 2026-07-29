@@ -18,7 +18,6 @@ const CrmMilestoneMaster: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
-  const [defaultPercent, setDefaultPercent] = useState("");
   const [sortOrder, setSortOrder] = useState("");
   const [saving, setSaving] = useState(false);
   // Opens locked (read-only) whenever editing an existing row — "New
@@ -30,14 +29,13 @@ const CrmMilestoneMaster: React.FC = () => {
 
   const resetForm = () => {
     setEditingId(null);
-    setName(""); setDefaultPercent(""); setSortOrder("");
+    setName(""); setSortOrder("");
     setLocked(false);
   };
 
   const openEdit = (m: any) => {
     setEditingId(m.Id);
     setName(m.Name);
-    setDefaultPercent(m.DefaultPercent != null ? String(m.DefaultPercent) : "");
     setSortOrder(String(m.SortOrder));
     setLocked(true);
     setDialogOpen(true);
@@ -53,7 +51,6 @@ const CrmMilestoneMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           Name: name.trim(),
-          DefaultPercent: defaultPercent || null,
           SortOrder: sortOrder || 0,
         }),
       });
@@ -88,8 +85,6 @@ const CrmMilestoneMaster: React.FC = () => {
       cell: (i) => <span className="text-xs text-muted-foreground flex items-center gap-1"><ListOrdered size={11} /> {i.getValue() as number}</span> },
     { accessorKey: "Name", header: "Name", size: 180,
       cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "DefaultPercent", header: "Default %", size: 100,
-      cell: (i) => <span className="text-xs">{i.row.original.DefaultPercent != null ? `${i.row.original.DefaultPercent}%` : "—"}</span> },
     { accessorKey: "IsActive", header: "Status", size: 100,
       cell: (i) => (
         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${i.row.original.IsActive ? "text-green-600 bg-green-50 border-green-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
@@ -148,17 +143,10 @@ const CrmMilestoneMaster: React.FC = () => {
               <input type="text" value={name} readOnly={locked} onChange={(e) => setName(e.target.value)}
                 className={inputCls} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Default %</label>
-                <input type="number" value={defaultPercent} readOnly={locked} onChange={(e) => setDefaultPercent(e.target.value)}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Sort Order</label>
-                <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)}
-                  className={inputCls} />
-              </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Sort Order</label>
+              <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)}
+                className={inputCls} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">

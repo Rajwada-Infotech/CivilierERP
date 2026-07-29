@@ -26,7 +26,19 @@ const { sql } = require("../db");
 const APPLICATION_TRANSITIONS = {
   Draft:     ["Cancelled"],
   Pending:   ["Cancelled"],
-  Approved:  ["Cancelled"],
+  // Approved is deliberately NOT allowed to transition to Cancelled here.
+  // Once an Application is Approved, "Cancel Application" is no longer the
+  // right tool — a real Booking either already exists or is expected to
+  // (createCrmBookingRecord requires Status = 'Approved' before it will
+  // create one), so undoing the deal from this point on has to go through
+  // the Booking's own Cancellation Request flow (crmCancellations.js:
+  // request -> admin-approved -> refund/parking/hold/amendment cascade),
+  // not a single-step self-service action. This is what keeps "accidentally
+  // applied, let me cancel and redo it" (fine pre-approval) distinct from
+  // "the deal fell through after approval" (needs the real cancellation
+  // workflow, refund accounting, and an audit trail an editor shouldn't be
+  // able to bypass with one click).
+  Approved:  [],
   Rejected:  ["Cancelled"],
   Cancelled: [],
   Expired:   [],

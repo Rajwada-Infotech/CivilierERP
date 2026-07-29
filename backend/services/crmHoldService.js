@@ -5,6 +5,7 @@
  * reimplemented per entity type.
  */
 const { sql } = require("../db");
+const { bumpCacheVersion } = require("../redis");
 
 const ENTITY_TYPES = ["Unit", "Parking"];
 const MAX_HOLD_DAYS = 90;
@@ -79,6 +80,18 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
       VALUES (@et, @eid, @aid, @days, DATEADD(DAY, @days, SYSDATETIME()), @reason, 'Active', @cb, SYSDATETIME())
     `);
 
+  // unitMaster.js's GET / caches LockHoldId/LockBookingNo per unit (server-side,
+  // via the cache() middleware) and only ever gets invalidated by Unit Master's
+  // own CRUD routes calling bumpCacheVersion("unit-master") — never by a hold
+  // actually being placed here. Without this, the unit dropdown/matrix can keep
+  // showing a just-held unit as free for the rest of that cache entry's TTL,
+  // regardless of any client-side staleTime. Non-blocking: a failed bump just
+  // means the cache catches up on its own TTL instead of instantly — it must
+  // never fail the hold itself.
+  if (entityType === "Unit") {
+    bumpCacheVersion("unit-master").catch(() => {});
+  }
+
   return { id: result.recordset[0].Id, holdUntil: result.recordset[0].HoldUntil, applicantName: app.recordset[0].ApplicantName };
 }
 
@@ -104,12 +117,19 @@ async function placeHoldIfNeeded(pool, params) {
 
 async function releaseHold(pool, holdId, userId) {
   const row = await pool.request().input("id", sql.Int, holdId)
-    .query("SELECT Id, Status FROM dbo.CrmInventoryHold WHERE Id = @id");
+    .query("SELECT Id, Status, EntityType FROM dbo.CrmInventoryHold WHERE Id = @id");
   if (!row.recordset.length) { const e = new Error("Hold not found"); e.status = 404; throw e; }
   if (row.recordset[0].Status !== "Active") { const e = new Error("Only an active hold can be released"); e.status = 400; throw e; }
 
   await pool.request().input("id", sql.Int, holdId).input("ub", sql.Int, userId)
     .query("UPDATE dbo.CrmInventoryHold SET Status = 'Released', ReleasedBy = @ub, ReleasedAt = SYSDATETIME() WHERE Id = @id");
+
+  // Same reasoning as placeHold's bump above — a released hold means the unit
+  // is free again, and the unit-master cache needs to know that immediately,
+  // not just whenever someone next edits Unit Master itself.
+  if (row.recordset[0].EntityType === "Unit") {
+    bumpCacheVersion("unit-master").catch(() => {});
+  }
 }
 
 // Called from booking/parking-allotment creation. If the entity has an
@@ -127,6 +147,9 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
   }
   await pool.request().input("id", sql.Int, hold.Id)
     .query("UPDATE dbo.CrmInventoryHold SET Status = 'Converted', ReleasedAt = SYSDATETIME() WHERE Id = @id");
+  if (entityType === "Unit") {
+    bumpCacheVersion("unit-master").catch(() => {});
+  }
 }
 
 // Releases every still-Active hold (Unit and/or Parking) tied to an
@@ -154,5 +177,5 @@ async function releaseAllHoldsForApplication(pool, applicationId, userId) {
 
 module.exports = {
   ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold,
-  guardAndConvertHold, releaseAllHoldsForApplication,
+  guardAndConvertHold, releaseAllHoldsForApplication, assertEntityNotTaken,
 };
