@@ -61,7 +61,7 @@ interface ApprovalActionsProps {
   status: string | null | undefined;
   recordId: number | string;
   endpoint: string; // e.g. "/api/purchase-orders"
-  onSuccess?: (action: "submit" | "approve" | "reject") => void;
+  onSuccess?: (action: "submit" | "approve" | "reject", data?: any) => void;
   className?: string;
   /** When true, only the Submit button is shown. Approve/Reject are reserved
    *  for the Admin Approval Inbox and will not render on this component. */
@@ -125,11 +125,20 @@ export function ApprovalActions({
               : "Record rejected",
         );
       }
+      // Some modules' /approve route auto-triggers a follow-on step (e.g. CRM
+      // Applications auto-creating a Booking) that can fail independently of
+      // the approval itself — the approval still succeeds and stays committed,
+      // but the caller needs to know the follow-on didn't happen instead of it
+      // being silently dropped here. Surfaced as a warning, not an error, since
+      // nothing about the approve action itself failed.
+      if (action === "approve" && data?.bookingError) {
+        toast.warning(data.bookingError);
+      }
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");
       }
-      onSuccess?.(action);
+      onSuccess?.(action, data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Action failed";
       // If the record was already approved/rejected by another session, treat it

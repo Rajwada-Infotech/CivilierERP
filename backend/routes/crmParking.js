@@ -68,6 +68,22 @@ function parkingError(message, status = 400) {
   return err;
 }
 
+// Server-side enforcement of "slot-wise, always" for every ParkingType —
+// quantity-only sales (no ParkingSlotId) are no longer supported at all,
+// including for a type with zero ParkingSlot rows entered yet. Previously
+// that zero-inventory case was silently allowed to sell by count as a
+// fallback; that let staff sell "phantom" parking with no slot on record
+// before Ops had even set up the physical inventory. Now a type with no
+// slots simply cannot be sold until slots exist — GET /available already
+// reports HasSlots: false for that case, which the wizard and the
+// standalone Parking Booking screen use to grey the option out entirely
+// (see CrmApplication.tsx ParkingSelectionStep and CrmParkingBooking.tsx)
+// before a request ever reaches this check.
+function assertSlotSelected(parkingType, parkingSlotId) {
+  if (parkingSlotId) return;
+  throw parkingError(`${parkingType} parking must be sold against a specific slot — none is available to select.`);
+}
+
 // Resolves the rate card row a given (already-picked) slot belongs to —
 // ParkingMaster is unique per (ProjectId, BlockId, ParkingType), so this is
 // deterministic. Used when converting an Application-stage hold into a real
@@ -131,15 +147,13 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   }
 
   const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+  assertSlotSelected(ParkingType, parkingSlotId);
   await assertSlotAvailable(pool, parkingSlotId);
-  if (parkingSlotId) await guardAndConvertHold(pool, "Parking", parkingSlotId, booking.recordset[0].ApplicationId);
-  let slotNo = b.ParkingSlotNo || null;
-  if (parkingSlotId) {
-    const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
-      .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
-    if (!slot.recordset.length) throw parkingError("Selected parking slot is not active");
-    slotNo = slot.recordset[0].SlotNo;
-  }
+  await guardAndConvertHold(pool, "Parking", parkingSlotId, booking.recordset[0].ApplicationId);
+  const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
+    .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+  if (!slot.recordset.length) throw parkingError("Selected parking slot is not active");
+  const slotNo = slot.recordset[0].SlotNo;
 
   const lineAmount = Charge * qty;
   const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
@@ -300,6 +314,36 @@ async function releaseAllParkingForBooking(pool, bookingId) {
   return { released: rows.recordset.length };
 }
 
+// Called from crmApplications.js's Cancel/Reject actions — the Application-
+// stage equivalent of releaseAllParkingForBooking() above. Without this,
+// cancelling or rejecting an Application released the picked Unit's hold
+// (crmHoldService.js) but left any standalone parking slot picked during the
+// wizard's Attachments step (a real, permanent CrmParkingAllotment row —
+// see POST /standalone below) permanently stuck as "Booked" in the parking
+// matrix forever, since nothing ever deactivated it. In practice this only
+// ever finds BookingId-IS-NULL rows: the calling routes already refuse to
+// cancel/reject an Application that has an active Booking, so anything
+// still ApplicationId-linked with a real BookingId at this point is already-
+// dead history under a Cancelled/Rejected Booking, cleaned up when that
+// Booking itself was cancelled. Reuses applyReleaseParking() per row so the
+// existing Paid-guard and milestone cleanup stay identical to every other
+// release path — a still-Paid standalone sale is left standing (logged, not
+// silently wiped) rather than blocking the whole Application cancellation.
+async function releaseAllParkingForApplication(pool, applicationId) {
+  const rows = await pool.request().input("aid", sql.Int, applicationId)
+    .query("SELECT Id FROM dbo.CrmParkingAllotment WHERE ApplicationId = @aid AND IsActive = 1");
+  let released = 0;
+  for (const row of rows.recordset) {
+    try {
+      await applyReleaseParking(pool, row.Id);
+      released++;
+    } catch (e) {
+      console.error("[crm-parking] releaseAllParkingForApplication failed for allotment", row.Id, e.message);
+    }
+  }
+  return { released };
+}
+
 // GET / — every parking allotment system-wide (both unit-linked and
 // standalone sales) for the dedicated Parking Booking page. Optional
 // ?status= filters by PaymentStatus.
@@ -314,6 +358,116 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-parking] GET / error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /available — every parking rate applicable to a Project(+Block), each
+// with the slots that are ACTUALLY free right now: not already a real
+// CrmParkingAllotment anywhere in the system, and not sitting under anyone's
+// still-Active CrmInventoryHold (any application's — not just the caller's
+// own). This is the fix for the Application wizard's old client-side
+// approach, which only ever excluded ITS OWN application's picks (from GET
+// /application/:applicationId) and so showed every other application's
+// booked/held slots as if they were still free. Types sold by count rather
+// than a fixed slot (e.g. "Open") come back with HasSlots: false and no cap.
+//
+// Registered BEFORE GET /:bookingId deliberately — same single-segment
+// greedy-match issue documented on POST /standalone above ("/available"
+// would otherwise be parsed as a bookingId).
+router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const projectId = parseInt(req.query.projectId);
+    const blockId = req.query.blockId ? parseInt(req.query.blockId) : null;
+    if (!projectId) return res.status(400).json({ error: "projectId is required" });
+
+    const rates = await pool.request()
+      .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId)
+      .query(`
+        SELECT Id, ParkingType, Charge, GstRate, BlockId
+        FROM dbo.ParkingMaster
+        WHERE ProjectId = @pid AND IsActive = 1 AND (BlockId IS NULL OR @bid IS NULL OR BlockId = @bid)
+      `);
+
+    const slots = await pool.request()
+      .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId)
+      .query(`
+        SELECT s.Id, s.SlotNo, s.ParkingType
+        FROM dbo.ParkingSlot s
+        WHERE s.ProjectId = @pid AND s.IsActive = 1 AND (@bid IS NULL OR s.BlockId IS NULL OR s.BlockId = @bid)
+        AND s.Id NOT IN (
+          SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
+          UNION
+          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = 'Active' AND HoldUntil >= SYSDATETIME()
+        )
+        ORDER BY s.SlotNo
+      `);
+
+    const slotsByType = new Map();
+    for (const s of slots.recordset) {
+      if (!slotsByType.has(s.ParkingType)) slotsByType.set(s.ParkingType, []);
+      slotsByType.get(s.ParkingType).push({ Id: s.Id, SlotNo: s.SlotNo });
+    }
+
+    // Project-wide free-slot count per type, ignoring the block filter
+    // entirely — used only to tell "genuinely sold out across the whole
+    // project" apart from "just not available in this specific block" (the
+    // block-scoped `AvailableSlots` above can be empty while slots of the
+    // same type still sit free in a different block — e.g. Basement parking
+    // reserved per-tower). Same exclusion rule (no active allotment/hold) as
+    // the block-scoped query, just without the BlockId condition.
+    const slotsAnyBlock = await pool.request().input("pid", sql.Int, projectId)
+      .query(`
+        SELECT s.ParkingType, COUNT(*) AS FreeCount
+        FROM dbo.ParkingSlot s
+        WHERE s.ProjectId = @pid AND s.IsActive = 1
+        AND s.Id NOT IN (
+          SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
+          UNION
+          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = 'Active' AND HoldUntil >= SYSDATETIME()
+        )
+        GROUP BY s.ParkingType
+      `);
+    const freeCountByType = new Map(slotsAnyBlock.recordset.map((r) => [r.ParkingType, r.FreeCount]));
+
+    // A rate type with fixed slot inventory has HasSlots true even when
+    // currently zero-available (0 available is still meaningfully different
+    // from "sold by count, no fixed inventory at all") — that distinction
+    // comes from whether ANY ParkingSlot row of this type exists for the
+    // project at all, active-and-free or not.
+    const anySlotOfType = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT DISTINCT ParkingType FROM dbo.ParkingSlot WHERE ProjectId = @pid AND IsActive = 1
+    `);
+    const typesWithInventory = new Set(anySlotOfType.recordset.map((r) => r.ParkingType));
+
+    const out = rates.recordset.map((r) => {
+      const hasInventory = typesWithInventory.has(r.ParkingType);
+      const blockScoped = slotsByType.get(r.ParkingType) || [];
+      const freeAnyBlock = freeCountByType.get(r.ParkingType) || 0;
+      return {
+        ParkingMasterId: r.Id, ParkingType: r.ParkingType, Charge: r.Charge, GstRate: r.GstRate,
+        HasSlots: hasInventory,
+        // No ParkingSlot rows exist for this type in the project at all yet
+        // (Ops hasn't set up inventory in Parking Slot Master) — distinct
+        // from "sold out" (SoldOutProjectWide below), which means slots
+        // exist but are all taken. Quantity-only selling is no longer
+        // supported for either case; the frontend greys the option out with
+        // a different message for each.
+        NoInventory: !hasInventory,
+        AvailableSlots: blockScoped,
+        // True only when zero slots of this type are free ANYWHERE in the
+        // project — distinguishes real sold-out inventory from "just none
+        // left in this particular block" (freeAnyBlock > blockScoped.length
+        // when a block filter was applied and other blocks still have some).
+        SoldOutProjectWide: blockId != null && freeAnyBlock === 0,
+        FreeCountProjectWide: freeAnyBlock,
+      };
+    });
+
+    res.json(out);
+  } catch (e) {
+    console.error("[crm-parking] GET /available error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -395,7 +549,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-      .query("SELECT Id, ProjectId FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
 
     const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
@@ -413,6 +567,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     }
 
     const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+    assertSlotSelected(ParkingType, parkingSlotId);
 
     const lineAmount = Charge * qty;
     const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
@@ -430,36 +585,45 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     // there only gets created once the Application's Booking actually
     // exists, via the hold-conversion loop in crmEntityCreation.js's
     // createCrmBookingRecord.
-    //
-    // A quantity-only pick (no ParkingSlotId — "Open" parking sold by count,
-    // not tied to one physical slot) has no specific inventory item to
-    // reserve, so it's always recorded directly below regardless of mode.
-    let slotNo = null;
-    if (parkingSlotId) {
-      const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
-        .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
-      if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
-      slotNo = slot.recordset[0].SlotNo;
+    const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
+      .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+    if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
+    const slotNo = slot.recordset[0].SlotNo;
 
-      if (!b.Immediate) {
-        const hold = await placeHoldIfNeeded(pool, {
-          entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
-          holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
-        });
-
-        await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
-          { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },
-        ]);
-
-        return res.status(201).json({
-          success: true, hold: true, id: hold.id, holdUntil: hold.holdUntil,
-          SlotNo: slotNo, TotalAmount: totalAmount,
+    if (!b.Immediate) {
+      // Hold-first path — this is the Application wizard's own Parking step
+      // (see CrmApplication.tsx ParkingSelectionStep), the parking-side twin
+      // of the Company/Project/Unit lock on the Application itself (see
+      // PUT /:id's changingUnitSelection check in crmApplications.js). A
+      // slot picked here is still just a hold until the Application's
+      // Booking is created, so it can move freely pre-approval but never
+      // after — same reasoning, same Draft/Pending gate. The dedicated
+      // standalone sale page (Immediate: true, CrmParkingBooking.tsx) is a
+      // separate, independent sale and is deliberately NOT gated by this —
+      // it never depends on its linked Application's own approval state.
+      if (!["Draft", "Pending"].includes(application.recordset[0].Status)) {
+        return res.status(400).json({
+          error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
         });
       }
 
-      await assertSlotAvailable(pool, parkingSlotId);
-      await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
+      const hold = await placeHoldIfNeeded(pool, {
+        entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
+        holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
+      });
+
+      await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
+        { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },
+      ]);
+
+      return res.status(201).json({
+        success: true, hold: true, id: hold.id, holdUntil: hold.holdUntil,
+        SlotNo: slotNo, TotalAmount: totalAmount,
+      });
     }
+
+    await assertSlotAvailable(pool, parkingSlotId);
+    await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
 
     const result = await pool.request()
       .input("aid",  sql.Int, parseInt(b.ApplicationId))
@@ -504,9 +668,22 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     const pool = getPool();
     const holdId = parseInt(req.params.holdId);
     const row = await pool.request().input("id", sql.Int, holdId)
-      .query("SELECT EntityType FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
+      .query("SELECT EntityType, ApplicationId FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
     if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
       return res.status(404).json({ error: "Active parking hold not found" });
+    }
+    // Same Draft/Pending lock as picking one in the first place (see POST
+    // /standalone above) — once the linked Application is Approved (or
+    // beyond), this hold either already converted into a real allotment or
+    // is about to, so it can no longer be pulled back out from here.
+    if (row.recordset[0].ApplicationId) {
+      const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (app.recordset.length && !["Draft", "Pending"].includes(app.recordset[0].Status)) {
+        return res.status(400).json({
+          error: `Cannot change this application's parking selection once it is ${app.recordset[0].Status} — this is locked after approval.`,
+        });
+      }
     }
     await releaseHold(pool, holdId, actorId(req));
     res.json({ success: true });
@@ -684,3 +861,4 @@ module.exports.applyAddParking = applyAddParking;
 module.exports.applyEditParking = applyEditParking;
 module.exports.applyReleaseParking = applyReleaseParking;
 module.exports.releaseAllParkingForBooking = releaseAllParkingForBooking;
+module.exports.releaseAllParkingForApplication = releaseAllParkingForApplication;

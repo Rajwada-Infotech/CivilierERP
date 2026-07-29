@@ -131,6 +131,19 @@ const CrmPaymentMilestones: React.FC = () => {
     Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1
   );
 
+  // Live preview for the Record Payment dialog — this milestone's own
+  // remaining balance, and (if what's typed in exceeds it) how much of the
+  // entry will be auto-parked to On Account instead of counted against this
+  // milestone. Mirrors the cap the backend applies on save.
+  const editingMilestone = milestones.find((m) => m.Id === editingId) || null;
+  const editingBalance = editingMilestone
+    ? Math.max(0, Number(editingMilestone.AmountDue) - Number(editingMilestone.AmountPaid || 0))
+    : 0;
+  const enteredPaid = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : 0;
+  const previewOverflow = editingMilestone && enteredPaid > Number(editingMilestone.AmountDue)
+    ? Math.round((enteredPaid - Number(editingMilestone.AmountDue)) * 100) / 100
+    : 0;
+
   const handleOpenPayment = (m: any) => {
     setEditingId(m.Id);
     setPayForm({
@@ -195,6 +208,18 @@ const CrmPaymentMilestones: React.FC = () => {
       toast.success("Payment recorded");
       if (data.brokerWarning) {
         toast.warning(data.brokerWarning, { duration: 8000 });
+      }
+      // Amount typed in beyond what was actually due on this milestone never
+      // gets recorded against it — the backend caps it and auto-parks the
+      // rest on the customer's On Account balance instead. Surface that so
+      // staff aren't left wondering why the milestone's own paid figure
+      // doesn't match what they entered.
+      if (data.overflowAmount > 0) {
+        toast.info(
+          `₹${Number(data.overflowAmount).toLocaleString("en-IN")} was beyond what's due on this milestone — parked to On Account${data.onAccountReceiptNo ? ` (${data.onAccountReceiptNo})` : ""}.`,
+          { duration: 8000 },
+        );
+        qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
       }
 
       const current = milestones.find((m) => m.Id === editingId);
@@ -605,6 +630,19 @@ const CrmPaymentMilestones: React.FC = () => {
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
               ))}
+              {editingMilestone && (
+                <div className="col-span-2 -mt-1">
+                  <p className="text-[11px] text-muted-foreground">
+                    Due: <span className="font-medium text-foreground">{fmt(editingMilestone.AmountDue)}</span>
+                    {" · "}Balance: <span className="font-medium text-foreground">{fmt(editingBalance)}</span>
+                  </p>
+                  {previewOverflow > 0 && (
+                    <p className="text-[11px] text-blue-600 font-medium mt-0.5 flex items-center gap-1">
+                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due will be parked to On Account, not counted against this milestone.
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
                 <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}

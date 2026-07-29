@@ -7,6 +7,7 @@ const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
 const { deleteProjectCascade } = require("../services/projectCascadeDelete");
+const { getProjectLockReason } = require("../services/crmHierarchyLocks");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -496,7 +497,20 @@ router.delete("/:id", adminOnly, async (req, res) => {
       });
     }
 
-    // 2. Check for any Purchase Orders, Work Orders, or GRNs referencing this project
+    // 2. Check for any live Block/Unit/Parking Slot (or, defensively, a
+    // stray Booking/Application) anywhere under this project — same shared
+    // hierarchy-wide rule Block/Unit/Floor deletion already enforce
+    // (see services/crmHierarchyLocks.js). A project full of live inventory
+    // or an active booking can never be silently removed out from under it.
+    const projectLockReason = await getProjectLockReason(pool, id);
+    if (projectLockReason) {
+      return res.status(409).json({
+        error: "Cannot delete project",
+        reason: `This project ${projectLockReason}. Delete/clear those first.`,
+      });
+    }
+
+    // 3. Check for any Purchase Orders, Work Orders, or GRNs referencing this project
     const usageCheck = await pool.request().input("ProjectId", sql.Int, id)
       .query(`
       SELECT
@@ -522,7 +536,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
       });
     }
 
-    // 3. Safe to delete
+    // 4. Safe to delete
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -573,6 +587,17 @@ router.delete("/:id/cascade", async (req, res) => {
     if (!confirmName || confirmName.trim() !== project.name) {
       return res.status(400).json({
         error: "Confirmation name does not match the project name.",
+      });
+    }
+
+    // Same hierarchy-wide lock check as the normal DELETE /:id above — this
+    // route is a deliberate super_admin "force delete everything" tool, but
+    // a live booking/hold/application anywhere underneath is never
+    // bypassable, by design: no role, confirmation, or flag skips this.
+    const projectLockReason = await getProjectLockReason(pool, id);
+    if (projectLockReason) {
+      return res.status(409).json({
+        error: `Cannot delete project — this project ${projectLockReason}. Delete/clear those first.`,
       });
     }
 

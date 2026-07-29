@@ -7,15 +7,16 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
-const { syncCoApplicantFromCustomerEdit } = require("../services/crmEntityCreation");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
 // Fields the Application page ("select company/project, auto-fetch
-// everything from the customer") reads directly, plus the co-applicant set
-// and PAN/Aadhaar/Address that now live here instead of being typed fresh
-// on every application.
+// everything from the customer") reads directly — PAN/Aadhaar/Address that
+// live here instead of being typed fresh on every application. Co-Applicant
+// is NOT among these: it's captured on the Application's own "Co-Applicant"
+// tab instead (see crmCoApplicant.js, keyed by ApplicationId directly into
+// dbo.CrmCoApplicant) and was never a CrmCustomer field.
 //
 // Address is split two ways:
 //   - PermanentAddress/City/State/Pincode  → dbo.CrmCustomer's original
@@ -32,7 +33,6 @@ const CUSTOMER_SELECT = `
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth,
-    c.CoApplicantName, c.CoApplicantMobile, c.CoApplicantPanNo, c.CoApplicantRelation,
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
     l.LeadUid, l.Classification AS LeadClassification,
@@ -160,7 +160,7 @@ function resolveCurrentAddress(b) {
 
 // POST / — register a new customer. Name/Mobile/PAN/Permanent Address are
 // the must-needed fields kept mandatory; everything else (Aadhaar,
-// Occupation, Annual Income, co-applicant, DOB, current address,
+// Occupation, Annual Income, DOB, current address,
 // city/state/pincode) is optional detail filled in as it becomes
 // available. Deduped by Mobile — reusing an existing customer instead of
 // silently creating a second identity for the same phone number,
@@ -211,10 +211,6 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
       .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
       .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("coname",    sql.NVarChar(200), b.CoApplicantName || null)
-      .input("comob",     sql.NVarChar(20),  b.CoApplicantMobile || null)
-      .input("copan",     sql.NVarChar(20),  b.CoApplicantPanNo || null)
-      .input("corel",     sql.NVarChar(50),  b.CoApplicantRelation || null)
       .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",        sql.Int,           actorId(req))
       .query(`
@@ -222,13 +218,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
           (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
            Address, City, State, Pincode,
            CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, CoApplicantName, CoApplicantMobile, CoApplicantPanNo, CoApplicantRelation, Notes,
+           DateOfBirth, Notes,
            CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
                 @addr, @city, @state, @pin,
                 @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @coname, @comob, @copan, @corel, @notes, @cb, SYSDATETIME())
+                @dob, @notes, @cb, SYSDATETIME())
       `);
     const newId = result.recordset[0].Id;
 
@@ -286,10 +282,6 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
       .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
       .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
       .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("coname",    sql.NVarChar(200), b.CoApplicantName ?? null)
-      .input("comob",     sql.NVarChar(20),  b.CoApplicantMobile ?? null)
-      .input("copan",     sql.NVarChar(20),  b.CoApplicantPanNo ?? null)
-      .input("corel",     sql.NVarChar(50),  b.CoApplicantRelation ?? null)
       .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
       .input("ub",        sql.Int,           actorId(req))
       .query(`
@@ -301,7 +293,6 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
           CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
           IsCurrentSameAsPermanent = @cursame,
           DateOfBirth = ISNULL(@dob, DateOfBirth),
-          CoApplicantName = @coname, CoApplicantMobile = @comob, CoApplicantPanNo = @copan, CoApplicantRelation = @corel,
           Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -348,22 +339,6 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);
-    }
-
-    // Same lockstep guarantee, extended to any already-created CrmCoApplicant
-    // row that was auto-seeded from this customer's intake-time co-applicant
-    // fields (see seedPrimaryCoApplicantFromCustomer) — that seed only fires
-    // once, at booking creation, so without this an edit here would silently
-    // never reach the row Welcome Call/Booking Details actually display.
-    // No-op if no booking/co-applicant exists yet, or the edit didn't touch
-    // any CoApplicant* field.
-    try {
-      await syncCoApplicantFromCustomerEdit(pool, id, {
-        CoApplicantName: b.CoApplicantName, CoApplicantRelation: b.CoApplicantRelation,
-        CoApplicantMobile: b.CoApplicantMobile, CoApplicantPanNo: b.CoApplicantPanNo,
-      });
-    } catch (coAppErr) {
-      console.error("[crm-customers] co-applicant sync failed:", coAppErr.message);
     }
 
     res.json({ success: true });

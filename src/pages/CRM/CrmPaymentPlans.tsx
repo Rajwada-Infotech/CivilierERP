@@ -1,36 +1,34 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Building2, Layers, Pencil, Lock } from "lucide-react";
+import { Plus, Trash2, Pencil, Layers, ListChecks } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/payment-plans";
-const COMPANY_API = "/api/business/dropdown";
-const UNIT_API = "/api/unit-master";
-const BLOCK_API = "/api/block-master";
 const MILESTONE_MASTER_API = "/api/crm/milestone-master";
+
+// Cycled across a plan's milestone rows so the segmented bar (card + preview)
+// gives each milestone a stable, distinguishable color regardless of how many
+// milestones the plan has.
+const SEGMENT_COLORS = [
+  "bg-primary", "bg-sky-500", "bg-emerald-500", "bg-violet-500",
+  "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-fuchsia-500",
+];
+
+type MilestoneRow = { name: string; pct: number };
+
+function parseMilestones(json: string | null | undefined): MilestoneRow[] {
+  if (!json) return [];
+  try {
+    const raw = JSON.parse(json);
+    return (raw as any[]).map((r) => ({ name: r.name, pct: Number(r.pct) || 0 }));
+  } catch { return []; }
+}
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchCompanies(): Promise<any[]> {
-  try {
-    const r = await fetchWithAuth(COMPANY_API);
-    if (!r.ok) return [];
-    const data = await r.json();
-    return (data.companies || []).map((c: any) => ({ Id: c.id, Name: c.name }));
-  } catch { return []; }
-}
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}/projects`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchBlocks(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BLOCK_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchUnits(): Promise<any[]> {
-  try { const r = await fetchWithAuth(UNIT_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -40,70 +38,74 @@ async function fetchPlanDetail(id: number): Promise<any> {
   return r.ok ? r.json() : null;
 }
 
+// The segmented percentage bar shared by both the card grid and the preview
+// dialog — a plan's milestone split is the one thing worth seeing at a
+// glance, so it gets a real proportional visual instead of just a number.
+const MilestoneBar: React.FC<{ milestones: MilestoneRow[]; height?: string }> = ({ milestones, height = "h-2" }) => {
+  if (!milestones.length) return <div className={`${height} w-full rounded-full bg-muted`} />;
+  return (
+    <div className={`flex ${height} w-full overflow-hidden rounded-full bg-muted gap-px`}>
+      {milestones.map((m, i) => (
+        <div
+          key={i}
+          title={`${m.name} — ${m.pct}%`}
+          className={`${SEGMENT_COLORS[i % SEGMENT_COLORS.length]} first:rounded-l-full last:rounded-r-full`}
+          style={{ width: `${m.pct}%` }}
+        />
+      ))}
+    </div>
+  );
+};
+
 const CrmPaymentPlans: React.FC = () => {
   const qc = useQueryClient();
+
+  // Edit/Create form dialog — always editable while open (see previewPlan
+  // below for the read-only view; there's no longer a "locked" mode here).
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
   const [description, setDescription] = useState("");
-  const [companyId, setCompanyId] = useState("");
-  const [projectIds, setProjectIds] = useState<string[]>([]);
-  const [blockId, setBlockId] = useState("");
-  const [unitId, setUnitId] = useState("");
+  // Booking is a fixed ₹ figure decided when the PLAN is created — not typed
+  // fresh on every booking, and never a % of the plan (see the locked row
+  // below). This is what generateMilestonesForBooking (backend) now treats
+  // as the authoritative Booking amount for any booking tagged to this plan.
+  const [bookingAmount, setBookingAmount] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
   const [saving, setSaving] = useState(false);
-  // Opens locked whenever editing an existing plan — "New Plan" opens unlocked.
-  const [locked, setLocked] = useState(false);
-  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
+
+  // Read-only preview, opened by tapping a card. Built straight from the
+  // list row's own MilestonesJson — no extra fetch, no loading flicker.
+  const [previewPlan, setPreviewPlan] = useState<any | null>(null);
+
+  const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 
   const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
-  const { data: blocks = [] } = useQuery({ queryKey: ["block-master"], queryFn: fetchBlocks, staleTime: 5 * 60_000 });
-  const { data: units = [] } = useQuery({ queryKey: ["unit-master-all"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
 
-  const projectsForCompany = useMemo(() => {
-    if (!companyId) return projects as any[];
-    return (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId);
-  }, [projects, companyId]);
-  const blocksForProject = useMemo(() => {
-    if (!projectIds.length) return blocks as any[];
-    return (blocks as any[]).filter((b: any) => projectIds.includes(String(b.ProjectId)));
-  }, [blocks, projectIds]);
-  const unitsForBlock = useMemo(() => {
-    let list = units as any[];
-    if (projectIds.length) list = list.filter((u: any) => projectIds.includes(String(u.ProjectId)));
-    if (blockId) list = list.filter((u: any) => String(u.BlockId) === blockId);
-    return list;
-  }, [units, projectIds, blockId]);
-
-  const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
-
-  const toggleProject = (id: string) => {
-    setProjectIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]);
-    setBlockId(""); setUnitId("");
-  };
+  // Item 0 is always "Booking" — a fixed ₹ figure decided per booking, never
+  // a slice of the plan's 100%. Only the milestones that come after Booking
+  // are required to sum to 100 (that 100% represents TotalValue - Booking,
+  // not TotalValue itself — see generateMilestonesForBooking on the backend).
+  const totalPct = items.slice(1).reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
 
   const resetForm = () => {
     setEditingId(null);
-    setPlanName(""); setDescription(""); setCompanyId(""); setProjectIds([]); setBlockId(""); setUnitId("");
+    setPlanName(""); setDescription(""); setBookingAmount("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
-    setLocked(false);
   };
 
+  const openCreate = () => { resetForm(); setDialogOpen(true); };
+
   const openEdit = async (id: number) => {
+    setPreviewPlan(null);
     const detail = await fetchPlanDetail(id);
     if (!detail) { toast.error("Could not load plan"); return; }
     const { plan, items: planItems } = detail;
     setEditingId(id);
-    setLocked(true);
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
-    setCompanyId(plan.CompanyId ? String(plan.CompanyId) : "");
-    setProjectIds((plan.Projects || []).map((p: any) => String(p.Id)));
-    setBlockId(plan.BlockId ? String(plan.BlockId) : "");
-    setUnitId(plan.UnitId ? String(plan.UnitId) : "");
+    setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
     setItems(
       (planItems as any[]).length
         ? planItems.map((i: any) => ({
@@ -117,16 +119,32 @@ const CrmPaymentPlans: React.FC = () => {
 
   const handleSave = async () => {
     if (!planName.trim()) { toast.error("Plan name is required"); return; }
-    if (Math.round(totalPct * 100) !== 10000) { toast.error(`Percentages must sum to 100 (currently ${totalPct})`); return; }
+    if (bookingAmount === "" || isNaN(parseFloat(bookingAmount)) || parseFloat(bookingAmount) < 0) {
+      toast.error("Enter a valid Booking Amount for this plan"); return;
+    }
+    if (items.length < 2) { toast.error("Add at least one milestone after Booking"); return; }
+    if (Math.round(totalPct * 100) !== 10000) { toast.error(`Post-Booking milestones must sum to 100% (currently ${totalPct}%)`); return; }
+    const seenMasterIds = new Set<string>();
+    for (const it of items) {
+      if (!it.MilestoneMasterId) continue;
+      if (seenMasterIds.has(it.MilestoneMasterId)) {
+        toast.error(`"${it.MilestoneName}" is selected more than once — each milestone can only appear once per plan`);
+        return;
+      }
+      seenMasterIds.add(it.MilestoneMasterId);
+    }
     setSaving(true);
     try {
       const isEdit = editingId != null;
+      // Booking never carries a % — it's a real ₹ amount fixed on the plan
+      // itself, so its stored Percent is always 0 regardless of what an
+      // older plan (saved before this rule) had in that field.
+      const normalizedItems = items.map((it, idx) => idx === 0 ? { ...it, Percent: "0" } : it);
       const res = await fetchWithAuth(isEdit ? `${API}/${editingId}` : API, {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          PlanName: planName, Description: description, Items: items,
-          CompanyId: companyId || null, ProjectIds: projectIds.map(Number), BlockId: blockId || null, UnitId: unitId || null,
+          PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
         }),
       });
       const data = await res.json();
@@ -140,7 +158,6 @@ const CrmPaymentPlans: React.FC = () => {
         toast.success(isEdit ? "Payment plan updated" : "Payment plan created");
       }
       setDialogOpen(false);
-      setLocked(true);
       resetForm();
       qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
     } catch (e: any) {
@@ -150,12 +167,14 @@ const CrmPaymentPlans: React.FC = () => {
     }
   };
 
+  const previewMilestones = useMemo(() => parseMilestones(previewPlan?.MilestonesJson), [previewPlan]);
+
   return (
     <SalesAutoShell
       title="CRM — Payment Plan Master"
-      subtitle="Reusable milestone templates — scoped globally, or to a specific company/project/block"
+      subtitle="Reusable milestone templates — tag them onto units from Unit Master"
       action={
-        <button onClick={() => setDialogOpen(true)}
+        <button onClick={openCreate}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Plan
         </button>
@@ -165,157 +184,278 @@ const CrmPaymentPlans: React.FC = () => {
         {isLoading ? (
           <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
         ) : plans.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">No payment plans defined</div>
-        ) : (plans as any[]).map((p: any) => (
-          <div key={p.Id} className="rounded-xl border border-border p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-medium">{p.PlanName}</span>
-              <div className="flex items-center gap-1.5">
-                <span className={`text-xs px-2 py-0.5 rounded-full border ${p.IsActive ? "text-green-600 bg-green-50 border-green-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-                  {p.IsActive ? "Active" : "Inactive"}
-                </span>
-                <button onClick={() => openEdit(p.Id)} className="p-1 text-muted-foreground hover:text-primary" title="Edit plan">
-                  <Pencil size={13} />
-                </button>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mb-2">{p.Description || "—"}</p>
-            <div className="flex items-center gap-1.5 text-xs mb-2">
-              {!p.CompanyId && !(p.Projects && p.Projects.length) && !p.BlockId && !p.UnitId ? (
-                <span className="px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-600 flex items-center gap-1"><Layers size={10} /> Global default</span>
-              ) : (
-                <span className="px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-600 flex items-center gap-1">
-                  <Building2 size={10} /> {[p.CompanyName, (p.Projects || []).map((x: any) => x.Name).join(", "), p.BlockName, p.UnitName].filter(Boolean).join(" · ")}
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground">{p.ItemCount} milestone(s) · {p.TotalPercent}% total</div>
+          <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center">
+            <Layers size={24} className="mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">No payment plans yet — create one to start tagging it onto units.</p>
           </div>
-        ))}
+        ) : (plans as any[]).map((p: any) => {
+          const milestones = parseMilestones(p.MilestonesJson);
+          const shown = milestones.slice(0, 5);
+          const hiddenCount = milestones.length - shown.length;
+          return (
+            <button
+              key={p.Id}
+              onClick={() => setPreviewPlan(p)}
+              className="group text-left rounded-xl border border-border bg-card p-4 hover:border-primary/40 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm">{p.PlanName}</div>
+                  {p.Description && <div className="text-xs text-muted-foreground mt-0.5">{p.Description}</div>}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                    p.IsActive
+                      ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
+                      : "text-muted-foreground bg-muted/50 border-border"
+                  }`}>
+                    {p.IsActive ? "Active" : "Inactive"}
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); openEdit(p.Id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); openEdit(p.Id); } }}
+                    title="Edit plan"
+                    className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  >
+                    <Pencil size={13} />
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <MilestoneBar milestones={milestones} />
+              </div>
+
+              {/* The brief itself — every card shows its actual milestone
+                  split, not just a count, so staff don't have to open the
+                  preview to know what they're tagging onto a unit. */}
+              <div className="mt-2.5 space-y-1">
+                {shown.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`} />
+                    <span className="flex-1 min-w-0 text-foreground/90 truncate">{m.name}</span>
+                    <span className="font-semibold tabular-nums text-muted-foreground">
+                      {i === 0 ? `₹${Number(p.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
+                    </span>
+                  </div>
+                ))}
+                {hiddenCount > 0 && (
+                  <div className="text-xs text-muted-foreground pl-3.5">+{hiddenCount} more…</div>
+                )}
+              </div>
+
+              <div className="mt-2.5 pt-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><ListChecks size={12} /> {p.ItemCount} milestone{p.ItemCount === 1 ? "" : "s"}</span>
+                <span className={Math.round(p.TotalPercent) === 100 ? "text-green-600 dark:text-green-400 font-medium" : "text-amber-600 font-medium"}>
+                  {p.TotalPercent}% total
+                </span>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
+      {/* Read-only preview — tapping a card opens this instead of dropping
+          straight into a greyed-out copy of the edit form. */}
+      <Dialog open={!!previewPlan} onOpenChange={(o) => { if (!o) setPreviewPlan(null); }}>
+        <DialogContent className="max-w-lg">
+          {previewPlan && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-heading flex items-start justify-between gap-2 pr-6">
+                  <div className="min-w-0">
+                    <div>{previewPlan.PlanName}</div>
+                    {previewPlan.Description && (
+                      <div className="text-xs font-normal text-muted-foreground mt-1">{previewPlan.Description}</div>
+                    )}
+                  </div>
+                  <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                    previewPlan.IsActive
+                      ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
+                      : "text-muted-foreground bg-muted/50 border-border"
+                  }`}>
+                    {previewPlan.IsActive ? "Active" : "Inactive"}
+                  </span>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                <MilestoneBar milestones={previewMilestones} height="h-2.5" />
+
+                <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
+                  {previewMilestones.map((m, i) => (
+                    <div key={i} className="flex items-start gap-2.5 text-sm rounded-lg border border-border bg-muted/20 px-3 py-2">
+                      <span className={`mt-0.5 shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
+                        {i + 1}
+                      </span>
+                      <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
+                      <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
+                        {i === 0 ? `₹${Number(previewPlan.BookingAmount || 0).toLocaleString("en-IN")}` : `${m.pct}%`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-2">
+                  <span className="flex items-center gap-3">
+                    <span>{previewMilestones.length} milestone{previewMilestones.length === 1 ? "" : "s"}</span>
+                    {previewPlan.CreatedAt && <span>Created {new Date(previewPlan.CreatedAt).toLocaleDateString()}</span>}
+                  </span>
+                  <span className={Math.round(previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)) === 100 ? "text-green-600 dark:text-green-400 font-semibold" : "text-amber-600 font-semibold"}>
+                    {previewMilestones.slice(1).reduce((s, m) => s + m.pct, 0)}% total (after Booking)
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <button onClick={() => setPreviewPlan(null)}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+                <button onClick={() => openEdit(previewPlan.Id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                  <Pencil size={13} /> Edit Plan
+                </button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create / Edit form — always editable while open. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-              <span>{editingId != null ? "Edit Payment Plan" : "New Payment Plan"}</span>
-              {editingId != null && locked && (
-                <button onClick={() => setLocked(false)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
-                  <Pencil size={12} /> Edit
-                </button>
-              )}
+            <DialogTitle className="font-heading">
+              {editingId != null ? "Edit Payment Plan" : "New Payment Plan"}
             </DialogTitle>
           </DialogHeader>
-          {editingId != null && locked && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
-              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
-            </div>
-          )}
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Plan Name *</label>
-              <input type="text" value={planName} readOnly={locked} onChange={(e) => setPlanName(e.target.value)}
+              <input type="text" value={planName} onChange={(e) => setPlanName(e.target.value)}
                 className={inputCls} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
-              <input type="text" value={description} readOnly={locked} onChange={(e) => setDescription(e.target.value)}
+              <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
                 className={inputCls} />
-            </div>
-
-            <div className="rounded-lg border border-border p-3 space-y-2">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} /> Scope (leave blank for a global default plan)</label>
-              <div className="grid grid-cols-2 gap-2">
-                <select value={companyId} disabled={locked} onChange={(e) => { setCompanyId(e.target.value); setProjectIds([]); setBlockId(""); setUnitId(""); }}
-                  className={inputCls}>
-                  <option value="">Any company</option>
-                  {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
-                </select>
-                <select value={blockId} disabled={locked} onChange={(e) => { setBlockId(e.target.value); setUnitId(""); }}
-                  className={inputCls}>
-                  <option value="">Any block</option>
-                  {(blocksForProject as any[]).map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
-                </select>
-                <select value={unitId} disabled={locked} onChange={(e) => setUnitId(e.target.value)}
-                  className={`col-span-2 ${inputCls}`}>
-                  <option value="">Any unit</option>
-                  {(unitsForBlock as any[]).map((u: any) => <option key={u.Id} value={String(u.Id)}>{u.UnitName}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Projects — leave all unchecked for any project, or pick multiple to share this plan across them
-                </label>
-                <div className={`flex flex-wrap gap-1.5 border border-border rounded px-2 py-1.5 max-h-32 overflow-y-auto ${locked ? "opacity-70" : ""}`}>
-                  {(projectsForCompany as any[]).length === 0 ? (
-                    <span className="text-xs text-muted-foreground py-0.5">No projects available</span>
-                  ) : (projectsForCompany as any[]).map((p: any) => {
-                    const checked = projectIds.includes(String(p.Id));
-                    return (
-                      <label key={p.Id}
-                        className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border cursor-pointer ${checked ? "border-primary bg-primary/10 text-primary" : "border-border"} ${locked ? "pointer-events-none" : ""}`}>
-                        <input type="checkbox" checked={checked} disabled={locked}
-                          onChange={() => toggleProject(String(p.Id))} className="accent-primary" />
-                        {p.Name}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-muted-foreground">Milestones (must total 100%)</label>
-                <span className={`text-xs font-medium ${Math.round(totalPct * 100) === 10000 ? "text-green-600" : "text-red-600"}`}>{totalPct}%</span>
+                <label className="text-xs text-muted-foreground">Milestones after Booking (must total 100%)</label>
+                <span className={`text-xs font-medium ${Math.round(totalPct * 100) === 10000 ? "text-green-600 dark:text-green-400" : "text-red-600"}`}>{totalPct}%</span>
               </div>
-              <div className="space-y-2">
-                {items.map((it, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <select value={it.MilestoneMasterId} disabled={locked}
-                      onChange={(e) => {
-                        const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
-                        setItems((arr) => arr.map((x, i) => i === idx ? {
-                          ...x,
-                          MilestoneMasterId: e.target.value,
-                          MilestoneName: master ? master.Name : x.MilestoneName,
-                          Percent: master?.DefaultPercent != null && !x.Percent ? String(master.DefaultPercent) : x.Percent,
-                        } : x));
-                      }}
-                      className={`flex-1 ${inputCls}`}>
-                      <option value="">Custom (type below)</option>
-                      {(milestoneMaster as any[]).filter((m: any) => m.IsActive).map((m: any) => (
-                        <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
-                      ))}
-                    </select>
-                    <input type="text" placeholder="Milestone name" value={it.MilestoneName} readOnly={locked}
-                      onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value, MilestoneMasterId: "" } : x))}
-                      className={`flex-1 ${inputCls}`} />
-                    <input type="number" placeholder="%" value={it.Percent} readOnly={locked}
-                      onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
-                      className={`w-20 ${inputCls}`} />
-                    <button onClick={() => setItems((arr) => arr.filter((_, i) => i !== idx))} disabled={locked}
-                      className="p-1.5 text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"><Trash2 size={14} /></button>
-                  </div>
-                ))}
+              <div className="space-y-2.5">
+                {items.map((it, idx) => {
+                  const fromMaster = !!it.MilestoneMasterId;
+                  const isBooking = idx === 0;
+                  if (isBooking) {
+                    return (
+                      <div key={idx} className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                        <div className="flex items-start gap-2.5">
+                          <span className="mt-1 shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-bold">
+                            1
+                          </span>
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="text-sm font-medium text-foreground">Booking</div>
+                            <p className="text-[11px] text-muted-foreground">
+                              Fixed ₹ amount, set here on the plan — never typed per booking, never a % of
+                              the plan. Milestones below split 100% of whatever's left after this is deducted.
+                            </p>
+                            <div>
+                              <label className="text-[11px] text-muted-foreground block mb-1">Booking Amount (₹) *</label>
+                              <div className="relative w-40">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">₹</span>
+                                <input type="number" placeholder="0" value={bookingAmount}
+                                  onChange={(e) => setBookingAmount(e.target.value)}
+                                  className={`${inputCls} pl-5 font-semibold`} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={idx} className="rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="flex items-start gap-2.5">
+                        <span className="mt-1 shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-bold">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div>
+                            <label className="text-[11px] text-muted-foreground block mb-1">Source</label>
+                            <select value={it.MilestoneMasterId}
+                              onChange={(e) => {
+                                const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
+                                setItems((arr) => arr.map((x, i) => i === idx ? {
+                                  ...x,
+                                  MilestoneMasterId: e.target.value,
+                                  MilestoneName: master ? master.Name : x.MilestoneName,
+                                } : x));
+                              }}
+                              className={inputCls}>
+                              <option value="">✎ Custom milestone (type name below)</option>
+                              {(milestoneMaster as any[])
+                                .filter((m: any) => m.IsActive)
+                                // Don't offer "Booking" here — it's already the fixed row above.
+                                .filter((m: any) => m.Name?.trim().toLowerCase() !== "booking")
+                                // Each master milestone can only be used once per plan — hide it
+                                // from every row except the one that currently has it selected.
+                                .filter((m: any) => String(m.Id) === it.MilestoneMasterId
+                                  || !items.some((x, i) => i !== idx && String(x.MilestoneMasterId) === String(m.Id)))
+                                .map((m: any) => (
+                                  <option key={m.Id} value={String(m.Id)}>{m.Name}</option>
+                                ))}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                            <div>
+                              <label className="text-[11px] text-muted-foreground block mb-1">Milestone Name</label>
+                              {fromMaster ? (
+                                <div className="w-full text-sm rounded px-2 py-1.5 bg-muted/40 border border-border text-foreground font-medium truncate" title={it.MilestoneName}>
+                                  {it.MilestoneName}
+                                </div>
+                              ) : (
+                                <input type="text" placeholder="e.g. Foundation, Handover" value={it.MilestoneName}
+                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, MilestoneName: e.target.value } : x))}
+                                  className={inputCls} />
+                              )}
+                            </div>
+                            <div>
+                              <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
+                              <div className="relative w-24">
+                                <input type="number" placeholder="0" value={it.Percent}
+                                  onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
+                                  className={`${inputCls} pr-6 text-right font-semibold`} />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <button onClick={() => setItems((arr) => arr.filter((_, i) => i !== idx))}
+                          title="Remove milestone"
+                          className="mt-1 shrink-0 p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-500/10 rounded transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])} disabled={locked}
-                className="text-xs text-primary hover:underline mt-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add milestone</button>
+              <button onClick={() => setItems((arr) => [...arr, { MilestoneMasterId: "", MilestoneName: "", Percent: "" }])}
+                className="text-xs text-primary hover:underline mt-2">+ Add milestone</button>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            {editingId != null && locked ? (
-              <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-            ) : (
-              <>
-                <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                  {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
-                </button>
-              </>
-            )}
+            <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
+            </button>
           </div>
         </DialogContent>
       </Dialog>
