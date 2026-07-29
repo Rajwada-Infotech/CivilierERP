@@ -152,6 +152,7 @@ const ParkingSlotMaster = lazy(
 const ExtraChargeMaster = lazy(
   () => import("./pages/admin/masters/ExtraChargeMaster"),
 );
+const TaskMaster = lazy(() => import("./pages/admin/masters/TaskMaster"));
 const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
 const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
 const CrmParkingBookingPage = lazy(() => import("./pages/CRM/CrmParkingBooking"));
@@ -1861,6 +1862,7 @@ function AppRoutes() {
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />

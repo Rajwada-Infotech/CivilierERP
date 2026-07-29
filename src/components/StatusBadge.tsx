@@ -128,6 +128,38 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
   },
+  // Task Master domain statuses
+  Active: {
+    label: "Active",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Cancel: {
+    label: "Cancelled",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  // Task Master priority levels
+  VVIP: {
+    label: "VVIP",
+    icon: FileEdit,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  LI: {
+    label: "LI",
+    icon: FileEdit,
+    classes:
+      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Normal: {
+    label: "Normal",
+    icon: FileEdit,
+    classes:
+      "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
   // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
   // live-derived Status (Blocked/Booked/OnHold/Available) exactly.
   "On Hold": {

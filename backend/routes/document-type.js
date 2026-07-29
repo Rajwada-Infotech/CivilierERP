@@ -53,6 +53,7 @@ const MODULE_LINKS = {
   SI: ["Sale Invoice"],
   QT: ["Quotation"],
   CON: ["Contract"],
+  TASK: ["Task"],
 };
 
 // ── GET / — list all doc types, optionally filtered by ?module= ───────────────
@@ -192,7 +193,8 @@ router.get("/projects", async (req, res) => {
       SELECT
         id         AS ProjectId,
         name       AS ProjectName,
-        short_name AS ProjectCode
+        short_name AS ProjectCode,
+        company_id AS CompanyId
       FROM dbo.enterprise
       WHERE business_type = 'P'
         AND (discontinue IS NULL OR discontinue = 0)
