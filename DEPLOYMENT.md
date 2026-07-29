@@ -63,8 +63,7 @@ sudo chmod 600 /etc/civilier/prod.env
 ```
 
 Deploy (first time, from this same SSH session, using a copy of the repo
-already on disk — for every deploy *after* this one, use the artifact-based
-flow below instead):
+already on disk):
 
 ```bash
 cd /opt/civilier
@@ -73,9 +72,49 @@ CIVILIER_ENV_FILE=/etc/civilier/prod.env bash scripts/deploy.sh main
 
 ## Releasing updates (after the first deploy)
 
-Pushing to `main` does **not** deploy anything by itself — it only runs the
-CI checks (build + test) in GitHub Actions. Nothing in this repo can reach
-the EC2 box automatically. A release is a deliberate, two-step action:
+**Pushing to `main` deploys automatically.** `.github/workflows/deploy.yml`
+runs on every push to `main` and executes `bash /opt/civilier/scripts/deploy.sh main`
+directly on the EC2 box — no manual build-download-copy step, no AWS API
+credentials involved. This works because a **self-hosted GitHub Actions
+runner lives on the EC2 box itself** (inside WSL, labeled `self-hosted` +
+`ec2-wsl` on the repo's Settings → Actions → Runners page): GitHub dispatches
+the job, the runner picks it up locally, and `deploy.sh` does its usual
+`git fetch` + `docker compose build/up` + health-check sequence in place.
+
+### Setting up the self-hosted runner (one-time)
+
+1. On the repo: **Settings → Actions → Runners → New self-hosted runner**,
+   choose Linux/x64, and follow GitHub's generated download/config commands
+   **inside WSL** on the EC2 box (not native Windows — the runner needs to be
+   Linux to match the `ec2-wsl` label and run the same Docker/bash tooling
+   `deploy.sh` expects).
+2. When configuring, give it both labels the workflow requires:
+   `self-hosted` (added automatically) and `ec2-wsl` (add explicitly when
+   prompted, or pass `--labels ec2-wsl` to `config.sh`).
+3. **Install it as a service** — don't leave it running via `./run.sh` in a
+   foreground terminal, that dies the moment the SSH session or WSL window
+   closes and the runner goes offline:
+   ```bash
+   cd ~/actions-runner   # wherever config.sh was run
+   sudo ./svc.sh install
+   sudo ./svc.sh start
+   sudo ./svc.sh status
+   ```
+4. Confirm it shows **Idle** (green) on the Runners page. If it later shows
+   **Offline**, that's almost always the service having stopped or WSL
+   itself not having restarted after an EC2 reboot — `sudo ./svc.sh status`
+   and `sudo journalctl -u actions.runner.* -n 50` on the box are the first
+   things to check.
+5. WSL doesn't start automatically on a Windows reboot by default. If the
+   EC2 instance is expected to reboot unattended (patching, etc.), set up a
+   Windows Task Scheduler task that runs `wsl.exe` (or launches the specific
+   distro) at startup so the runner's systemd service has a chance to come
+   back up with it.
+
+### Manual fallback (no runner, or runner is down)
+
+The artifact-based flow still works if you ever need to deploy without a
+working runner:
 
 1. **Build it.** In GitHub: Actions tab → "CI" workflow → "Run workflow" →
    pick the branch (usually `main`) → Run. Wait for it to finish, open the
@@ -117,21 +156,22 @@ sequence as before. See the comments at the top of
 > genuinely new migrations. Only run it against a DB whose schema you have
 > confirmed already reflects the migrations being baselined.
 
-The old `scripts/deploy.sh` (live `git pull` on the box) still exists and
-still works if you ever want it, but nothing triggers it automatically
-anymore — GitHub Actions no longer has AWS credentials or talks to this box
-at all.
-
 ## GitHub Actions
 
-No repository secrets are required anymore — the CI workflow only builds
-and tests; it never calls AWS. (If `AWS_ACCESS_KEY_ID` /
-`AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `EC2_INSTANCE_ID` secrets are still
-set on the repo from before, they're unused now and safe to delete.)
+Two separate workflows, don't confuse them:
 
-Pushes and pull requests to `main`/`dev` run checks only — build, test,
-syntax check, Docker build check. Nothing deploys. Deploying is the manual
-two-step process described above.
+- **`deploy.yml`** — triggers on push to `main`. Requires the self-hosted
+  runner (see above) to be online; runs `scripts/deploy.sh main` directly
+  on the EC2 box. This is the live auto-deploy path.
+- **CI workflow** — runs on GitHub-hosted runners for pushes/PRs to
+  `main`/`dev`. Build, test, syntax check, Docker build check only. Never
+  touches the EC2 box.
+
+No repository secrets are required for either — `deploy.yml` doesn't call
+the AWS API, it just runs a shell script on a runner that already lives on
+the target box. (If `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+`AWS_REGION` / `EC2_INSTANCE_ID` secrets are still set on the repo from an
+earlier setup, they're unused and safe to delete.)
 
 ## Smoke Test
 
