@@ -1,6 +1,6 @@
 services:
   frontend-build:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run build && rm -rf /frontend-dist/* && cp -R dist/. /frontend-dist/"
     volumes:
