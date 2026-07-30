@@ -76,7 +76,7 @@ const AGR_SELECT = `
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
-  LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
+  LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking
@@ -1258,7 +1258,7 @@ async function setPortalActive(pool, agreementId, isActive) {
     FROM dbo.CrmAgreement ag
     JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-    LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.ApplicationId = a.Id
+    LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
     WHERE ag.Id = @id
   `);
   if (!row.recordset.length) return { error: "Agreement not found", status: 404 };
