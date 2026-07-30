@@ -21,15 +21,32 @@ const { syncApplicationOnBookingTerminal } = require("../services/crmApplication
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
+// The set of company banks THIS booking's real payments actually landed in
+// (milestone receipts + on-account deposits, wherever DepositBankId is set).
+// Feeds the refund's own bank default: "the same account, same" only makes
+// sense to auto-apply when every payment agrees on one bank — a booking
+// whose milestones landed across more than one company bank has no single
+// "same account" answer, so the frontend forces an explicit pick instead of
+// guessing.
+const DEPOSIT_BANKS_FOR_BOOKING = `
+  (SELECT r.DepositBankId FROM dbo.CrmPaymentReceipt r
+     JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
+     WHERE m.BookingId = b.Id AND r.DepositBankId IS NOT NULL
+   UNION ALL
+   SELECT DepositBankId FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id AND DepositBankId IS NOT NULL) x
+`;
+
 const CANCEL_SELECT = `
   SELECT
     c.Id, c.CancellationNo, c.BookingId, c.RequestedDate, c.Reason, c.AmountPaidTillDate,
     c.DeductionPercent, c.DeductionAmount, c.RefundAmount, c.Status,
     c.RequestedBy, c.ApprovedBy, c.ApprovedAt, c.RefundDate, c.RefundMode,
-    c.RefundRef, c.Notes, c.CreatedAt, c.UpdatedAt,
-    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.AssignedTo,
+    c.RefundRef, c.RefundBankId, c.Notes, c.CreatedAt, c.UpdatedAt,
+    b.BookingNo, b.UnitNo, b.ProjectName, b.ProjectId, b.TotalValue, b.AssignedTo,
     a.ApplicantName, a.Mobile,
-    rb.name AS RequestedByName, ab.name AS ApprovedByName
+    rb.name AS RequestedByName, ab.name AS ApprovedByName,
+    (SELECT COUNT(DISTINCT x.DepositBankId) FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS DistinctDepositBankCount,
+    (SELECT TOP 1 x.DepositBankId FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS SingleDepositBankId
   FROM dbo.CrmCancellation c
   JOIN  dbo.CrmBooking b     ON b.Id = c.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -306,10 +323,24 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
+      .query(`
+        SELECT c.Status, b.ProjectId
+        FROM dbo.CrmCancellation c
+        JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+        WHERE c.Id = @id
+      `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
     if (cur.recordset[0].Status !== "Approved") {
       return res.status(400).json({ error: `Cannot mark refunded — cancellation must be Approved (currently '${cur.recordset[0].Status}')` });
+    }
+
+    // Same mandatory-bank rule as every deposit — mirrored for the money
+    // going back out. "Same account, same" is only ever a frontend default;
+    // the requirement itself doesn't relax just because this is a refund.
+    const tagged = await pool.request().input("pid", sql.Int, cur.recordset[0].ProjectId)
+      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
+    if (tagged.recordset[0].Cnt > 0 && !b.RefundBankId) {
+      return res.status(400).json({ error: "Refund bank is required for this project" });
     }
 
     await pool.request()
@@ -317,11 +348,12 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
       .input("rdate", sql.Date,          b.RefundDate || null)
       .input("rmode", sql.NVarChar(50),  b.RefundMode || null)
       .input("rref",  sql.NVarChar(200), b.RefundRef  || null)
+      .input("rbank", sql.Int,           b.RefundBankId ? parseInt(b.RefundBankId) : null)
       .query(`
         UPDATE dbo.CrmCancellation SET
           Status = 'Refunded',
           RefundDate = ISNULL(@rdate, CAST(SYSDATETIME() AS DATE)),
-          RefundMode = @rmode, RefundRef = @rref,
+          RefundMode = @rmode, RefundRef = @rref, RefundBankId = @rbank,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

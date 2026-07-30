@@ -359,17 +359,39 @@ class ReceiptError extends Error {
 // must already be Paid or Waived first (always true for milestone #1, the
 // only one the auto-booking caller ever targets, since it has no earlier
 // milestone to check against).
-async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, actorEmail) {
+// enforceBankMandate defaults true for every direct caller (POST /:id/receipts
+// below), and — now that CrmApplication.tsx's Details step actually captures
+// a Payment Details section (Token Type/Value, Payment Mode, Deposit Bank) —
+// also true for createCrmBookingRecord's auto-sync (crmEntityCreation.js).
+// Still wrapped in that caller's own try/catch, so a genuinely missing bank
+// (e.g. an Application submitted before this field existed) fails the
+// auto-receipt-sync alone rather than blocking Booking creation itself;
+// staff can then record it manually through the mandate-enforced path like
+// any other receipt.
+async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, actorEmail, { enforceBankMandate = true } = {}) {
   const amount = parseFloat(data.Amount);
   if (!amount || amount <= 0) throw new ReceiptError("Amount must be greater than 0");
 
   const target = await pool.request().input("id", sql.Int, milestoneId)
-    .query("SELECT BookingId, MilestoneNo, MilestoneName, AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+    .query(`
+      SELECT m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, bk.ProjectId
+      FROM dbo.CrmPaymentMilestone m
+      JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId
+      WHERE m.Id = @id
+    `);
   if (!target.recordset.length) throw new ReceiptError("Milestone not found", 404);
   const targetRow = target.recordset[0];
 
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) throw new ReceiptError(activeErr);
+
+  if (enforceBankMandate) {
+    const tagged = await pool.request().input("pid", sql.Int, targetRow.ProjectId)
+      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
+    if (tagged.recordset[0].Cnt > 0 && !data.DepositBankId) {
+      throw new ReceiptError("Deposit bank is required for this project");
+    }
+  }
 
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
@@ -649,13 +671,27 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // to know this milestone's own AmountDue so an AmountPaid write can be
     // capped against it (see the overpayment handling below).
     const curRes = await pool.request().input("id", sql.Int, id).query(`
-      SELECT m.AmountDue, m.MilestoneName, bk.GrandTotal, bk.TotalValue
+      SELECT m.AmountDue, m.MilestoneName, bk.GrandTotal, bk.TotalValue, bk.ProjectId
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId
       WHERE m.Id = @id
     `);
     if (!curRes.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     const curRow = curRes.recordset[0];
+
+    // A payment actually being recorded here (not a remarks/due-date-only
+    // edit — this same route doubles as that) must specify which of the
+    // project's tagged bank accounts received it, whenever the project has
+    // at least one tagged. Zero tagged banks for the project means nothing
+    // to mandate — falls back to the open company bank list, same as the
+    // frontend's own fallback.
+    if (paidRaw != null) {
+      const tagged = await pool.request().input("pid", sql.Int, curRow.ProjectId)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
+      if (tagged.recordset[0].Cnt > 0 && !b.DepositBankId) {
+        return res.status(400).json({ error: "Deposit bank is required for this project" });
+      }
+    }
 
     // A manual AmountDue override changes this milestone's own weight in
     // the schedule — recompute its stored Percent alongside it (against the
@@ -876,6 +912,19 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // Same rule as a milestone payment: a deposit against a project with one
+    // or more tagged bank accounts must say which one it landed in. A
+    // project with nothing tagged falls back to the open company bank
+    // list, so nothing is mandated there.
+    const projRes = await pool.request().input("bid", sql.Int, bid)
+      .query("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
+    if (!projRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const tagged = await pool.request().input("pid", sql.Int, projRes.recordset[0].ProjectId)
+      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
+    if (tagged.recordset[0].Cnt > 0 && !b.DepositBankId) {
+      return res.status(400).json({ error: "Deposit bank is required for this project" });
+    }
 
     const receiptNo = await getNextDocNumber(pool, "OACC", "OACC");
     const result = await pool.request()

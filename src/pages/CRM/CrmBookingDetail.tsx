@@ -102,7 +102,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
-  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "" });
+  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
   const [chargesSaving, setChargesSaving] = useState(false);
@@ -516,7 +516,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const activeTabIndex = Math.max(0, TABS.indexOf(tab));
-  const firstMilestone = (data?.milestones || []).find((m: any) => Number(m.MilestoneNo) === 1) || (data?.milestones || [])[0];
+  // MilestoneNo alone isn't a safe key — a parking/extra-charge line item
+  // added while a booking briefly had zero milestones yet could have been
+  // numbered 1 too (a real, now-fixed backend bug; see
+  // crmEntityCreation.js), leaving old data with two rows both claiming
+  // MilestoneNo=1. Excluding anything tagged as a parking/extra-charge line
+  // item guarantees this always resolves to the real Booking Amount
+  // milestone, not whichever row a plain `.find` happens to hit first.
+  const milestoneList = (data?.milestones || []) as any[];
+  const firstMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId)
+    || milestoneList.find((m: any) => Number(m.MilestoneNo) === 1)
+    || milestoneList[0];
   const bookingAmountDue = Number(firstMilestone?.AmountDue || booking?.BookingAmount || 0);
   const bookingAmountPaid = Number(firstMilestone?.AmountPaid || booking?.BookingAmountPaid || 0);
   const bookingAmountBalance = Math.max(0, bookingAmountDue - bookingAmountPaid);
@@ -644,18 +654,38 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     // Confirm & Book (see maybeAutoGenerateBookingInvoice on the backend).
     // This manual dialog is for every other invoice (e.g. milestone-wise
     // payments after booking), so it never defaults to or offers "Booking".
-    setInvoiceForm({ InvoiceType: "Maintenance", Amount: "", InvoiceDate: todayStr, Description: "" });
+    setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "" });
     setInvoiceDialog(true);
   };
 
+  // Milestones that are fully paid but don't have an invoice yet — the only
+  // ones a "Milestone" invoice can legally be raised for. This is what makes
+  // the manual dialog "well synced" rather than a disconnected freehand
+  // entry: amount/date always come from the milestone's real payment record
+  // (enforced again server-side), never typed by staff.
+  const uninvoicedPaidMilestones = milestoneList.filter(
+    (m: any) => m.Status === "Paid" && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
+  );
+
   const handleGenerateInvoice = async () => {
-    if (!invoiceForm.Amount) { toast.error("Amount is required"); return; }
+    if (invoiceForm.InvoiceType === "Milestone") {
+      if (!invoiceForm.MilestoneId) { toast.error("Select a milestone"); return; }
+    } else if (!invoiceForm.Amount) {
+      toast.error("Amount is required"); return;
+    }
     setSaving(true);
     try {
+      const body: any = { InvoiceType: invoiceForm.InvoiceType, Description: invoiceForm.Description };
+      if (invoiceForm.InvoiceType === "Milestone") {
+        body.MilestoneId = parseInt(invoiceForm.MilestoneId);
+      } else {
+        body.Amount = parseFloat(invoiceForm.Amount);
+        body.InvoiceDate = invoiceForm.InvoiceDate;
+      }
       const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...invoiceForm, Amount: parseFloat(invoiceForm.Amount) }),
+        body: JSON.stringify(body),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
@@ -859,7 +889,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {bookingAmountDue <= 0 && (
                     <p className="text-[11px] text-muted-foreground">No default amount is shown here — set the actual Booking Amount below; the rest of the payment schedule is calculated from it.</p>
                   )}
-                  {canEdit && booking.Status !== "Approved" && (
+                  {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && (
                     <div className="flex items-center gap-2 pt-1">
                       <input type="number" placeholder="Set/correct booking amount (₹)"
                         value={bookingAmountInput ?? (booking.BookingAmount != null ? String(booking.BookingAmount) : "")}
@@ -871,13 +901,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </button>
                     </div>
                   )}
+                  {bookingAmountPaidInFull && (
+                    <p className="text-[11px] text-emerald-700">Booking Amount fully paid — locked from further edits.</p>
+                  )}
                 </div>
 
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Record Payment</h3>
                     <div className="grid grid-cols-2 gap-2">
-                      <input type="number" placeholder={`Amount (balance ${fmt(bookingAmountBalance)})`} value={payForm.Amount}
+                      <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
@@ -895,7 +928,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       ) : null}
                       <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                        <option value="">— Select deposit bank —</option>
+                        <option value="">— Select deposit bank —{bankOptions.length > 0 ? " *" : ""}</option>
                         {(bankOptions as any[]).map((b: any) => (
                           <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
                         ))}
@@ -905,7 +938,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       )}
                     </div>
-                    <button onClick={handleRecordPayment} disabled={paySaving}
+                    <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
                       className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40">
                       {paySaving ? "Recording..." : `Record Payment`}
                     </button>
@@ -1272,17 +1305,38 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                       <h3 className="text-sm font-semibold">Generate Invoice</h3>
                       <div className="space-y-2">
-                        <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
+                        <select value={invoiceForm.InvoiceType}
+                          onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                          <option value="Milestone">Milestone Payment</option>
                           <option value="Maintenance">Maintenance</option>
                           <option value="Other">Other</option>
                         </select>
-                        <input type="number" placeholder="Amount" value={invoiceForm.Amount}
-                          onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                        <input type="date" value={invoiceForm.InvoiceDate}
-                          onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                        {invoiceForm.InvoiceType === "Milestone" ? (
+                          <>
+                            <select value={invoiceForm.MilestoneId}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, MilestoneId: e.target.value }))}
+                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                              <option value="">— Select a paid milestone —</option>
+                              {uninvoicedPaidMilestones.map((m: any) => (
+                                <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmt(m.AmountPaid)}</option>
+                              ))}
+                            </select>
+                            {uninvoicedPaidMilestones.length === 0 && (
+                              <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
+                            )}
+                            <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
+                          </>
+                        ) : (
+                          <>
+                            <input type="number" placeholder="Amount" value={invoiceForm.Amount}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                            <input type="date" value={invoiceForm.InvoiceDate}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
+                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                          </>
+                        )}
                         <input placeholder="Description" value={invoiceForm.Description}
                           onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
@@ -1292,7 +1346,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
                           Cancel
                         </button>
-                        <button onClick={handleGenerateInvoice} disabled={saving}
+                        <button onClick={handleGenerateInvoice}
+                          disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId)}
                           className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                           {saving ? "Generating..." : "Generate"}
                         </button>

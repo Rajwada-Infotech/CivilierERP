@@ -70,6 +70,7 @@ async function getBookingWorkflowContext(pool, bookingId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT
       b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.Status, b.IsActive, b.AssignedTo,
+      b.FinancingType,
       a.Email, a.Mobile
     FROM dbo.CrmBooking b
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -124,6 +125,24 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
     if (missing.length) {
       errors.push(`Missing customer details: ${missing.join(", ")}`);
     }
+  }
+
+  // Real money in hand, not just an auto-synced receipt that's assumed to
+  // have landed — the auto-sync at booking creation (crmEntityCreation.js)
+  // is best-effort and can silently fail (missing bank, DB hiccup), so this
+  // is checked independently rather than trusted from booking creation alone.
+  const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+  `);
+  if (!milestone1.recordset.length || milestone1.recordset[0].Status !== "Paid") {
+    errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation");
+  }
+
+  // Financing Type must be explicitly declared (Self-funded / Loan-financed)
+  // — without this, an empty CrmLoanDetail row is permanently ambiguous
+  // (declared self-funded vs. simply never filled in).
+  if (!hasValue(booking.FinancingType)) {
+    errors.push("Financing type (self-funded or loan-financed) must be declared");
   }
 
   return { ok: errors.length === 0, errors, booking };

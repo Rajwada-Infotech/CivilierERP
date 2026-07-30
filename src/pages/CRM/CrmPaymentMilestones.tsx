@@ -653,7 +653,7 @@ const CrmPaymentMilestones: React.FC = () => {
               </div>
               <div className="col-span-2">
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}
+                  Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project${payForm.AmountPaid && bankOptions.length > 0 ? " *" : ""}` : ""}
                 </label>
                 <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -687,7 +687,8 @@ const CrmPaymentMilestones: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setEditingId(null)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleRecordPayment} disabled={saving}
+            <button onClick={handleRecordPayment}
+              disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Saving..." : "Record Payment"}
             </button>
@@ -780,7 +781,7 @@ const CrmPaymentMilestones: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">
-                Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}
+                Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project${bankOptions.length > 0 ? " *" : ""}` : ""}
               </label>
               <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -799,7 +800,8 @@ const CrmPaymentMilestones: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setOnAccountDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleDepositOnAccount} disabled={saving || !onAccountForm.Amount}
+            <button onClick={handleDepositOnAccount}
+              disabled={saving || !onAccountForm.Amount || (bankOptions.length > 0 && !onAccountForm.DepositBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Recording..." : "Record Deposit"}
             </button>

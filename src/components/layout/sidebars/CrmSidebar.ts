@@ -66,6 +66,7 @@ export const crmNavItems: NavItem[] = [
     icon: IndianRupee,
     children: [
       { label: "Payment Milestones", path: "/crm/payments",       pageKey: "crm-payments"      },
+      { label: "Home Loan Tracking", path: "/crm/loan-details",   pageKey: "crm-loan-details"  },
       { label: "Demands",            path: "/crm/demands",        pageKey: "crm-payments"      },
       { label: "Parking Booking",    path: "/crm/parking-booking",pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",      pageKey: "crm-brokerage"     },

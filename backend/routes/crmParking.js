@@ -465,7 +465,16 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
       };
     });
 
-    res.json(out);
+    // Types with real ParkingSlot inventory but no ParkingMaster rate at
+    // all — the "slots exist but nobody priced them" gap. Surfaced
+    // separately from `out` (which is driven entirely by rates) so the
+    // frontend can tell staff exactly what's missing instead of a flat
+    // "no parking rates configured" that reads as "no parking exists" even
+    // when the slots clearly do.
+    const ratedTypes = new Set(rates.recordset.map((r) => r.ParkingType));
+    const unratedTypesWithInventory = [...typesWithInventory].filter((t) => !ratedTypes.has(t));
+
+    res.json({ rates: out, unratedTypesWithInventory });
   } catch (e) {
     console.error("[crm-parking] GET /available error:", e.message);
     res.status(500).json({ error: e.message });

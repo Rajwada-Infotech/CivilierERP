@@ -10,6 +10,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/cancellations";
 const BKG_API = "/api/crm/bookings";
+const PROJECT_BANK_API = "/api/crm/project-banks";
+const BANK_MASTER_API = "/api/bank-master";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Other"];
 
@@ -28,17 +30,52 @@ async function fetchCancellations(): Promise<any[]> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchAllBanks(): Promise<any[]> {
+  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 const CrmCancellations: React.FC = () => {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ BookingId: "", Reason: "", DeductionPercent: "10" });
-  const [refundDialog, setRefundDialog] = useState<number | null>(null);
-  const [refundForm, setRefundForm] = useState({ RefundDate: "", RefundMode: "", RefundRef: "" });
+  // Holds the full cancellation row (not just its Id) so the refund dialog
+  // can read ProjectId/DistinctDepositBankCount/SingleDepositBankId straight
+  // off it without a second round-trip.
+  const [refundDialog, setRefundDialog] = useState<any | null>(null);
+  const [refundForm, setRefundForm] = useState({ RefundDate: "", RefundMode: "", RefundRef: "", RefundBankId: "" });
+  // Locked by default whenever every payment on this booking agrees on one
+  // company bank — "keep the same account, same" — with an explicit unlock
+  // to redirect the refund elsewhere. A booking whose payments are split
+  // across more than one bank (or has none on file) opens unlocked, since
+  // there's no single "same account" to default to.
+  const [refundBankLocked, setRefundBankLocked] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const { data: cancellations = [], isLoading } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: refundProjectBanks = [] } = useQuery({
+    queryKey: ["crm-cancellation-project-banks", refundDialog?.ProjectId],
+    queryFn: () => fetchProjectBanks(refundDialog?.ProjectId),
+    enabled: !!refundDialog?.ProjectId,
+  });
+  const { data: refundAllBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"],
+    queryFn: fetchAllBanks,
+    enabled: !!refundDialog,
+    staleTime: 5 * 60_000,
+  });
+  const refundBankOptions = refundProjectBanks.length > 0 ? refundProjectBanks : refundAllBanks;
+
+  const openRefundDialog = (c: any) => {
+    setRefundDialog(c);
+    const singleBank = c.DistinctDepositBankCount === 1 && c.SingleDepositBankId ? String(c.SingleDepositBankId) : "";
+    setRefundForm({ RefundDate: "", RefundMode: "", RefundRef: "", RefundBankId: singleBank });
+    setRefundBankLocked(!!singleBank);
+  };
 
   const activeBookings = useMemo(() =>
     (bookings as any[]).filter((b: any) => b.Status !== "Cancelled"), [bookings]);
@@ -71,9 +108,13 @@ const CrmCancellations: React.FC = () => {
 
   const handleRefund = async () => {
     if (!refundDialog) return;
+    if (refundBankOptions.length > 0 && !refundForm.RefundBankId) {
+      toast.error("Select which company bank this refund pays out of");
+      return;
+    }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${refundDialog}/mark-refunded`, {
+      const res = await fetchWithAuth(`${API}/${refundDialog.Id}/mark-refunded`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(refundForm),
@@ -81,7 +122,7 @@ const CrmCancellations: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Refund recorded");
       setRefundDialog(null);
-      setRefundForm({ RefundDate: "", RefundMode: "", RefundRef: "" });
+      setRefundForm({ RefundDate: "", RefundMode: "", RefundRef: "", RefundBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
     } catch (e: any) {
       toast.error(e.message);
@@ -125,7 +166,7 @@ const CrmCancellations: React.FC = () => {
             />
             {c.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
             {c.Status === "Approved" && (
-              <button onClick={() => setRefundDialog(c.Id)} className="text-xs text-primary hover:underline">Record Refund</button>
+              <button onClick={() => openRefundDialog(c)} className="text-xs text-primary hover:underline">Record Refund</button>
             )}
             {c.Status === "Refunded" && (
               <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Refunded</span>
@@ -214,10 +255,36 @@ const CrmCancellations: React.FC = () => {
                 onChange={(e) => setRefundForm((f) => ({ ...f, RefundRef: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-muted-foreground">
+                  Refund From (Company Bank){refundProjectBanks.length > 0 ? " — scoped to this project" : ""}{refundBankOptions.length > 0 ? " *" : ""}
+                </label>
+                {refundBankLocked && (
+                  <button type="button" onClick={() => setRefundBankLocked(false)} className="text-xs text-primary hover:underline">Edit</button>
+                )}
+              </div>
+              {refundBankLocked ? (
+                <input type="text" readOnly disabled
+                  value={(refundBankOptions as any[]).find((b: any) => String(b.BId) === refundForm.RefundBankId)?.BName || "—"}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+              ) : (
+                <select value={refundForm.RefundBankId} onChange={(e) => setRefundForm((f) => ({ ...f, RefundBankId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Select company bank —</option>
+                  {(refundBankOptions as any[]).map((b: any) => (
+                    <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                  ))}
+                </select>
+              )}
+              {!refundBankLocked && refundDialog?.DistinctDepositBankCount > 1 && (
+                <p className="text-xs text-amber-600 mt-1">This booking's payments landed in more than one bank — pick which one this refund pays out of.</p>
+              )}
+            </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setRefundDialog(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleRefund} disabled={saving}
+            <button onClick={handleRefund} disabled={saving || (refundBankOptions.length > 0 && !refundForm.RefundBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Saving..." : "Mark Refunded"}
             </button>

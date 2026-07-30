@@ -20,7 +20,7 @@ const statusColor: Record<string, string> = {
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", LoanAmount: "", SanctionStatus: "NotApplied",
-  SanctionDate: "", DisbursedAmount: "", LoanAccountNo: "", RmName: "", RmContact: "", Notes: "",
+  SanctionDate: "", LoanAccountNo: "", RmName: "", RmContact: "", Notes: "",
 };
 
 async function fetchBookings(): Promise<any[]> {
@@ -71,7 +71,6 @@ const CrmLoanTracking: React.FC = () => {
       LoanAmount: existing.LoanAmount != null ? String(existing.LoanAmount) : "",
       SanctionStatus: existing.SanctionStatus || "NotApplied",
       SanctionDate: existing.SanctionDate ? String(existing.SanctionDate).slice(0, 10) : "",
-      DisbursedAmount: existing.DisbursedAmount != null ? String(existing.DisbursedAmount) : "",
       LoanAccountNo: existing.LoanAccountNo || "", RmName: existing.RmName || "", RmContact: existing.RmContact || "",
       Notes: existing.Notes || "",
     } : { ...EMPTY_FORM });
@@ -176,7 +175,6 @@ const CrmLoanTracking: React.FC = () => {
               { key: "BranchName",   label: "Branch",          type: "text"   },
               { key: "LoanAmount",   label: "Loan Amount (₹)", type: "number" },
               { key: "SanctionDate", label: "Sanction Date",   type: "date"   },
-              { key: "DisbursedAmount", label: "Disbursed Amount (₹)", type: "number" },
               { key: "LoanAccountNo", label: "Loan Account No", type: "text"  },
               { key: "RmName",       label: "RM Name",         type: "text"   },
               { key: "RmContact",    label: "RM Contact",      type: "text"   },
@@ -196,6 +194,20 @@ const CrmLoanTracking: React.FC = () => {
               </select>
             </div>
           </div>
+          {(() => {
+            const computedDisbursed = editingBookingId != null ? loanMap[editingBookingId]?.DisbursedAmount ?? 0 : 0;
+            const hasLoanRecord = editingBookingId != null ? loanMap[editingBookingId]?.HasLoanRecord : false;
+            const sanctioned = parseFloat(form.LoanAmount) || 0;
+            const mismatch = hasLoanRecord && form.SanctionStatus === "Disbursed" && sanctioned > 0
+              && Math.abs(computedDisbursed - sanctioned) > 1;
+            if (!hasLoanRecord) return null;
+            return (
+              <div className={`rounded-lg border px-3 py-2 text-xs ${mismatch ? "border-amber-300 bg-amber-50 text-amber-800" : "border-border bg-muted/20 text-muted-foreground"}`}>
+                Received via Home Loan (from actual receipts): <span className="font-medium">{fmt(computedDisbursed)}</span>
+                {mismatch && <span className="block mt-0.5">Doesn't match the sanctioned Loan Amount ({fmt(sanctioned)}) — worth checking with accounts.</span>}
+              </div>
+            );
+          })()}
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
             <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}

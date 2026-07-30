@@ -27,6 +27,8 @@ const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
 const PLAN_API = "/api/crm/payment-plans";
+const PROJECT_BANK_API = "/api/crm/project-banks";
+const BANK_MASTER_API = "/api/bank-master";
 
 const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
@@ -51,6 +53,7 @@ const EMPTY_FORM = {
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
   BookingAmount: "", BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
+  DepositBankId: "",
 };
 
 async function fetchUnits(): Promise<any[]> {
@@ -88,6 +91,17 @@ async function fetchBookings(applicationId?: string): Promise<any[]> {
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
+}
+// Which real company bank account this booking's token payment lands in —
+// scoped to the selected unit's project (falls back to the open bank list if
+// the project has none tagged), same "Deposited To" pattern already used by
+// CrmBookingDetail.tsx and CrmPaymentMilestones.tsx's own deposit dialogs.
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchAllBanks(): Promise<any[]> {
+  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
@@ -180,6 +194,28 @@ const CrmBooking: React.FC = () => {
     setForm((f) => f.BookingAmount === planAmt ? f : { ...f, BookingAmount: planAmt });
   }, [selectedPlan]);
 
+  const selectedUnitProjectId: number | undefined = useMemo(
+    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.ProjectId,
+    [units, form.UnitId],
+  );
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-booking-project-banks", selectedUnitProjectId],
+    queryFn: () => fetchProjectBanks(selectedUnitProjectId),
+    enabled: dialogOpen && !!selectedUnitProjectId,
+  });
+  const { data: allBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"],
+    queryFn: fetchAllBanks,
+    enabled: dialogOpen,
+    staleTime: 5 * 60_000,
+  });
+  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  React.useEffect(() => {
+    if (projectBanks.length === 1) {
+      setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String(projectBanks[0].BId) });
+    }
+  }, [projectBanks]);
+
   const availableUnits = useMemo(() => {
     // Was filtering against the `bookings` query above — but that query is
     // scoped to a single Application whenever this page is opened via
@@ -254,8 +290,12 @@ const CrmBooking: React.FC = () => {
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
     if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
+    if (bankOptions.length > 0 && !form.DepositBankId) { toast.error("Select which company bank this booking's token payment landed in"); return; }
     setSaving(true);
     try {
+      const bankName = form.DepositBankId
+        ? (bankOptions as any[]).find((b: any) => String(b.BId) === form.DepositBankId)?.BName
+        : undefined;
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -272,6 +312,8 @@ const CrmBooking: React.FC = () => {
           BookingAmount: form.BookingAmount || null,
           BrokerId:      form.BrokerId || null,
           BrokerageRatePercent: form.BrokerageRatePercent || null,
+          DepositBankId: form.DepositBankId || null,
+          DepositBankName: bankName || null,
         }),
       });
       const data = await res.json();
@@ -662,6 +704,18 @@ const CrmBooking: React.FC = () => {
                 )}
               </div>
               <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
+                </label>
+                <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Select company bank —</option>
+                  {(bankOptions as any[]).map((b: any) => (
+                    <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="text-xs text-muted-foreground block mb-1">Area (sq ft) — from Unit Master</label>
                 <input type="text" value={form.AreaSqFt} readOnly disabled
                   placeholder="Auto-filled once a unit is selected"
@@ -725,7 +779,7 @@ const CrmBooking: React.FC = () => {
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
               Cancel
             </button>
-            <button onClick={handleSave} disabled={saving}
+            <button onClick={handleSave} disabled={saving || (bankOptions.length > 0 && !form.DepositBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
               {saving ? "Creating..." : "Create Booking"}
             </button>

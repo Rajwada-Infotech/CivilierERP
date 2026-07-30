@@ -134,10 +134,10 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
     const bookingRows = bookings.recordset;
     const bookingIds = bookingRows.map((b) => b.Id);
 
-    let receiptsByBooking = {}, invoicesByBooking = {}, onAccountByBooking = {}, brokerageByBooking = {};
+    let receiptsByBooking = {}, invoicesByBooking = {}, onAccountByBooking = {}, brokerageByBooking = {}, milestonesByBooking = {};
     if (bookingIds.length) {
       const idList = bookingIds.join(",");
-      const [receiptsRes, invoicesRes, onAccountRes, brokerageRes] = await Promise.all([
+      const [receiptsRes, invoicesRes, onAccountRes, brokerageRes, milestonesRes] = await Promise.all([
         // Receipts are keyed off Milestone, not Booking directly — join through
         // CrmPaymentMilestone the same way the milestone-payment flow itself does.
         pool.request().query(`
@@ -148,13 +148,19 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
           WHERE m.BookingId IN (${idList})
           ORDER BY r.ReceivedDate DESC
         `),
+        // CreatedByName — "invoice history list management (per-user wise)"
+        // needs to show who actually generated each invoice, not just the
+        // invoice itself.
         pool.request().query(`
-          SELECT Id, InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description
-          FROM dbo.CrmInvoice WHERE BookingId IN (${idList})
-          ORDER BY InvoiceDate DESC
+          SELECT i.Id, i.InvoiceNo, i.BookingId, i.InvoiceType, i.Amount, i.InvoiceDate, i.Description, i.Status,
+                 cu.name AS CreatedByName
+          FROM dbo.CrmInvoice i
+          LEFT JOIN dbo.Users cu ON cu.id = i.CreatedBy
+          WHERE i.BookingId IN (${idList})
+          ORDER BY i.InvoiceDate DESC
         `),
         pool.request().query(`
-          SELECT Id, ReceiptNo, BookingId, Amount, AppliedAmount, ReceivedDate, PaymentMode
+          SELECT Id, ReceiptNo, BookingId, Amount, AppliedAmount, ReceivedDate, PaymentMode, DepositBankName
           FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${idList})
           ORDER BY ReceivedDate DESC
         `),
@@ -169,11 +175,22 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
           FROM dbo.CrmBrokerageMaster br
           WHERE br.BookingId IN (${idList})
         `),
+        // Full milestone-wise schedule — "act like a Customer 360" means
+        // showing the real payment plan step by step (done / pending /
+        // upcoming / overdue), not just the booking-level Paid/Outstanding
+        // totals already summarized above.
+        pool.request().query(`
+          SELECT Id, BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status, [Percent]
+          FROM dbo.CrmPaymentMilestone
+          WHERE BookingId IN (${idList})
+          ORDER BY BookingId, MilestoneNo
+        `),
       ]);
       for (const r of receiptsRes.recordset) (receiptsByBooking[r.BookingId] ??= []).push(r);
       for (const inv of invoicesRes.recordset) (invoicesByBooking[inv.BookingId] ??= []).push(inv);
       for (const oa of onAccountRes.recordset) (onAccountByBooking[oa.BookingId] ??= []).push(oa);
       for (const br of brokerageRes.recordset) (brokerageByBooking[br.BookingId] ??= []).push(br);
+      for (const m of milestonesRes.recordset) (milestonesByBooking[m.BookingId] ??= []).push(m);
     }
 
     const enrichedBookings = bookingRows.map((b) => ({
@@ -182,6 +199,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
       invoices: invoicesByBooking[b.Id] || [],
       onAccount: onAccountByBooking[b.Id] || [],
       brokerage: brokerageByBooking[b.Id] || [],
+      milestones: milestonesByBooking[b.Id] || [],
     }));
 
     // Customer-level summary rolls up every non-Cancelled/Rejected booking's
