@@ -10,7 +10,7 @@ const { lockNextDocNumber, currentFinYear } = require("../utils/docNumberLock");
 const multer = require("multer");
 const path = require("path");
 
-const PRIORITIES = ["VVIP", "LI", "Normal"];
+const PRIORITIES = ["Very Important", "Important", "Normal"];
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"];
 
 // Socket.io — lazy-loaded, same pattern as ticketRoutes.js, so requiring
@@ -33,7 +33,19 @@ const upload = multer({
   },
 });
 
-bumpCacheVersion("task-master").catch(() => {});
+// GET /followup-board is cached under its own namespace (separate cache
+// entry/TTL from GET /), so any mutation that could change what the board
+// shows — status changes above all — has to bump both or the board keeps
+// serving a stale response for up to its own TTL regardless of what the
+// frontend invalidates.
+function bumpTaskCaches() {
+  return Promise.all([
+    bumpCacheVersion("task-master"),
+    bumpCacheVersion("task-master-followup-board"),
+  ]);
+}
+
+bumpTaskCaches().catch(() => {});
 
 // GET all tasks — case-linkage columns are joined in as labels so the grid
 // never needs a second round trip to show Company/Project/Financial Year.
@@ -69,6 +81,24 @@ router.get("/", cache("task-master", 60), async (req, res) => {
   }
 });
 
+// GET /assignable-users — lightweight {id, name} list for the Assignee
+// dropdown. Open to any authenticated user (unlike /api/users, which is
+// privileged-only) since anyone creating a task needs to be able to assign
+// it. Registered before /:id so "assignable-users" never gets swallowed as
+// an :id param.
+router.get("/assignable-users", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 ORDER BY name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[task-master] GET assignable-users error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /followup-board — standalone feed for the Follow-Up dashboard. Kept
 // separate from GET / (Task Master admin grid) so the two pages never share
 // a cache entry or a response shape — Follow-Up only ever needs the handful
@@ -80,12 +110,17 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
       SELECT
         t.Id, t.TaskNo, t.Subject, t.Details, t.Department, t.DueDate,
         t.CaseNumber, t.Priority, t.Status,
-        co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName
+        co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
+        (
+          SELECT MIN(f.NextReminderAt)
+          FROM dbo.TaskFollowUps f
+          WHERE f.TaskId = t.Id AND f.NextReminderAt >= CAST(SYSDATETIME() AS DATE)
+        ) AS NextFollowUpAt
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
       LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
-      WHERE t.IsDeleted = 0 AND t.Status = 'Active' AND t.DueDate IS NOT NULL
+      WHERE t.IsDeleted = 0 AND t.Status IN ('Active', 'Hold') AND t.DueDate IS NOT NULL
       ORDER BY t.DueDate ASC
     `);
     res.json(result.recordset);
@@ -111,6 +146,7 @@ router.get("/:id", async (req, res) => {
         t.CaseFinYearId, fy.FName AS CaseFinYearName,
         t.CaseDocumentNumber,
         t.TypeOfDocId, td.Description AS TypeOfDocLabel,
+        t.AssignedTo, au.name AS AssigneeName, au.avatar_url AS AssigneeAvatarUrl,
         t.CreatedBy, u.name AS CreatedByName,
         t.CreatedAt, t.UpdatedAt
       FROM dbo.TaskMaster t
@@ -119,6 +155,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = t.TypeOfDocId
       LEFT JOIN dbo.users u ON u.id = t.CreatedBy
+      LEFT JOIN dbo.users au ON au.id = t.AssignedTo
       WHERE t.Id = @Id AND t.IsDeleted = 0
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Task not found" });
@@ -202,7 +239,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     const newId = result.recordset[0].Id;
     const taskNo = await pool.request().input("Id", sql.Int, newId)
       .query("SELECT TaskNo FROM dbo.TaskMaster WHERE Id = @Id");
-    await bumpCacheVersion("task-master");
+    await bumpTaskCaches();
     res.json({ message: "Task added successfully", TaskNo: taskNo.recordset[0]?.TaskNo });
   } catch (err) {
     console.error("[task-master] POST error:", err.message);
@@ -257,7 +294,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
-    await bumpCacheVersion("task-master");
+    await bumpTaskCaches();
     res.json({ message: "Task updated successfully" });
   } catch (err) {
     console.error("[task-master] PUT error:", err.message);
@@ -286,7 +323,7 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
       .input("Status", sql.NVarChar(20), Status)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query("UPDATE dbo.TaskMaster SET Status = @Status, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
-    await bumpCacheVersion("task-master");
+    await bumpTaskCaches();
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" marked ${Status}` });
   } catch (err) {
     console.error("[task-master] PATCH status error:", err.message);
@@ -370,9 +407,40 @@ router.post("/:id/followups", upload.array("files", 10), async (req, res) => {
         `);
     }
 
+    await bumpTaskCaches();
     res.json({ message: "Follow-up added", Id: followUpId });
   } catch (err) {
     console.error("[task-master] POST followups error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /:id/followups/:followUpId — removes the follow-up entry and any
+// attachments filed against it (no ON DELETE CASCADE on TaskAttachments, so
+// those are removed explicitly first).
+router.delete("/:id/followups/:followUpId", async (req, res) => {
+  const taskId = parseInt(req.params.id, 10);
+  const followUpId = parseInt(req.params.followUpId, 10);
+  if (!Number.isFinite(taskId) || !Number.isFinite(followUpId)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  try {
+    const pool = getPool();
+    const existing = await pool.request()
+      .input("Id", sql.Int, followUpId)
+      .input("TaskId", sql.Int, taskId)
+      .query("SELECT Id FROM dbo.TaskFollowUps WHERE Id = @Id AND TaskId = @TaskId");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Follow-up not found" });
+
+    await pool.request().input("FollowUpId", sql.Int, followUpId)
+      .query("DELETE FROM dbo.TaskAttachments WHERE FollowUpId = @FollowUpId");
+    await pool.request().input("Id", sql.Int, followUpId)
+      .query("DELETE FROM dbo.TaskFollowUps WHERE Id = @Id");
+
+    await bumpTaskCaches();
+    res.json({ message: "Follow-up deleted" });
+  } catch (err) {
+    console.error("[task-master] DELETE followup error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -386,7 +454,7 @@ router.get("/:id/chat", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().input("TaskId", sql.Int, taskId).query(`
       SELECT c.Id, c.TaskId, c.Message, c.CreatedAt,
-             c.SenderId, u.name AS SenderName
+             c.SenderId, u.name AS SenderName, u.avatar_url AS SenderAvatarUrl
       FROM dbo.TaskChatMessages c
       LEFT JOIN dbo.users u ON u.id = c.SenderId
       WHERE c.TaskId = @TaskId
@@ -424,7 +492,7 @@ router.post("/:id/chat", async (req, res) => {
     const newId = ins.recordset[0].Id;
 
     const row = await pool.request().input("Id", sql.Int, newId).query(`
-      SELECT c.Id, c.TaskId, c.Message, c.CreatedAt, c.SenderId, u.name AS SenderName
+      SELECT c.Id, c.TaskId, c.Message, c.CreatedAt, c.SenderId, u.name AS SenderName, u.avatar_url AS SenderAvatarUrl
       FROM dbo.TaskChatMessages c
       LEFT JOIN dbo.users u ON u.id = c.SenderId
       WHERE c.Id = @Id
@@ -452,10 +520,12 @@ router.get("/:id/attachments", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().input("TaskId", sql.Int, taskId).query(`
-      SELECT Id, FollowUpId, FileName, MimeType, FileSize, UploadedBy, UploadedAt
-      FROM dbo.TaskAttachments
-      WHERE TaskId = @TaskId
-      ORDER BY UploadedAt DESC
+      SELECT a.Id, a.FollowUpId, a.FileName, a.MimeType, a.FileSize,
+             a.UploadedBy, u.name AS UploadedByName, a.UploadedAt
+      FROM dbo.TaskAttachments a
+      LEFT JOIN dbo.users u ON u.id = a.UploadedBy
+      WHERE a.TaskId = @TaskId
+      ORDER BY a.UploadedAt DESC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -498,7 +568,7 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       .input("Id", sql.Int, id)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query("UPDATE dbo.TaskMaster SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
-    await bumpCacheVersion("task-master");
+    await bumpTaskCaches();
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" deleted successfully` });
   } catch (err) {
     console.error("[task-master] DELETE error:", err.message);

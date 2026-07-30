@@ -11,9 +11,11 @@ interface FollowupShellProps {
   children: React.ReactNode;
 }
 
-// Violet (#8b5cf6) accent — CRM / follow-up module identity
-const ACCENT = "#8b5cf6";
-const ACCENT_SOFT = "#a78bfa";
+// Teal (#0d9488) accent — matches the Follow-Up module's own sidebar/top-nav
+// color (see MODULE_COLORS.followup in TopNavbar.tsx and MODULE_HEADER in
+// AppSidebar.tsx), so the module reads the same everywhere.
+const ACCENT = "#0d9488";
+const ACCENT_SOFT = "#2dd4bf";
 
 export const FollowupShell: React.FC<FollowupShellProps> = ({
   title,
@@ -27,8 +29,8 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
 
   const glassCard = isDark
     ? {
-        background: "rgba(10, 8, 28, 0.45)",
-        border: "1px solid rgba(139,92,246,0.18)",
+        background: "rgba(6, 20, 19, 0.45)",
+        border: "1px solid rgba(13,148,136,0.22)",
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         boxShadow:
@@ -36,11 +38,11 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
       }
     : {
         background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(139,92,246,0.20)",
+        border: "1px solid rgba(13,148,136,0.20)",
         backdropFilter: "blur(20px) saturate(180%)",
         WebkitBackdropFilter: "blur(20px) saturate(180%)",
         boxShadow:
-          "0 8px 32px rgba(139,92,246,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+          "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
       };
 
   return (
@@ -51,24 +53,24 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(139,92,246,0.07) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(13,148,136,0.12) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(13,148,136,0.08) 0%, transparent 70%)",
           }}
         />
         <div
           className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(167,139,250,0.08) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(167,139,250,0.05) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(45,212,191,0.08) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(45,212,191,0.05) 0%, transparent 70%)",
           }}
         />
         <div
           className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-48 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(ellipse, rgba(139,92,246,0.04) 0%, transparent 70%)"
-              : "radial-gradient(ellipse, rgba(139,92,246,0.03) 0%, transparent 70%)",
+              ? "radial-gradient(ellipse, rgba(13,148,136,0.05) 0%, transparent 70%)"
+              : "radial-gradient(ellipse, rgba(13,148,136,0.03) 0%, transparent 70%)",
           }}
         />
       </div>
@@ -85,7 +87,7 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
           className="absolute inset-0 pointer-events-none rounded-2xl"
           style={{
             background:
-              "linear-gradient(135deg, rgba(139,92,246,0.10) 0%, transparent 60%)",
+              "linear-gradient(135deg, rgba(13,148,136,0.10) 0%, transparent 60%)",
           }}
         />
         <div
@@ -100,9 +102,9 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={{
-                background: "rgba(139,92,246,0.18)",
-                border: "1px solid rgba(139,92,246,0.35)",
-                boxShadow: "0 0 12px rgba(139,92,246,0.2)",
+                background: "rgba(13,148,136,0.18)",
+                border: "1px solid rgba(13,148,136,0.4)",
+                boxShadow: "0 0 12px rgba(13,148,136,0.22)",
               }}
             >
               {PageIcon ? (
@@ -114,7 +116,7 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
             <div>
               <h1
                 className="text-base font-heading font-bold"
-                style={{ color: isDark ? "#ede9fe" : "#3b0764" }}
+                style={{ color: isDark ? "#ccfbf1" : "#134e4a" }}
               >
                 {title}
               </h1>

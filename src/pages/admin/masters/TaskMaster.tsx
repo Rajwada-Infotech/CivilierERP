@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PauseCircle, PlayCircle, XCircle } from "lucide-react";
+import { PauseCircle, PlayCircle, XCircle, Download, Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -11,12 +11,19 @@ import {
   type RecordWithId,
   type FieldDef,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/task-master";
-const PRIORITIES = ["VVIP", "LI", "Normal"];
+const PRIORITIES = ["Very Important", "Important", "Normal"];
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"];
+
+async function fetchAssigneeOptions(): Promise<{ value: string; label: string }[]> {
+  const res = await fetchWithAuth(`${API}/assignable-users`);
+  if (!res.ok) throw new Error("Failed to fetch users");
+  const data: { id: number; name: string }[] = await res.json().catch(() => ([]));
+  return data.map((u) => ({ value: String(u.id), label: u.name }));
+}
 
 // April–March cycle, matching backend/utils/docNumberLock.js's currentFinYear().
 function currentFinYear(): string {
@@ -162,6 +169,7 @@ const fields: FieldDef[] = [
   { name: "department", label: "Department", type: "text" },
   { name: "dueDate", label: "Due Date", type: "date" },
   { name: "caseNumber", label: "Case Number", type: "text", placeholder: "Manual entry" },
+  { name: "assignedTo", label: "Assignee", type: "select", asyncOptions: fetchAssigneeOptions },
   {
     name: "priority",
     label: "Priority",
@@ -186,6 +194,7 @@ const columns = [
   { key: "taskNo", label: "Task No." },
   { key: "subject", label: "Subject" },
   { key: "department", label: "Department" },
+  { key: "assigneeName", label: "Assignee" },
   { key: "dueDate", label: "Due Date" },
   { key: "priority", label: "Priority" },
   { key: "status", label: "Status" },
@@ -199,6 +208,19 @@ const exportColumns: ExportColumn[] = [
   { header: "Case Number", accessor: "caseNumber" },
   { header: "Priority", accessor: "priority" },
   { header: "Status", accessor: "status" },
+];
+
+// Bulk-import template — TaskNo is deliberately excluded since it's always
+// auto-generated (trg_TaskMaster_TaskNo / the doc-numbering scheme), never
+// something you'd type into a spreadsheet.
+const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: "Subject", accessor: "Subject" },
+  { header: "Details", accessor: "Details" },
+  { header: "Department", accessor: "Department" },
+  { header: "Due Date (YYYY-MM-DD)", accessor: "DueDate" },
+  { header: "Case Number", accessor: "CaseNumber" },
+  { header: "Priority (Very Important/Important/Normal)", accessor: "Priority" },
+  { header: "Status (Active/Hold/Cancel/Closed)", accessor: "Status" },
 ];
 
 const TaskMaster: React.FC = () => {
@@ -247,6 +269,8 @@ const TaskMaster: React.FC = () => {
       department: t.Department ?? "",
       dueDate: t.DueDate ? String(t.DueDate).slice(0, 10) : "",
       caseNumber: t.CaseNumber ?? "",
+      assignedTo: t.AssignedTo ? String(t.AssignedTo) : "",
+      assigneeName: t.AssigneeName ?? "",
       priority: t.Priority ?? "Normal",
       status: t.Status ?? "Active",
       isActiveToggle: (t.Status ?? "Active") === "Active",
@@ -306,6 +330,7 @@ const TaskMaster: React.FC = () => {
     CaseProjectId: r.caseProjectId ? parseInt(r.caseProjectId) : null,
     CaseFinYearId: r.caseFinYearId ? parseInt(r.caseFinYearId) : null,
     TypeOfDocId: r.typeOfDocId ? parseInt(r.typeOfDocId) : null,
+    AssignedTo: r.assignedTo ? parseInt(r.assignedTo) : null,
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -349,13 +374,115 @@ const TaskMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["task-master"] });
   };
 
+  const handleDownloadTemplate = () => {
+    exportToCsv([], IMPORT_TEMPLATE_COLUMNS, "task-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const [importing, setImporting] = React.useState(false);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleImportClick = () => importInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same filename
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        return;
+      }
+
+      let success = 0;
+      let failed = 0;
+      // Sequential — keeps error rows attributable and avoids hammering the
+      // API with N parallel inserts (each one also locks a doc number if a
+      // Type of Doc were ever wired into the template).
+      for (const row of rows) {
+        const subject = row["Subject"]?.trim();
+        if (!subject) {
+          failed++;
+          continue;
+        }
+        const priority = row["Priority (Very Important/Important/Normal)"]?.trim() || "Normal";
+        const status = row["Status (Active/Hold/Cancel/Closed)"]?.trim() || "Active";
+        try {
+          const res = await fetchWithAuth(API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              Subject: subject,
+              Details: row["Details"]?.trim() || null,
+              Department: row["Department"]?.trim() || null,
+              DueDate: row["Due Date (YYYY-MM-DD)"]?.trim() || null,
+              CaseNumber: row["Case Number"]?.trim() || null,
+              Priority: PRIORITIES.includes(priority) ? priority : "Normal",
+              Status: STATUSES.includes(status) ? status : "Active",
+            }),
+          });
+          if (res.ok) success++;
+          else failed++;
+        } catch {
+          failed++;
+        }
+      }
+
+      if (failed === 0) toast.success(`Imported ${success} task${success === 1 ? "" : "s"} ✓`);
+      else if (success === 0) toast.error(`Import failed for all ${failed} row${failed === 1 ? "" : "s"}.`);
+      else toast.warning(`Imported ${success} of ${rows.length} rows — ${failed} failed.`);
+
+      await queryClient.invalidateQueries({ queryKey: ["task-master"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to import CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading tasks...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load tasks.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Task Master"]} />
-      <FollowupShell title="Task Master">
+      <FollowupShell
+        title="Task Master"
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors"
+            >
+              <Download size={13} /> Download Template
+            </button>
+            <button
+              type="button"
+              onClick={handleImportClick}
+              disabled={importing}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50 transition-colors"
+              style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.35)", color: "#0d9488" }}
+            >
+              <Upload size={13} /> {importing ? "Importing…" : "Import CSV"}
+            </button>
+          </div>
+        }
+      >
         <MasterPage
           title="Task"
           gridCols={3}
@@ -426,6 +553,7 @@ const TaskMaster: React.FC = () => {
               { key: "subject", label: "Subject" },
               { key: "details", label: "Details" },
               { key: "department", label: "Department" },
+              { key: "assigneeName", label: "Assignee" },
               { key: "dueDate", label: "Due Date" },
               { key: "caseNumber", label: "Case Number" },
               { key: "priority", label: "Priority" },

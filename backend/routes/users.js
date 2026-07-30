@@ -17,7 +17,7 @@ const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
 const SALT_ROUNDS = 12;
-const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 5;
+const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 10;
 const LOCKOUT_SECONDS = 15 * 60;
 
 // When an email doesn't exist we still run a bcrypt.compare against this hash

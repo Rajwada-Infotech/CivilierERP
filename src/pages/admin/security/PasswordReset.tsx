@@ -96,6 +96,17 @@ function ResetDialog({
   const [showConfirm, setShowConfirm]       = useState(false);
   const [loading, setLoading]               = useState(false);
 
+  // ResetDialog stays mounted across different users (only `user` changes),
+  // so without this the previous account's password stays sitting in the
+  // fields — both after a successful save and when switching to reset a
+  // different account. Reset whenever the target user changes.
+  React.useEffect(() => {
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowNew(false);
+    setShowConfirm(false);
+  }, [user?.id]);
+
   const strength    = passwordStrength(newPassword);
   const matches     = newPassword && confirmPassword && newPassword === confirmPassword;
   const mismatch    = confirmPassword && newPassword !== confirmPassword;
@@ -127,13 +138,6 @@ function ResetDialog({
 
         {/* Header */}
         <div className="relative px-6 pt-6 pb-5 bg-gradient-to-br from-blue-500/8 via-transparent to-transparent border-b border-border">
-          <button
-            onClick={() => { if (!loading) onClose(); }}
-            className="absolute top-4 right-4 p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <X size={14} />
-          </button>
-
           <div className="flex items-center gap-4">
             {/* Avatar */}
             <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0 shadow-sm`}>
@@ -173,7 +177,7 @@ function ResetDialog({
                 type={showNew ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Enter new password"
+                placeholder="At least 6 characters"
                 autoFocus
                 className="w-full px-3 py-2.5 pr-9 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
               />
@@ -185,6 +189,15 @@ function ResetDialog({
                 {showNew ? <EyeOff size={13} /> : <Eye size={13} />}
               </button>
             </div>
+
+            {/* Live length hint — shows as soon as they've typed something
+                too short, instead of only failing silently on submit. */}
+            {newPassword && newPassword.length < 6 && (
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-500">
+                <AlertCircle size={11} />
+                {6 - newPassword.length} more character{6 - newPassword.length === 1 ? "" : "s"} needed
+              </p>
+            )}
 
             {/* Strength bar */}
             {newPassword && (
@@ -252,14 +265,16 @@ function ResetDialog({
           <button
             onClick={() => { if (!loading) onClose(); }}
             disabled={loading}
-            className="flex-1 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+            className="w-24 shrink-0 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleReset}
             disabled={!canSubmit}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
+              canSubmit && !loading ? "animate-breathe" : ""
+            }`}
           >
             {loading ? (
               <RefreshCw size={13} className="animate-spin" />
