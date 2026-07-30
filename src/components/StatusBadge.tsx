@@ -142,14 +142,14 @@ const STATUS_CONFIG: Record<
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
   // Task Master priority levels
-  VVIP: {
-    label: "VVIP",
+  "Very Important": {
+    label: "Very Important",
     icon: FileEdit,
     classes:
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
-  LI: {
-    label: "LI",
+  Important: {
+    label: "Important",
     icon: FileEdit,
     classes:
       "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",

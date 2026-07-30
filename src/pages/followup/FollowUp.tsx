@@ -1,19 +1,21 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList } from "lucide-react";
+import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
+import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import type { ExportColumn } from "@/lib/export";
 
 const API = "/api/task-master";
+const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
-// Same violet identity as FollowupShell — kept in sync deliberately.
-const ACCENT = "#8b5cf6";
-const ACCENT_SOFT = "#a78bfa";
+// Same teal identity as FollowupShell — kept in sync deliberately.
+const ACCENT = "#0d9488";
+const ACCENT_SOFT = "#2dd4bf";
 
 interface Task {
   Id: number;
@@ -28,6 +30,7 @@ interface Task {
   CaseCompanyName: string | null;
   CaseProjectName: string | null;
   CaseFinYearName: string | null;
+  NextFollowUpAt: string | null;
 }
 
 // Standalone data source — Follow-Up never reads Task Master's cache/shape,
@@ -63,8 +66,8 @@ function dueLabel(dueDate: string | null): string {
 }
 
 const PRIORITY_STYLE: Record<string, { classes: string }> = {
-  VVIP: { classes: "bg-red-500/10 text-red-500 border-red-500/25" },
-  LI: { classes: "bg-amber-500/10 text-amber-600 border-amber-500/25" },
+  "Very Important": { classes: "bg-red-500/10 text-red-500 border-red-500/25" },
+  Important: { classes: "bg-amber-500/10 text-amber-600 border-amber-500/25" },
   Normal: { classes: "" },
 };
 
@@ -73,18 +76,18 @@ function useGlass() {
   const isDark = theme !== "light";
   const glassCard = isDark
     ? {
-        background: "rgba(10, 8, 28, 0.45)",
-        border: "1px solid rgba(139,92,246,0.18)",
+        background: "rgba(6, 20, 19, 0.45)",
+        border: "1px solid rgba(13,148,136,0.18)",
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
       }
     : {
         background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(139,92,246,0.20)",
+        border: "1px solid rgba(13,148,136,0.20)",
         backdropFilter: "blur(20px) saturate(180%)",
         WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: "0 8px 32px rgba(139,92,246,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        boxShadow: "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
       };
   return { isDark, glassCard };
 }
@@ -92,7 +95,9 @@ function useGlass() {
 const TaskCard: React.FC<{ task: Task; index: number; onClick: () => void }> = ({ task, index, onClick }) => {
   const { glassCard } = useGlass();
   const priority = PRIORITY_STYLE[task.Priority] || PRIORITY_STYLE.Normal;
-  const overdue = dueLabel(task.DueDate).includes("overdue");
+  // A Held task isn't "overdue" in the actionable sense — it's paused — so
+  // skip the red urgency styling for anything that isn't Active.
+  const overdue = task.Status === "Active" && dueLabel(task.DueDate).includes("overdue");
 
   return (
     <motion.button
@@ -126,6 +131,11 @@ const TaskCard: React.FC<{ task: Task; index: number; onClick: () => void }> = (
       <p className={`text-xs font-medium ${overdue ? "text-red-500" : "text-muted-foreground"}`}>
         {dueLabel(task.DueDate)}
       </p>
+      {task.NextFollowUpAt && (
+        <p className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 border border-amber-500/25">
+          Next follow-up · {formatDate(task.NextFollowUpAt)}
+        </p>
+      )}
       <div className="flex items-center gap-2 pt-1">
         {priority.classes && (
           <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md border ${priority.classes}`}>
@@ -172,9 +182,9 @@ const StatCard: React.FC<{ label: string; count: number; icon: React.ElementType
 
 const FollowUp: React.FC = () => {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
+  const [priorityFilter, setPriorityFilter] = React.useState<(typeof PRIORITIES)[number] | null>(null);
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
 
   const { data: tasks = [], isLoading } = useQuery({
@@ -185,11 +195,12 @@ const FollowUp: React.FC = () => {
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return tasks;
-    // Search every field a case card could plausibly be found by — not just
-    // subject/project. Dates are matched both as the raw ISO string and as
-    // the "15 Aug 2026" label shown on the card, so either form works.
     return tasks.filter((t) => {
+      if (priorityFilter && t.Priority !== priorityFilter) return false;
+      if (!q) return true;
+      // Search every field a case card could plausibly be found by — not just
+      // subject/project. Dates are matched both as the raw ISO string and as
+      // the "15 Aug 2026" label shown on the card, so either form works.
       const haystack = [
         t.TaskNo,
         t.Subject,
@@ -203,13 +214,15 @@ const FollowUp: React.FC = () => {
         t.CaseFinYearName,
         t.DueDate,
         t.DueDate ? formatDate(t.DueDate) : null,
+        t.NextFollowUpAt ? formatDate(t.NextFollowUpAt) : null,
       ];
       return haystack.some((field) => field?.toString().toLowerCase().includes(q));
     });
-  }, [tasks, search]);
+  }, [tasks, search, priorityFilter]);
 
   const buckets = React.useMemo(() => {
     const active = filtered.filter((t) => t.Status === "Active" && t.DueDate);
+    const onHold = filtered.filter((t) => t.Status === "Hold" && t.DueDate);
     const today = startOfDay(new Date());
     const overdue: Task[] = [];
     const dueToday: Task[] = [];
@@ -225,10 +238,12 @@ const FollowUp: React.FC = () => {
       overdue: overdue.sort(byDue),
       dueToday: dueToday.sort(byDue),
       upcoming: upcoming.sort(byDue),
+      onHold: onHold.sort(byDue),
     };
   }, [filtered]);
 
-  const totalActive = buckets.overdue.length + buckets.dueToday.length + buckets.upcoming.length;
+  const totalActive =
+    buckets.overdue.length + buckets.dueToday.length + buckets.upcoming.length + buckets.onHold.length;
 
   const handleStatusChange = async (id: string, status: string) => {
     const res = await fetchWithAuth(`${API}/${id}/status`, {
@@ -247,23 +262,31 @@ const FollowUp: React.FC = () => {
     ]);
   };
 
+  const exportColumns: ExportColumn[] = [
+    { header: "Task No.", accessor: "TaskNo" },
+    { header: "Subject", accessor: "Subject" },
+    { header: "Department", accessor: "Department" },
+    { header: "Due Date", accessor: "DueDate" },
+    { header: "Case Number", accessor: "CaseNumber" },
+    { header: "Priority", accessor: "Priority" },
+    { header: "Status", accessor: "Status" },
+    { header: "Company", accessor: "CaseCompanyName" },
+    { header: "Project", accessor: "CaseProjectName" },
+    { header: "Next Follow-Up", accessor: "NextFollowUpAt" },
+  ];
+
   return (
     <FollowupShell
       title="Follow-Up"
       subtitle="Cases needing attention, sorted by urgency"
       action={
-        <button
-          type="button"
-          onClick={() => navigate("/followup/setup/task-master")}
-          className="text-xs font-semibold px-3.5 py-2 rounded-xl transition-all hover:-translate-y-0.5"
-          style={{
-            background: "rgba(139,92,246,0.14)",
-            border: "1px solid rgba(139,92,246,0.35)",
-            color: ACCENT_SOFT,
-          }}
-        >
-          Task Master
-        </button>
+        <ExportMenu
+          data={filtered as unknown as Record<string, unknown>[]}
+          columns={exportColumns}
+          title="Follow-Up Cases"
+          filename="followup-cases"
+          disabled={filtered.length === 0}
+        />
       }
     >
       <motion.div
@@ -283,17 +306,38 @@ const FollowUp: React.FC = () => {
         />
       </motion.div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mr-1">Priority</span>
+        {PRIORITIES.map((p) => {
+          const active = priorityFilter === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPriorityFilter(active ? null : p)}
+              className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                active ? "" : "border-border text-muted-foreground hover:bg-muted"
+              }`}
+              style={active ? { background: "rgba(13,148,136,0.16)", borderColor: "rgba(13,148,136,0.45)", color: ACCENT } : undefined}
+            >
+              {p}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex flex-wrap gap-3">
         <StatCard label="Due Today" count={buckets.dueToday.length} icon={Clock3} color="#3b82f6" delay={0.05} />
         <StatCard label="Overdue" count={buckets.overdue.length} icon={Flame} color="#ef4444" delay={0.1} />
         <StatCard label="Upcoming" count={buckets.upcoming.length} icon={CalendarDays} color="#10b981" delay={0.15} />
+        <StatCard label="On Hold" count={buckets.onHold.length} icon={Pause} color="#f59e0b" delay={0.2} />
       </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <div
             className="w-5 h-5 rounded-full border-2 animate-spin"
-            style={{ borderColor: "rgba(139,92,246,0.2)", borderTopColor: ACCENT }}
+            style={{ borderColor: "rgba(13,148,136,0.2)", borderTopColor: ACCENT }}
           />
         </div>
       ) : totalActive === 0 ? (
@@ -305,7 +349,7 @@ const FollowUp: React.FC = () => {
         >
           <div
             className="w-11 h-11 rounded-xl flex items-center justify-center mb-1"
-            style={{ background: "rgba(139,92,246,0.14)", border: "1px solid rgba(139,92,246,0.3)" }}
+            style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.3)" }}
           >
             <ClipboardList size={18} style={{ color: ACCENT_SOFT }} />
           </div>
@@ -317,6 +361,7 @@ const FollowUp: React.FC = () => {
           <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} />
           <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} />
           <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} />
+          <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} />
         </>
       )}
 
@@ -342,7 +387,7 @@ const TaskGroup: React.FC<{ title: string; tasks: Task[]; onSelect: (id: string)
           {title}
         </p>
         <span className="text-[10px] text-muted-foreground">{tasks.length}</span>
-        <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(139,92,246,0.25), transparent)" }} />
+        <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {tasks.map((t, i) => (
