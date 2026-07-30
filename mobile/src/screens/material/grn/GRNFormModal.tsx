@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, PackageCheck, ChevronRight, Lock, CheckCircle2, CopyPlus } from "lucide-react-native";
+import { X, PackageCheck, Lock, CheckCircle2, CopyPlus } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";

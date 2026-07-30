@@ -8,7 +8,7 @@ import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityInd
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
-import { X, Truck, Camera as CameraIcon, Paperclip, ChevronRight, FileText } from "lucide-react-native";
+import { X, Truck, Camera as CameraIcon, Paperclip, FileText } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import {

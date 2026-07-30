@@ -94,7 +94,6 @@ import {
 import {
   DateField,
   SectionHeader,
-  GRNChainBadge,
   LinkedDocBadge,
 } from "./ExpenseBooking/PickerPrimitives";
 import { AmountGstSection } from "./ExpenseBooking/AmountGstSection";
@@ -108,7 +107,7 @@ import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
-import { aggregateGRNsForInvoice, filterServicePOs } from "./ExpenseBooking/invoiceLinking";
+import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import type {
   CompanyOption,

@@ -703,7 +703,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
         entryTime ? new Date(entryTime) : new Date(),
       )
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
-      .input("ChallanNo", sql.NVarChar(100), challanNo || null)
+      .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("Status", sql.NVarChar(30), "Draft")
       .input("CreatedBy", sql.NVarChar(150), email)
@@ -815,7 +815,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       .input("VehicleNo", sql.NVarChar(50), vehicleNo)
       .input("EntryTime", sql.DateTime, entryTime ? new Date(entryTime) : null)
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
-      .input("ChallanNo", sql.NVarChar(100), challanNo || null)
+      .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
         UPDATE dbo.VehicleInOut SET

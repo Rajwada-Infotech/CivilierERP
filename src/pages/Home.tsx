@@ -29,7 +29,6 @@ import {
   Wrench,
   LineChart,
   ShoppingCart,
-  Megaphone,
   Pickaxe,
   Receipt,
   HeartHandshake,
