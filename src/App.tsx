@@ -1859,6 +1859,7 @@ function AppRoutes() {
       <Route path="/crm/setup/unit-master"         element={<ProtectedRoute pageKey="followup-unit-master"><UnitMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/block-master"        element={<ProtectedRoute pageKey="followup-block-master"><BlockMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/room-master"         element={<ProtectedRoute pageKey="followup-room-master"><RoomMaster /></ProtectedRoute>} />
+      <Route path="/crm/setup/payment-plan-master" element={<ProtectedRoute pageKey="payment-plan-master"><PaymentPlanMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />

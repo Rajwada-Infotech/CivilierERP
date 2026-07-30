@@ -88,7 +88,7 @@ export function IssueReturnDetailModal({
   const busy = submitMutation.isPending || approveMutation.isPending || rejectMutation.isPending || deleteMutation.isPending;
 
   return (
-    <Modal visible={recordId != null} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+    <Modal visible animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
           <View className="flex-row items-center gap-2.5 flex-1 min-w-0">

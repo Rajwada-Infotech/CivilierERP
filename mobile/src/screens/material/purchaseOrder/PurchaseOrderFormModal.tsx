@@ -23,7 +23,7 @@ import {
   getAllItemUomAlternates, getCostCenterOptions, fetchFinYearOptions,
   getSupplierDetails, getCompanyDetails, getApprovedMRList, getMRPOPrefill,
   fetchDocTypes, fetchNextDocNumber,
-  resolveLineGstSplit, relevantUOMs, convertRate, alternatesForItem, getItemUomFactor, convertItemRate, convertItemQuantity,
+  resolveLineGstSplit, relevantUOMs, convertRate, alternatesForItem, getItemUomFactor, convertItemRate,
   type CreatePOPayload, type MRPOPrefill, type QTPOPrefill, type ItemUOMAlternate, type UOMOption,
 } from "@/api/purchaseOrdersApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";

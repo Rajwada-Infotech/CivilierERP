@@ -7,7 +7,7 @@
 // determined are "Partial" (approved PO with some-but-not-all qty received,
 // or MR with Status='Partially Fulfilled') — there's nothing to validate
 // client-side beyond "at least one selected".
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput, Alert, Modal } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

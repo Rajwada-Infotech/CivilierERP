@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  Plus, Search, ChevronRight, IdCard, Users2, IndianRupee, Lock, Pencil, BookUser,
+  Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
   User, MapPin, Briefcase, FileText,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";

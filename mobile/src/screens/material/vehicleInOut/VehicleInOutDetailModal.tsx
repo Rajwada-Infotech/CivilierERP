@@ -6,7 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { View, Text, Modal, Pressable, ScrollView, Image, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X, Truck, Paperclip, FileText } from "lucide-react-native";
+import { X, Truck, FileText } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getVehicleInOut, type VehicleInOutRecord } from "@/api/vehicleInOutApi";
@@ -45,7 +45,7 @@ export function VehicleInOutDetailModal({ recordId, onClose }: { recordId: numbe
   if (recordId == null) return null;
 
   return (
-    <Modal visible={recordId != null} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+    <Modal visible animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
           <View className="flex-row items-center gap-2.5 flex-1 min-w-0">

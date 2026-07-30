@@ -46,7 +46,7 @@ export default function L1ChartScreen() {
   const sendableQuotations = useMemo(() => quotations.filter((q) => q.Status !== "Draft"), [quotations]);
   const selectedQuotation = sendableQuotations.find((q) => q.QuotationId === quotationId) ?? null;
 
-  const { data: chart, isLoading: loadingChart, isFetching: fetchingChart } = useQuery({
+  const { data: chart, isLoading: loadingChart } = useQuery({
     queryKey: ["l1-chart", quotationId],
     queryFn: () => getL1ChartData(quotationId!),
     enabled: quotationId != null,

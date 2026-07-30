@@ -149,42 +149,6 @@ async function fetchVehicleAttachments(pool, actor) {
   }));
 }
 
-async function fetchVaultDocuments(pool, actor) {
-  if (actor.role === "customer") return [];
-
-  const result = await pool.request().query(`
-    SELECT
-      d.Id,
-      d.DocNo,
-      d.Category,
-      d.DocName,
-      d.FileName,
-      d.FileSize,
-      d.MimeType,
-      d.CreatedBy,
-      d.CreatedAt,
-      fa.ApplicantName
-    FROM dbo.FollowupDocumentVault d
-    LEFT JOIN dbo.FollowupApplications fa ON fa.Id = d.ApplicantId
-    WHERE d.IsDeleted = 0
-    ORDER BY d.CreatedAt DESC
-  `);
-
-  return result.recordset.map((r) => ({
-    source: "vault",
-    sourceId: r.Id,
-    module: "Document Vault",
-    docRef: r.DocNo || `DV-${r.Id}`,
-    docLabel: r.DocName || r.ApplicantName || r.Category || `Document #${r.Id}`,
-    filename: r.FileName,
-    mimeType: r.MimeType,
-    size: r.FileSize,
-    uploadedBy: r.CreatedBy || null,
-    uploadedAt: r.CreatedAt,
-    url: `/api/followup-document-vault/file/${r.Id}`,
-  }));
-}
-
 async function fetchGRNAttachments(pool, actor) {
   if (actor.role === "customer") return [];
   const tableCheck = await pool.request().query(
@@ -303,9 +267,8 @@ async function fetchPersonalVaultAttachments(pool, actor) {
 const SOURCES = [
   { key: "ticket", label: "Ticket", fetch: fetchTicketAttachments },
   { key: "vehicle", label: "Vehicle In/Out", fetch: fetchVehicleAttachments },
-  // "vault" (Follow-Up's dbo.FollowupDocumentVault) deliberately disconnected —
-  // the Follow-Up module is stray/unused for now. fetchVaultDocuments is left
-  // defined above, not deleted, so this is a one-line re-add if that changes.
+  // "vault" (Follow-Up's Document Vault) removed — the Follow-Up module and
+  // its tables (including FollowupDocumentVault) were dropped entirely.
   { key: "grn", label: "GRN", fetch: fetchGRNAttachments },
   { key: "contract", label: "Contract", fetch: fetchContractAttachments },
   { key: "personal", label: "Personal Vault", fetch: fetchPersonalVaultAttachments },
