@@ -9,6 +9,9 @@ lerna-debug.log*
 
 password.md
 
+# SSL certificates - never commit
+certbot/conf/
+certbot/www/
 # Dependency directories
 node_modules
 .vite/

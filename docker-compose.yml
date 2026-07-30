@@ -101,15 +101,24 @@ services:
     image: nginx:1.27-alpine
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - frontend_dist:/usr/share/nginx/html:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - civilier-network
     restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
 volumes:
   redis_data:
