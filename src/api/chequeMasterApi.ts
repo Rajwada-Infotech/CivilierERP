@@ -45,6 +45,7 @@ export interface BankOption {
   accountNumber: string | null;
   ifscCode: string | null;
   branchName: string | null;
+  companyName: string | null;
 }
 
 export interface CompanyOption {

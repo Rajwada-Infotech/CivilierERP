@@ -596,10 +596,18 @@ router.get("/options", async (req, res) => {
 router.get("/bank-options", async (req, res) => {
   try {
     const pool = getPool();
+    const columnMeta = await getAccountHeadColumnMeta();
+    // Same column-name fallback bankMaster.js uses when saving BCompanyName —
+    // whichever of these actually exists on this DB holds the company label
+    // picked from the same company dropdown ChequeMaster's Company field uses.
+    const companyCol =
+      getColumn(columnMeta, "CompanyName")?.name ||
+      getColumn(columnMeta, "LCompanyName")?.name ||
+      "LDescription";
     const result = await pool.request().query(`
       SELECT LHeadId AS id, LHeadName AS label,
              LAccountNo AS accountNumber, LIFSCCode AS ifscCode,
-             LBranchName AS branchName
+             LBranchName AS branchName, ${companyCol} AS companyName
       FROM dbo.AccountHeadMaster
       WHERE LHeadType = 'B' AND LHeadStatus = 1
       ORDER BY LHeadName
