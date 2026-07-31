@@ -205,29 +205,14 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success("Payment recorded");
-      if (data.brokerWarning) {
-        toast.warning(data.brokerWarning, { duration: 8000 });
-      }
-      // Amount typed in beyond what was actually due on this milestone never
-      // gets recorded against it — the backend caps it and auto-parks the
-      // rest on the customer's On Account balance instead. Surface that so
-      // staff aren't left wondering why the milestone's own paid figure
-      // doesn't match what they entered.
-      if (data.overflowAmount > 0) {
-        toast.info(
-          `₹${Number(data.overflowAmount).toLocaleString("en-IN")} was beyond what's due on this milestone — parked to On Account${data.onAccountReceiptNo ? ` (${data.onAccountReceiptNo})` : ""}.`,
-          { duration: 8000 },
-        );
-        qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
-      }
-
-      const current = milestones.find((m) => m.Id === editingId);
-      const paidAmt = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : current?.AmountPaid;
-      const thisOneCleared = current && paidAmt != null && paidAmt >= current.AmountDue;
-      const allOthersCleared = milestones.filter((m) => m.Id !== editingId).every((m) => ["Paid", "Waived"].includes(m.Status));
-      if (thisOneCleared && allOthersCleared) {
-        promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
+      // A payment amount now submits into Finance's Received Payment queue
+      // for approval (Account's Head/admin/super admin) instead of landing
+      // on the milestone immediately — it won't show as Paid, and the
+      // overpayment-cap/On Account split isn't resolved, until approved.
+      if (data.submitted) {
+        toast.success(`Submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't count as paid until approved.`);
+      } else {
+        toast.success("Milestone updated");
       }
 
       setEditingId(null);
@@ -379,7 +364,14 @@ const CrmPaymentMilestones: React.FC = () => {
         </span>
       ) },
     { accessorKey: "AmountPaid", header: "Amount Paid", size: 100,
-      cell: (i) => <span className="text-green-600 font-semibold">{fmt(i.row.original.AmountPaid)}</span> },
+      cell: (i) => (
+        <span className="text-green-600 font-semibold">
+          {fmt(i.row.original.AmountPaid)}
+          {Number(i.row.original.PendingVerificationAmount) > 0 && (
+            <div className="text-[10px] text-amber-700 font-normal">+{fmt(i.row.original.PendingVerificationAmount)} pending verification</div>
+          )}
+        </span>
+      ) },
     { id: "balance", header: "Balance", size: 100, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
@@ -410,7 +402,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <>
                 <button onClick={() => handleOpenPayment(m)}
                   className="text-xs text-primary hover:underline">
-                  Record Payment
+                  Submit Payment
                 </button>
                 {onAccountBalance > 0 && (
                   <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
@@ -615,7 +607,8 @@ const CrmPaymentMilestones: React.FC = () => {
       {/* Record Payment Dialog */}
       <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">Record Payment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle></DialogHeader>
+          <p className="text-[11px] text-muted-foreground -mt-2">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               {[
@@ -638,7 +631,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   </p>
                   {previewOverflow > 0 && (
                     <p className="text-[11px] text-blue-600 font-medium mt-0.5 flex items-center gap-1">
-                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due will be parked to On Account, not counted against this milestone.
+                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's currently due — if still true when this is approved, it'll be parked to On Account instead of counted against this milestone.
                     </p>
                   )}
                 </div>
@@ -690,7 +683,7 @@ const CrmPaymentMilestones: React.FC = () => {
             <button onClick={handleRecordPayment}
               disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Record Payment"}
+              {saving ? "Submitting..." : "Submit for Approval"}
             </button>
           </div>
         </DialogContent>

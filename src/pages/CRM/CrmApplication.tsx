@@ -1745,6 +1745,9 @@ const CrmApplication: React.FC = () => {
                         Defaults to the plan's fixed ₹{selectedPlanBookingAmount.toLocaleString("en-IN")} — change this only if the customer actually paid a different amount; anything over the fixed figure is auto-parked to On Account, not lost.
                       </p>
                     )}
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      This submits to Finance's Received Payment queue for approval (Account's Head/admin/super admin) — it won't count as paid on the Booking until approved.
+                    </p>
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>

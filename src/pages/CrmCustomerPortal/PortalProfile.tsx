@@ -41,8 +41,15 @@ function MiniStat({ icon: Icon, label, value }: { icon: any; label: string; valu
 // all pulled from the same live tables the staff CRM reads, in one glance,
 // instead of a bare contact-details form.
 const PortalProfile: React.FC = () => {
-  const { me, timeline, applicationId } = useOutletContext<Ctx>();
+  const { me, timeline, applicationId, applications } = useOutletContext<Ctx>();
   const navigate = useNavigate();
+
+  // /me is the customer's shared identity (Name, Mobile, Email — keyed by
+  // CustomerId since migration 254); ApplicantName/ApplicationNo/
+  // InterestedProject/Status are all per-application, so they come from the
+  // selected row in `applications` instead, not from `me`.
+  const selectedApp = (applications || []).find((a: any) => a.ApplicationId === applicationId);
+  const displayName = selectedApp?.ApplicantName || me.Name;
   const { data: tickets = [] } = useQuery({ queryKey: ["portal-tickets", applicationId], queryFn: () => fetchTickets(applicationId) });
   const [accent, setAccentState] = useState(getStoredPortalAccent());
   const [mode, setModeState] = useState<PortalMode>(getStoredPortalMode());
@@ -84,20 +91,20 @@ const PortalProfile: React.FC = () => {
         <div className="flex items-center gap-4 mb-4 pb-4" style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
           <div className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold shrink-0"
             style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid #E8C766` }}>
-            {initials(me.ApplicantName)}
+            {initials(displayName)}
           </div>
           <div>
-            <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{me.ApplicantName}</p>
-            <p className="text-xs" style={{ ...mono, color: TEXT_FAINT }}>{me.ApplicationNo}</p>
+            <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{displayName}</p>
+            <p className="text-xs" style={{ ...mono, color: TEXT_FAINT }}>{selectedApp?.ApplicationNo}</p>
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <InfoField label="Mobile" value={me.Mobile} />
           <InfoField label="Email" value={me.Email} />
-          <InfoField label="Interested Project" value={me.InterestedProject} />
+          <InfoField label="Interested Project" value={selectedApp?.InterestedProject} />
           <div>
             <p className="text-[10px] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Application Status</p>
-            <div className="mt-1"><StatusPill status={me.Status} /></div>
+            <div className="mt-1"><StatusPill status={selectedApp?.ApplicationStatus} /></div>
           </div>
         </div>
       </Card>

@@ -140,8 +140,12 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const id = parseInt(req.params.id);
     const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT * FROM dbo.CrmPaymentMilestone WHERE BookingId = @id ORDER BY MilestoneNo`),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT m.*,
+               (SELECT ISNULL(SUM(rp.RPAmount), 0) FROM dbo.ReceivedPayment rp
+                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = 'Pending') AS PendingVerificationAmount
+        FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @id ORDER BY m.MilestoneNo
+      `),
       pool.request().input("id", sql.Int, id).query(
         `SELECT wc.*, u.name AS CalledByName FROM dbo.CrmWelcomeCall wc LEFT JOIN dbo.Users u ON u.id = wc.CalledBy WHERE wc.BookingId = @id ORDER BY wc.CreatedAt DESC`),
       pool.request().input("id", sql.Int, id).query(
@@ -895,10 +899,15 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       milestoneId = parseInt(b.MilestoneId);
       if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
-        SELECT Id, MilestoneName, AmountPaid, Status, PaidDate FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
+      // Milestone #1 ("Booking") is never eligible here — it already gets its
+      // own auto-generated 'Booking' invoice (maybeAutoGenerateBookingInvoice)
+      // the moment the booking payment clears, so letting it through this
+      // route too would double-invoice the exact same money received.
+      if (mRow.MilestoneNo === 1) return res.status(400).json({ error: "The Booking milestone is invoiced automatically — it can't be invoiced again here" });
       if (mRow.Status !== "Paid") return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
@@ -1025,6 +1034,9 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
 
+    const statusCheck = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be added." });
+
     const inserted = [];
     for (const file of files) {
       const result = await pool.request()
@@ -1077,6 +1089,9 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     const pool = getPool();
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
+    const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
+
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });

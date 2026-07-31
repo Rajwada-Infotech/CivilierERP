@@ -607,8 +607,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         body: JSON.stringify({ ...payForm, DepositBankName: bankName }),
       });
       const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Payment failed");
-      toast.success(`Payment recorded — ${resData.ReceiptNo || ""}`.trim());
+      if (!res.ok) throw new Error(resData.error || "Submission failed");
+      toast.success(`Submitted for Finance approval${resData.RPDocNo ? ` — ${resData.RPDocNo}` : ""}. It won't count as paid until Account's Head approves it.`);
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
@@ -662,9 +662,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // ones a "Milestone" invoice can legally be raised for. This is what makes
   // the manual dialog "well synced" rather than a disconnected freehand
   // entry: amount/date always come from the milestone's real payment record
-  // (enforced again server-side), never typed by staff.
+  // (enforced again server-side), never typed by staff. Milestone #1
+  // ("Booking") is excluded — it always gets its own auto-generated
+  // 'Booking' invoice the moment the booking payment clears, so offering it
+  // here too would double-invoice the same money received.
   const uninvoicedPaidMilestones = milestoneList.filter(
-    (m: any) => m.Status === "Paid" && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
+    (m: any) => m.Status === "Paid" && Number(m.MilestoneNo) !== 1
+      && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
   );
 
   const handleGenerateInvoice = async () => {
@@ -851,6 +855,66 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   )}
                 </div>
 
+                {/* Breakdown of the real, already-generated schedule for
+                    this booking — not a re-derivation of the plan template,
+                    since parking/extra-charge line items get bolted on as
+                    their own milestones too (excluded here; they live on
+                    their own tab) and this way the numbers can never drift
+                    from what CrmPaymentMilestone actually has. */}
+                {(() => {
+                  const scheduleRows = milestoneList.filter((m: any) => !m.ParkingAllotmentId && !m.ExtraChargeId);
+                  if (!scheduleRows.length) return null;
+                  const totalDue = scheduleRows.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
+                  const totalPaid = scheduleRows.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+                  return (
+                    <div className="rounded-xl border border-border p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Payment Breakdown</h3>
+                        <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid</span>
+                      </div>
+                      <div className="overflow-x-auto thin-scroll">
+                        <div className="min-w-[520px]">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border">
+                                <th className="text-left px-2.5 py-1.5 text-xs text-muted-foreground font-medium">#</th>
+                                <th className="text-left px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Milestone</th>
+                                <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">%</th>
+                                <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Amount Due</th>
+                                <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Paid</th>
+                                <th className="text-left px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {scheduleRows.map((m: any) => (
+                                <tr key={m.Id} className="border-b border-border">
+                                  <td className="px-2.5 py-1.5 text-xs text-muted-foreground">{m.MilestoneNo}</td>
+                                  <td className="px-2.5 py-1.5">{m.MilestoneName}</td>
+                                  <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
+                                  <td className="px-2.5 py-1.5 text-right font-medium">{fmt(m.AmountDue)}</td>
+                                  <td className="px-2.5 py-1.5 text-right text-emerald-700">
+                                    {fmt(m.AmountPaid)}
+                                    {Number(m.PendingVerificationAmount) > 0 && (
+                                      <div className="text-[10px] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
+                                    )}
+                                  </td>
+                                  <td className="px-2.5 py-1.5">
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
+                                      m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                                        : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
+                                        : "text-amber-700 bg-amber-50 border-amber-200"
+                                    }`}>{m.Status}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {booking.Status !== "Approved" && (
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
                     <p className="text-sm font-medium">Payment Plan is correct</p>
@@ -884,8 +948,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
-                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Pending</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Balance</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
                   </div>
+                  {Number(firstMilestone?.PendingVerificationAmount) > 0 && (
+                    <p className="text-[11px] text-amber-700 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      {fmt(firstMilestone.PendingVerificationAmount)} submitted and awaiting Finance (Account's Head) approval — not counted as paid yet.
+                    </p>
+                  )}
                   {bookingAmountDue <= 0 && (
                     <p className="text-[11px] text-muted-foreground">No default amount is shown here — set the actual Booking Amount below; the rest of the payment schedule is calculated from it.</p>
                   )}
@@ -908,7 +978,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Record Payment</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Submit Payment for Approval</h3>
+                    <p className="text-[11px] text-muted-foreground">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
@@ -940,7 +1011,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                     <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
                       className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40">
-                      {paySaving ? "Recording..." : `Record Payment`}
+                      {paySaving ? "Submitting..." : `Submit for Approval`}
                     </button>
                   </div>
                 )}
@@ -975,19 +1046,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-primary" /> Parking Allotments</h3>
+                    {(parking as any[]).length > 0 && (
+                      <span className="text-xs font-semibold text-foreground">
+                        Total {fmt((parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0))}
+                      </span>
+                    )}
                   </div>
                   {(parking as any[]).length === 0 ? (
                     <p className="text-xs text-muted-foreground">No parking allotments linked to this booking.</p>
                   ) : (
-                    <div className="overflow-x-auto thin-scroll">
-                      <div className="min-w-[500px]">
-                        {(parking as any[]).map((p: any) => (
-                          <div key={p.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 mb-1.5">
-                            <div className="space-y-0.5 min-w-0">
-                              <span className="text-sm font-medium">{p.ParkingSlotName}</span>
-                              <div className="flex gap-3 text-xs text-muted-foreground">
-                                <span>Qty: {p.Quantity}</span>
-                                <span>Amount: {fmt(p.Amount)}</span>
+                    <div className="space-y-2">
+                      {(parking as any[]).map((p: any) => (
+                        <div key={p.Id} className="rounded-lg border border-border px-3 py-2.5 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">{p.SlotNo || p.ParkingSlotNo || `Slot #${p.ParkingSlotId ?? "—"}`}</span>
+                                {p.CurrentParkingType && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40">{p.CurrentParkingType}</span>
+                                )}
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
+                                  p.PaymentStatus === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"
+                                }`}>{p.PaymentStatus || "Pending"}</span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
@@ -1019,8 +1099,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               ) : null}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                            <div><span className="text-muted-foreground block">Qty</span><span className="font-medium">{p.Quantity}</span></div>
+                            <div><span className="text-muted-foreground block">Rate</span><span className="font-medium">{fmt(p.RateSnapshot)}</span></div>
+                            <div><span className="text-muted-foreground block">GST</span><span className="font-medium">{p.GstRateSnapshot != null ? `${p.GstRateSnapshot}% (${fmt(p.GstAmount)})` : "—"}</span></div>
+                            <div><span className="text-muted-foreground block">Total</span><span className="font-semibold text-foreground">{fmt(p.TotalAmount)}</span></div>
+                            <div><span className="text-muted-foreground block">Receipt</span><span className="font-medium">{p.ReceiptNo || "—"}</span></div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1192,7 +1279,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Attachments" && (
               <div className="space-y-4 pt-2">
-                {canEdit && (
+                {canEdit && booking.Status !== "Approved" && (
                   <div className="flex items-center gap-2">
                     <label className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-lg cursor-pointer hover:bg-muted">
                       <Upload size={14} />
@@ -1200,6 +1287,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} disabled={uploading} />
                     </label>
                   </div>
+                )}
+                {booking.Status === "Approved" && (
+                  <p className="text-xs text-muted-foreground">Locked — this Booking is Approved. Attachments can no longer be added or removed here.</p>
                 )}
                 {(attachments as any[]).length === 0 ? (
                   <p className="text-xs text-muted-foreground py-4">No attachments yet.</p>
@@ -1227,7 +1317,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
                                   <Download size={11} /> Download
                                 </a>
-                                {canEdit && (
+                                {canEdit && booking.Status !== "Approved" && (
                                   <button onClick={() => handleDeleteAttachment(a.Id)}
                                     className="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded ml-1">
                                     <Trash2 size={11} /> Delete
