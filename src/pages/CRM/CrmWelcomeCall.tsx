@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -14,11 +14,8 @@ const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
 const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
-const PAY_API = "/api/crm/payments";
 const SA_LEADS_API = "/api/sa/leads";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
-const PROJECT_BANK_API = "/api/crm/project-banks";
-const BANK_MASTER_API = "/api/bank-master";
 
 const EMPTY_BANK = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
@@ -38,7 +35,7 @@ const outcomeColor: Record<string, string> = {
 
 const EMPTY_FORM = {
   CalledBy: "", CallDate: "", DurationSeconds: "",
-  Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "", PaymentPlanConfirmed: false,
+  Outcome: "", NextCallDate: "", Notes: "", PreferredAgreementDate: "", PaymentPlanConfirmed: null as boolean | null, PaymentPlanDisputeReason: "",
 };
 const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 // datetime-local input value for "right now" — pre-filling this is the
@@ -115,14 +112,6 @@ async function fetchBookingMilestones(bookingId: number): Promise<any[]> {
 async function fetchBookingInvoices(bookingId: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
-  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAllBanks(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-
 function mimeIcon(mime: string | null | undefined) {
   if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
   if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
@@ -218,9 +207,12 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const fmtTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
-  const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", DepositBankId: "", Notes: "" });
-  const [recordingOnAccount, setRecordingOnAccount] = useState(false);
+  // Payment Plan confirmation — locked (summary view) the instant a real
+  // decision (agree/disagree) is picked, same lock/Edit pattern used
+  // everywhere else in this file, so it can't be casually flipped back and
+  // forth while filling out the rest of the call. Still revertible via the
+  // explicit "Change" link.
+  const [ppLocked, setPpLocked] = useState(false);
 
   // Nominee & Bank Details — done inline here now instead of a "go to
   // Customer Bank & Nominee page" link, same shape/API CrmBookingDetail.tsx's
@@ -271,19 +263,6 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryFn: () => fetchLoanDetail(booking.BookingId),
     enabled: expandedCard === "bank",
   });
-  const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-welcome-project-banks", callContext?.booking?.ProjectId],
-    queryFn: () => fetchProjectBanks(callContext?.booking?.ProjectId),
-    enabled: onAccountDialog && !!callContext?.booking?.ProjectId,
-  });
-  const { data: allBanks = [] } = useQuery({
-    queryKey: ["bank-master-dropdown"],
-    queryFn: fetchAllBanks,
-    enabled: onAccountDialog,
-    staleTime: 5 * 60_000,
-  });
-  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
-
   useEffect(() => {
     let cancelled = false;
     setBankLoaded(false);
@@ -346,6 +325,10 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     // the call, so a blank one is a useless log entry masquerading as a
     // real one.
     if (!form.Outcome) { toast.error("Select an outcome before logging the call"); return; }
+    if (form.PaymentPlanConfirmed === false && !form.PaymentPlanDisputeReason.trim()) {
+      toast.error("A reason is required when the customer does not agree to the payment plan");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -364,6 +347,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
           Notes: form.Notes || null,
           PreferredAgreementDate: form.PreferredAgreementDate || null,
           PaymentPlanConfirmed: form.PaymentPlanConfirmed,
+          PaymentPlanDisputeReason: form.PaymentPlanConfirmed === false ? form.PaymentPlanDisputeReason.trim() : null,
           CustomFields: customFields,
         }),
       });
@@ -371,6 +355,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       if (!res.ok) throw new Error(data.error || "Failed to log call");
       setForm({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
       setCustomFields([]);
+      setPpLocked(false);
       setTimerRunning(false);
       setTimerSeconds(0);
       refetchChecklist();
@@ -393,40 +378,6 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       toast.error(e.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  // "If the customer is paying extra amount" — recorded straight from the
-  // call as an on-account deposit, not tied to any milestone yet.
-  // Matches the real detailed form CrmPaymentMilestones.tsx's own "Deposit
-  // On-Account" dialog uses (Amount/ReceivedDate/PaymentMode/TransactionRef/
-  // DepositBankId/Notes) — this is the same backend endpoint and the same
-  // customer-wise on-account tracking, not a separate ad-hoc mini-form. A
-  // deposit recorded here shows up identically on the Payment Milestones
-  // page's own on-account list, and auto-sweeps onto the next-due milestone
-  // server-side (autoApplyOnAccount).
-  const handleRecordOnAccount = async () => {
-    if (!onAccountForm.Amount) { toast.error("Amount is required"); return; }
-    setRecordingOnAccount(true);
-    try {
-      const bankName = onAccountForm.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === onAccountForm.DepositBankId)?.BName
-        : undefined;
-      const res = await fetchWithAuth(`${PAY_API}/booking/${booking.BookingId}/on-account`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...onAccountForm, Amount: parseFloat(onAccountForm.Amount), DepositBankName: bankName }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
-      setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", DepositBankId: "", Notes: "" });
-      refetchCallContext();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setRecordingOnAccount(false);
     }
   };
 
@@ -650,13 +601,9 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               )}
               {(callContext?.onAccount?.availableBalance ?? 0) > 0 && (
                 <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium pt-1 border-t border-border">
-                  <Wallet size={12} className="shrink-0" /> {fmt(callContext?.onAccount.availableBalance)} on account, not yet applied
+                  <Wallet size={12} className="shrink-0" /> {fmt(callContext?.onAccount.availableBalance)} on account, not yet applied — see Payment Milestones
                 </div>
               )}
-              <button onClick={() => setOnAccountDialog(true)}
-                className="w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-foreground font-medium hover:bg-muted">
-                <Wallet size={13} /> Record On-Account Deposit
-              </button>
             </div>
 
             {/* Progress stepper — a vertical readout of the same checklist
@@ -666,21 +613,36 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             {checklist && (
               <div className="rounded-xl border border-border p-3.5 space-y-1.5">
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Booking Readiness</h4>
-                {[
-                  { label: "Welcome Call", done: checklist.welcomeCall.done },
-                  { label: "Documents Verified", done: checklist.documents.total > 0 && checklist.documents.verified === checklist.documents.total },
-                  { label: "Co-Applicant Added", done: checklist.coApplicants.count > 0 },
-                  { label: "Bank & Nominee", done: checklist.bankDetails.complete },
-                  { label: "NOC Issued", done: checklist.noc.some((n: any) => n.Status === "Issued") },
-                  { label: "Agreement", done: !!checklist.agreement },
-                ].map((s) => (
-                  <div key={s.label} className="flex items-center gap-2 text-xs py-0.5">
-                    <span className={`flex items-center justify-center w-4 h-4 rounded-full shrink-0 ${s.done ? "bg-emerald-500 text-white" : "border border-border text-transparent"}`}>
-                      {s.done && <Check size={10} />}
-                    </span>
-                    <span className={s.done ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
-                  </div>
-                ))}
+                {(() => {
+                  // Tri-state, not just done/not-done: "blank" (never touched),
+                  // "progress" (started but not yet clean/complete — shown
+                  // yellow), "done" (green — the step is genuinely finished,
+                  // e.g. the customer was actually Welcomed, not just called).
+                  const hasNoc = checklist.noc.length > 0;
+                  const nocIssued = checklist.noc.some((n: any) => n.Status === "Issued");
+                  const steps: { label: string; state: "blank" | "progress" | "done" }[] = [
+                    { label: "Welcome Call", state: checklist.welcomeCall.done ? "done" : checklist.welcomeCall.called ? "progress" : "blank" },
+                    { label: "Documents Verified", state:
+                      checklist.documents.total === 0 ? "blank"
+                      : checklist.documents.verified === checklist.documents.total ? "done" : "progress" },
+                    { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
+                    { label: "Bank & Nominee", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
+                    { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
+                    { label: "Agreement", state: checklist.agreement?.Status === "Executed" ? "done" : checklist.agreement ? "progress" : "blank" },
+                  ];
+                  return steps.map((s) => (
+                    <div key={s.label} className="flex items-center gap-2 text-xs py-0.5">
+                      <span className={`flex items-center justify-center w-4 h-4 rounded-full shrink-0 ${
+                        s.state === "done" ? "bg-emerald-500 text-white"
+                        : s.state === "progress" ? "bg-amber-400 text-white"
+                        : "border border-border text-transparent"
+                      }`}>
+                        {s.state === "done" && <Check size={10} />}
+                      </span>
+                      <span className={s.state === "done" ? "text-foreground" : s.state === "progress" ? "text-amber-600" : "text-muted-foreground"}>{s.label}</span>
+                    </div>
+                  ));
+                })()}
               </div>
             )}
           </div>
@@ -777,13 +739,59 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
               </div>
 
-              <label className="flex items-center gap-2 text-xs rounded-lg border border-border p-2.5 cursor-pointer hover:bg-muted/30">
-                <input type="checkbox" checked={form.PaymentPlanConfirmed}
-                  onChange={(e) => setForm((f) => ({ ...f, PaymentPlanConfirmed: e.target.checked }))}
-                  className="rounded border-border" />
-                <ClipboardCheck size={13} className="text-muted-foreground" />
-                Customer confirmed the payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""} on this call
-              </label>
+              <div className="rounded-lg border border-border p-2.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium flex items-center gap-1.5">
+                    <ClipboardCheck size={13} className="text-muted-foreground" />
+                    Payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""}
+                  </span>
+                  {ppLocked && (
+                    <button type="button" onClick={() => setPpLocked(false)} className="text-xs text-primary hover:underline">Change</button>
+                  )}
+                </div>
+
+                {ppLocked && form.PaymentPlanConfirmed === true && (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
+                    <Check size={13} /> Customer confirmed the payment plan on this call
+                  </div>
+                )}
+                {ppLocked && form.PaymentPlanConfirmed === false && (
+                  <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+                    <div className="font-medium flex items-center gap-1.5"><AlertTriangle size={12} /> Customer did not agree</div>
+                    <div className="mt-0.5">{form.PaymentPlanDisputeReason}</div>
+                  </div>
+                )}
+
+                {!ppLocked && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button"
+                        onClick={() => { setForm((f) => ({ ...f, PaymentPlanConfirmed: true, PaymentPlanDisputeReason: "" })); setPpLocked(true); }}
+                        className="text-xs rounded-lg border border-border px-2.5 py-1.5 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700">
+                        Customer agreed
+                      </button>
+                      <button type="button"
+                        onClick={() => setForm((f) => ({ ...f, PaymentPlanConfirmed: false }))}
+                        className={`text-xs rounded-lg border px-2.5 py-1.5 ${form.PaymentPlanConfirmed === false ? "border-amber-300 bg-amber-50 text-amber-700" : "border-border hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"}`}>
+                        Customer did not agree
+                      </button>
+                    </div>
+                    {form.PaymentPlanConfirmed === false && (
+                      <div>
+                        <textarea value={form.PaymentPlanDisputeReason}
+                          onChange={(e) => setForm((f) => ({ ...f, PaymentPlanDisputeReason: e.target.value }))}
+                          placeholder="Reason the customer didn't agree — required, goes to Communication Log for follow-up"
+                          rows={2} className="w-full text-xs border border-amber-300 rounded px-2 py-1.5 bg-background resize-none" />
+                        <button type="button" disabled={!form.PaymentPlanDisputeReason.trim()}
+                          onClick={() => setPpLocked(true)}
+                          className="mt-1.5 text-xs px-2.5 py-1 rounded-lg bg-amber-500 text-white font-medium disabled:opacity-40 hover:bg-amber-600">
+                          Confirm — flag to Communication Log
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
 
               {/* Dynamic custom fields */}
               <div>
@@ -1021,88 +1029,6 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     </Dialog>
 
     {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
-
-    {/* On-Account Deposit Dialog */}
-    <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> On-Account Deposit</DialogTitle></DialogHeader>
-        <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due at booking — held as a customer-wise credit and applied to milestones as they come up, in order. Same record you'll see on the Payment Milestones page.</p>
-
-        {/* Existing deposits for this booking — so this is visibly the same
-            customer-wise ledger the Payment Milestones page tracks, not a
-            one-off note that vanishes after this dialog closes. */}
-        {(callContext?.onAccount?.payments?.length ?? 0) > 0 && (
-          <div className="rounded-lg border border-border divide-y divide-border">
-            {callContext.onAccount.payments.map((p: any) => (
-              <div key={p.ReceiptNo} className="flex items-center justify-between px-3 py-2 text-xs">
-                <div>
-                  <span className="font-mono font-medium">{p.ReceiptNo}</span>
-                  <span className="text-muted-foreground"> · {fmt(p.Amount)}</span>
-                </div>
-                <span className={`px-2 py-0.5 rounded-full border font-medium ${
-                  p.Status === "Applied" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                  : p.Status === "PartiallyApplied" ? "text-amber-700 bg-amber-50 border-amber-200"
-                  : "text-blue-700 bg-blue-50 border-blue-200"
-                }`}>{p.Status}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-              <input type="number" value={onAccountForm.Amount}
-                onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-              <input type="date" value={onAccountForm.ReceivedDate}
-                onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-              <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Select —</option>
-                {["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"].map((m) => <option key={m}>{m}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-              <input type="text" value={onAccountForm.TransactionRef}
-                onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Deposit Bank</label>
-            <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">— Select deposit bank —</option>
-              {(bankOptions as any[]).map((b: any) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={() => setOnAccountDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={handleRecordOnAccount} disabled={recordingOnAccount || !onAccountForm.Amount}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {recordingOnAccount ? "Recording..." : "Record Deposit"}
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
 
     {/* Invoice detail dialog */}
     {viewingInvoice && (
@@ -1418,26 +1344,26 @@ const CrmWelcomeCall: React.FC = () => {
 
   const queueColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">{i.getValue() as string}</span> },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
-        <div>
+        <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
     { id: "projectUnit", header: "Project / Unit", size: 130, enableSorting: false,
-      cell: (i) => <span className="text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
     { accessorKey: "LastOutcome", header: "Last Outcome", size: 120,
       cell: (i) => i.row.original.LastOutcome ? (
-        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[i.row.original.LastOutcome] || ""}`}>{i.row.original.LastOutcome}</span>
-      ) : <span className="text-xs text-muted-foreground">Never called</span> },
+        <span onClick={() => setActiveBooking(i.row.original)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[i.row.original.LastOutcome] || ""}`}>{i.row.original.LastOutcome}</span>
+      ) : <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">Never called</span> },
     { accessorKey: "NextCallDate", header: "Follow-up Due", size: 110,
       cell: (i) => i.row.original.NextCallDate ? (
-        <span className={new Date(i.row.original.NextCallDate) <= new Date() ? "text-orange-600 font-medium text-xs" : "text-muted-foreground text-xs"}>
+        <span onClick={() => setActiveBooking(i.row.original)} className={`cursor-pointer ${new Date(i.row.original.NextCallDate) <= new Date() ? "text-orange-600 font-medium text-xs" : "text-muted-foreground text-xs"}`}>
           {String(i.row.original.NextCallDate).slice(0, 10)}
         </span>
-      ) : <span className="text-xs">—</span> },
+      ) : <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">—</span> },
     { id: "actions", header: "Action", size: 100, enableSorting: false,
       cell: (i) => (
         <button onClick={() => setActiveBooking(i.row.original)}
@@ -1450,7 +1376,7 @@ const CrmWelcomeCall: React.FC = () => {
   return (
     <SalesAutoShell
       title="CRM — Welcome Calls"
-      subtitle="Work the call queue, then verify documents, co-applicant, bank, NOC, and agreement readiness"
+      subtitle="Work the call queue, verify documents, co-applicant, and bank/nominee details"
     >
       {overdueCount > 0 && (
         <div className="rounded-lg bg-orange-50 border border-orange-200 px-4 py-2.5 text-sm text-orange-700 flex items-center gap-2">

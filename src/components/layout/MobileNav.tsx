@@ -482,20 +482,6 @@ const crmSetupItems: SetupItem[] = [
     pageKey: "crm-payment-plans",
   },
   {
-    icon: Landmark,
-    label: "Project Bank Mapping",
-    path: "/crm/setup/project-banks",
-    color: "text-amber-600",
-    pageKey: "crm-project-banks",
-  },
-  {
-    icon: CreditCard,
-    label: "Home Loan Tracking",
-    path: "/crm/loan-details",
-    color: "text-cyan-500",
-    pageKey: "crm-loan-details",
-  },
-  {
     icon: Car,
     label: "Parking Rate Master",
     path: "/crm/setup/parking-master",

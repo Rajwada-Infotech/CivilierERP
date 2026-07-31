@@ -313,6 +313,15 @@ router.get("/adjustments-for-invoice/:expenseRef", async (req, res) => {
 
 // ── GET /adjustable — credit entries for parties with available OA balance ──
 // Used by the On A/C Adjustment page to list excess payments available for use.
+// Includes both vendor-side entries (RefType='Payment', adjustable here
+// against an ExpenseBooking invoice via POST /apply-adjustment) and CRM
+// customer on-account credits (RefType='CrmOnAccountPayment', written by
+// crmLedger.js's postCrmOnAccountToGL against the same ledger/balance
+// columns) — the latter for VISIBILITY only. A CRM credit has no invoice
+// to adjust against here; applying it stays a CRM-only action (Booking
+// Detail / Payment Milestones' own "Apply On-Account" flow), so these rows
+// carry Source='CRM' + booking context instead of invoice fields, and the
+// frontend must not offer the Adjust action for them.
 router.get("/adjustable", async (req, res) => {
   const { partyId } = req.query;
   try {
@@ -352,7 +361,15 @@ router.get("/adjustable", async (req, res) => {
         eb.ETotalPaid          AS InvoiceTotalPaid,
         eb.EDocNo              AS InvoiceDocNo,
         pb.Balance             AS AvailableBalance,
-        oa.Notes
+        oa.Notes,
+        'Vendor'               AS Source,
+        NULL                   AS CrmBookingNo,
+        NULL                   AS CrmProjectName,
+        NULL                   AS CrmUnitNo,
+        NULL                   AS CrmApplicantName,
+        NULL                   AS CrmNextMilestoneName,
+        NULL                   AS CrmNextMilestoneDue,
+        NULL                   AS CrmNextMilestoneDueDate
       FROM dbo.OnAccountLedger oa
       JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
@@ -362,7 +379,61 @@ router.get("/adjustable", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
       WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'Payment'
         ${partyFilter}
-      ORDER BY pb.Balance DESC, oa.TxnDate DESC
+
+      UNION ALL
+
+      SELECT
+        oa.OAId,
+        oa.PartyId,
+        ahm.LHeadName  AS PartyName,
+        ahm.LHeadType  AS PartyTypeCode,
+        oa.TxnDate     AS PaymentDate,
+        oa.RefDocNo    AS PaymentDocNo,
+        oa.Amount              AS ExcessAmount,
+        cb.BookingNo           AS InvoiceRef,
+        NULL                   AS PaymentAmount,
+        NULL                   AS ENetAmount,
+        NULL                   AS EAmount,
+        NULL                   AS ECgstRate,
+        NULL                   AS ESgstRate,
+        NULL                   AS EBillingTermsData,
+        NULL                   AS EDiscountData,
+        NULL                   AS ESourceType,
+        NULL                   AS ESourceId,
+        NULL                   AS ELinkedGrnIds,
+        NULL                   AS GrnTotalAmount,
+        NULL                   AS InvoiceTotalPaid,
+        NULL                   AS InvoiceDocNo,
+        pb.Balance             AS AvailableBalance,
+        oa.Notes,
+        'CRM'                  AS Source,
+        cb.BookingNo           AS CrmBookingNo,
+        cb.ProjectName         AS CrmProjectName,
+        cb.UnitNo              AS CrmUnitNo,
+        ca.ApplicantName       AS CrmApplicantName,
+        nm.MilestoneName       AS CrmNextMilestoneName,
+        (nm.AmountDue - ISNULL(nm.AmountPaid, 0)) AS CrmNextMilestoneDue,
+        nm.DueDate             AS CrmNextMilestoneDueDate
+      FROM dbo.OnAccountLedger oa
+      JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
+      LEFT JOIN dbo.CrmOnAccountPayment coa ON coa.Id = oa.RefId AND oa.RefType = 'CrmOnAccountPayment'
+      LEFT JOIN dbo.CrmBooking cb ON cb.Id = coa.BookingId
+      LEFT JOIN dbo.CrmApplication ca ON ca.Id = cb.ApplicationId
+      -- The next milestone still open on this booking — the "underpay" side
+      -- of the picture, shown alongside the on-account credit itself so
+      -- staff can see both at once (this deposit will auto-apply onto it,
+      -- see autoApplyOnAccount in crmPayments.js).
+      OUTER APPLY (
+        SELECT TOP 1 m.MilestoneName, m.AmountDue, m.AmountPaid, m.DueDate
+        FROM dbo.CrmPaymentMilestone m
+        WHERE m.BookingId = cb.Id AND m.Status NOT IN ('Paid', 'Waived') AND m.AmountDue > ISNULL(m.AmountPaid, 0)
+        ORDER BY m.MilestoneNo ASC
+      ) nm
+      WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'CrmOnAccountPayment'
+        ${partyFilter}
+
+      ORDER BY AvailableBalance DESC, PaymentDate DESC
     `);
     // For GRN-source invoices, recompute the correct GST-inclusive net payable from
     // current GRN line items (same as the expense booking preview modal does).

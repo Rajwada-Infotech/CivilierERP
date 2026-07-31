@@ -60,17 +60,20 @@ const CrmNoc: React.FC = () => {
   const hasAgreement = !!context?.agreement;
   const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
 
-  // Auto-fill Bank NOC fields from data the system already has, the moment
-  // both the booking context and "Bank" type are in place — no click
-  // required. Only fills fields still blank, so it never clobbers something
-  // staff already typed (e.g. after switching booking mid-edit).
+  // Auto-fill Bank NOC fields from the actual lender record (Home Loan
+  // Tracking / CrmLoanDetail) — a Bank NOC exists for the bank that issued
+  // the loan, which is a different bank from the customer's own KYC account
+  // more often than not. Only fills fields still blank (never clobbers
+  // something staff already typed), and leaves them blank — never guesses
+  // from the customer's personal bank or the outstanding balance — when no
+  // loan record exists yet for this booking.
   useEffect(() => {
     if (form.NocType !== "Bank" || !context) return;
     setForm((f) => ({
       ...f,
-      BankName: f.BankName || context.customerBankDetail?.BankName || "",
-      LoanAccountNo: f.LoanAccountNo || context.customerBankDetail?.AccountNo || "",
-      LoanAmount: f.LoanAmount || (context.outstandingBalance != null ? String(Math.round(context.outstandingBalance)) : ""),
+      BankName: f.BankName || context.loanDetail?.BankName || "",
+      LoanAccountNo: f.LoanAccountNo || context.loanDetail?.LoanAccountNo || "",
+      LoanAmount: f.LoanAmount || (context.loanDetail?.LoanAmount != null ? String(context.loanDetail.LoanAmount) : ""),
     }));
     setBankFieldsLocked(true);
   }, [form.NocType, context]);
@@ -226,7 +229,7 @@ const CrmNoc: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
                   <span className="flex items-center gap-1">
-                    <Landmark size={11} /> {bankFieldsLocked ? "Auto-filled from customer KYC & balance due" : "Editing — override the auto-filled values"}
+                    <Landmark size={11} /> {bankFieldsLocked ? "Auto-filled from Home Loan Tracking" : "Editing — override the auto-filled values"}
                   </span>
                   <button type="button" onClick={() => setBankFieldsLocked((l) => !l)}
                     className="flex items-center gap-1 text-primary hover:underline shrink-0">

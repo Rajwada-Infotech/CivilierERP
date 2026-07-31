@@ -176,16 +176,24 @@ export interface EngineeringSummaryData {
   projects: { total: number; active: number };
 }
 
+export interface FollowupTaskSummary {
+  id: number;
+  taskNo: string;
+  subject: string;
+  dueDate: string | null;
+  status: string;
+}
+
+// Sourced from Task Master's /followup-board (already scoped server-side to
+// the logged-in user's own assigned tasks) — the old applications/bookings/
+// agreements/NOC/handover fields hit routes retired in the Follow-Up module
+// cleanup and always 404'd, so this replaces that shape entirely.
 export interface FollowupSummaryData {
-  applications: number;
-  bookings: number;
-  confirmedBookings: number;
-  agreements: number;
-  activeAgreements: number;
-  nocs: number;
-  pendingNOCs: number;
-  handovers: number;
-  scheduledHandovers: number;
+  totalActive: number;
+  overdue: number;
+  dueToday: number;
+  onHold: number;
+  recent: FollowupTaskSummary[];
 }
 
 // ─── Aggregated home dashboard shape ─────────────────────────────────────────
@@ -303,22 +311,10 @@ export async function fetchHomeDashboard(
     hasEngineeringAccess
       ? safeFetch<EngineeringSummaryData>("/api/engineering/dashboard")
       : skip,
-    // /api/followup-applications, /api/followup-bookings, and
-    // /api/followup-agreements are retired (see server.js's ALL_ROUTES —
-    // route modules left on disk, no longer mounted; CRM Applications/
-    // Bookings/Agreements superseded them). Calling them here always 404'd,
-    // spamming the server log on every dashboard load for zero benefit —
-    // commented out rather than left hitting a dead route. `applications`,
-    // `bookings`, and `agreements` in the followup summary below stay
-    // permanently 0, same as they already were.
-    skip,
-    skip,
-    skip,
+    // Task Master's own board feed — already scoped server-side to the
+    // logged-in user's assigned tasks (see taskMaster.js's /followup-board).
     hasFollowupAccess
-      ? safeFetch<unknown>("/api/followup-noc?pageSize=500")
-      : skip,
-    hasFollowupAccess
-      ? safeFetch<unknown>("/api/followup-handover?pageSize=500")
+      ? safeFetch<unknown>("/api/task-master/followup-board")
       : skip,
     hasSalesAccess
       ? safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500")
@@ -339,11 +335,7 @@ export async function fetchHomeDashboard(
     tasksRes,
     ticketsRes,
     engineeringRes,
-    appRes,
-    bookingsRes,
-    agreementsRes,
-    nocRes,
-    handoverRes,
+    followupBoardRes,
     saleOrdersRes,
     projectMasterRes,
     adminRes,
@@ -358,6 +350,7 @@ export async function fetchHomeDashboard(
   if (engineeringRes.error) errors.engineering = engineeringRes.error;
   if (adminRes.error) errors.admin = adminRes.error;
   if (saleOrdersRes.error) errors.sales = saleOrdersRes.error;
+  if (followupBoardRes.error) errors.followup = followupBoardRes.error;
 
   let tickets: TicketSummaryData | null = null;
   if (!ticketsRes.error && ticketsRes.data) {
@@ -441,22 +434,29 @@ export async function fetchHomeDashboard(
         ? (d as any).data
         : [];
   };
-  const applications: any[] = unwrap(appRes);
-  const bookings: any[] = unwrap(bookingsRes);
-  const agreements: any[] = unwrap(agreementsRes);
-  const nocs: any[] = unwrap(nocRes);
-  const handovers: any[] = unwrap(handoverRes);
+
+  // Follow-Up (Task Master) — buckets mirror FollowUp.tsx's own dashboard
+  // logic: Active tasks split into overdue/due-today/upcoming by DueDate,
+  // Hold tasks counted separately.
+  const followupTasks: any[] = unwrap(followupBoardRes);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const followupActive = followupTasks.filter((t) => t.Status === "Active" && t.DueDate);
   const followup: FollowupSummaryData = {
-    applications: applications.length,
-    bookings: bookings.length,
-    confirmedBookings: bookings.filter((b) => b.Status === "Confirmed").length,
-    agreements: agreements.length,
-    activeAgreements: agreements.filter((a) => a.Status === "Signed").length,
-    nocs: nocs.length,
-    pendingNOCs: nocs.filter((n) => n.Status === "Pending").length,
-    handovers: handovers.length,
-    scheduledHandovers: handovers.filter((h) => h.Status === "Scheduled")
-      .length,
+    totalActive: followupActive.length,
+    overdue: followupActive.filter((t) => new Date(t.DueDate).setHours(0, 0, 0, 0) < todayStart.getTime()).length,
+    dueToday: followupActive.filter((t) => new Date(t.DueDate).setHours(0, 0, 0, 0) === todayStart.getTime()).length,
+    onHold: followupTasks.filter((t) => t.Status === "Hold").length,
+    recent: [...followupTasks]
+      .sort((a, b) => new Date(a.DueDate ?? 0).getTime() - new Date(b.DueDate ?? 0).getTime())
+      .slice(0, 2)
+      .map((t) => ({
+        id: t.Id,
+        taskNo: t.TaskNo ?? "",
+        subject: t.Subject ?? "",
+        dueDate: t.DueDate ?? null,
+        status: t.Status ?? "",
+      })),
   };
 
   // ── Sales summary

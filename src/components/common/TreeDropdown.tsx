@@ -179,7 +179,14 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    const panelHeight = 360;
+    // Flat lists are short and fixed-size — estimate their real height
+    // (placeholder row + one row per option) instead of assuming the same
+    // 360px a deep/expandable tree might need. Using the tree's worst-case
+    // height for a 5-item flat list was flipping it to open upward (and
+    // clipping against the viewport top) even when there was plenty of
+    // room below the trigger.
+    const panelHeight =
+      variant === "flat" ? Math.min(360, 42 + options.length * 36 + 8) : 360;
     const above = spaceBelow < panelHeight && spaceAbove > spaceBelow;
     const maxH = above
       ? Math.min(panelHeight, spaceAbove - 8)
@@ -192,7 +199,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       maxHeight: maxH,
       zIndex: 9999,
     });
-  }, []);
+  }, [variant, options.length]);
 
   useEffect(() => {
     if (open) recalcPosition();

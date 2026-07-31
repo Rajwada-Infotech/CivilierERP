@@ -25,7 +25,7 @@ const requireSuperAdmin = (req, res, next) => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ALL_VALID_ACTIONS = ["view", "create", "edit", "delete", "print", "export"];
+const ALL_VALID_ACTIONS = ["view", "create", "edit", "delete", "print", "export", "import", "post-approval"];
 
 function parseActions(raw) {
   if (!raw) return [];

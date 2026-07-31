@@ -5,7 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireActiveBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
 const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
 router.use(authMiddleware);
@@ -45,6 +45,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
     const result = await pool.request().query(`
       SELECT
         b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.Status AS BookingStatus, b.AssignedTo,
+        b.FinancingType,
         a.ApplicantName, a.Mobile,
         wc.Outcome AS LastCallOutcome,
         CASE WHEN
@@ -56,7 +57,8 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
           NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeRelation, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.PanNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.AadhaarNo, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(d.Occupation, ''))), '') IS NOT NULL
+          NULLIF(LTRIM(RTRIM(ISNULL(d.Occupation, ''))), '') IS NOT NULL AND
+          NULLIF(LTRIM(RTRIM(ISNULL(b.FinancingType, ''))), '') IS NOT NULL
         THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsComplete
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -78,9 +80,20 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
   try {
     const pool = getPool();
     const bid = parseInt(req.params.bookingId);
+    // FinancingType and Milestone-1 payment status live outside
+    // CrmCustomerBankDetail (on CrmBooking/CrmPaymentMilestone) but the
+    // dialog needs both — Milestone 1 to decide whether the form should even
+    // be usable yet, FinancingType as a field on the same save.
+    const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT b.FinancingType,
+             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status
+      FROM dbo.CrmBooking b WHERE b.Id = @bid
+    `);
+    const bookingExtra = bookingRow.recordset[0] || {};
+
     const result = await pool.request().input("bid", sql.Int, bid)
       .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
-    if (result.recordset.length) return res.json(result.recordset[0]);
+    if (result.recordset.length) return res.json({ ...result.recordset[0], ...bookingExtra });
 
     // No bank-detail row saved yet — PAN, Aadhaar, Occupation, Annual Income
     // and the account holder's name are already on file at Customer intake
@@ -98,13 +111,14 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE b.Id = @bid
     `);
-    if (!prefill.recordset.length) return res.json(null);
+    if (!prefill.recordset.length) return res.json({ ...bookingExtra });
     const p = prefill.recordset[0];
     res.json({
       PanNo: p.PanNo || null, AccountHolderName: p.AccountHolderName || null,
       AadhaarNo: p.AadhaarNo || null, Occupation: p.Occupation || null,
       AnnualIncome: p.AnnualIncome != null ? p.AnnualIncome : null,
       _prefilledFrom: "customer",
+      ...bookingExtra,
     });
   } catch (e) {
     console.error("[crm-customer-bank-details] GET error:", e.message);
@@ -124,15 +138,38 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // Locked once the Booking is Approved — same "nothing left to edit"
-    // rule every other tab on the Booking Detail page enforces (Unit/Rate,
-    // Payment Plan, Parking/Extra Charges — see crmBookings.js's own
-    // Status === 'Approved' checks). Bank/KYC details are exactly as
-    // sensitive as those, so they get the same server-side gate rather than
-    // relying on the frontend alone to hide the Save button.
-    const bookingRow = await pool.request().input("bid", sql.Int, bid).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @bid");
-    if (bookingRow.recordset[0]?.Status === "Approved") {
-      return res.status(400).json({ error: "This booking is Approved — Bank/KYC details can no longer be edited." });
+    // Financing Type (Self-funded / Loan-financed) lives on CrmBooking, not
+    // CrmCustomerBankDetail — it's a simple declaration, not sensitive KYC
+    // data (bank account/PAN/Aadhaar), so it's exempt from the
+    // Approved-locks-everything rule below. Without this exemption, a
+    // booking that reached Approved before this field existed could never
+    // have it set at all — permanently blocking Agreement prep for every
+    // pre-existing booking (validateAgreementPreparationPrerequisites now
+    // requires it). Validated against the fixed set rather than accepting
+    // any string.
+    if (b.FinancingType !== undefined && b.FinancingType !== null && !["SelfFunded", "LoanFinanced"].includes(b.FinancingType)) {
+      return res.status(400).json({ error: "FinancingType must be either SelfFunded or LoanFinanced" });
+    }
+    if (b.FinancingType) {
+      await pool.request().input("bid", sql.Int, bid).input("ft", sql.NVarChar(20), b.FinancingType)
+        .query("UPDATE dbo.CrmBooking SET FinancingType = @ft WHERE Id = @bid");
+      await maybeAutoCreateAgreement(pool, bid, actor);
+    }
+
+    // Locked once the Agreement actually has an uploaded document — that's
+    // the real "point of no return" (same trigger Unit/Parking/Extra-Charge
+    // edits gate on via isLegalWorkStarted, see crmWorkflowGuards.js), not
+    // "Status became Approved". Status flips to Approved BEFORE the Welcome
+    // Call even fires (crmBookings.js's approval notifies the assignee to go
+    // do it) and never changes again afterward — locking KYC writes at that
+    // same instant meant the write window for Bank/Nominee/PAN/Aadhaar never
+    // actually existed: Welcome Call and KYC are only ever attempted post-
+    // approval, but a Status==='Approved' lock closes the door the moment
+    // that happens. This was a real, unconditional deadlock, not a rare edge
+    // case. FinancingType is saved above regardless either way.
+    if (await isLegalWorkStarted(pool, bid)) {
+      if (b.FinancingType) return res.json({ success: true });
+      return res.status(400).json({ error: "The agreement already has documents uploaded — Bank/KYC details can no longer be edited." });
     }
 
     const existing = await pool.request().input("bid", sql.Int, bid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
@@ -271,6 +308,15 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (linkedBookingId) {
       const activeErr = await requireActiveBooking(pool, linkedBookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      // Same real freeze point as the Booking-keyed endpoint — this comment
+      // above already said these two endpoints were SUPPOSED to freeze
+      // together; they never actually did until now (this route had no
+      // Approved/legal-work check at all, which is exactly how KYC data kept
+      // getting written through here after a booking's Approved-based lock
+      // elsewhere made the Booking-side endpoint refuse the same edit).
+      if (await isLegalWorkStarted(pool, linkedBookingId)) {
+        return res.status(400).json({ error: "The agreement already has documents uploaded — Bank/KYC details can no longer be edited." });
+      }
     }
 
     const existing = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");

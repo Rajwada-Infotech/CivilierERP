@@ -235,7 +235,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PreferredUnitId, Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
     const existingUnitId = existing.recordset[0].PreferredUnitId || null;
     const existingStatus = existing.recordset[0].Status;
@@ -339,6 +339,27 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
+    // Mandatory-bank rule — same pattern as crmPayments.js's
+    // createReceiptForMilestone (the auto-sync's own receipt-write check)
+    // and CrmBooking.tsx's client-side check: once a real token amount is
+    // on the application and the project has at least one tagged company
+    // bank, a DepositBankId must be present (either just supplied, or
+    // already saved from an earlier step). Only gated on TokenValue —
+    // matches the wizard, which only shows/requires the picker once a
+    // token value is actually entered.
+    const effectiveTokenValue = b.TokenValue !== undefined ? b.TokenValue : undefined;
+    if (effectiveTokenValue !== undefined && effectiveTokenValue !== null && effectiveTokenValue !== "") {
+      const effectiveProjectId = b.ProjectId ? parseInt(b.ProjectId) : existing.recordset[0].ProjectId;
+      const effectiveDepositBankId = b.DepositBankId !== undefined ? b.DepositBankId : existing.recordset[0].DepositBankId;
+      if (effectiveProjectId) {
+        const tagged = await pool.request().input("pid", sql.Int, effectiveProjectId)
+          .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
+        if (tagged.recordset[0].Cnt > 0 && !effectiveDepositBankId) {
+          return res.status(400).json({ error: "Deposit bank is required for this project" });
+        }
+      }
+    }
+
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
@@ -365,6 +386,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
+      .input("dbid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
@@ -392,6 +414,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           TokenType = ISNULL(@ttype, TokenType),
           TokenValue = ISNULL(@tval, TokenValue), BookingAmount = ISNULL(@bamt, BookingAmount),
           PaymentMode = ISNULL(@pmode, PaymentMode),
+          DepositBankId = ISNULL(@dbid, DepositBankId),
           BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),
           BrokerageSplitEnabled = ISNULL(@brksplit, BrokerageSplitEnabled),
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
@@ -518,7 +541,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     if (!already.recordset.length) {
       const app = await pool.request().input("id", sql.Int, id).query(`
         SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
-               BookingAmount, PaymentMode, AssignedTo, Notes,
+               BookingAmount, PaymentMode, AssignedTo, Notes, DepositBankId,
                BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
         FROM dbo.CrmApplication WHERE Id = @id
       `);
@@ -529,6 +552,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
             ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
             PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
             TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
+            DepositBankId: a.DepositBankId,
             AssignedTo: a.AssignedTo, Notes: a.Notes,
             BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
           }, actor);

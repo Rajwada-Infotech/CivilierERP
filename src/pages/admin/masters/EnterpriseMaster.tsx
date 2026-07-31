@@ -29,15 +29,10 @@ import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { friendlyErrorMessage } from "@/lib/friendlyError";
 
-const ENTITY_TYPES = ["Enterprise", "Company", "Business Unit"];
-const GST_TYPES = [
-  "Regular",
-  "Composition",
-  "Unregistered",
-  "SEZ",
-  "Deemed Export",
-];
+const GST_TYPES = ["Registered", "Unregistered"];
 
 // Indian states + major cities
 const INDIA_STATE_CITIES: Record<string, string[]> = {
@@ -504,7 +499,12 @@ function buildEnterpriseColumns(
 
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
-  const rights = usePageRights("enterprise-master");
+  // Matches the grantable key registered in PageDefinitions/Menu Rights
+  // ("business-unit-master" — the Admin > Enterprise > Enterprise sidebar
+  // item's path is /admin/masters/business-unit). Using a different key
+  // here meant nobody could ever actually be granted create/edit/delete on
+  // this page — Menu Rights had no matching row to grant.
+  const rights = usePageRights("business-unit-master");
   const {
     data: rows = [],
     isLoading,
@@ -514,6 +514,19 @@ export default function EnterpriseMaster() {
     queryFn: getEnterprises,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Start Financial Year is now picked from Financial Year Master instead of
+  // free-typed, so it always matches a real FinYear row.
+  const { data: finYears = [] } = useQuery<{ FId: number; FName: string }[]>({
+    queryKey: ["fin-year"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/fin-year");
+      if (!res.ok) throw new Error("Failed to fetch financial years");
+      return res.json().catch(() => []);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const finYearNames = finYears.map((f) => f.FName);
 
   const [form, setForm] = useState<Partial<Enterprise>>(empty);
   const [editId, setEditId] = useState<number | null>(null);
@@ -574,7 +587,7 @@ export default function EnterpriseMaster() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      toast.error("Logo must be under 2 MB");
+      toast.error("That logo is too large — please use an image under 2 MB.");
       return;
     }
     const reader = new FileReader();
@@ -594,7 +607,7 @@ export default function EnterpriseMaster() {
 
   const handleSave = async () => {
     if (!form.name?.trim()) {
-      toast.error("Name is required");
+      toast.error("Please enter a name before saving.");
       return;
     }
     setSaving(true);
@@ -609,7 +622,9 @@ export default function EnterpriseMaster() {
       await queryClient.invalidateQueries({ queryKey: ["enterprises"] });
       setShowForm(false);
     } catch (err: any) {
-      toast.error(err.message || "Save failed");
+      toast.error(
+        friendlyErrorMessage(err, "Couldn't save this enterprise. Please check the details and try again."),
+      );
     } finally {
       setSaving(false);
     }
@@ -622,7 +637,9 @@ export default function EnterpriseMaster() {
       toast.success("Enterprise deleted");
       await queryClient.invalidateQueries({ queryKey: ["enterprises"] });
     } catch (err: any) {
-      toast.error(err.message || "Delete failed");
+      toast.error(
+        friendlyErrorMessage(err, "Couldn't delete this enterprise. It may still be in use elsewhere."),
+      );
     } finally {
       setDeleteTarget(null);
     }
@@ -636,10 +653,12 @@ export default function EnterpriseMaster() {
     key: keyof Enterprise,
     type = "text",
     placeholder = "",
+    required = false,
   ) => (
     <div>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {type === "date" ? (
         <div className="relative">
@@ -845,22 +864,26 @@ export default function EnterpriseMaster() {
                     </div>
                   </div>
 
-                  {field("Name *", "name", "text", "Full legal name")}
+                  {field("Name", "name", "text", "Full legal name", true)}
                   {field(
                     "Short Name",
                     "short_name",
                     "text",
                     "Abbreviated name",
                   )}
-                  {sel("Type", "entity_type", ENTITY_TYPES)}
+                  {/* Locked, not a dropdown — this page only ever manages
+                      business_type='E' rows, so Type can only be Enterprise. */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Type
+                    </label>
+                    <div className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-muted/30 text-foreground cursor-not-allowed">
+                      Enterprise
+                    </div>
+                  </div>
                   {field("Description", "description", "text")}
                   {field("Start Date", "start_date", "date")}
-                  {field(
-                    "Start Financial Year",
-                    "start_fin_year",
-                    "text",
-                    "e.g. 2024-25",
-                  )}
+                  {sel("Start Financial Year", "start_fin_year", finYearNames)}
                   {sel("Status", "status", ["Active", "Inactive", "Suspended"])}
                   <div className="flex items-center gap-3 pt-5">
                     <button

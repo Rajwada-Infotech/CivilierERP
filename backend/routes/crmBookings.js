@@ -140,8 +140,12 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const id = parseInt(req.params.id);
     const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT * FROM dbo.CrmPaymentMilestone WHERE BookingId = @id ORDER BY MilestoneNo`),
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT m.*,
+               (SELECT ISNULL(SUM(rp.RPAmount), 0) FROM dbo.ReceivedPayment rp
+                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = 'Pending') AS PendingVerificationAmount
+        FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @id ORDER BY m.MilestoneNo
+      `),
       pool.request().input("id", sql.Int, id).query(
         `SELECT wc.*, u.name AS CalledByName FROM dbo.CrmWelcomeCall wc LEFT JOIN dbo.Users u ON u.id = wc.CalledBy WHERE wc.BookingId = @id ORDER BY wc.CreatedAt DESC`),
       pool.request().input("id", sql.Int, id).query(
@@ -739,21 +743,45 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
   }
 });
 
-// GET /:id/loan — home loan / bank coordination detail for a booking
+// GET /:id/loan — home loan / bank coordination detail for a booking.
+// DisbursedAmount is no longer a manually-typed column — it's computed live
+// from real money: CrmPaymentReceipt rows (via CrmPaymentMilestone.BookingId)
+// plus CrmOnAccountPayment rows (BookingId direct), both filtered to
+// PaymentMode = 'Home Loan' (the real mode value used by CrmPaymentMilestones.tsx's
+// PAY_MODES list). A manual figure that can silently drift from receipts is
+// worse than no figure at all.
 router.get("/:id/loan", requirePageRight("crm-loan-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const result = await pool.request().input("bid", sql.Int, id)
       .query("SELECT * FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
-    res.json(result.recordset[0] || null);
+
+    const received = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r
+                JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
+                WHERE m.BookingId = @bid AND r.PaymentMode = 'Home Loan'), 0)
+        +
+        ISNULL((SELECT SUM(o.Amount) FROM dbo.CrmOnAccountPayment o
+                WHERE o.BookingId = @bid AND o.PaymentMode = 'Home Loan'), 0)
+        AS DisbursedAmount
+    `);
+
+    const row = result.recordset[0] || null;
+    res.json({
+      ...(row || { BookingId: id }),
+      DisbursedAmount: received.recordset[0].DisbursedAmount,
+      HasLoanRecord: !!row,
+    });
   } catch (e) {
     console.error("[crm-bookings] GET /:id/loan error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// PUT /:id/loan — upsert loan detail for a booking
+// PUT /:id/loan — upsert loan detail for a booking. DisbursedAmount is
+// intentionally not accepted here — it's computed on GET, never stored.
 router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -772,7 +800,6 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
         .input("amt",   sql.Decimal(18,2), b.LoanAmount  != null ? parseFloat(b.LoanAmount) : null)
         .input("st",    sql.NVarChar(30),  b.SanctionStatus || null)
         .input("sdate", sql.Date,          b.SanctionDate   || null)
-        .input("disb",  sql.Decimal(18,2), b.DisbursedAmount!= null ? parseFloat(b.DisbursedAmount) : null)
         .input("acc",   sql.NVarChar(100), b.LoanAccountNo || null)
         .input("rm",    sql.NVarChar(200), b.RmName || null)
         .input("rmc",   sql.NVarChar(20),  b.RmContact || null)
@@ -782,7 +809,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
           UPDATE dbo.CrmLoanDetail SET
             BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
             LoanAmount = ISNULL(@amt, LoanAmount), SanctionStatus = ISNULL(@st, SanctionStatus),
-            SanctionDate = ISNULL(@sdate, SanctionDate), DisbursedAmount = ISNULL(@disb, DisbursedAmount),
+            SanctionDate = ISNULL(@sdate, SanctionDate),
             LoanAccountNo = ISNULL(@acc, LoanAccountNo), RmName = ISNULL(@rm, RmName), RmContact = ISNULL(@rmc, RmContact),
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE BookingId = @bid
@@ -858,8 +885,41 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     if (type === "Booking") {
       return res.status(400).json({ error: "Booking invoice is generated automatically once the booking payment is confirmed and the booking is submitted via Confirm & Book — it can't be created manually" });
     }
-    const amount = parseFloat(b.Amount);
-    if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    // "Milestone" invoices (Foundation, Superstructure, Slab Casting,
+    // Plastering, On Possession, parking/extra-charge line items — every
+    // real payment after Booking) stay manual-trigger by design, but the
+    // amount/date are always pulled from the milestone's own real payment
+    // data, never typed freehand — that's what keeps them "synced" instead
+    // of just another disconnected ad-hoc entry. MilestoneId's unique index
+    // (migration 268) guarantees a milestone can never be invoiced twice.
+    let milestoneId = null;
+    let amount, invoiceDate, description;
+    if (type === "Milestone") {
+      milestoneId = parseInt(b.MilestoneId);
+      if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone invoice" });
+      const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
+        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+      `);
+      const mRow = m.recordset[0];
+      if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
+      // Milestone #1 ("Booking") is never eligible here — it already gets its
+      // own auto-generated 'Booking' invoice (maybeAutoGenerateBookingInvoice)
+      // the moment the booking payment clears, so letting it through this
+      // route too would double-invoice the exact same money received.
+      if (mRow.MilestoneNo === 1) return res.status(400).json({ error: "The Booking milestone is invoiced automatically — it can't be invoiced again here" });
+      if (mRow.Status !== "Paid") return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
+      const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid");
+      if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
+      amount = Number(mRow.AmountPaid);
+      invoiceDate = mRow.PaidDate;
+      description = b.Description || `${mRow.MilestoneName} — payment received`;
+    } else {
+      amount = parseFloat(b.Amount);
+      if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+      invoiceDate = b.InvoiceDate || null;
+      description = b.Description || null;
+    }
 
     const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
     const result = await pool.request()
@@ -867,13 +927,14 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       .input("bid",  sql.Int,           id)
       .input("type", sql.NVarChar(30),  type)
       .input("amt",  sql.Decimal(18,2), amount)
-      .input("dt",   sql.Date,          b.InvoiceDate || null)
-      .input("desc", sql.NVarChar(500), b.Description || null)
+      .input("dt",   sql.Date,          invoiceDate)
+      .input("desc", sql.NVarChar(500), description)
       .input("cb",   sql.Int,           actorId(req))
+      .input("mid",  sql.Int,           milestoneId)
       .query(`
-        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME())
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, InvoiceNo: invoiceNo });
   } catch (e) {
@@ -973,6 +1034,9 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
 
+    const statusCheck = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be added." });
+
     const inserted = [];
     for (const file of files) {
       const result = await pool.request()
@@ -1025,6 +1089,9 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     const pool = getPool();
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
+    const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
+    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
+
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });

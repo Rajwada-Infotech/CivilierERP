@@ -647,6 +647,25 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("UPDATE dbo.CrmCoApplicant SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
 
+  // The real % payment schedule must exist BEFORE any parking allotment is
+  // converted below. applyAddParking numbers its own milestone via
+  // `MAX(MilestoneNo)+1` against whatever already exists for the booking —
+  // called on a booking with zero milestones yet (as it used to be here),
+  // that resolves to 1 and collides with the schedule's own Milestone #1
+  // ("Booking"), leaving two distinct rows both claiming MilestoneNo=1. Any
+  // code that looks up "the first milestone" by number (e.g.
+  // CrmBookingDetail.tsx's Record Payment section) then nondeterministically
+  // picks whichever row the query happens to return first — sometimes the
+  // real, already-paid Booking Amount, sometimes the unrelated, unpaid
+  // parking charge — making an already-settled Booking Amount look
+  // outstanding again. generateMilestonesForBooking's own `total` parameter
+  // is the unit price alone (parking is always bolted on as its own fixed
+  // line item, never part of the % base), so moving this earlier changes
+  // nothing about the actual amounts — it only guarantees parking's
+  // MAX(MilestoneNo)+1 resolves against the real schedule instead of an
+  // empty table.
+  await generateMilestonesForBooking(pool, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
+
   // Application-stage slot picks are now only a temporary hold, not a real
   // allotment (see crmParking.js POST /standalone) — convert each one into a
   // real CrmParkingAllotment against this Booking now that it exists, the
@@ -690,8 +709,6 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
 
-  await generateMilestonesForBooking(pool, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
-
   // The Application's Payment Details step already captured the token
   // amount as "paid" (PaymentMode + a cheque/transaction reference, see
   // CrmApplication.tsx) — that is real money Finance needs to know about,
@@ -706,21 +723,48 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       const m1 = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
       const instrument = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT ChequeNo, ChequeDate, TransactionRef, BankName FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+        .query("SELECT ChequeNo, ChequeDate, TransactionRef FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
       const actorRow = await pool.request().input("uid", sql.Int, actorUserId)
         .query("SELECT email, name FROM dbo.users WHERE id = @uid");
+      // The COMPANY bank the token payment landed in — captured on the
+      // Application's own Payment Details step (b.DepositBankId, resolved
+      // from CrmApplication.DepositBankId by the caller) — is a completely
+      // separate thing from the customer's own bank above (that's KYC/
+      // refund banking, never where the company's money actually sits).
+      // Resolved here rather than trusting a caller-supplied name string, so
+      // it can never drift from what CrmProjectBank/AccountHeadMaster
+      // actually call this account.
+      let depositBankName = null;
+      if (b.DepositBankId) {
+        const bank = await pool.request().input("bid2", sql.Int, parseInt(b.DepositBankId))
+          .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid2");
+        depositBankName = bank.recordset[0]?.LHeadName || null;
+      }
       if (m1.recordset.length) {
         const inst = instrument.recordset[0] || {};
         const actorEmail = actorRow.recordset[0]?.email || actorRow.recordset[0]?.name || null;
+        // The real amount actually received, not the plan's fixed figure —
+        // TokenValue on the Application's Payment Details step is what staff
+        // captured the customer as having actually paid, which can
+        // legitimately be more OR less than the fixed Booking Amount (the
+        // plan only fixes what's DUE, not what's collected). Passing this
+        // through lets createReceiptForMilestone's own overpayment-cap logic
+        // do the right thing either way: excess auto-parks to On Account,
+        // and a genuine underpayment leaves the milestone correctly
+        // Partially-paid instead of the system silently recording money that
+        // was never actually received. Falls back to the plan's fixed
+        // figure only when no token amount was captured at all.
+        const actualAmount = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : bookingAmount;
         await createReceiptForMilestone(pool, m1.recordset[0].Id, {
-          Amount: bookingAmount,
+          Amount: actualAmount,
           ReceivedDate: b.BookingDate,
           PaymentMode: b.PaymentMode || null,
           TransactionRef: b.PaymentMode === "Cheque" ? (inst.ChequeNo || null) : (inst.TransactionRef || null),
           ChequeDate: b.PaymentMode === "Cheque" ? (inst.ChequeDate || null) : null,
-          DepositBankName: inst.BankName || null,
+          DepositBankId: b.DepositBankId || null,
+          DepositBankName: depositBankName,
           Notes: "Auto-synced from Application token payment capture",
-        }, actorUserId, actorEmail);
+        }, actorUserId, actorEmail, { enforceBankMandate: true });
       }
     } catch (receiptErr) {
       console.error("[crmEntityCreation] auto-receipt sync failed:", receiptErr.message);
