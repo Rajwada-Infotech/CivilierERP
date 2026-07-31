@@ -55,6 +55,7 @@ export type PageAction =
   | "print"
   | "preview"
   | "export"
+  | "import"
   | "approve"
   | "reject"
   | "post-approval";

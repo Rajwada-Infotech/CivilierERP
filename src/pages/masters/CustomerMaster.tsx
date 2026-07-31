@@ -54,13 +54,7 @@ import TreeDropdown from "@/components/common/TreeDropdown";
 
 const CUSTOMER_TYPE = "A";
 
-const GST_TYPES = [
-  "Regular",
-  "Composition",
-  "Unregistered",
-  "SEZ",
-  "Deemed Export",
-] as const;
+const GST_TYPES = ["Registered", "Unregistered"] as const;
 
 const GST_STATES = [
   "Andaman and Nicobar Islands",

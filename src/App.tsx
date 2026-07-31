@@ -13,6 +13,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+const DownloadAndroidApp = lazy(() => import("./pages/DownloadAndroidApp"));
 import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
@@ -578,6 +579,9 @@ function AppRoutes() {
         <Route path="profile" element={<PortalProfile />} />
       </Route>
 
+      {/* Public — reachable without logging in, so the QR/link can be shared freely */}
+      <Route path="/download-android-app" element={<DownloadAndroidApp />} />
+
       {/* AUTH */}
       <Route
         path="/login"
@@ -945,7 +949,7 @@ function AppRoutes() {
       <Route
         path="/material/work-order"
         element={
-          <ProtectedRoute pageKey="work-order-master">
+          <ProtectedRoute pageKey="engineering-work-order">
             <WorkOrderMaster />
           </ProtectedRoute>
         }
@@ -1194,7 +1198,7 @@ function AppRoutes() {
       <Route
         path="/masters/account-group"
         element={
-          <ProtectedRoute pageKey="account-group">
+          <ProtectedRoute pageKey="account-head">
             <AccountGroupMaster />
           </ProtectedRoute>
         }

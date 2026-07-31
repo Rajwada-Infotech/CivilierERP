@@ -25,6 +25,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
+import { friendlyErrorMessage } from "@/lib/friendlyError";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -638,7 +639,10 @@ export default function CompanyMaster() {
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setShowForm(false);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't save this company. Please check the details and try again."),
+      ),
   });
 
   const deleteMutation = useMutation({
@@ -659,7 +663,10 @@ export default function CompanyMaster() {
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setDeleteConfirm(null);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't delete this company. It may still be in use elsewhere."),
+      ),
   });
 
   const filtered = companies.filter(
@@ -704,7 +711,7 @@ export default function CompanyMaster() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      toast.error("Logo must be under 2 MB");
+      toast.error("That logo is too large — please use an image under 2 MB.");
       return;
     }
     const reader = new FileReader();
@@ -750,7 +757,7 @@ export default function CompanyMaster() {
       <div key={key}>
         <label className="block text-xs font-medium text-muted-foreground mb-1">
           {cleanLabel}
-          {showStar && <span className="ml-0.5">*</span>}
+          {showStar && <span className="text-red-500 ml-0.5">*</span>}
         </label>
         {type === "date" ? (
           <>

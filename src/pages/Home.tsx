@@ -32,6 +32,8 @@ import {
   Pickaxe,
   Receipt,
   HeartHandshake,
+  CalendarClock,
+  Smartphone,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
@@ -476,6 +478,7 @@ function BgGrid() {
 // ─── HomePage ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const { currentUser, canAccessPage } = useAuth();
+  const navigate = useNavigate();
 
   const role: UserRoleStr = currentUser?.role ?? "";
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";
@@ -736,6 +739,23 @@ export default function HomePage() {
     });
   });
 
+  if (access.followup) {
+    (fol?.recent ?? []).forEach((t) => {
+      feed.push({
+        label: `${t.taskNo || "Task"} — ${t.subject}`,
+        sub: t.status,
+        icon: CalendarClock,
+        color: "#0d9488",
+        time: t.dueDate
+          ? new Date(t.dueDate).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+            })
+          : undefined,
+      });
+    });
+  }
+
   const activityFeed = feed.slice(0, 7);
 
   // ── How many visible module cards exist (for staggered delay calculation) ──
@@ -844,6 +864,23 @@ export default function HomePage() {
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
             </span>
             <div className="ml-auto flex items-center gap-2">
+              <motion.button
+                type="button"
+                onClick={() => navigate("/download-android-app")}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold border border-primary/25 text-primary/80 hover:bg-primary/10 transition-colors"
+                title="Download our Android app"
+              >
+                <motion.span
+                  className="inline-flex"
+                  animate={{ y: [0, -2.5, 0] }}
+                  transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <Smartphone size={11} />
+                </motion.span>
+                Get the Android app
+              </motion.button>
               {lastUpdated && (
                 <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums">
                   {lastUpdated}
@@ -1014,12 +1051,12 @@ export default function HomePage() {
             {/* 5 · Follow-Up */}
             {access.followup && (
               <ModuleCard title="Follow-Up" href="/followup" icon={Users} accent="#0d9488" delay={nextDelay()} loading={isLoading}
-                badge={fol?.pendingNOCs}
+                badge={fol?.overdue}
                 stats={[
-                  { label: "Applications", value: fol?.applications ?? 0, accent: "#0d9488" },
-                  { label: "Confirmed bookings", value: fol?.confirmedBookings ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                  { label: "Active agreements", value: fol?.activeAgreements ?? 0, accent: "#f59e0b" },
-                  { label: "Handovers due", value: fol?.scheduledHandovers ?? 0, accent: fol?.scheduledHandovers ? "#ef4444" : undefined },
+                  { label: "Active tasks", value: fol?.totalActive ?? 0, accent: "#0d9488" },
+                  { label: "Due today", value: fol?.dueToday ?? 0, accent: "#3b82f6" },
+                  { label: "Overdue", value: fol?.overdue ?? 0, accent: fol?.overdue ? "#ef4444" : undefined },
+                  { label: "On hold", value: fol?.onHold ?? 0, accent: "#f59e0b" },
                 ]} />
             )}
 

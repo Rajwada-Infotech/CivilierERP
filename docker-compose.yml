@@ -107,6 +107,10 @@ services:
       - frontend_dist:/usr/share/nginx/html:ro
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      # APK releases — a plain host folder, not part of the git repo or the
+      # frontend build image. Drop/replace .apk files here directly on the
+      # EC2 host and nginx serves the new one immediately, no rebuild needed.
+      - ./apk-releases:/var/www/apk-releases:ro
     depends_on:
       backend:
         condition: service_healthy

@@ -70,7 +70,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 
 const CrmBrokerMaster: React.FC = () => {
   const qc = useQueryClient();
-  const rights = usePageRights("crm-broker-master");
+  // Matches the route's real gating key (App.tsx: /masters/brokers ->
+  // pageKey="broker-master") — this internal check used a different,
+  // ungrantable key ("crm-broker-master") that had no Menu Rights row.
+  const rights = usePageRights("broker-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BrokerForm>(EMPTY_FORM);
