@@ -328,6 +328,13 @@ const followupSetupItems = [
     color: "text-teal-500",
     pageKey: "task-master",
   },
+  {
+    icon: Users,
+    label: "Department Master",
+    path: "/followup/setup/department-master",
+    color: "text-cyan-500",
+    pageKey: "followup-department-master",
+  },
 ];
 
 const engineeringSetupItems = [
@@ -716,7 +723,7 @@ const SetupDropdown = ({
                       : undefined
                   }
                 >
-                  {label}
+                  {label.replace(/ Master$/, "")}
                 </span>
               </button>
             );

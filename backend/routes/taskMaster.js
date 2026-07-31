@@ -103,24 +103,36 @@ router.get("/assignable-users", async (req, res) => {
 // separate from GET / (Task Master admin grid) so the two pages never share
 // a cache entry or a response shape — Follow-Up only ever needs the handful
 // of fields its cards render, not the full admin record.
+// Every task has an Assignee, so the Follow-Up board only ever shows a user
+// their own assigned tasks — never another user's — determined purely from
+// the logged-in session (req.user), never a client-supplied filter. Admin
+// roles keep full visibility since they're the ones who assign tasks in the
+// first place and need to see the whole board to manage it.
+const FOLLOWUP_BOARD_PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
+
 router.get("/followup-board", cache("task-master-followup-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const request = pool.request();
+    if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
+    const result = await request.query(`
       SELECT
         t.Id, t.TaskNo, t.Subject, t.Details, t.Department, t.DueDate,
         t.CaseNumber, t.Priority, t.Status,
         co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
         (
-          SELECT MIN(f.NextReminderAt)
+          SELECT TOP 1 f.NextReminderAt
           FROM dbo.TaskFollowUps f
-          WHERE f.TaskId = t.Id AND f.NextReminderAt >= CAST(SYSDATETIME() AS DATE)
+          WHERE f.TaskId = t.Id AND f.IsDone = 0 AND f.NextReminderAt IS NOT NULL
+          ORDER BY f.CreatedAt DESC
         ) AS NextFollowUpAt
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
       LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
       WHERE t.IsDeleted = 0 AND t.Status IN ('Active', 'Hold') AND t.DueDate IS NOT NULL
+        ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
       ORDER BY t.DueDate ASC
     `);
     res.json(result.recordset);
@@ -159,7 +171,17 @@ router.get("/:id", async (req, res) => {
       WHERE t.Id = @Id AND t.IsDeleted = 0
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Task not found" });
-    res.json(result.recordset[0]);
+    const task = result.recordset[0];
+    // Same rule as /followup-board: a non-privileged user can't fetch a task
+    // (and by extension its follow-ups/chat/files via the drawer) assigned
+    // to someone else, even by guessing/typing the id directly.
+    if (
+      !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role) &&
+      task.AssignedTo !== (req.user?.userId ?? null)
+    ) {
+      return res.status(403).json({ error: "Not authorized to view this task" });
+    }
+    res.json(task);
   } catch (err) {
     console.error("[task-master] GET /:id error:", err.message);
     res.status(500).json({ error: err.message });
@@ -232,7 +254,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         VALUES (
           @TaskNo, @Subject, @Details, @Department, @DueDate, @CaseNumber, @Priority, @Status,
           @CaseCompanyId, @CaseProjectId, @CaseFinYearId, @CaseDocumentNumber, @TypeOfDocId, @AssignedTo,
-          @CreatedBy, SYSDATETIME()
+          @CreatedBy, SYSUTCDATETIME()
         );
         SELECT SCOPE_IDENTITY() AS Id;
       `);
@@ -291,7 +313,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           CaseCompanyId = @CaseCompanyId, CaseProjectId = @CaseProjectId,
           CaseFinYearId = @CaseFinYearId, CaseDocumentNumber = @CaseDocumentNumber,
           AssignedTo = @AssignedTo,
-          UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
     await bumpTaskCaches();
@@ -322,7 +344,7 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
       .input("Id", sql.Int, id)
       .input("Status", sql.NVarChar(20), Status)
       .input("UpdatedBy", sql.Int, updatedBy)
-      .query("UPDATE dbo.TaskMaster SET Status = @Status, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
+      .query("UPDATE dbo.TaskMaster SET Status = @Status, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME() WHERE Id = @Id");
     await bumpTaskCaches();
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" marked ${Status}` });
   } catch (err) {
@@ -340,9 +362,11 @@ router.get("/:id/followups", async (req, res) => {
     const pool = getPool();
     const followups = await pool.request().input("TaskId", sql.Int, taskId).query(`
       SELECT f.Id, f.TaskId, f.Note, f.NextReminderAt, f.CreatedAt,
-             f.CreatedBy, u.name AS CreatedByName
+             f.CreatedBy, u.name AS CreatedByName,
+             f.IsDone, f.DoneAt, f.DoneBy, du.name AS DoneByName
       FROM dbo.TaskFollowUps f
       LEFT JOIN dbo.users u ON u.id = f.CreatedBy
+      LEFT JOIN dbo.users du ON du.id = f.DoneBy
       WHERE f.TaskId = @TaskId
       ORDER BY f.CreatedAt ASC
     `);
@@ -386,7 +410,7 @@ router.post("/:id/followups", upload.array("files", 10), async (req, res) => {
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
         INSERT INTO dbo.TaskFollowUps (TaskId, Note, NextReminderAt, CreatedBy, CreatedAt)
-        VALUES (@TaskId, @Note, @NextReminderAt, @CreatedBy, SYSDATETIME());
+        VALUES (@TaskId, @Note, @NextReminderAt, @CreatedBy, SYSUTCDATETIME());
         SELECT SCOPE_IDENTITY() AS Id;
       `);
     const followUpId = ins.recordset[0].Id;
@@ -403,7 +427,7 @@ router.post("/:id/followups", upload.array("files", 10), async (req, res) => {
         .input("UploadedBy", sql.Int, createdBy)
         .query(`
           INSERT INTO dbo.TaskAttachments (TaskId, FollowUpId, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
-          VALUES (@TaskId, @FollowUpId, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy, SYSDATETIME())
+          VALUES (@TaskId, @FollowUpId, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy, SYSUTCDATETIME())
         `);
     }
 
@@ -441,6 +465,40 @@ router.delete("/:id/followups/:followUpId", async (req, res) => {
     res.json({ message: "Follow-up deleted" });
   } catch (err) {
     console.error("[task-master] DELETE followup error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /:id/followups/:followUpId/done — marks the current follow-up
+// reminder as completed, so it drops off the "most recent due date" shown on
+// the board/bell before the next one is logged.
+router.patch("/:id/followups/:followUpId/done", async (req, res) => {
+  const taskId = parseInt(req.params.id, 10);
+  const followUpId = parseInt(req.params.followUpId, 10);
+  if (!Number.isFinite(taskId) || !Number.isFinite(followUpId)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+  try {
+    const pool = getPool();
+    const existing = await pool.request()
+      .input("Id", sql.Int, followUpId)
+      .input("TaskId", sql.Int, taskId)
+      .query("SELECT Id FROM dbo.TaskFollowUps WHERE Id = @Id AND TaskId = @TaskId");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Follow-up not found" });
+
+    await pool.request()
+      .input("Id", sql.Int, followUpId)
+      .input("DoneBy", sql.Int, req.user?.userId || null)
+      .query(`
+        UPDATE dbo.TaskFollowUps
+        SET IsDone = 1, DoneAt = SYSUTCDATETIME(), DoneBy = @DoneBy
+        WHERE Id = @Id
+      `);
+
+    await bumpTaskCaches();
+    res.json({ message: "Follow-up marked done" });
+  } catch (err) {
+    console.error("[task-master] PATCH followup done error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -486,7 +544,7 @@ router.post("/:id/chat", async (req, res) => {
       .input("Message", sql.NVarChar(sql.MAX), Message.trim())
       .query(`
         INSERT INTO dbo.TaskChatMessages (TaskId, SenderId, Message, CreatedAt)
-        VALUES (@TaskId, @SenderId, @Message, SYSDATETIME());
+        VALUES (@TaskId, @SenderId, @Message, SYSUTCDATETIME());
         SELECT SCOPE_IDENTITY() AS Id;
       `);
     const newId = ins.recordset[0].Id;
@@ -567,7 +625,7 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       .request()
       .input("Id", sql.Int, id)
       .input("UpdatedBy", sql.Int, updatedBy)
-      .query("UPDATE dbo.TaskMaster SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() WHERE Id = @Id");
+      .query("UPDATE dbo.TaskMaster SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME() WHERE Id = @Id");
     await bumpTaskCaches();
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" deleted successfully` });
   } catch (err) {

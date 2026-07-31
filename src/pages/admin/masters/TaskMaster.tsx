@@ -25,6 +25,16 @@ async function fetchAssigneeOptions(): Promise<{ value: string; label: string }[
   return data.map((u) => ({ value: String(u.id), label: u.name }));
 }
 
+// Department is sourced from Department Master (Setup -> Department Master)
+// — no more free text here, so every task's Department always matches a
+// real, de-duplicated master record.
+async function fetchDepartmentOptions(): Promise<{ value: string; label: string }[]> {
+  const res = await fetchWithAuth("/api/department-master");
+  if (!res.ok) throw new Error("Failed to fetch departments");
+  const data: { Id: number; DepartmentName: string; IsActive: boolean }[] = await res.json().catch(() => ([]));
+  return data.filter((d) => d.IsActive).map((d) => ({ value: d.DepartmentName, label: d.DepartmentName }));
+}
+
 // April–March cycle, matching backend/utils/docNumberLock.js's currentFinYear().
 function currentFinYear(): string {
   const now = new Date();
@@ -161,12 +171,13 @@ const fields: FieldDef[] = [
     label: "Financial Year",
     type: "select",
     asyncOptions: fetchFinYearOptions,
+    defaultToFirstOption: true,
   },
 
   { name: "section-task", label: "Task Details", type: "section" },
   { name: "subject", label: "Subject", type: "text", required: true },
   { name: "details", label: "Details", type: "textarea", fullWidth: true },
-  { name: "department", label: "Department", type: "text" },
+  { name: "department", label: "Department", type: "select", asyncOptions: fetchDepartmentOptions },
   { name: "dueDate", label: "Due Date", type: "date" },
   { name: "caseNumber", label: "Case Number", type: "text", placeholder: "Manual entry" },
   { name: "assignedTo", label: "Assignee", type: "select", asyncOptions: fetchAssigneeOptions },

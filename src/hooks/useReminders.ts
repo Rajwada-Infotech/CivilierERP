@@ -9,7 +9,22 @@ export type ReminderType =
   | "grn"
   | "emi_installment"
   | "material_request"
-  | "pdc";
+  | "pdc"
+  | "followup";
+
+// Which module owns each reminder type — drives the bell's "only this
+// module's reminders" scoping everywhere except the Home dashboard, which
+// shows every type unfiltered.
+export const REMINDER_TYPE_MODULE: Record<ReminderType, string> = {
+  purchase_order: "material",
+  work_order: "material",
+  grn: "material",
+  emi_installment: "material",
+  material_request: "material",
+  tds: "finance",
+  pdc: "finance",
+  followup: "followup",
+};
 
 export interface ReminderItem {
   id: string | number;
@@ -138,6 +153,34 @@ async function fetchPdcReminders(): Promise<ReminderItem[]> {
           urgency: classifyUrgency(dueDate),
           amount: r.Amount,
           path: "/reports",
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+// Follow-Up task reminders — only tasks that actually have a scheduled
+// (not-yet-done) follow-up reminder date surface here; a task's own DueDate
+// alone doesn't (that's what the Follow-Up board's Overdue/Today buckets are
+// for), so the bell reflects "you told yourself to check back on this."
+async function fetchFollowUpReminders(): Promise<ReminderItem[]> {
+  try {
+    const res = await fetchWithAuth("/api/task-master/followup-board");
+    if (!res.ok) return [];
+    const rows: any[] = await res.json().catch(() => []);
+    return rows
+      .filter((t) => t.NextFollowUpAt)
+      .map((t) => {
+        const dueDate = String(t.NextFollowUpAt).slice(0, 10);
+        return {
+          id: `followup-${t.Id}`,
+          type: "followup" as ReminderType,
+          title: `${t.TaskNo || `Task #${t.Id}`} · ${t.Subject}`,
+          subtitle: t.CaseProjectName || t.CaseCompanyName || t.Department || "Follow-Up",
+          dueDate,
+          urgency: classifyUrgency(dueDate),
+          path: `/followup?view=${t.Id}`,
         };
       });
   } catch {
@@ -297,7 +340,7 @@ export async function fetchAllReminders(
     toList(tdsRes),
     toList(woRes),
   ]);
-  const [, emiItems, mrItems, pdcItems] = await Promise.all([
+  const [, emiItems, mrItems, pdcItems, followupItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
@@ -307,11 +350,13 @@ export async function fetchAllReminders(
     fetchEmiReminders().catch(() => [] as ReminderItem[]),
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
     fetchPdcReminders().catch(() => [] as ReminderItem[]),
+    fetchFollowUpReminders().catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
   items.push(...mrItems);
   items.push(...pdcItems);
+  items.push(...followupItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };

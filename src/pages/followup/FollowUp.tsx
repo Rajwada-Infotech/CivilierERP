@@ -1,4 +1,5 @@
 import React from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -64,6 +65,13 @@ function dueLabel(dueDate: string | null): string {
   if (diffDays === 1) return `Due Tomorrow · ${dateStr}`;
   return `Due in ${diffDays}d · ${dateStr}`;
 }
+
+const BUCKET_LABELS = {
+  dueToday: "Due Today",
+  overdue: "Overdue",
+  upcoming: "Upcoming",
+  onHold: "On Hold",
+} as const;
 
 const PRIORITY_STYLE: Record<string, { classes: string }> = {
   "Very Important": { classes: "bg-red-500/10 text-red-500 border-red-500/25" },
@@ -150,21 +158,30 @@ const TaskCard: React.FC<{ task: Task; index: number; onClick: () => void }> = (
   );
 };
 
-const StatCard: React.FC<{ label: string; count: number; icon: React.ElementType; color: string; delay: number }> = ({
-  label,
-  count,
-  icon: Icon,
-  color,
-  delay,
-}) => {
+const StatCard: React.FC<{
+  label: string;
+  count: number;
+  icon: React.ElementType;
+  color: string;
+  delay: number;
+  active: boolean;
+  onClick: () => void;
+}> = ({ label, count, icon: Icon, color, delay, active, onClick }) => {
   const { glassCard } = useGlass();
   return (
-    <motion.div
+    <motion.button
+      type="button"
+      onClick={onClick}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay, ease: "easeOut" }}
-      className="flex-1 min-w-[160px] rounded-xl p-4 flex items-center gap-3"
-      style={glassCard}
+      whileHover={{ y: -2 }}
+      className="flex-1 min-w-[160px] rounded-xl p-4 flex items-center gap-3 text-left transition-shadow"
+      style={{
+        ...glassCard,
+        outline: active ? `2px solid ${color}` : "none",
+        outlineOffset: -1,
+      }}
     >
       <div
         className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
@@ -176,7 +193,7 @@ const StatCard: React.FC<{ label: string; count: number; icon: React.ElementType
         <p className="text-2xl font-bold text-foreground leading-none">{count}</p>
         <p className="text-xs text-muted-foreground mt-1">{label}</p>
       </div>
-    </motion.div>
+    </motion.button>
   );
 };
 
@@ -185,7 +202,24 @@ const FollowUp: React.FC = () => {
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<(typeof PRIORITIES)[number] | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
+  const [bucketFilter, setBucketFilter] = React.useState<keyof typeof BUCKET_LABELS | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(
+    searchParams.get("view"),
+  );
+
+  // Deep-link support (e.g. from the reminder bell's Follow-Up pill) — open
+  // straight to the task the ?view= param names, then drop the param so it
+  // doesn't reopen on a later back/refresh.
+  React.useEffect(() => {
+    const view = searchParams.get("view");
+    if (!view) return;
+    setSelectedTaskId(view);
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["followup-board"],
@@ -327,11 +361,63 @@ const FollowUp: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <StatCard label="Due Today" count={buckets.dueToday.length} icon={Clock3} color="#3b82f6" delay={0.05} />
-        <StatCard label="Overdue" count={buckets.overdue.length} icon={Flame} color="#ef4444" delay={0.1} />
-        <StatCard label="Upcoming" count={buckets.upcoming.length} icon={CalendarDays} color="#10b981" delay={0.15} />
-        <StatCard label="On Hold" count={buckets.onHold.length} icon={Pause} color="#f59e0b" delay={0.2} />
+        <StatCard
+          label="Due Today"
+          count={buckets.dueToday.length}
+          icon={Clock3}
+          color="#3b82f6"
+          delay={0.05}
+          active={bucketFilter === "dueToday"}
+          onClick={() => setBucketFilter((f) => (f === "dueToday" ? null : "dueToday"))}
+        />
+        <StatCard
+          label="Overdue"
+          count={buckets.overdue.length}
+          icon={Flame}
+          color="#ef4444"
+          delay={0.1}
+          active={bucketFilter === "overdue"}
+          onClick={() => setBucketFilter((f) => (f === "overdue" ? null : "overdue"))}
+        />
+        <StatCard
+          label="Upcoming"
+          count={buckets.upcoming.length}
+          icon={CalendarDays}
+          color="#10b981"
+          delay={0.15}
+          active={bucketFilter === "upcoming"}
+          onClick={() => setBucketFilter((f) => (f === "upcoming" ? null : "upcoming"))}
+        />
+        <StatCard
+          label="On Hold"
+          count={buckets.onHold.length}
+          icon={Pause}
+          color="#f59e0b"
+          delay={0.2}
+          active={bucketFilter === "onHold"}
+          onClick={() => setBucketFilter((f) => (f === "onHold" ? null : "onHold"))}
+        />
       </div>
+
+      {bucketFilter && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Showing</span>
+          <span
+            className="inline-flex items-center gap-1.5 font-semibold px-2 py-1 rounded-lg"
+            style={{ background: "rgba(13,148,136,0.14)", color: ACCENT }}
+          >
+            {BUCKET_LABELS[bucketFilter]}
+            <button
+              type="button"
+              onClick={() => setBucketFilter(null)}
+              className="hover:opacity-70 transition-opacity"
+              aria-label="Clear filter"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -358,10 +444,29 @@ const FollowUp: React.FC = () => {
         </motion.div>
       ) : (
         <>
-          <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} />
-          <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} />
-          <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} />
-          <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} />
+          {(!bucketFilter || bucketFilter === "overdue") && (
+            <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} />
+          )}
+          {(!bucketFilter || bucketFilter === "dueToday") && (
+            <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} />
+          )}
+          {(!bucketFilter || bucketFilter === "upcoming") && (
+            <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} />
+          )}
+          {(!bucketFilter || bucketFilter === "onHold") && (
+            <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} />
+          )}
+          {bucketFilter && buckets[bucketFilter].length === 0 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-xl p-8 flex flex-col items-center gap-1.5 text-center"
+              style={glassCard}
+            >
+              <p className="text-sm font-medium text-foreground">No {BUCKET_LABELS[bucketFilter].toLowerCase()} tasks</p>
+              <p className="text-xs text-muted-foreground">Nothing here right now.</p>
+            </motion.div>
+          )}
         </>
       )}
 

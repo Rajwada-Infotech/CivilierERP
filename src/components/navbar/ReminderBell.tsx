@@ -13,8 +13,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Landmark,
+  CalendarClock,
 } from "lucide-react";
-import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
+import { useReminders, formatRelative, formatDate, REMINDER_TYPE_MODULE } from "@/hooks/useReminders";
 import { useModule } from "@/contexts/ModuleContext";
 import { getModuleAccent } from "@/lib/moduleColors";
 
@@ -32,7 +33,20 @@ const TYPE_META: Record<string, ReminderMeta> = {
   emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
   material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
   pdc: { icon: Landmark, label: "PDC", color: "text-sky-500" },
+  followup: { icon: CalendarClock, label: "Follow-Up", color: "text-teal-500" },
 };
+
+const ALL_TABS = [
+  "all",
+  "material_request",
+  "purchase_order",
+  "grn",
+  "work_order",
+  "pdc",
+  "emi_installment",
+  "tds",
+  "followup",
+];
 
 export const ReminderBell = () => {
   const navigate = useNavigate();
@@ -40,7 +54,7 @@ export const ReminderBell = () => {
   const accent = getModuleAccent(activeModule);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
-  const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
+  const { reminders, loading, refresh, isLocked } = useReminders({
     pollingInterval: 0,
   });
 
@@ -99,8 +113,27 @@ export const ReminderBell = () => {
     });
   }, [refresh]);
 
+  // Home (activeModule === null) is the one consolidated view — everywhere
+  // else the bell only ever shows the current module's own reminders, per
+  // REMINDER_TYPE_MODULE, so e.g. the Material bell doesn't get cluttered
+  // with Follow-Up or Finance items and vice versa.
+  const scoped = activeModule
+    ? reminders.filter((r) => REMINDER_TYPE_MODULE[r.type] === activeModule)
+    : reminders;
+
+  const availableTabs = activeModule
+    ? ["all", ...ALL_TABS.filter((t) => t !== "all" && REMINDER_TYPE_MODULE[t as keyof typeof REMINDER_TYPE_MODULE] === activeModule)]
+    : ALL_TABS;
+
+  // Reset back to "all" if the active filter tab no longer applies (e.g. the
+  // user switched modules while a type-specific tab was selected).
+  useEffect(() => {
+    if (!availableTabs.includes(filter)) setFilter("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeModule]);
+
   const filtered =
-    filter === "all" ? reminders : reminders.filter((r) => r.type === filter);
+    filter === "all" ? scoped : scoped.filter((r) => r.type === filter);
 
   // CSS custom properties drive every accent-tinted style below, so the
   // whole panel re-themes to whichever module the user is currently in
@@ -146,15 +179,15 @@ export const ReminderBell = () => {
       >
         <Notification
           size={20}
-          variant={badgeCount > 0 ? "Bold" : "Outline"}
-          className={badgeCount > 0 ? "animate-jingle-periodic" : ""}
-          color={badgeCount > 0 ? "#f59e0b" : "hsl(var(--muted-foreground))"}
+          variant={scoped.length > 0 ? "Bold" : "Outline"}
+          className={scoped.length > 0 ? "animate-jingle-periodic" : ""}
+          color={scoped.length > 0 ? "#f59e0b" : "hsl(var(--muted-foreground))"}
         />
-        {badgeCount > 0 && (
+        {scoped.length > 0 && (
           <span className="absolute top-1.5 right-1.5 flex h-4 w-4">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 text-[10px] font-bold text-white items-center justify-center border-2 border-background">
-              {badgeCount}
+              {scoped.length}
             </span>
           </span>
         )}
@@ -191,8 +224,8 @@ export const ReminderBell = () => {
                       Reminders
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      {reminders.length} pending alert
-                      {reminders.length === 1 ? "" : "s"}
+                      {scoped.length} pending alert
+                      {scoped.length === 1 ? "" : "s"}
                     </p>
                   </div>
                 </div>
@@ -238,16 +271,7 @@ export const ReminderBell = () => {
                 ref={tabsRef}
                 className="flex-1 flex gap-1 overflow-x-auto no-scrollbar"
               >
-                {[
-                  "all",
-                  "material_request",
-                  "purchase_order",
-                  "grn",
-                  "work_order",
-                  "pdc",
-                  "emi_installment",
-                  "tds",
-                ].map((t) => {
+                {availableTabs.map((t) => {
                   const active = filter === t;
                   const meta = t !== "all" ? TYPE_META[t] : null;
                   const Icon = meta?.icon;

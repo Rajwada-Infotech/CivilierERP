@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2 } from "lucide-react";
+import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2, Check } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getSocket } from "@/lib/socket";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "/api/task-master";
 const TEAL = "#0d9488";
@@ -45,6 +46,9 @@ interface FollowUp {
   CreatedByName: string | null;
   CreatedAt: string;
   Attachments: Attachment[];
+  IsDone: boolean;
+  DoneAt: string | null;
+  DoneByName: string | null;
 }
 
 interface Attachment {
@@ -60,6 +64,7 @@ interface Attachment {
 interface ChatMessage {
   Id: number;
   Message: string;
+  SenderId: number | null;
   SenderName: string | null;
   SenderAvatarUrl: string | null;
   CreatedAt: string;
@@ -138,6 +143,8 @@ const EmptyState: React.FC<{ label: string }> = ({ label }) => (
 
 export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatusChange }) => {
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const currentUserId = currentUser?.id ? Number(currentUser.id) : null;
 
   // Standalone: the drawer fetches its own task record the moment a taskId
   // is plugged in — it never reads from Task Master's or the Follow-Up
@@ -261,6 +268,17 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
       toast.error(err.message || "Failed to save follow-up");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleMarkFollowUpDone = async (followUpId: number) => {
+    try {
+      const res = await fetchWithAuth(`${API}/${taskId}/followups/${followUpId}/done`, { method: "PATCH" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to mark follow-up done");
+      toast.success("Follow-up marked done");
+      await Promise.all([invalidateFollowUps(), invalidateBoard()]);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to mark follow-up done");
     }
   };
 
@@ -407,34 +425,66 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
             <div className="h-full flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto scrollbar-none px-5">
               {followUps.length === 0 && <EmptyState label="No follow-ups yet." />}
-              {followUps.map((f, i) => (
+              {followUps.map((f, i) => {
+                // Only the latest, not-yet-done follow-up is "current" — that's
+                // the one a Done button makes sense on, mirroring the board's
+                // NextFollowUpAt (which is sourced the same way).
+                const isCurrent = !f.IsDone && i === followUps.length - 1;
+                return (
                 <div key={f.Id} className="relative pl-6 pb-5">
                   {i < followUps.length - 1 && (
                     <span className="absolute left-[5px] top-3 bottom-0 w-px" style={{ background: "rgba(13,148,136,0.25)" }} />
                   )}
                   <span
                     className="absolute left-0 top-1.5 w-2.5 h-2.5 rounded-full"
-                    style={{ background: TEAL, boxShadow: `0 0 0 3px rgba(13,148,136,0.15)` }}
+                    style={
+                      f.IsDone
+                        ? { background: "#10b981", boxShadow: "0 0 0 3px rgba(16,185,129,0.15)" }
+                        : { background: TEAL, boxShadow: `0 0 0 3px rgba(13,148,136,0.15)` }
+                    }
                   />
-                  <div className="rounded-xl border border-border/70 bg-card/50 p-3">
+                  <div className={`rounded-xl border p-3 ${f.IsDone ? "border-border/50 bg-muted/30" : "border-border/70 bg-card/50"}`}>
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm text-foreground whitespace-pre-wrap flex-1">{f.Note}</p>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteFollowUp(f.Id)}
-                        className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 transition-colors shrink-0"
-                        title="Delete follow-up"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <p className={`text-sm whitespace-pre-wrap flex-1 ${f.IsDone ? "text-muted-foreground" : "text-foreground"}`}>{f.Note}</p>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkFollowUpDone(f.Id)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors"
+                            title="Mark this follow-up as done"
+                          >
+                            <Check size={11} /> Done
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteFollowUp(f.Id)}
+                          className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 transition-colors"
+                          title="Delete follow-up"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="text-[11px] text-muted-foreground">
                         {f.CreatedByName || "—"} · {formatDateTime(f.CreatedAt)}
                       </span>
                       {f.NextReminderAt && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/25">
+                        <span
+                          className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border ${
+                            f.IsDone
+                              ? "bg-muted text-muted-foreground border-border/60 line-through"
+                              : "bg-amber-500/10 text-amber-600 border-amber-500/25"
+                          }`}
+                        >
                           <CalendarClock size={10} /> {formatDateTime(f.NextReminderAt)}
+                        </span>
+                      )}
+                      {f.IsDone && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/25">
+                          <Check size={10} /> Done{f.DoneByName ? ` · ${f.DoneByName}` : ""}
                         </span>
                       )}
                     </div>
@@ -455,7 +505,8 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* A plain sibling of the scroll area above, not `sticky` inside
@@ -512,25 +563,50 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
           {/* ── Chat ── */}
           <TabsContent value="chat" className="flex-1 min-h-0 mt-3" style={{ height: 0 }}>
             <div className="h-full flex flex-col min-h-0">
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-none px-5 pb-4 pt-1 space-y-3">
+            <div
+              ref={chatScrollRef}
+              className="flex-1 overflow-y-auto scrollbar-none px-5 pb-4 pt-1 space-y-3"
+              style={{
+                backgroundImage:
+                  "radial-gradient(rgba(13,148,136,0.05) 1px, transparent 1px)",
+                backgroundSize: "16px 16px",
+              }}
+            >
               {chatMessages.length === 0 && <EmptyState label="No messages yet." />}
-              {chatMessages.map((m) => (
-                <div key={m.Id} className="flex items-start gap-2.5">
-                  <Avatar name={m.SenderName} url={m.SenderAvatarUrl} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xs font-semibold text-foreground">{m.SenderName || "Unknown"}</span>
-                      <span className="text-[10px] text-muted-foreground">{formatDateTime(m.CreatedAt)}</span>
+              {chatMessages.map((m, i) => {
+                const isOwn = currentUserId != null && m.SenderId === currentUserId;
+                // Group consecutive messages from the same sender — only the
+                // first in a run shows the name/avatar, WhatsApp-style.
+                const prev = chatMessages[i - 1];
+                const showSender = !prev || prev.SenderId !== m.SenderId;
+                return (
+                  <div key={m.Id} className={`flex items-end gap-2 ${isOwn ? "flex-row-reverse" : ""}`}>
+                    <div className="w-7 shrink-0">
+                      {!isOwn && showSender && <Avatar name={m.SenderName} url={m.SenderAvatarUrl} size={26} />}
                     </div>
-                    <div
-                      className="inline-block mt-1 px-3 py-1.5 rounded-xl rounded-tl-sm text-sm text-foreground whitespace-pre-wrap"
-                      style={{ background: "rgba(13,148,136,0.08)" }}
-                    >
-                      {m.Message}
+                    <div className={`min-w-0 max-w-[75%] flex flex-col ${isOwn ? "items-end" : "items-start"}`}>
+                      {!isOwn && showSender && (
+                        <span className="text-[11px] font-semibold px-1 mb-0.5" style={{ color: TEAL }}>
+                          {m.SenderName || "Unknown"}
+                        </span>
+                      )}
+                      <div
+                        className={`px-3 py-1.5 text-sm whitespace-pre-wrap break-words shadow-sm ${
+                          isOwn
+                            ? "rounded-2xl rounded-br-sm text-white"
+                            : "rounded-2xl rounded-bl-sm text-foreground border border-border/60"
+                        }`}
+                        style={isOwn ? { background: TEAL } : { background: "var(--card)" }}
+                      >
+                        {m.Message}
+                        <span className={`block text-[10px] mt-0.5 text-right ${isOwn ? "text-white/70" : "text-muted-foreground"}`}>
+                          {formatDateTime(m.CreatedAt)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div className="shrink-0 border-t border-border p-3 flex items-center gap-2">
               <input
