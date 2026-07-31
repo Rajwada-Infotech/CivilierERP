@@ -209,7 +209,12 @@ const CrmBooking: React.FC = () => {
     enabled: dialogOpen,
     staleTime: 5 * 60_000,
   });
-  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when this unit's Project isn't known yet.
+  const bankOptions = selectedUnitProjectId ? projectBanks : allBanks;
   React.useEffect(() => {
     if (projectBanks.length === 1) {
       setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String(projectBanks[0].BId) });

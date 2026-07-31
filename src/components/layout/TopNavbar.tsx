@@ -433,13 +433,6 @@ const crmSetupItems = [
     pageKey: "crm-payment-plans",
   },
   {
-    icon: Landmark,
-    label: "Project Bank Mapping",
-    path: "/crm/setup/project-banks",
-    color: "text-amber-600",
-    pageKey: "crm-project-banks",
-  },
-  {
     icon: ClipboardList,
     label: "Milestone Master",
     path: "/crm/milestone-master",

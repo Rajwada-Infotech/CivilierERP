@@ -54,6 +54,10 @@ const EMPTY_FORM = {
   // CrmApplication and were already read by handleCreateBooking's retry
   // payload, but nothing in the wizard ever captured them until now.
   TokenType: "Percentage", TokenValue: "", PaymentMode: "", DepositBankId: "",
+  // Payment instrument reference — only meaningful once PaymentMode is
+  // anything other than Cash (see the Payment Details block's dynamic
+  // fields). Stored on CrmCustomerBankDetail, not CrmApplication itself.
+  ChequeNo: "", ChequeDate: "", TransactionRef: "",
 };
 
 const EMPTY_BANK = {
@@ -365,7 +369,12 @@ const CrmApplication: React.FC = () => {
     enabled: dialogOpen,
     staleTime: 5 * 60_000,
   });
-  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when no Project is even picked yet (nothing to scope by).
+  const bankOptions = form.ProjectId ? projectBanks : allBanks;
   useEffect(() => {
     if (projectBanks.length === 1) {
       setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String((projectBanks[0] as any).BId) });
@@ -604,6 +613,16 @@ const CrmApplication: React.FC = () => {
       const app = body.application;
       if (!app) throw new Error("Application record missing from response");
 
+      // ChequeNo/ChequeDate/TransactionRef live on CrmCustomerBankDetail
+      // (keyed by ApplicationId), not on CrmApplication itself — same table
+      // BankDetailsStep's own KYC form reads/writes, since that's the
+      // existing place a payment instrument's reference is stored (see
+      // crmEntityCreation.js's auto-sync, which already reads these three
+      // columns from there when creating the Booking).
+      const bankDetail = await fetchWithAuth(`${BANK_DETAIL_API}/application/${id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+
       setApplicationId(app.Id);
       setApplicationNo(app.ApplicationNo || null);
       setForm((f) => ({
@@ -630,6 +649,9 @@ const CrmApplication: React.FC = () => {
         TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
         PaymentMode: app.PaymentMode || "",
         DepositBankId: app.DepositBankId ? String(app.DepositBankId) : "",
+        ChequeNo: bankDetail?.ChequeNo || "",
+        ChequeDate: bankDetail?.ChequeDate ? String(bankDetail.ChequeDate).slice(0, 10) : "",
+        TransactionRef: bankDetail?.TransactionRef || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
       setWizardAppStatus(app.Status || null);
@@ -808,6 +830,22 @@ const CrmApplication: React.FC = () => {
         PaymentMode: form.PaymentMode || null,
         DepositBankId: form.DepositBankId || null,
       });
+      // Cheque/UTR/reference lives on CrmCustomerBankDetail, not
+      // CrmApplication (see the ChequeNo/ChequeDate/TransactionRef fields
+      // above and crmEntityCreation.js's auto-sync, which already reads
+      // these three columns from there) — only worth writing once a
+      // non-Cash mode actually gave something to reference.
+      if (form.PaymentMode && form.PaymentMode !== "Cash" && (form.ChequeNo || form.ChequeDate || form.TransactionRef)) {
+        await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ChequeNo: form.ChequeNo || null,
+            ChequeDate: form.ChequeDate || null,
+            TransactionRef: form.TransactionRef || null,
+          }),
+        }).catch(() => {});
+      }
       // Actually submits the application — this is what triggers the 72h
       // auto-hold on the picked Unit/Parking server-side, AND now also
       // attempts to create the Booking straight away (see crmApplications.js
@@ -1751,12 +1789,45 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>
-                    <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                    <select value={form.PaymentMode}
+                      onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
                       className={inputCls}>
                       <option value="">Select</option>
                       {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                     </select>
                   </div>
+                  {/* Instrument reference — appears only once a non-Cash mode
+                      is picked, since that's the only time there's actually
+                      anything to reference. Cheque gets its own number/date
+                      pair; every other non-Cash mode shares a single
+                      Transaction Ref/UTR field, labeled per mode so it reads
+                      naturally regardless of which one is picked. */}
+                  {form.PaymentMode === "Cheque" && (
+                    <>
+                      <div>
+                        <label className={labelCls}>Cheque Number</label>
+                        <input type="text" value={form.ChequeNo}
+                          onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Cheque Date</label>
+                        <input type="date" value={form.ChequeDate}
+                          onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                    </>
+                  )}
+                  {form.PaymentMode && form.PaymentMode !== "Cash" && form.PaymentMode !== "Cheque" && (
+                    <div>
+                      <label className={labelCls}>
+                        {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
+                      </label>
+                      <input type="text" value={form.TransactionRef}
+                        onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                        className={inputCls} />
+                    </div>
+                  )}
                   <div>
                     <label className={labelCls}>
                       Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}

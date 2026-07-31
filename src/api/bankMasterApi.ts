@@ -33,6 +33,13 @@ export interface BankRecord {
   BStatus: boolean;
   BCompanyName: string | null;
   BLBelongsTo: number | null;
+  // Project tagging — optional, not-mandatory. A comma-joined list of
+  // Project ids/names this bank is currently tagged to (see
+  // crmProjectBanks.js's GET /for-project for what tagging actually does:
+  // once tagged, this bank becomes the ONLY option offered for those
+  // Projects and disappears from every other Project's dropdown).
+  ProjectIds?: string | null;
+  ProjectNames?: string | null;
 }
 
 export interface BankPayload {
@@ -48,6 +55,7 @@ export interface BankPayload {
   BStatus: boolean;
   BCompanyName?: string | null;
   BLBelongsTo?: number | null;
+  ProjectIds?: number[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,6 +104,9 @@ export const addBank = async (
     BCompanyName: cleanStr(formData.BCompanyName as string),
     BLBelongsTo:
       formData.BLBelongsTo != null ? Number(formData.BLBelongsTo) : null,
+    ProjectIds: Array.isArray(formData.ProjectIds)
+      ? (formData.ProjectIds as unknown[]).map((x) => Number(x)).filter(Number.isFinite)
+      : undefined,
   };
 
   const res = await fetchWithAuth(BASE, {
@@ -126,6 +137,9 @@ export const updateBank = async (
     BCompanyName: cleanStr(formData.BCompanyName as string),
     BLBelongsTo:
       formData.BLBelongsTo != null ? Number(formData.BLBelongsTo) : null,
+    ProjectIds: Array.isArray(formData.ProjectIds)
+      ? (formData.ProjectIds as unknown[]).map((x) => Number(x)).filter(Number.isFinite)
+      : undefined,
   };
 
   const res = await fetchWithAuth(`${BASE}/${id}`, {

@@ -144,10 +144,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Payment & Invoice",
     staleTime: 5 * 60_000,
   });
-  // Project-scoped list if the project has any banks linked, otherwise the
-  // full company bank list as a fallback — same rule everywhere this pattern
-  // is used (On-Account dialog, Milestone payments page).
-  const bankOptions = projectBanks.length > 0 ? projectBanks : allBanks;
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when this booking's Project isn't known yet.
+  const bankOptions = booking?.ProjectId ? projectBanks : allBanks;
   const { data: scopedPlans = [] } = useQuery({
     queryKey: ["crm-payment-plans-for-booking", bookingId],
     queryFn: () => fetchScopedPaymentPlans(booking),

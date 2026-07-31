@@ -52,6 +52,11 @@ const bankMasterCreateSchema = z.object({
     (v) => (v === undefined || v === null || v === "" ? null : Number(v)),
     z.number().int().positive().nullable(),
   ),
+  // Optional Project tagging (see routes/bankMaster.js + crmProjectBanks.js).
+  // Zod strips unknown keys by default and validateBody replaces req.body
+  // with the parsed result, so this must be declared here or it silently
+  // vanishes before the route ever sees it.
+  ProjectIds: z.array(z.union([z.number(), z.string()])).optional(),
 });
 
 const bankMasterUpdateSchema = bankMasterCreateSchema.partial().extend({

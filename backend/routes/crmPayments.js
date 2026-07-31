@@ -563,6 +563,16 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
     } catch (glErr) {
       await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
     }
+
+    // This overflow is exactly the same kind of "money sitting unapplied on
+    // the booking" that a manual on-account deposit produces (see POST
+    // /booking/:id/on-account below) — it must get the same auto-sweep onto
+    // the next due milestone rather than sitting parked until a staff member
+    // manually applies it. Previously missing here, which is why a real
+    // overpayment (e.g. ABIR DUTTA's ₹198.02 on BKG-2026-00001) stayed
+    // Unapplied indefinitely even though the very next milestone (PILING)
+    // was open and would have accepted it.
+    await autoApplyOnAccount(pool, targetRow.BookingId, actorUserId, actorEmail);
   }
 
   return { receiptId, ReceiptNo: receiptNo, bookingId: targetRow.BookingId, overflowAmount, onAccountId, OnAccountReceiptNo: onAccountReceiptNo, brokerWarning };
@@ -966,4 +976,5 @@ module.exports = router;
 // Application-stage token payment onto the new Booking's first milestone.
 module.exports.createReceiptForMilestone = createReceiptForMilestone;
 module.exports.applyCrmMilestonePaymentApproval = applyCrmMilestonePaymentApproval;
+module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;

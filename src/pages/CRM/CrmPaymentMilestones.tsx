@@ -118,9 +118,12 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchProjectBanks(booking?.ProjectId),
     enabled: !!booking?.ProjectId,
   });
-  // Project-scoped list if the project has any banks linked, otherwise the
-  // full company bank list as a fallback.
-  const bankOptions = projectBanks.length > 0 ? projectBanks : companyBanks;
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when this booking's Project isn't known yet.
+  const bankOptions = booking?.ProjectId ? projectBanks : companyBanks;
   // Bookings created before the payment-logic fix have Milestone #1 sized
   // off the payment plan's fixed % instead of the real BookingAmount — flag
   // that mismatch here so staff can one-click resync the schedule.

@@ -68,7 +68,12 @@ const CrmCancellations: React.FC = () => {
     enabled: !!refundDialog,
     staleTime: 5 * 60_000,
   });
-  const refundBankOptions = refundProjectBanks.length > 0 ? refundProjectBanks : refundAllBanks;
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when this cancellation's booking Project isn't known yet.
+  const refundBankOptions = refundDialog?.ProjectId ? refundProjectBanks : refundAllBanks;
 
   const openRefundDialog = (c: any) => {
     setRefundDialog(c);
