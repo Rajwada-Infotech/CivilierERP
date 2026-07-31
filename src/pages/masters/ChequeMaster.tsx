@@ -858,12 +858,9 @@ const ChequeMaster: React.FC = () => {
                     <select
                       value={form.bankId}
                       onChange={(e) => handleBankChange(e.target.value)}
-                      disabled={!form.companyId}
-                      className={`${sel} pl-8 ${errors.bankId ? "border-destructive" : ""} ${!form.companyId ? "opacity-60 cursor-not-allowed" : ""}`}
+                      className={`${sel} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
                     >
-                      <option value="">
-                        {form.companyId ? "Select Bank..." : "Select a company first"}
-                      </option>
+                      <option value="">Select Bank...</option>
                       {banksForCompany.map((b) => (
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
