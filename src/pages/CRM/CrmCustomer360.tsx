@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, Phone, FileText, Home, MessageSquare, Wrench, ArrowLeft,
   IndianRupee, Receipt, Wallet, Users2, ChevronDown, ChevronUp, ChevronRight, User,
+  CalendarClock, ExternalLink,
 } from "lucide-react";
 
 const API = "/api/crm/customer-360";
@@ -27,6 +29,7 @@ const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLoca
 const dt = (v: any) => v ? String(v).slice(0, 10) : "—";
 
 const CrmCustomer360: React.FC = () => {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMobile, setSelectedMobile] = useState<string | null>(null);
@@ -172,15 +175,39 @@ const CrmCustomer360: React.FC = () => {
                 <Section icon={Home} title={`Bookings & Ledger (${data.bookings.length})`}>
                   {data.bookings.map((b: any) => {
                     const expanded = expandedBookingId === b.Id;
+                    const milestones = b.milestones || [];
+                    const today = new Date();
+                    const overdueCount = milestones.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < today).length;
+                    const pendingCount = milestones.filter((m: any) => m.Status !== "Paid" && m.Status !== "Waived").length;
                     const ledgerCount = (b.receipts?.length || 0) + (b.invoices?.length || 0) + (b.onAccount?.length || 0) + (b.brokerage?.length || 0);
                     return (
                       <div key={b.Id} className="rounded-lg border border-border overflow-hidden">
-                        <button onClick={() => toggleBooking(b.Id)}
-                          className="w-full text-left p-3 hover:bg-muted/20 transition-colors">
+                        {/* A native <button> can't legally contain the nested
+                            "Manage Payments" <button> below (invalid HTML —
+                            browsers/React don't reconcile a button-in-button
+                            the way stopPropagation alone would suggest), so
+                            this card header is a div with the same keyboard
+                            semantics wired on by hand. */}
+                        <div role="button" tabIndex={0} onClick={() => toggleBooking(b.Id)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleBooking(b.Id); } }}
+                          className="w-full text-left p-3 hover:bg-muted/20 transition-colors cursor-pointer">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="font-mono text-xs font-semibold text-primary">{b.BookingNo}</span>
                             <div className="flex items-center gap-2">
                               <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-muted/40">{b.Status}</span>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/crm/payments?bookingId=${b.Id}`); }}
+                                className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                Manage Payments <ExternalLink size={11} />
+                              </button>
+                              {/* Invoices are generated on the Booking Detail's own
+                                  Payment & Invoice tab (Booking is auto-generated;
+                                  every milestone-wise invoice after that is manual but
+                                  synced to the real paid amount) — this deep-links
+                                  there instead of duplicating that dialog here. */}
+                              <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/crm/bookings?applicationId=${b.ApplicationId}`); }}
+                                className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                Invoices <ExternalLink size={11} />
+                              </button>
                               {expanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
                             </div>
                           </div>
@@ -193,6 +220,14 @@ const CrmCustomer360: React.FC = () => {
                             <div><span className="text-muted-foreground">Handover: </span>{b.HandoverStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Legal: </span>{b.LegalMilestoneStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Pre-Possession: </span>{b.PrePossessionStatus || "—"}</div>
+                            {milestones.length > 0 && (
+                              <div>
+                                <span className="text-muted-foreground">Milestones: </span>
+                                <span className={overdueCount > 0 ? "text-red-600 font-medium" : pendingCount > 0 ? "text-orange-600 font-medium" : "text-green-600 font-medium"}>
+                                  {milestones.length - pendingCount}/{milestones.length} paid{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
+                                </span>
+                              </div>
+                            )}
                             {b.NocTotalCount > 0 && (
                               <div>
                                 <span className="text-muted-foreground">NOC: </span>
@@ -208,17 +243,35 @@ const CrmCustomer360: React.FC = () => {
                               {ledgerCount > 0 ? `${ledgerCount} ledger record${ledgerCount === 1 ? "" : "s"} — click to view` : "No ledger records yet"}
                             </div>
                           )}
-                        </button>
+                        </div>
 
                         {expanded && (
                           <div className="border-t border-border bg-muted/10 p-3 space-y-3">
+                            <LedgerSubSection icon={CalendarClock} title="Payment Milestones" rows={milestones} empty="No payment plan on this booking">
+                              {(m: any) => {
+                                const balance = Number(m.AmountDue || 0) - Number(m.AmountPaid || 0);
+                                const overdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < today;
+                                return (
+                                  <Row key={m.Id}>
+                                    <span className="text-xs font-medium">#{m.MilestoneNo} {m.MilestoneName}</span>
+                                    <span className="text-xs">{fmt(m.AmountDue)}{m.Percent != null ? ` (${m.Percent}%)` : ""}</span>
+                                    <span className="text-xs text-green-600">{fmt(m.AmountPaid)} paid</span>
+                                    <span className={`text-xs font-medium ${balance > 0 ? "text-orange-600" : "text-muted-foreground"}`}>{fmt(balance)} due</span>
+                                    <span className={`text-xs font-medium ${m.Status === "Paid" ? "text-green-600" : overdue ? "text-red-600" : "text-muted-foreground"}`}>
+                                      {overdue ? "Overdue" : m.Status}{m.DueDate ? ` · ${dt(m.DueDate)}` : ""}
+                                    </span>
+                                  </Row>
+                                );
+                              }}
+                            </LedgerSubSection>
+
                             <LedgerSubSection icon={Receipt} title="Payment Receipts" rows={b.receipts} empty="No payments received yet">
                               {(r: any) => (
                                 <Row key={r.Id}>
                                   <span className="font-mono text-xs text-primary">{r.ReceiptNo}</span>
                                   <span className="text-xs">{r.MilestoneName}</span>
                                   <span className="font-semibold text-xs">{fmt(r.Amount)}</span>
-                                  <span className="text-xs text-muted-foreground">{r.PaymentMode || "—"}</span>
+                                  <span className="text-xs text-muted-foreground">{r.PaymentMode || "—"}{r.DepositBankName ? ` · ${r.DepositBankName}` : ""}</span>
                                   <span className="text-xs text-muted-foreground">{dt(r.ReceivedDate)}</span>
                                 </Row>
                               )}
@@ -231,7 +284,7 @@ const CrmCustomer360: React.FC = () => {
                                   <span className="text-xs">{inv.InvoiceType}</span>
                                   <span className="font-semibold text-xs">{fmt(inv.Amount)}</span>
                                   <span className="text-xs text-muted-foreground">{inv.Status || "—"}</span>
-                                  <span className="text-xs text-muted-foreground">{dt(inv.InvoiceDate)}</span>
+                                  <span className="text-xs text-muted-foreground">{dt(inv.InvoiceDate)}{inv.CreatedByName ? ` · ${inv.CreatedByName}` : ""}</span>
                                 </Row>
                               )}
                             </LedgerSubSection>
@@ -242,7 +295,7 @@ const CrmCustomer360: React.FC = () => {
                                 return (
                                   <Row key={oa.Id}>
                                     <span className="font-mono text-xs text-primary">{oa.ReceiptNo}</span>
-                                    <span className="text-xs">{fmt(oa.Amount)} deposited</span>
+                                    <span className="text-xs">{fmt(oa.Amount)} deposited{oa.DepositBankName ? ` · ${oa.DepositBankName}` : ""}</span>
                                     <span className="text-xs">{fmt(oa.AppliedAmount)} applied</span>
                                     <span className={`text-xs font-medium ${balance > 0 ? "text-sky-600" : "text-muted-foreground"}`}>{fmt(balance)} balance</span>
                                     <span className="text-xs text-muted-foreground">{dt(oa.ReceivedDate)}</span>

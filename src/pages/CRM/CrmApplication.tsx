@@ -23,6 +23,9 @@ const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const DOC_API = "/api/crm/booking-documents";
 const PARKING_API = "/api/crm/parking";
 const CO_APPLICANT_API = "/api/crm/co-applicants";
+const PROJECT_BANK_API = "/api/crm/project-banks";
+const BANK_MASTER_API = "/api/bank-master";
+const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 // Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
@@ -47,6 +50,14 @@ const EMPTY_FORM = {
   // broker sub-block; BrokerId being set is what actually matters server-side.
   ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
   Notes: "",
+  // Payment Details (Step 6/Details) — these columns already existed on
+  // CrmApplication and were already read by handleCreateBooking's retry
+  // payload, but nothing in the wizard ever captured them until now.
+  TokenType: "Percentage", TokenValue: "", PaymentMode: "", DepositBankId: "",
+  // Payment instrument reference — only meaningful once PaymentMode is
+  // anything other than Cash (see the Payment Details block's dynamic
+  // fields). Stored on CrmCustomerBankDetail, not CrmApplication itself.
+  ChequeNo: "", ChequeDate: "", TransactionRef: "",
 };
 
 const EMPTY_BANK = {
@@ -54,6 +65,18 @@ const EMPTY_BANK = {
   NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
 };
+
+// Which real company bank account the token payment lands in — scoped to
+// the selected Project (falls back to the open bank list if the project has
+// none tagged), same "Deposited To" pattern CrmBooking.tsx, CrmBookingDetail.tsx
+// and CrmPaymentMilestones.tsx all already use for this exact decision.
+async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchAllBanks(): Promise<any[]> {
+  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 // The management page needs every stage (Converted/In Process/Not
 // Converted) for its own tabs — every other page's application-selector
@@ -332,6 +355,31 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitId) || null,
     [units, form.PreferredUnitId]
   );
+  // Deposit bank picker for the Payment Details section (Details step) —
+  // scoped to the Project picked back in step 1, same pattern as
+  // CrmBooking.tsx's own "Deposited To" field.
+  const { data: projectBanks = [] } = useQuery({
+    queryKey: ["crm-application-project-banks", form.ProjectId],
+    queryFn: () => fetchProjectBanks(form.ProjectId ? Number(form.ProjectId) : undefined),
+    enabled: dialogOpen && !!form.ProjectId,
+  });
+  const { data: allBanks = [] } = useQuery({
+    queryKey: ["bank-master-dropdown"],
+    queryFn: fetchAllBanks,
+    enabled: dialogOpen,
+    staleTime: 5 * 60_000,
+  });
+  // /for-project already resolves the full exclusivity rule server-side
+  // (tagged-only, or every untagged bank as the fallback pool) — falling
+  // back further to the raw, unfiltered bank list here would silently
+  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
+  // the raw list when no Project is even picked yet (nothing to scope by).
+  const bankOptions = form.ProjectId ? projectBanks : allBanks;
+  useEffect(() => {
+    if (projectBanks.length === 1) {
+      setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String((projectBanks[0] as any).BId) });
+    }
+  }, [projectBanks]);
   // Project -> Block -> Unit cascade (see crmEntityCreation.js's
   // getApplicablePaymentPlans, the same source of truth the backend uses to
   // validate the actual save) — stop at the first non-empty tier: the
@@ -515,6 +563,20 @@ const CrmApplication: React.FC = () => {
   const selectedPlanBookingAmount = Number(selectedPaymentPlan?.BookingAmount || 0);
   const selectedPlanRemainder = Math.max(0, computedTotal - selectedPlanBookingAmount);
 
+  // Token Amount defaults to the plan's own fixed Booking Amount the moment
+  // a plan is picked — Token Type is no longer a free "Percentage vs Amount"
+  // choice (the actual milestone-1 charge was never derived from either;
+  // see crmEntityCreation.js), it's just the fixed ₹ figure the plan already
+  // sets. Only pre-fills when the field is still untouched, so staff can
+  // still overtype it to whatever the customer actually paid — more OR less
+  // than this default — which is the one thing this field is genuinely for.
+  useEffect(() => {
+    if (selectedPlanBookingAmount > 0 && !form.TokenValue) {
+      setForm((f) => f.TokenValue ? f : { ...f, TokenType: "Amount", TokenValue: String(selectedPlanBookingAmount) });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlanBookingAmount]);
+
   // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
   // percentage/amount is computed server-side off the Booking's actual
   // TotalValue once one exists (see maybeAutoCreateBrokerage in
@@ -551,6 +613,16 @@ const CrmApplication: React.FC = () => {
       const app = body.application;
       if (!app) throw new Error("Application record missing from response");
 
+      // ChequeNo/ChequeDate/TransactionRef live on CrmCustomerBankDetail
+      // (keyed by ApplicationId), not on CrmApplication itself — same table
+      // BankDetailsStep's own KYC form reads/writes, since that's the
+      // existing place a payment instrument's reference is stored (see
+      // crmEntityCreation.js's auto-sync, which already reads these three
+      // columns from there when creating the Booking).
+      const bankDetail = await fetchWithAuth(`${BANK_DETAIL_API}/application/${id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+
       setApplicationId(app.Id);
       setApplicationNo(app.ApplicationNo || null);
       setForm((f) => ({
@@ -573,6 +645,13 @@ const CrmApplication: React.FC = () => {
         BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
         BrokerageSplitEnabled: !!app.BrokerageSplitEnabled,
         Notes: app.Notes || "",
+        TokenType: app.TokenType || "Percentage",
+        TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
+        PaymentMode: app.PaymentMode || "",
+        DepositBankId: app.DepositBankId ? String(app.DepositBankId) : "",
+        ChequeNo: bankDetail?.ChequeNo || "",
+        ChequeDate: bankDetail?.ChequeDate ? String(bankDetail.ChequeDate).slice(0, 10) : "",
+        TransactionRef: bankDetail?.TransactionRef || "",
       }));
       setSourceLocked(!!app.Source && !!app.PlatformId);
       setWizardAppStatus(app.Status || null);
@@ -733,9 +812,40 @@ const CrmApplication: React.FC = () => {
   };
 
   const handleFinalSave = async () => {
+    // Same mandatory-bank rule as every other place money moves in this
+    // app (CrmBooking.tsx, CrmBookingDetail.tsx, CrmPaymentMilestones.tsx):
+    // if the project has tagged banks (or even just the open bank list is
+    // non-empty), a bank must be picked before this can go through — only
+    // gated when a real token amount is actually being captured.
+    if (form.TokenValue && bankOptions.length > 0 && !form.DepositBankId) {
+      toast.error("Select which company bank this application's token payment landed in");
+      return;
+    }
     setSaving(true);
     try {
-      await saveApplicationFields({ Notes: form.Notes || null });
+      await saveApplicationFields({
+        Notes: form.Notes || null,
+        TokenType: form.TokenType || null,
+        TokenValue: form.TokenValue || null,
+        PaymentMode: form.PaymentMode || null,
+        DepositBankId: form.DepositBankId || null,
+      });
+      // Cheque/UTR/reference lives on CrmCustomerBankDetail, not
+      // CrmApplication (see the ChequeNo/ChequeDate/TransactionRef fields
+      // above and crmEntityCreation.js's auto-sync, which already reads
+      // these three columns from there) — only worth writing once a
+      // non-Cash mode actually gave something to reference.
+      if (form.PaymentMode && form.PaymentMode !== "Cash" && (form.ChequeNo || form.ChequeDate || form.TransactionRef)) {
+        await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ChequeNo: form.ChequeNo || null,
+            ChequeDate: form.ChequeDate || null,
+            TransactionRef: form.TransactionRef || null,
+          }),
+        }).catch(() => {});
+      }
       // Actually submits the application — this is what triggers the 72h
       // auto-hold on the picked Unit/Parking server-side, AND now also
       // attempts to create the Booking straight away (see crmApplications.js
@@ -858,6 +968,7 @@ const CrmApplication: React.FC = () => {
           ApplicationId: a.Id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
           PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
           TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
+          DepositBankId: a.DepositBankId,
           AssignedTo: a.AssignedTo, Notes: a.Notes,
           BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
         }),
@@ -1645,6 +1756,93 @@ const CrmApplication: React.FC = () => {
                 </div>
               )}
 
+              {/* Payment Details — the actual token capture. These columns
+                  already existed on CrmApplication and were already read by
+                  the auto-sync/retry paths, but nothing in the wizard ever
+                  wrote them until now. Kept here on Details (not a new step,
+                  not folded into Bank/KYC) since it belongs with the final
+                  review right before Submit, once Project/Unit is known and
+                  the bank picker can be project-scoped. */}
+              <div className="rounded-lg border border-border p-3 space-y-2.5">
+                <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Token Type</label>
+                    <input type="text" value="Amount" readOnly disabled
+                      title="Fixed — the Booking Amount is always a ₹ figure set by the Payment Plan, never a % staff pick here"
+                      className={`${inputCls} bg-muted/30 text-muted-foreground cursor-not-allowed`} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Token (Booking) Amount (₹)</label>
+                    <input type="number" value={form.TokenValue}
+                      onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
+                      placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
+                      className={inputCls} />
+                    {selectedPlanBookingAmount > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Defaults to the plan's fixed ₹{selectedPlanBookingAmount.toLocaleString("en-IN")} — change this only if the customer actually paid a different amount; anything over the fixed figure is auto-parked to On Account, not lost.
+                      </p>
+                    )}
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      This submits to Finance's Received Payment queue for approval (Account's Head/admin/super admin) — it won't count as paid on the Booking until approved.
+                    </p>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Payment Mode</label>
+                    <select value={form.PaymentMode}
+                      onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
+                      className={inputCls}>
+                      <option value="">Select</option>
+                      {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  {/* Instrument reference — appears only once a non-Cash mode
+                      is picked, since that's the only time there's actually
+                      anything to reference. Cheque gets its own number/date
+                      pair; every other non-Cash mode shares a single
+                      Transaction Ref/UTR field, labeled per mode so it reads
+                      naturally regardless of which one is picked. */}
+                  {form.PaymentMode === "Cheque" && (
+                    <>
+                      <div>
+                        <label className={labelCls}>Cheque Number</label>
+                        <input type="text" value={form.ChequeNo}
+                          onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Cheque Date</label>
+                        <input type="date" value={form.ChequeDate}
+                          onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                    </>
+                  )}
+                  {form.PaymentMode && form.PaymentMode !== "Cash" && form.PaymentMode !== "Cheque" && (
+                    <div>
+                      <label className={labelCls}>
+                        {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
+                      </label>
+                      <input type="text" value={form.TransactionRef}
+                        onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                        className={inputCls} />
+                    </div>
+                  )}
+                  <div>
+                    <label className={labelCls}>
+                      Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
+                    </label>
+                    <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                      className={inputCls}>
+                      <option value="">— Select company bank —</option>
+                      {(bankOptions as any[]).map((b: any) => (
+                        <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className={labelCls}>Notes / Remarks</label>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
@@ -2260,17 +2458,22 @@ const ParkingSelectionStep: React.FC<{
   // and hold system-wide (not just this application's own picks) — see
   // crmParking.js GET /available. Refetched alongside allotments so a slot
   // this step itself just took disappears from "available" immediately too.
-  const { data: availableRates = [], refetch: refetchAvailable } = useQuery({
+  const { data: parkingAvailability, refetch: refetchAvailable } = useQuery({
     queryKey: ["crm-parking-available", projectId, blockId],
     queryFn: async () => {
-      if (!projectId) return [];
+      if (!projectId) return { rates: [], unratedTypesWithInventory: [] };
       const params = new URLSearchParams({ projectId });
       if (blockId) params.set("blockId", blockId);
       const r = await fetchWithAuth(`${PARKING_API}/available?${params}`);
-      return r.ok ? r.json() : [];
+      return r.ok ? r.json() : { rates: [], unratedTypesWithInventory: [] };
     },
     enabled: !!projectId,
   });
+  const availableRates = parkingAvailability?.rates || [];
+  // Slot inventory that exists (Parking Slot Master) but has no matching
+  // rate (Parking Rate Master) — distinct from "no parking at all", which
+  // is what the old flat "no parking rates configured" message conflated.
+  const unratedTypesWithInventory: string[] = parkingAvailability?.unratedTypesWithInventory || [];
 
   const refetchAll = () => { refetchParking(); refetchAvailable(); };
 
@@ -2376,7 +2579,11 @@ const ParkingSelectionStep: React.FC<{
       {!canEdit ? null : !projectId ? (
         <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
       ) : (availableRates as any[]).length === 0 ? (
-        <p className="text-xs text-muted-foreground">No parking rates configured for this project.</p>
+        <p className="text-xs text-muted-foreground">
+          {unratedTypesWithInventory.length > 0
+            ? `${unratedTypesWithInventory.join(", ")} parking slots exist for this project, but no rate is configured — add one in Parking Rate Master.`
+            : "No parking rates configured for this project."}
+        </p>
       ) : (
         <div className="rounded-lg border border-border p-3 space-y-3">
           <div>

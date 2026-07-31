@@ -53,10 +53,12 @@ async function validateItems(pool, items) {
   return { error: null, namesById };
 }
 
-// A plan can be tagged to 1+ Projects (dbo.CrmPaymentPlanProject,
-// many-to-many, optional — an untagged plan just never appears in a
+// A plan can be tagged to AT MOST ONE Project (dbo.CrmPaymentPlanProject,
+// enforced 1:1 from the Plan's side by migration 270's unique index on
+// PlanId — a Project can still have many Plans tagged to it, just not the
+// other way around). Optional — an untagged plan just never appears in a
 // Project/Block-filtered dropdown but is still offered as part of the
-// final "all active plans" fallback everywhere). This is the TOP tier of
+// final "all active plans" fallback everywhere. This is the TOP tier of
 // the Project -> Block -> Unit cascade Unit Master's own tags
 // (dbo.CrmUnitPaymentPlan) and the new Block tags
 // (dbo.CrmBlockPaymentPlan) sit below — see
@@ -72,35 +74,35 @@ const PLAN_SELECT = `
           WHERE i.PlanTemplateId = p.Id
           ORDER BY i.MilestoneNo
           FOR JSON PATH) AS MilestonesJson,
-         proj.ProjectIds, proj.ProjectNames
+         proj.ProjectId, proj.ProjectName
   FROM dbo.CrmPaymentPlanTemplate p
   OUTER APPLY (
-    SELECT STRING_AGG(CAST(cpp.ProjectId AS VARCHAR(20)), ',') AS ProjectIds,
-           STRING_AGG(e.name, ', ') AS ProjectNames
+    SELECT TOP 1 cpp.ProjectId, e.name AS ProjectName
     FROM dbo.CrmPaymentPlanProject cpp
     JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P'
     WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1
   ) proj
 `;
 
-// Same deactivate-then-MERGE pattern as unitMaster.js's own
-// syncUnitPaymentPlanTags, one tier up the hierarchy.
-async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
+// Sets this plan's single tagged Project (or clears it if projectId is
+// null) — deactivate-then-upsert, same pattern as unitMaster.js's own
+// syncUnitPaymentPlanTags one tier up the hierarchy. migration 270's unique
+// index on PlanId (WHERE IsActive = 1) is the actual 1:1 enforcement; this
+// just never gives it a second active row to conflict over.
+async function syncPaymentPlanProjectTag(pool, planId, projectId) {
   await pool.request().input("pid", sql.Int, planId)
     .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid");
-  for (const projectId of projectIds) {
-    if (!Number.isFinite(projectId)) continue;
-    await pool.request()
-      .input("pid", sql.Int, planId)
-      .input("proj", sql.Int, projectId)
-      .query(`
-        MERGE dbo.CrmPaymentPlanProject AS tgt
-        USING (SELECT @pid AS PlanId, @proj AS ProjectId) AS src
-        ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
-        WHEN MATCHED THEN UPDATE SET IsActive = 1
-        WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
-      `);
-  }
+  if (!Number.isFinite(projectId)) return;
+  await pool.request()
+    .input("pid", sql.Int, planId)
+    .input("proj", sql.Int, projectId)
+    .query(`
+      MERGE dbo.CrmPaymentPlanProject AS tgt
+      USING (SELECT @pid AS PlanId, @proj AS ProjectId) AS src
+      ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
+      WHEN MATCHED THEN UPDATE SET IsActive = 1
+      WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
+    `);
 }
 
 // GET / — every plan. ?isActive=1 filters to active-only (used by Unit
@@ -199,8 +201,9 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
 
     await tx.commit();
 
-    const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map((x) => parseInt(x, 10)) : [];
-    if (projectIds.length) await syncPaymentPlanProjectTags(pool, planId, projectIds);
+    if (b.ProjectId != null && b.ProjectId !== "") {
+      await syncPaymentPlanProjectTag(pool, planId, parseInt(b.ProjectId, 10));
+    }
 
     res.status(201).json({ success: true, id: planId });
   } catch (e) {
@@ -279,11 +282,13 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
 
     await tx.commit();
 
-    // Only touches Project tags if the caller actually sent the array — same
-    // "don't clobber on a partial edit" reasoning as BookingAmount above.
-    if (Array.isArray(b.ProjectIds)) {
-      const projectIds = b.ProjectIds.map((x) => parseInt(x, 10));
-      await syncPaymentPlanProjectTags(pool, id, projectIds);
+    // Only touches the Project tag if the caller actually sent the field —
+    // same "don't clobber on a partial edit" reasoning as BookingAmount
+    // above. An explicit null/empty clears the tag; the key being absent
+    // entirely leaves whatever's already tagged untouched.
+    if (Object.prototype.hasOwnProperty.call(b, "ProjectId")) {
+      const projectId = b.ProjectId != null && b.ProjectId !== "" ? parseInt(b.ProjectId, 10) : null;
+      await syncPaymentPlanProjectTag(pool, id, projectId);
     }
 
     const usage = await pool.request().input("id", sql.Int, id)

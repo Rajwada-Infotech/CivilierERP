@@ -12,6 +12,13 @@ const {
   bankMasterCreateSchema,
   bankMasterUpdateSchema,
 } = require("../utils/bankMasterSchemas");
+const { actorId } = require("../services/saAccess");
+// Project tagging (optional, not-mandatory) — a bank tagged to one or more
+// Projects becomes the ONLY bank offered for that Project's work; a bank
+// with no tag at all stays in the shared fallback pool every untagged
+// Project draws from. See crmProjectBanks.js's GET /for-project for the
+// actual exclusivity rule; this file only owns writing the tag set.
+const { syncBankProjectTags } = require("./crmProjectBanks");
 
 // BANKS (ASSETS > CURRENT ASSETS > BANKS, Code='BNK') — every bank ledger
 // head lands here automatically instead of staff manually picking an
@@ -134,8 +141,16 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
     const result = await pool.request().input("type", sql.VarChar(50), "B")
       .query(`
         SELECT
-          ${selectColumns.join(",\n          ")}
+          ${selectColumns.join(",\n          ")},
+          tags.ProjectIds, tags.ProjectNames
         FROM dbo.AccountHeadMaster ahm
+        OUTER APPLY (
+          SELECT STRING_AGG(CAST(pb.ProjectId AS VARCHAR(20)), ',') AS ProjectIds,
+                 STRING_AGG(proj.name, ', ') AS ProjectNames
+          FROM dbo.CrmProjectBank pb
+          JOIN dbo.enterprise proj ON proj.id = pb.ProjectId AND proj.business_type = 'P'
+          WHERE pb.BankLHeadId = ahm.LHeadId AND pb.IsActive = 1
+        ) tags
         WHERE LHeadType = @type
         ORDER BY LHeadId DESC
       `);
@@ -302,8 +317,18 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
       )
     `);
 
+    const created = result.recordset[0];
+
+    // Project tagging — optional, not-mandatory (see the import comment
+    // above). Only touches CrmProjectBank when the caller actually sent the
+    // field, so a plain create with no tags behaves exactly as before.
+    if (Array.isArray(req.body.ProjectIds)) {
+      const projectIds = req.body.ProjectIds.map((x) => parseInt(x, 10));
+      await syncBankProjectTags(pool, created.BId, projectIds, actorId(req));
+    }
+
     await bumpCacheVersion("bank-master");
-    res.status(201).json(result.recordset[0]);
+    res.status(201).json(created);
   } catch (err) {
     console.error("INSERT BANK ERROR:", err);
     if (err.number === 2627 || err.number === 547) {
@@ -433,6 +458,14 @@ router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMas
     `);
     if (!checkRowsAffected(result, res, "Bank")) return;
 
+    // Same "only touch tags if the caller actually sent the field" rule as
+    // POST above — a lightweight edit that doesn't resend ProjectIds must
+    // never silently clear an existing tag.
+    if (Array.isArray(req.body.ProjectIds)) {
+      const projectIds = req.body.ProjectIds.map((x) => parseInt(x, 10));
+      await syncBankProjectTags(pool, id, projectIds, actorId(req));
+    }
+
     await bumpCacheVersion("bank-master");
     res.json({ success: true, message: "Bank updated successfully" });
   } catch (err) {
@@ -449,6 +482,8 @@ router.delete("/:id", requirePageRight("bank-master", "delete"), async (req, res
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = await getPool();
+    await pool.request().input("bid", sql.Int, id)
+      .query("DELETE FROM dbo.CrmProjectBank WHERE BankLHeadId = @bid");
     const result = await pool.request().input("LHeadId", sql.Int, id).query(`
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'

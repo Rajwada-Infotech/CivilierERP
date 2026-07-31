@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
@@ -69,9 +70,11 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
 
-    const [welcome, docs, coApplicants, bankDetail, noc, agreement] = await Promise.all([
+    const [welcome, callCount, docs, coApplicants, bankDetail, noc, agreement] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CallDate DESC, CreatedAt DESC"),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmWelcomeCall WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT COUNT(*) AS Total, SUM(CASE WHEN IsVerified = 1 THEN 1 ELSE 0 END) AS Verified FROM dbo.CrmBookingDocument WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bookingId)
@@ -97,10 +100,18 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
     ]);
 
     res.json({
-      welcomeCall: { done: welcome.recordset[0]?.Outcome === "Welcomed" },
+      // done: the real "Welcome Call page finished cleanly" signal (Welcomed
+      // specifically). called: at least one call attempt is on file, even if
+      // it hasn't landed on Welcomed yet — lets the frontend show yellow
+      // ("in progress") instead of collapsing "never called" and "called but
+      // not yet Welcomed" into the same blank state.
+      welcomeCall: { done: welcome.recordset[0]?.Outcome === "Welcomed", called: (callCount.recordset[0]?.Cnt || 0) > 0 },
       documents: { total: docs.recordset[0]?.Total || 0, verified: docs.recordset[0]?.Verified || 0 },
       coApplicants: { count: coApplicants.recordset[0]?.Cnt || 0 },
-      bankDetails: { complete: !!bankDetail.recordset[0]?.IsComplete },
+      // started: a CrmCustomerBankDetail row exists at all (even partially
+      // filled) — distinct from complete, so the frontend can show yellow
+      // for "in progress" instead of only blank/green.
+      bankDetails: { started: bankDetail.recordset.length > 0, complete: !!bankDetail.recordset[0]?.IsComplete },
       noc: noc.recordset,
       agreement: agreement.recordset[0] || null,
     });
@@ -196,6 +207,14 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
 
+    // A customer explicitly declining the payment plan is a real business
+    // problem, not a silent checkbox left unticked — staff must say why, so
+    // whoever picks it up next (Communication Log) has something to act on
+    // rather than just "not confirmed".
+    if (b.PaymentPlanConfirmed === false && !String(b.PaymentPlanDisputeReason || "").trim()) {
+      return res.status(400).json({ error: "A reason is required when the customer does not agree to the payment plan" });
+    }
+
     // Ad-hoc custom fields: array of {key, value} the caller can freely add
     // to at call time, no admin setup needed — stored as JSON, never parsed
     // into columns.
@@ -218,13 +237,14 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
       .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
-      .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed ? 1 : 0)
-      .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed ? new Date() : null)
+      .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed === true ? 1 : b.PaymentPlanConfirmed === false ? 0 : null)
+      .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed === true ? new Date() : null)
+      .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
       .input("acb",  sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmWelcomeCall
-          (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, CreatedBy, CreatedAt)
-        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @acb, SYSDATETIME())
+          (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, PaymentPlanDisputeReason, CreatedBy, CreatedAt)
+        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @ppr, @acb, SYSDATETIME())
       `);
 
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
@@ -248,6 +268,27 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
             (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
           VALUES (@aid, @bid, 'Call', 'Outbound', @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
         `);
+
+      // A customer declining the payment plan is a real, open issue — hand
+      // it to the Communication Log as its own entry (Inbound, since it's
+      // the customer's own objection) so whoever works that page next has
+      // something concrete to follow up on, not just a checkbox buried on
+      // this page.
+      if (b.PaymentPlanConfirmed === false) {
+        await logCommunication(pool, {
+          applicationId: booking.ApplicationId, bookingId,
+          direction: "Inbound",
+          subject: "Payment Plan Not Confirmed",
+          summary: String(b.PaymentPlanDisputeReason).trim(),
+          createdBy: actorId(req),
+        });
+        if (booking.AssignedTo) {
+          await emitNotification(pool, booking.AssignedTo, "crm_payment_plan_disputed",
+            "Customer Did Not Agree to Payment Plan",
+            `${booking.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
+            bookingId, "crm_booking");
+        }
+      }
     }
 
     // Auto-flow: a completed welcome call is one of two prerequisites for
@@ -278,8 +319,12 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
     const b = req.body;
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
+    if (b.PaymentPlanConfirmed === false && !String(b.PaymentPlanDisputeReason || "").trim()) {
+      return res.status(400).json({ error: "A reason is required when the customer does not agree to the payment plan" });
+    }
 
-    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id, BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
+    const existing = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, BookingId, Outcome, PaymentPlanConfirmed FROM dbo.CrmWelcomeCall WHERE Id = @id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Call log not found" });
 
     // Distinguish "field genuinely absent from this request" (preserve the
@@ -318,6 +363,7 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
       .input("pad",  sql.Date, b.PreferredAgreementDate || null)
       .input("padP", sql.Bit, has("PreferredAgreementDate") ? 1 : 0)
       .input("ppc",  sql.Bit,  b.PaymentPlanConfirmed != null ? (b.PaymentPlanConfirmed ? 1 : 0) : null)
+      .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
       .query(`
         UPDATE dbo.CrmWelcomeCall SET
           CalledBy = ISNULL(@cb, CalledBy),
@@ -329,7 +375,17 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
           CustomFields = CASE WHEN @cfP = 1 THEN @cf ELSE CustomFields END,
           PreferredAgreementDate = CASE WHEN @padP = 1 THEN @pad ELSE PreferredAgreementDate END,
           PaymentPlanConfirmed = ISNULL(@ppc, PaymentPlanConfirmed),
-          PaymentPlanConfirmedAt = CASE WHEN @ppc = 1 THEN ISNULL(PaymentPlanConfirmedAt, SYSDATETIME()) ELSE PaymentPlanConfirmedAt END
+          PaymentPlanConfirmedAt = CASE WHEN @ppc = 1 THEN ISNULL(PaymentPlanConfirmedAt, SYSDATETIME()) ELSE PaymentPlanConfirmedAt END,
+          -- Revertible: re-confirming (true) clears any prior dispute reason;
+          -- disputing (false) always overwrites with the fresh reason; a
+          -- request that doesn't touch PaymentPlanConfirmed at all (@ppc
+          -- NULL) leaves the existing reason untouched — @ppr is bound to
+          -- NULL in that case too, but the ELSE branch below never reads it.
+          PaymentPlanDisputeReason = CASE
+            WHEN @ppc = 1 THEN NULL
+            WHEN @ppc = 0 THEN @ppr
+            ELSE PaymentPlanDisputeReason
+          END
         WHERE Id = @id
       `);
     // Same auto-flow POST / fires — a welcome call can be logged with one
@@ -341,6 +397,31 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
     // still isn't Welcomed, or if the bank-detail prerequisite isn't in yet.
     if (b.Outcome === "Welcomed" && existing.recordset[0].BookingId) {
       await maybeAutoCreateAgreement(pool, existing.recordset[0].BookingId, actorId(req));
+    }
+
+    // Same "hand a real dispute to Communication Log" flow as POST / —
+    // only fires on the actual transition into disputed (not on every save
+    // of an already-disputed row), so editing unrelated fields on a
+    // previously-disputed call doesn't spam a duplicate log entry.
+    if (b.PaymentPlanConfirmed === false && existing.recordset[0].PaymentPlanConfirmed !== false) {
+      const bkg = await pool.request().input("bid", sql.Int, existing.recordset[0].BookingId)
+        .query("SELECT BookingNo, ApplicationId, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
+      const bkgRow = bkg.recordset[0];
+      if (bkgRow) {
+        await logCommunication(pool, {
+          applicationId: bkgRow.ApplicationId, bookingId: existing.recordset[0].BookingId,
+          direction: "Inbound",
+          subject: "Payment Plan Not Confirmed",
+          summary: String(b.PaymentPlanDisputeReason).trim(),
+          createdBy: actorId(req),
+        });
+        if (bkgRow.AssignedTo) {
+          await emitNotification(pool, bkgRow.AssignedTo, "crm_payment_plan_disputed",
+            "Customer Did Not Agree to Payment Plan",
+            `${bkgRow.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
+            existing.recordset[0].BookingId, "crm_booking");
+        }
+      }
     }
 
     res.json({ success: true });

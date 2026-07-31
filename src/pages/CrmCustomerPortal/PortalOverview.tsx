@@ -6,7 +6,7 @@ import { PageHeader, Card, Stepper, StepState, GOLD, GOLD_SOFT, SURFACE, HAIRLIN
 
 const STAGES = ["Application", "Booking", "Welcome Call", "Customer Details", "Agreement", "Payments", "Sales Deed", "Handover"];
 
-type Ctx = { me: any; timeline: any };
+type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
 function StatCard({ icon: Icon, label, value, sub }: { icon: any; label: string; value: string; sub?: string }) {
   return (
@@ -20,8 +20,13 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: any; label: string;
 }
 
 const PortalOverview: React.FC = () => {
-  const { me, timeline } = useOutletContext<Ctx>();
+  const { me, timeline, applicationId, applications } = useOutletContext<Ctx>();
   const navigate = useNavigate();
+
+  // /me is the customer's shared identity (Id, Name, Mobile, ... — keyed by
+  // CustomerId since migration 254), not any one application — ApplicationNo
+  // and ApplicantName live on the per-application row instead.
+  const selectedApp = (applications || []).find((a: any) => a.ApplicationId === applicationId);
 
   const agreement = timeline.agreement;
   const customerDetailsComplete = !!timeline.customerDetails?.IsComplete;
@@ -53,7 +58,7 @@ const PortalOverview: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow={`Application ${me.ApplicationNo}`} title={`Welcome back, ${me.ApplicantName?.split(" ")[0]}`}
+      <PageHeader eyebrow={`Application ${selectedApp?.ApplicationNo || ""}`} title={`Welcome back, ${(selectedApp?.ApplicantName || me.Name || "").split(" ")[0]}`}
         subtitle={`Here's where things stand on your home${timeline.booking?.ProjectName ? ` at ${timeline.booking.ProjectName}` : ""}.`} />
 
       {/* Holds */}

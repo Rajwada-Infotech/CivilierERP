@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -52,6 +52,7 @@ import {
   type BankRecord,
   type CompanyOption,
 } from "@/api/bankMasterApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -181,6 +182,20 @@ interface ImportRowResult {
   message?: string;
 }
 
+// Company -> Project source for the Tag Project(s) picker below — same
+// shared dropdown endpoint CrmApplication.tsx/CrmPaymentPlans.tsx already
+// use for their own Company -> Project chains.
+async function fetchCompanyProjectDropdown(): Promise<{
+  companies: { id: number; name: string }[];
+  projects: { id: number; name: string; company_id: number }[];
+}> {
+  try {
+    const r = await fetchWithAuth("/api/business/dropdown");
+    return r.ok ? r.json() : { companies: [], projects: [] };
+  } catch {
+    return { companies: [], projects: [] };
+  }
+}
 const ACCOUNT_TYPES = ["Current", "Savings", "Overdraft (OD)", "Cash Credit"];
 const BANK_TYPES = [
   "Nationalized",
@@ -411,6 +426,22 @@ const BankMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Project tagging — optional, not-mandatory (see the "Tag Project(s)"
+  // section of the form below). Reuses the same Company -> Project dropdown
+  // source as CrmApplication.tsx/CrmPaymentPlans.tsx; `projects` here is
+  // keyed by `company_id` matching the `companies` list above (both trace
+  // back to dbo.enterprise), so no second Company fetch is needed.
+  const { data: projectDropdown } = useQuery({
+    queryKey: ["business-dropdown"],
+    queryFn: fetchCompanyProjectDropdown,
+    staleTime: 5 * 60 * 1000,
+  });
+  const projects = projectDropdown?.projects ?? [];
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [tagProjectId, setTagProjectId] = useState("");
+  const companiesById = useMemo(() => new Map(companies.map((c) => [String(c.id), c])), [companies]);
+  const projectsById = useMemo(() => new Map(projects.map((p) => [String(p.id), p])), [projects]);
+
   const { data: groupsData } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
@@ -445,6 +476,64 @@ const BankMaster: React.FC = () => {
   });
 
   const form = watch();
+  // Company now lives ONLY inside Tag Project(s), right above the Project
+  // picker — one field doing double duty: it's still the bank's own
+  // Company (form.companyName, saved as BCompanyName), and it narrows the
+  // Project list right below it. It's a convenience filter, not a hard
+  // rule: real banks are routinely tagged to Projects under a DIFFERENT
+  // Company than their own (e.g. a shared group account funding a
+  // subsidiary's project), and Company itself is optional on a bank — so
+  // with no Company picked yet, every Project stays offered rather than
+  // blocking tagging outright.
+  // `companies` matches by label since that's all form.companyName (a
+  // TreeDropdown value) actually stores.
+  const selectedCompany = useMemo(
+    () => companies.find((c) => c.label === form.companyName) || null,
+    [companies, form.companyName],
+  );
+  const projectsForTagCompany = useMemo(
+    () => projects.filter((p) =>
+      (!selectedCompany || String(p.company_id) === String(selectedCompany.id)) && !projectIds.includes(String(p.id)),
+    ),
+    [projects, selectedCompany, projectIds],
+  );
+  const selectedTaggedProjects = useMemo(
+    () => projectIds
+      .map((id) => {
+        const p = projectsById.get(id);
+        if (!p) return null;
+        const company = companiesById.get(String(p.company_id));
+        return { id, name: p.name, companyName: company?.label ?? "" };
+      })
+      .filter((x): x is { id: string; name: string; companyName: string } => x !== null),
+    [projectIds, projectsById, companiesById],
+  );
+  const handleAddTaggedProject = () => {
+    if (!tagProjectId) return;
+    setProjectIds((prev) => (prev.includes(tagProjectId) ? prev : [...prev, tagProjectId]));
+    setTagProjectId("");
+  };
+  // Changing the Company clears an in-progress "Add" pick ONLY if that pick
+  // no longer belongs to the new Company — a project half-picked under the
+  // OLD Company shouldn't silently carry over once it no longer matches.
+  // This must stay one-directional, not a blind "Company changed -> clear
+  // Project": picking a Project directly auto-fills Company to match it
+  // (see the Project <select>'s onChange below), and that fill-in is itself
+  // a Company change — clearing tagProjectId unconditionally here would
+  // immediately undo the very pick that caused it. Must also never touch
+  // already-tagged projectIds — real production banks are routinely tagged
+  // to Projects under a DIFFERENT Company than the bank's own Company field
+  // (e.g. a shared group account funding a subsidiary's project), so
+  // existing tags are never assumed to match Company.
+  useEffect(() => {
+    setTagProjectId((prev) => {
+      if (!prev || !selectedCompany) return prev;
+      const p = projectsById.get(prev);
+      return p && String(p.company_id) === String(selectedCompany.id) ? prev : "";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany?.id]);
+
   const canSave = isValid;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -490,16 +579,18 @@ const BankMaster: React.FC = () => {
 
   const handleSave = async (values: FormState) => {
     try {
+      const payload = { ...toPayload(values), ProjectIds: projectIds.map((x) => parseInt(x, 10)) };
       if (editingId) {
-        await updateBank(editingId, toPayload(values));
+        await updateBank(editingId, payload);
         toast.success("Bank updated successfully!");
       } else {
-        await addBank(toPayload(values));
+        await addBank(payload);
         toast.success("Bank added successfully!");
       }
       await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
       reset(EMPTY);
       setEditingId(null);
+      setProjectIds([]);
     } catch (err: any) {
       toast.error("Failed: " + (err.message || "Unknown error"));
     }
@@ -526,6 +617,9 @@ const BankMaster: React.FC = () => {
           : "",
     });
     setEditingId(String(item.BId));
+    // Tagged Projects already come back with the bank list itself
+    // (bankMaster.js's GET / OUTER APPLYs CrmProjectBank) — no extra fetch.
+    setProjectIds(item.ProjectIds ? String(item.ProjectIds).split(",") : []);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -538,6 +632,7 @@ const BankMaster: React.FC = () => {
       if (editingId === id) {
         setEditingId(null);
         reset(EMPTY);
+        setProjectIds([]);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + (err.message || "Unknown error"));
@@ -547,6 +642,7 @@ const BankMaster: React.FC = () => {
   const handleReset = () => {
     reset(EMPTY);
     setEditingId(null);
+    setProjectIds([]);
   };
 
   // ── CSV import/export state ─────────────────────────────────────────────────
@@ -904,26 +1000,6 @@ const BankMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Company Name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Company Name
-                  </label>
-                  <TreeDropdown
-                    variant="flat"
-                    value={form.companyName}
-                    onChange={(v) =>
-                      setValue("companyName", v, { shouldValidate: true })
-                    }
-                    options={companies.map((c) => ({
-                      value: c.label,
-                      label: c.label,
-                    }))}
-                    placeholder="Select Company…"
-                    icon={<Building2 size={13} />}
-                  />
-                </div>
-
                 {/* Bank Name */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
@@ -1150,6 +1226,102 @@ const BankMaster: React.FC = () => {
                   className={`${inputCls} pl-8 resize-none`}
                 />
               </div>
+            </div>
+
+            {/* ── Section: Tag Project(s) ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Building2 size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Tag Project(s)
+                </p>
+              </div>
+              <p className="text-[11px] text-muted-foreground -mt-1">
+                Optional — leave empty and this bank stays in the shared pool every untagged Project draws from.
+                Tag it to one or more Projects and it becomes the ONLY bank offered for those Projects' work — it
+                disappears from every other Project's bank selection, including ones with no tags of their own.
+                {" "}Pick a Company to narrow the Project list, or just pick a Project directly and its Company
+                fills in on its own — either way works, and a bank can still keep (or be tagged to) Projects
+                under a different Company than the one shown here.
+              </p>
+
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.companyName}
+                    onChange={(v) => setValue("companyName", v, { shouldValidate: true })}
+                    options={companies.map((c) => ({ value: c.label, label: c.label }))}
+                    placeholder="Select Company… (optional)"
+                    icon={<Building2 size={13} />}
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <select
+                      value={tagProjectId}
+                      onChange={(e) => {
+                        const projectId = e.target.value;
+                        setTagProjectId(projectId);
+                        // Picking a Project directly (without choosing a
+                        // Company first) fills the Company in on its own,
+                        // instead of leaving it blank/mismatched — same
+                        // reasoning as why this field moved down here next
+                        // to Project in the first place.
+                        const picked = projectId ? projectsById.get(projectId) : null;
+                        if (picked) {
+                          const company = companiesById.get(String(picked.company_id));
+                          if (company && company.label !== form.companyName) {
+                            setValue("companyName", company.label, { shouldValidate: true });
+                          }
+                        }
+                      }}
+                      className={inputCls}
+                    >
+                      <option value="">
+                        {projectsForTagCompany.length === 0 ? "All projects already tagged" : "Select project"}
+                      </option>
+                      {projectsForTagCompany.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddTaggedProject}
+                    disabled={!tagProjectId}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                </div>
+              </div>
+
+              {selectedTaggedProjects.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedTaggedProjects.map((p) => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30"
+                    >
+                      <span>
+                        {p.name}
+                        {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setProjectIds((prev) => prev.filter((x) => x !== p.id))}
+                        title={`Remove ${p.name}`}
+                        className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ── Status Toggle ── */}
@@ -1394,6 +1566,10 @@ const BankMaster: React.FC = () => {
                           (g) => g._id === String(viewRow.BLBelongsTo),
                         )?.name ?? "—")
                       : "—",
+                },
+                {
+                  label: "Tagged Project(s)",
+                  value: viewRow.ProjectNames || "Not tagged — available to every untagged Project",
                 },
               ].map(({ label, value, mono }) => (
                 <div key={label}>

@@ -393,6 +393,18 @@ const PortalLayout: React.FC = () => {
             <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
               No active applications found.
             </div>
+          ) : !timeline && !tlError ? (
+            // An application is selected but its own timeline query (fetched
+            // separately, keyed off selectedApplicationId) hasn't resolved yet.
+            // Every page below the Outlet (PortalOverview, PortalBooking,
+            // PortalAgreement, PortalPayments, ...) destructures `timeline`
+            // from context and reads straight off it (e.g. timeline.agreement)
+            // with no null-guard of its own — rendering the Outlet before this
+            // query settles crashed the whole portal on every application
+            // switch, not just the first load.
+            <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
+              Loading your application details…
+            </div>
           ) : (
             <Suspense fallback={<div className="min-h-[40vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>Loading…</div>}>
               <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />

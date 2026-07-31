@@ -34,6 +34,23 @@ interface CreditEntry {
   InvoiceDocNo: string | null;
   AvailableBalance: number;
   Notes: string | null;
+  // CRM customer on-account credits (Source='CRM') are visibility-only here —
+  // there's no ExpenseBooking invoice to adjust against, so no Adjust action
+  // is offered; applying stays a CRM-only flow (Booking Detail / Payment
+  // Milestones' own "Apply On-Account"). Booking context substitutes for the
+  // invoice columns, which stay null on these rows.
+  Source: "Vendor" | "CRM";
+  CrmBookingNo: string | null;
+  CrmProjectName: string | null;
+  CrmUnitNo: string | null;
+  CrmApplicantName: string | null;
+  // The next still-open milestone on this booking — this credit auto-applies
+  // onto it the moment it's created/approved (see autoApplyOnAccount in
+  // crmPayments.js); null means every milestone on the booking is already
+  // fully paid, so the credit has nothing left to apply to.
+  CrmNextMilestoneName: string | null;
+  CrmNextMilestoneDue: number | null;
+  CrmNextMilestoneDueDate: string | null;
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -42,9 +59,11 @@ function fmtDate(d: string | null | undefined) {
 }
 
 function PartyTypePill({ code }: { code: string }) {
-  const label = code === "S" ? "Supplier" : code === "C" ? "Contractor" : code;
+  const label = code === "S" ? "Supplier" : code === "C" ? "Contractor" : code === "A" ? "Customer" : code;
   const cls = code === "S"
     ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+    : code === "A"
+    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
     : "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls}`}>
@@ -408,7 +427,7 @@ export default function OnAccountAdjustment() {
               icon={Users}
               accentColor="#6366f1"
               value={partiesLoading ? "—" : String(parties.length)}
-              sub={`${parties.filter((p) => p.PartyType === "Supplier" || p.PartyType === "S").length} Suppliers · ${parties.filter((p) => p.PartyType === "Contractor" || p.PartyType === "C").length} Contractors`}
+              sub={`${parties.filter((p) => p.PartyType === "Supplier" || p.PartyType === "S").length} Suppliers · ${parties.filter((p) => p.PartyType === "Contractor" || p.PartyType === "C").length} Contractors · ${parties.filter((p) => p.PartyType === "Customer" || p.PartyType === "A").length} Customers`}
             />
 
             <FinanceGlassCard
@@ -524,11 +543,17 @@ export default function OnAccountAdjustment() {
                             <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
                           </div>
                         </div>
-                        <Button size="sm" variant="outline"
-                          className="shrink-0 h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
-                          onClick={() => handleAdjust(entry)}>
-                          Adjust <ArrowRight size={11} />
-                        </Button>
+                        {entry.Source === "CRM" ? (
+                          <span className="shrink-0 text-[10px] text-muted-foreground italic px-2 py-1">
+                            Apply via CRM
+                          </span>
+                        ) : (
+                          <Button size="sm" variant="outline"
+                            className="shrink-0 h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                            onClick={() => handleAdjust(entry)}>
+                            Adjust <ArrowRight size={11} />
+                          </Button>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                         <div>
@@ -536,10 +561,21 @@ export default function OnAccountAdjustment() {
                           <p>{fmtDate(entry.PaymentDate)}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Invoice Ref</p>
-                          <p className="font-mono text-muted-foreground truncate">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</p>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            {entry.Source === "CRM" ? "Booking" : "Invoice Ref"}
+                          </p>
+                          <p className="font-mono text-muted-foreground truncate">
+                            {entry.Source === "CRM"
+                              ? `${entry.CrmBookingNo || "—"}${entry.CrmUnitNo ? ` · ${entry.CrmUnitNo}` : ""}`
+                              : entry.InvoiceDocNo || entry.InvoiceRef || "—"}
+                          </p>
                         </div>
                       </div>
+                      {entry.Source === "CRM" && (entry.CrmProjectName || entry.CrmApplicantName) && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {entry.CrmApplicantName}{entry.CrmProjectName ? ` · ${entry.CrmProjectName}` : ""}
+                        </p>
+                      )}
                       {entry.InvoiceAmount != null && (
                         <div className="rounded-xl border border-border overflow-hidden text-xs">
                           <div className="flex items-center justify-between px-3 py-2 bg-muted/10">
@@ -554,6 +590,20 @@ export default function OnAccountAdjustment() {
                               </p>
                             </div>
                           )}
+                        </div>
+                      )}
+                      {entry.Source === "CRM" && (
+                        <div className="rounded-xl border border-border overflow-hidden text-xs">
+                          <div className="flex items-center justify-between px-3 py-2 bg-muted/10">
+                            <p className="text-muted-foreground">Next Milestone Due</p>
+                            <p className={`font-mono font-semibold tabular-nums ${entry.CrmNextMilestoneDue != null ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                              {entry.CrmNextMilestoneDue != null ? formatINR(entry.CrmNextMilestoneDue) : "—"}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2 border-t border-border/60">
+                            <p className="text-muted-foreground">Milestone</p>
+                            <p className="font-medium">{entry.CrmNextMilestoneName ?? "All milestones paid"}</p>
+                          </div>
                         </div>
                       )}
                       <div className="flex items-center justify-between pt-1 border-t border-border">
@@ -576,7 +626,7 @@ export default function OnAccountAdjustment() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
-                      {["Party", "Payment Voucher", "Date", "Invoice Ref", "Net Payable", "Total Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
+                      {["Party", "Payment Voucher", "Date", "Invoice / Booking", "Net Payable", "Total Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -597,13 +647,36 @@ export default function OnAccountAdjustment() {
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(entry.PaymentDate)}</td>
                           <td className="px-4 py-3">
-                            <span className="font-mono text-xs text-muted-foreground">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</span>
+                            {entry.Source === "CRM" ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {entry.CrmBookingNo || "—"}{entry.CrmUnitNo ? ` · ${entry.CrmUnitNo}` : ""}
+                                </span>
+                                {(entry.CrmApplicantName || entry.CrmProjectName) && (
+                                  <span className="text-[10px] text-muted-foreground/80 truncate max-w-[160px]">
+                                    {entry.CrmApplicantName}{entry.CrmProjectName ? ` · ${entry.CrmProjectName}` : ""}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="font-mono text-xs text-muted-foreground">{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-xs font-medium tabular-nums text-right">
-                            {entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}
+                            {entry.Source === "CRM" ? (
+                              entry.CrmNextMilestoneDue != null ? (
+                                <span className="text-amber-600 dark:text-amber-400">{formatINR(entry.CrmNextMilestoneDue)}</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )
+                            ) : entry.InvoiceAmount != null ? formatINR(entry.InvoiceAmount) : "—"}
                           </td>
                           <td className="px-4 py-3 text-xs tabular-nums text-right text-emerald-600 dark:text-emerald-400 font-medium">
-                            {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null
+                            {entry.Source === "CRM" ? (
+                              <span className="text-[10px] text-muted-foreground font-normal normal-case tracking-normal">
+                                {entry.CrmNextMilestoneName ?? "All milestones paid"}
+                              </span>
+                            ) : (entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null
                               ? formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0) : "—"}
                           </td>
                           <td className="px-4 py-3 text-right">
@@ -613,11 +686,17 @@ export default function OnAccountAdjustment() {
                             <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(live)}</span>
                           </td>
                           <td className="px-4 py-3">
-                            <Button size="sm" variant="outline"
-                              className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleAdjust(entry)}>
-                              Adjust <ArrowRight size={12} />
-                            </Button>
+                            {entry.Source === "CRM" ? (
+                              <span className="text-[10px] text-muted-foreground italic opacity-0 group-hover:opacity-100 transition-opacity">
+                                Apply via CRM
+                              </span>
+                            ) : (
+                              <Button size="sm" variant="outline"
+                                className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleAdjust(entry)}>
+                                Adjust <ArrowRight size={12} />
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       );

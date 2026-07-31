@@ -7,12 +7,13 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark, Users,
-  IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil,
+  IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil, CreditCard,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
+const BKG_API = "/api/crm/bookings";
 
 // Same "always allowed regardless of assignment" role set the backend
 // enforces (backend/services/approvalService.js CRM_APPROVER_ROLES) — kept
@@ -26,6 +27,7 @@ const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
   NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Notes: "",
+  FinancingType: "",
 };
 
 // Same completeness rule the backend (crmPortal.js / crmWelcomeCalls.js
@@ -35,6 +37,7 @@ const EMPTY_FORM = {
 const REQUIRED_KEYS: (keyof typeof EMPTY_FORM)[] = [
   "BankName", "AccountNo", "IfscCode", "AccountHolderName",
   "NomineeName", "NomineeRelation", "PanNo", "AadhaarNo", "Occupation",
+  "FinancingType",
 ];
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -65,6 +68,9 @@ async function fetchBankDetail(bookingId: number): Promise<any> {
 }
 async function fetchChecklist(bookingId: number): Promise<any> {
   try { const r = await fetchWithAuth(`${CHECKLIST_API}/${bookingId}/checklist`); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function fetchLoan(bookingId: number): Promise<any> {
+  try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/loan`); return r.ok ? r.json() : null; } catch { return null; }
 }
 
 function SectionCard({ icon: Icon, iconClass, title, children }: { icon: any; iconClass: string; title: string; children: React.ReactNode }) {
@@ -102,11 +108,20 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // gate above: someone without canEdit never sees an Edit button at all.
   const [uiLocked, setUiLocked] = useState(true);
   const locked = !canEdit || uiLocked;
+  // Booking Amount (Milestone 1) must actually be paid before this form —
+  // and the Financing Type declaration on it — can be completed. Mirrors the
+  // same hard gate the backend now enforces in
+  // validateAgreementPreparationPrerequisites (crmWorkflowGuards.js), so
+  // staff see the reason up front instead of a save that silently never
+  // unlocks Agreement prep.
+  const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
+  const bookingAmountPaid = milestone1Status === "Paid";
 
   useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
     queryFn: async () => {
       const d = await fetchBankDetail(row.BookingId);
+      setMilestone1Status(d?.Milestone1Status ?? null);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
@@ -114,7 +129,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         NomineeDob: d.NomineeDob ? String(d.NomineeDob).slice(0,10) : "", NomineeContact: d.NomineeContact || "",
         NomineeAddress: d.NomineeAddress || "", PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
         Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
-        Notes: d.Notes || "",
+        Notes: d.Notes || "", FinancingType: d.FinancingType || "",
       } : { ...EMPTY_FORM });
       return d;
     },
@@ -122,6 +137,14 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   const { data: checklist } = useQuery({
     queryKey: ["crm-welcome-checklist", row.BookingId],
     queryFn: () => fetchChecklist(row.BookingId),
+  });
+  // Soft check only — never blocks saving/completing this form. Just tells
+  // staff, right where they're declaring Financing Type, whether the loan
+  // side actually has anything on file yet.
+  const { data: loanDetail } = useQuery({
+    queryKey: ["crm-loan-detail", row.BookingId],
+    queryFn: () => fetchLoan(row.BookingId),
+    enabled: form.FinancingType === "LoanFinanced",
   });
 
   const errors = useMemo(() => validate(form), [form]);
@@ -133,6 +156,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   const handleSave = async () => {
     if (locked) { toast.error("This record is locked — only the assigned salesperson or an admin can edit it"); return; }
+    if (!bookingAmountPaid) { toast.error("Booking Amount (Milestone 1) must be paid before this form can be completed"); return; }
     setTouched(true);
     if (hasErrors) { toast.error("Fix the highlighted fields before saving"); return; }
     setSaving(true);
@@ -176,7 +200,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             <span className="flex items-center gap-2">
               <Landmark size={16} className="text-primary" /> Bank & Nominee Details
             </span>
-            {canEdit && uiLocked && (
+            {canEdit && uiLocked && bookingAmountPaid && (
               <button onClick={() => setUiLocked(false)}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
                 <Pencil size={12} /> Edit
@@ -185,7 +209,11 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
           </DialogTitle>
         </DialogHeader>
 
-        {!canEdit ? (
+        {!bookingAmountPaid ? (
+          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <AlertTriangle size={13} /> Booking Amount (Milestone 1) must be paid before Bank & Nominee / Financing details can be completed.
+          </div>
+        ) : !canEdit ? (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
           </div>
@@ -285,6 +313,31 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             {field("AnnualIncome", "Annual Income (₹)", "number")}
           </SectionCard>
         </div>
+
+        <SectionCard icon={CreditCard} iconClass="bg-cyan-500/10 text-cyan-600" title="Financing">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed? *</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
+                <button key={opt} type="button" disabled={locked}
+                  onClick={() => !locked && setForm((f) => ({ ...f, FinancingType: opt }))}
+                  className={`text-sm rounded-lg border px-3 py-2 text-left transition-colors ${
+                    form.FinancingType === opt ? "border-primary bg-primary/10 text-primary font-medium" : "border-border bg-background"
+                  } ${locked ? "cursor-not-allowed opacity-70" : "hover:bg-muted/40"}`}>
+                  {opt === "SelfFunded" ? "Self-funded" : "Loan-financed"}
+                </button>
+              ))}
+            </div>
+            {touched && !form.FinancingType && (
+              <p className="text-[11px] text-rose-500 mt-1">Financing type must be declared</p>
+            )}
+          </div>
+          {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <AlertTriangle size={13} /> No loan record on file yet — capture it on Home Loan Tracking once the customer's bank/sanction details are known.
+            </div>
+          )}
+        </SectionCard>
 
         <div className="flex justify-between items-center pt-3 border-t border-border">
           <span className="text-xs text-muted-foreground">

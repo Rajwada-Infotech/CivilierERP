@@ -19,7 +19,7 @@ const allowRoles = require("../middleware/role");
 // approval engine (services/approvalService.js). Without this, any user with
 // ReceivedPayments "edit" permission could approve a receipt and post it to
 // the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-const APPROVER_ROLES = ["admin", "super_admin", "dba"];
+const APPROVER_ROLES = ["admin", "super_admin", "dba", "Account's Head"];
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -127,6 +127,10 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       SourceSaleInvoiceDocNo,
       // ── Contract Master (Migration 176) — see services/contractLedger.js ──
       ContractId,
+      // ── CRM (Migration 269) — see routes/crmPayments.js createReceiptForMilestone ──
+      CrmMilestoneId,
+      CrmBookingId,
+      CrmApplicationId,
     } = payload;
     const body = { ...payload };
     let finalDocNo = null;
@@ -296,10 +300,13 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         sql.NVarChar(100),
         SourceSaleInvoiceDocNo || null,
       )
-      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null);
+      .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
+      .input("CrmMilestoneId", sql.Int, CrmMilestoneId ? parseInt(CrmMilestoneId, 10) : null)
+      .input("CrmBookingId", sql.Int, CrmBookingId ? parseInt(CrmBookingId, 10) : null)
+      .input("CrmApplicationId", sql.Int, CrmApplicationId ? parseInt(CrmApplicationId, 10) : null);
 
-    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated`;
-    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated`;
+    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated, CrmMilestoneId, CrmBookingId, CrmApplicationId`;
+    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated, @CrmMilestoneId, @CrmBookingId, @CrmApplicationId`;
 
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
@@ -588,16 +595,25 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   if (!Number.isFinite(pid))
     return res.status(400).json({ error: "Invalid id" });
   const actor = req.user?.name || req.user?.email || null;
+  const actorUserId = Number(req.user?.userId ?? req.user?.id) || null;
   const pool = getPool();
 
   // Lock + guard the status change: only a Pending receipt can be approved,
   // and the row lock serialises concurrent approvals so the same receipt
   // can't be approved twice (which would otherwise re-run GL posting).
+  // CRM-linked rows (see migration 269) also get their predecessor-milestone
+  // rule re-checked here, INSIDE this same transaction — a second payment
+  // approved before its own predecessor's approval must be refused outright
+  // (RPStatus stays Pending, rolled back with a clear reason) rather than
+  // silently approved into a milestone schedule that's still out of order.
   const tx = new sql.Transaction(pool);
+  let crmRow = null;
   try {
     await tx.begin();
     const cur = await tx.request().input("id", sql.Int, pid).query(`
-      SELECT RPStatus FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
+      SELECT RPStatus, RPAmount, RPDocDate, RPMode, RPTransactionID, RPChequeDate, RPRemarks,
+             RPDepositBankId, RPDepositBankName, CrmMilestoneId, CrmBookingId, CrmApplicationId
+      FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
       WHERE RPPaymentID=@id
     `);
     if (!cur.recordset.length) {
@@ -611,6 +627,22 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
         .status(400)
         .json({ error: `Cannot approve from status "${status}"` });
     }
+
+    if (cur.recordset[0].CrmMilestoneId) {
+      const predecessor = await tx.request()
+        .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
+          SELECT TOP 1 p.MilestoneName
+          FROM dbo.CrmPaymentMilestone m
+          JOIN dbo.CrmPaymentMilestone p ON p.BookingId = m.BookingId AND p.MilestoneNo < m.MilestoneNo
+          WHERE m.Id = @mid AND p.Status NOT IN ('Paid', 'Waived')
+          ORDER BY p.MilestoneNo
+        `);
+      if (predecessor.recordset.length) {
+        await tx.rollback();
+        return res.status(400).json({ error: `Cannot approve — "${predecessor.recordset[0].MilestoneName}" is still due first` });
+      }
+    }
+
     await tx
       .request()
       .input("id", sql.Int, pid)
@@ -619,6 +651,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
         SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE()
         WHERE RPPaymentID=@id
       `);
+    crmRow = { RPPaymentID: pid, ...cur.recordset[0] };
     await tx.commit();
   } catch (err) {
     try {
@@ -628,6 +661,27 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
     }
     console.error("PUT /:id/approve error:", err);
     return res.status(500).json({ error: "Approval failed" });
+  }
+
+  // CRM-linked rows never go through the generic postReceivedPaymentApproval
+  // GL path below — applyCrmMilestonePaymentApproval does the CRM-specific
+  // receipt/rollup/GL posting instead (crmLedger.js's postCrmReceiptToGL,
+  // not the generic customer-name-matched GL posting), same as when
+  // createReceiptForMilestone posted directly before this approval detour
+  // existed. Never allowed to fail the approval itself; outcome logged the
+  // same way GL posting failures already are everywhere else.
+  if (crmRow?.CrmMilestoneId) {
+    let brokerWarning = null;
+    try {
+      const { applyCrmMilestonePaymentApproval } = require("./crmPayments");
+      const outcome = await applyCrmMilestonePaymentApproval(pool, crmRow, actorUserId, actor);
+      brokerWarning = outcome?.brokerWarning || null;
+      await recordGLPosting("crm-received-payment", pid, outcome, actor);
+    } catch (crmErr) {
+      await recordGLPosting("crm-received-payment", pid, { failed: true, reason: crmErr.message }, actor);
+    }
+    await invalidateReceivedPaymentWorkflowCaches();
+    return res.json({ success: true, brokerWarning });
   }
 
   // GL posting AFTER the status commit (postVoucher has its own transaction),

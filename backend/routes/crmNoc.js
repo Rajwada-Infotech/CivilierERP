@@ -66,28 +66,27 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
     const existingNocs = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, NocNo, NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid ORDER BY CreatedAt DESC");
 
-    // The customer's own bank account on file (KYC/Welcome Call) — not
-    // necessarily the same bank issuing their home loan, but the only bank
-    // reference the system actually has, so it's used to pre-fill the form
-    // (still freely editable, and labeled as such in the response).
+    // The customer's own bank account on file (KYC/Welcome Call) — kept in
+    // the response for reference/display only. It is NOT the pre-fill source
+    // for a Bank NOC's lender fields below — that was the bug: a Bank NOC
+    // exists for the LENDING bank, and the customer's personal KYC account is
+    // a different bank entirely more often than not.
     const bankDetail = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT BankName, AccountNo, IfscCode FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
 
-    // Suggested loan amount: the balance still outstanding on the unit
-    // (GrandTotal minus whatever's already been paid) — a real, derivable
-    // number, not a guess, since a home loan is typically sized to cover
-    // exactly what's left to pay.
-    const paid = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-    const grandTotal = booking.recordset[0].GrandTotal;
-    const outstandingBalance = grandTotal != null ? Math.max(0, grandTotal - paid.recordset[0].TotalPaid) : null;
+    // The actual lender record (Home Loan Tracking) — real BankName/
+    // LoanAccountNo/LoanAmount the bank itself sanctioned, not a guess. Null
+    // when no loan has been recorded yet; the frontend leaves the Bank NOC
+    // fields blank in that case rather than falling back to a wrong source.
+    const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
 
     res.json({
       booking: booking.recordset[0],
       agreement: agreement.recordset[0] || null,
       existingNocs: existingNocs.recordset,
       customerBankDetail: bankDetail.recordset[0] || null,
-      outstandingBalance,
+      loanDetail: loanDetail.recordset[0] || null,
     });
   } catch (e) {
     console.error("[crm-noc] GET /booking/:id/context error:", e.message);
