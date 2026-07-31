@@ -236,6 +236,7 @@ const ALL_ROUTES = [
   { path: "/api/parking-master", file: "./routes/parkingMaster" },
   { path: "/api/parking-slot-master", file: "./routes/parkingSlotMaster" },
   { path: "/api/extra-charge-master", file: "./routes/extraChargeMaster" },
+  { path: "/api/department-master", file: "./routes/departmentMaster" },
   { path: "/api/task-master", file: "./routes/taskMaster" },
   { path: "/api/unit-matrix", file: "./routes/unitMatrix" },
   { path: "/api/parking-matrix", file: "./routes/parkingMatrix" },

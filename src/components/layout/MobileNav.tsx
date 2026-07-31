@@ -372,6 +372,13 @@ const followupSetupItems: SetupItem[] = [
     color: "text-teal-500",
     pageKey: "task-master",
   },
+  {
+    icon: Users,
+    label: "Department Master",
+    path: "/followup/setup/department-master",
+    color: "text-cyan-500",
+    pageKey: "followup-department-master",
+  },
 ];
 
 const engineeringSetupItems: SetupItem[] = [
@@ -1295,7 +1302,7 @@ export const MobileNav: React.FC = () => {
                                   <Icon size={15} className={color} />
                                 </div>
                                 <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
-                                  {label}
+                                  {label.replace(/ Master$/, "")}
                                 </span>
                               </button>
                             );
