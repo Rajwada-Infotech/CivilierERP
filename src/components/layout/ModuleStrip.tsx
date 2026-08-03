@@ -14,6 +14,7 @@ import {
   Archive,
   VideoPlay,
   Shield,
+  MoneyRecive,
 } from "iconsax-react";
 import { HardHat } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
@@ -116,6 +117,15 @@ const MODULES = [
     color: "#0ea5e9",
     bg: "rgba(14,165,233,0.22)",
     ringRgb: "14,165,233",
+  },
+  {
+    id: "loan" as Module,
+    icon: MoneyRecive,
+    label: "Loan",
+    desc: "Loan management (coming soon)",
+    color: "#22c55e",
+    bg: "rgba(34,197,94,0.22)",
+    ringRgb: "34,197,94",
   },
   // Records is always last — new modules get inserted above this entry
   {
