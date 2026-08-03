@@ -109,7 +109,11 @@ function formatINR(n: number) {
 
 function unique(arr: (string | undefined | null)[]): string[] {
   return Array.from(
-    new Set(arr.filter((v): v is string => !!v && v.trim() !== "")),
+    new Set(
+      arr
+        .map((v) => v?.trim())
+        .filter((v): v is string => !!v && v !== ""),
+    ),
   ).sort();
 }
 

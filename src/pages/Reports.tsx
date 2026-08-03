@@ -199,6 +199,33 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "payment-reason-report",
+    label: "Payment Reason Report",
+    description: "Outward payments grouped and filterable by Payment Reason",
+    icon: Receipt,
+    color: "#9333ea",
+    apiPath: "/api/payment-reason-master/report",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Reason", accessor: "ReasonName" },
+      { header: "Company", accessor: (r) => (r.Company ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.Project ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Mode", accessor: (r) => (r.Mode ?? "—") as string },
+      {
+        header: "Date",
+        accessor: (r) => (r.Date ? String(r.Date).slice(0, 10) : "—"),
+      },
+      { header: "Document Number", accessor: "DocNo" },
+    ],
+  },
+  {
     id: "received-payment",
     label: "Received Payment",
     description: "Inward payments received from clients",
@@ -1547,6 +1574,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     icon: IndianRupee,
     reportIds: [
       "payment-register",
+      "payment-reason-report",
       "received-payment",
       "emi-register",
       "pending-payment",
@@ -1845,6 +1873,18 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isStockSummary]);
 
+  // ── Payment Reason switcher (payment-reason-report only) ─────────────────
+  const isPaymentReasonReport = report.id === "payment-reason-report";
+  const [reasonFilter, setReasonFilter] = useState<string>("");
+  const [reasonOptions, setReasonOptions] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    if (!isPaymentReasonReport) return;
+    fetchWithAuth("/api/payment-reason-master/options")
+      .then((r) => r.json().catch(() => []))
+      .then((list) => setReasonOptions(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, [isPaymentReasonReport]);
+
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
@@ -1877,6 +1917,9 @@ const ReportTable: React.FC<{
 
     // Stock summary: pass selected godownId to inventory-master
     if (isStockSummary && godownId) f["godownId"] = godownId;
+
+    // Payment Reason Report: scope to a single reason when selected
+    if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
     return f;
   };
@@ -1914,6 +1957,7 @@ const ReportTable: React.FC<{
     filters.rangeFrom,
     filters.rangeTo,
     godownId,
+    reasonFilter,
   ]);
 
   useEffect(() => {
@@ -1986,6 +2030,32 @@ const ReportTable: React.FC<{
                   <option key={g.GodownID} value={String(g.GodownID)}>
                     {g.GodownName}
                     {g.IsMain ? " ★" : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+          )}
+
+          {/* Reason switcher — payment-reason-report only */}
+          {isPaymentReasonReport && reasonOptions.length > 0 && (
+            <div className="relative flex items-center">
+              <Receipt
+                size={11}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={reasonFilter}
+                onChange={(e) => setReasonFilter(e.target.value)}
+                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              >
+                <option value="">All Reasons</option>
+                {reasonOptions.map((r) => (
+                  <option key={r.id} value={r.name}>
+                    {r.name}
                   </option>
                 ))}
               </select>
