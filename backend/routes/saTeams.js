@@ -18,18 +18,20 @@ router.get("/", requirePageRight("sa-teams", "view"), async (req, res) => {
     const pool = getPool();
 
     const leads = await pool.request().query(`
-      SELECT u.id AS Id, u.name AS Name, u.email AS Email, u.role AS Role
+      SELECT u.id AS Id, u.name AS Name, u.email AS Email, r.RName AS Role
       FROM dbo.Users u
-      WHERE u.role = 'sales_team_lead' AND u.discontinue = 0
+      JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) = 'sales_team_lead' AND u.discontinue = 0
       ORDER BY u.name
     `);
 
     const members = await pool.request().query(`
       SELECT
         t.Id, t.TeamLeadUserId, t.MemberUserId, t.IsActive, t.CreatedAt,
-        u.name AS MemberName, u.email AS MemberEmail, u.role AS MemberRole
+        u.name AS MemberName, u.email AS MemberEmail, r.RName AS MemberRole
       FROM dbo.SaSalesTeam t
       JOIN dbo.Users u ON t.MemberUserId = u.id
+      LEFT JOIN dbo.Role r ON r.RId = u.RoleId
       WHERE t.IsActive = 1
       ORDER BY t.TeamLeadUserId, u.name
     `);
@@ -58,14 +60,15 @@ router.get("/unassigned", requirePageRight("sa-teams", "view"), async (req, res)
   try {
     const pool = getPool();
     const r = await pool.request().query(`
-      SELECT u.id AS Id, u.name AS Name, u.email AS Email, u.role AS Role
+      SELECT u.id AS Id, u.name AS Name, u.email AS Email, r.RName AS Role
       FROM dbo.Users u
-      WHERE u.role IN ('sales_person', 'sales_team_lead')
+      JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) IN ('sales_person', 'sales_team_lead')
         AND u.discontinue = 0
         AND u.id NOT IN (
           SELECT MemberUserId FROM dbo.SaSalesTeam WHERE IsActive = 1
         )
-      ORDER BY u.role DESC, u.name
+      ORDER BY r.RName DESC, u.name
     `);
     res.json(r.recordset);
   } catch (e) {
@@ -80,15 +83,16 @@ router.get("/all-sa-users", requirePageRight("sa-teams", "view"), async (req, re
   try {
     const pool = getPool();
     const r = await pool.request().query(`
-      SELECT u.id AS Id, u.name AS Name, u.email AS Email, u.role AS Role,
+      SELECT u.id AS Id, u.name AS Name, u.email AS Email, r.RName AS Role,
         t.TeamLeadUserId,
         tl.name AS TeamLeadName
       FROM dbo.Users u
+      JOIN dbo.Role r ON r.RId = u.RoleId
       LEFT JOIN dbo.SaSalesTeam t ON t.MemberUserId = u.id AND t.IsActive = 1
       LEFT JOIN dbo.Users tl ON tl.id = t.TeamLeadUserId
-      WHERE u.role IN ('sales_person', 'sales_team_lead')
+      WHERE LOWER(r.RName) IN ('sales_person', 'sales_team_lead')
         AND u.discontinue = 0
-      ORDER BY u.role DESC, u.name
+      ORDER BY r.RName DESC, u.name
     `);
     res.json(r.recordset);
   } catch (e) {
@@ -114,7 +118,11 @@ router.post("/:teamLeadId/members", requirePageRight("sa-teams", "edit"), async 
     // Verify team lead exists and has correct role
     const tlCheck = await pool.request()
       .input("id", sql.Int, teamLeadId)
-      .query("SELECT id FROM dbo.Users WHERE id = @id AND role = 'sales_team_lead' AND discontinue = 0");
+      .query(`
+        SELECT u.id FROM dbo.Users u
+        JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE u.id = @id AND LOWER(r.RName) = 'sales_team_lead' AND u.discontinue = 0
+      `);
     if (!tlCheck.recordset.length) return res.status(400).json({ error: "Team lead not found" });
 
     // Check if member is already in a team — if so, remove from old team first
@@ -204,7 +212,12 @@ router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
-      .query("SELECT id, name, role FROM dbo.Users WHERE id = @id AND discontinue = 0");
+      .query(`
+        SELECT u.id, u.name, r.RName AS role
+        FROM dbo.Users u
+        LEFT JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE u.id = @id AND u.discontinue = 0
+      `);
     if (!userCheck.recordset.length) return res.status(404).json({ error: "User not found" });
 
     const user = userCheck.recordset[0];
@@ -225,7 +238,7 @@ router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req
     await pool.request()
       .input("id", sql.Int, userId)
       .input("rid", sql.Int, roleId)
-      .query("UPDATE dbo.Users SET RoleId = @rid, role = 'sales_team_lead' WHERE id = @id");
+      .query("UPDATE dbo.Users SET RoleId = @rid WHERE id = @id");
 
     res.json({ success: true, message: `${user.name} promoted to Sales Team Lead` });
   } catch (e) {
@@ -243,7 +256,12 @@ router.post("/:userId/demote", requirePageRight("sa-teams", "edit"), async (req,
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
-      .query("SELECT id, name, role FROM dbo.Users WHERE id = @id AND discontinue = 0");
+      .query(`
+        SELECT u.id, u.name, r.RName AS role
+        FROM dbo.Users u
+        LEFT JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE u.id = @id AND u.discontinue = 0
+      `);
     if (!userCheck.recordset.length) return res.status(404).json({ error: "User not found" });
 
     const user = userCheck.recordset[0];
@@ -264,7 +282,7 @@ router.post("/:userId/demote", requirePageRight("sa-teams", "edit"), async (req,
     await pool.request()
       .input("id", sql.Int, userId)
       .input("rid", sql.Int, roleId)
-      .query("UPDATE dbo.Users SET RoleId = @rid, role = 'sales_person' WHERE id = @id");
+      .query("UPDATE dbo.Users SET RoleId = @rid WHERE id = @id");
 
     res.json({ success: true, message: `${user.name} demoted to Sales Person` });
   } catch (e) {
