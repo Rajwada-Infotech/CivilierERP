@@ -977,7 +977,7 @@ export default function ProjectMaster() {
                   columns={columns}
                   searchable={false}
                   paginated={true}
-                  defaultPageSize={20}
+                  defaultPageSize={10}
                   emptyMessage="No projects found."
                 />
               </div>

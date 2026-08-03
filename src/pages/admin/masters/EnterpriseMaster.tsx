@@ -725,7 +725,7 @@ export default function EnterpriseMaster() {
                   columns={columns}
                   searchable={false}
                   paginated={true}
-                  defaultPageSize={20}
+                  defaultPageSize={10}
                   emptyMessage="No records found."
                 />
               </div>

@@ -892,7 +892,7 @@ export default function CompanyMaster() {
                   columns={columns}
                   searchable={false}
                   paginated={true}
-                  defaultPageSize={20}
+                  defaultPageSize={10}
                   emptyMessage="No companies found."
                 />
               </div>
