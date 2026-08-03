@@ -8,7 +8,7 @@
 IF EXISTS (
   SELECT 1
   FROM dbo.CrmCustomer
-  WHERE IsActive = 1S
+  WHERE IsActive = 1
     AND Email IS NOT NULL
     AND LTRIM(RTRIM(Email)) <> ''
   GROUP BY LOWER(LTRIM(RTRIM(Email)))
