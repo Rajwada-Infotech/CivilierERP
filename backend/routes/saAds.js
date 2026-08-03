@@ -66,12 +66,12 @@ router.get(
           SELECT
             l.AdId,
             COUNT(*) AS TotalLeadsGenerated,
-            SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS BookingCount,
+            SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS BookingCount,
             SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
           FROM dbo.SaLead l
-          LEFT JOIN dbo.FollowupBookings fb
-            ON fb.Id = l.BookingId
-           AND ISNULL(fb.IsDeleted, 0) = 0
+          LEFT JOIN dbo.CrmBooking fb
+            ON fb.Id = l.CrmBookingId
+           AND ISNULL(fb.IsActive, 1) = 1
           WHERE l.IsActive = 1
           GROUP BY l.AdId
         ),

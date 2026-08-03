@@ -26,7 +26,7 @@ router.get("/lead-source", requirePageRight("sa-leads", "view"), async (req, res
     const pool = getPool();
     const r = await pool.request().query(`
       SELECT p.Name AS Platform, COUNT(l.Id) AS TotalLeads,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
         SUM(CASE WHEN l.Status = 'Lost' THEN 1 ELSE 0 END) AS Lost
       FROM dbo.SaSocialMediaPlatform p
       LEFT JOIN dbo.SaLead l ON l.PlatformId = p.Id
@@ -61,7 +61,7 @@ router.get("/campaign-performance", requirePageRight("sa-campaigns", "view"), as
         SELECT
           l.CampaignId,
           COUNT(*) AS TotalLeads,
-          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+          SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
         FROM dbo.SaLead l
         WHERE l.IsActive = 1
         GROUP BY l.CampaignId
@@ -92,12 +92,12 @@ router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, re
         SELECT
           l.AdId,
           COUNT(*) AS LeadsGenerated,
-          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
           SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
         FROM dbo.SaLead l
-        LEFT JOIN dbo.FollowupBookings fb
-          ON fb.Id = l.BookingId
-         AND ISNULL(fb.IsDeleted, 0) = 0
+        LEFT JOIN dbo.CrmBooking fb
+          ON fb.Id = l.CrmBookingId
+         AND ISNULL(fb.IsActive, 1) = 1
         WHERE l.IsActive = 1
         GROUP BY l.AdId
       ),
@@ -232,7 +232,7 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
         COUNT(DISTINCT l.Id) AS LeadsHandled,
         COUNT(DISTINCT c.Id) AS CallsMade,
         COUNT(DISTINCT v.Id) AS SiteVisits,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
       FROM dbo.Users u
       INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id AND l.IsActive = 1 ${whereClause}
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
@@ -268,7 +268,7 @@ router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", 
         COUNT(DISTINCT l.Id) AS LeadsReceived,
         SUM(CASE WHEN l.AssignedSalespersonId IS NOT NULL THEN 1 ELSE 0 END) AS LeadsDistributed,
         SUM(CASE WHEN l.AssignedSalespersonId IS NULL THEN 1 ELSE 0 END) AS PendingDistribution,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS TeamBookings
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS TeamBookings
       FROM dbo.Users u
       INNER JOIN dbo.SaLead l ON l.AssignedTeamLeadId = u.id AND l.IsActive = 1 ${whereClause}
       WHERE 1=1 ${userScope}
@@ -345,9 +345,9 @@ router.get("/booking-conversion", requirePageRight("sa-leads", "view"), async (r
       SELECT c.Name AS CampaignName, c.CampaignCode,
         COUNT(l.Id) AS TotalLeads,
         SUM(CASE WHEN l.Status = 'VisitScheduled' OR l.Status = 'Visited' THEN 1 ELSE 0 END) AS Visited,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Booked,
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Booked,
         CASE WHEN COUNT(l.Id) > 0
-          THEN CAST(SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) / COUNT(l.Id) * 100
+          THEN CAST(SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) / COUNT(l.Id) * 100
           ELSE 0 END AS ConversionPct
       FROM dbo.SaCampaign c
       LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
@@ -381,12 +381,12 @@ router.get("/marketing-roi", requirePageRight("sa-campaigns", "view"), async (re
         SELECT
           l.CampaignId,
           COUNT(*) AS TotalLeads,
-          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
           SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
         FROM dbo.SaLead l
-        LEFT JOIN dbo.FollowupBookings fb
-          ON fb.Id = l.BookingId
-         AND ISNULL(fb.IsDeleted, 0) = 0
+        LEFT JOIN dbo.CrmBooking fb
+          ON fb.Id = l.CrmBookingId
+         AND ISNULL(fb.IsActive, 1) = 1
         WHERE l.IsActive = 1
         GROUP BY l.CampaignId
       )

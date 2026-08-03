@@ -863,11 +863,12 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       qc.invalidateQueries({ queryKey: ["unit-master"] });
       if (subData.booking?.BookingNo) {
-        // Booking auto-created — go straight to it instead of leaving staff
-        // to find it themselves, matching the "no approval step in between"
-        // change: Application submitted -> Booking exists -> Booking page.
+        // Booking is auto-created server-side on submit, but we deliberately
+        // do NOT navigate there — Application and Booking are meant to be
+        // handled by two different users/steps (no enforced user-gate yet,
+        // that's a separate future change), so staff stay on this page
+        // instead of being forced onto the booking they didn't create.
         toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
-        navigate(`/crm/bookings?applicationId=${applicationId}`);
       } else if (subData.bookingError) {
         // Auto-create failed (e.g. a unit-hold conflict in the interim) —
         // the Application itself still submitted fine; staff can retry via

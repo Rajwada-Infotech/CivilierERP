@@ -30,7 +30,7 @@ const EMPTY_BANK = {
 // frontend-side permission preview.
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
-const TABS = ["Booking", "Payment Plan", "Parking & Extra Work", "Bank Details", "Attachments", "Payment & Invoice"] as const;
+const TABS = ["Booking", "Parking & Extra Work", "Payment Plan", "Bank Details", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
 
 const fmt = (n: number | null | undefined) =>
@@ -206,6 +206,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [bankLoaded, setBankLoaded] = useState(false);
   const [bankSaving, setBankSaving] = useState(false);
+  // Locked = read-only "Saved" state, distinct from booking.Status ===
+  // "Approved" (which is a permanent, backend-enforced lock). This one is
+  // purely a local UX guard: once Save succeeds the fields lock and show
+  // "Saved" so nobody edits KYC/nominee data by accident, but Edit is
+  // always available to reopen them right up until the Booking itself is
+  // Approved. Defaults to locked if a row was already saved before this
+  // tab was opened, so returning to an already-filled-in booking doesn't
+  // present open, editable fields as if nothing had been saved yet.
+  const [bankLocked, setBankLocked] = useState(false);
   useEffect(() => {
     if (tab !== "Bank Details" || !booking?.ApplicationId) return;
     let cancelled = false;
@@ -223,6 +232,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           PanNo: d?.PanNo || "", AadhaarNo: d?.AadhaarNo || "",
           Occupation: d?.Occupation || "", AnnualIncome: d?.AnnualIncome != null ? String(d.AnnualIncome) : "",
         });
+        setBankLocked(!!(d && (d.BankName || d.AccountNo || d.PanNo)));
       })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
@@ -239,6 +249,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       });
       if (!res.ok) throw new Error((await res.json()).error || "Save failed");
       toast.success("Bank/KYC details saved");
+      setBankLocked(true);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -857,22 +868,94 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   )}
                 </div>
 
-                {/* Breakdown of the real, already-generated schedule for
-                    this booking — not a re-derivation of the plan template,
-                    since parking/extra-charge line items get bolted on as
-                    their own milestones too (excluded here; they live on
-                    their own tab) and this way the numbers can never drift
-                    from what CrmPaymentMilestone actually has. */}
+                {/* Where the Grand Total actually comes from — base Unit
+                    Value plus whatever Parking/Extra Charges have been
+                    added on the Parking & Extra Work tab. Pulled straight
+                    from the CrmBooking row's own TotalValue/ParkingTotal/
+                    ExtraChargesTotal/GrandTotal columns (GrandTotal is kept
+                    in sync with these server-side on every update — see
+                    crmBookings.js), so this can never drift from what the
+                    Book action itself is checking. */}
+                {(() => {
+                  const unitValue = Number(booking.TotalValue || 0);
+                  const parkingTotal = Number(booking.ParkingTotal || 0);
+                  const extraTotal = Number(booking.ExtraChargesTotal || 0);
+                  const grandTotal = Number(booking.GrandTotal ?? (unitValue + parkingTotal + extraTotal));
+                  return (
+                    <div className="rounded-xl border border-border p-4 space-y-2">
+                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Total Price Breakdown</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Unit Value</div>
+                          <div className="font-medium">{fmt(unitValue)}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Parking</div>
+                          <div className="font-medium">{fmt(parkingTotal)}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Extra Charges</div>
+                          <div className="font-medium">{fmt(extraTotal)}</div>
+                        </div>
+                        <div className="rounded-lg bg-primary/10 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Grand Total</div>
+                          <div className="font-semibold text-primary">{fmt(grandTotal)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Full payment breakdown across every milestone category —
+                    base schedule, Parking, and Extra Charges alike (all
+                    three live in CrmPaymentMilestone; previously this only
+                    showed the base schedule and silently left Parking/Extra
+                    Charges out of both the table and the totals, so "paid
+                    of total" never matched the real Grand Total). Grouped
+                    by category so it stays readable, with one combined
+                    total across all of them at the top. */}
                 {(() => {
                   const scheduleRows = milestoneList.filter((m: any) => !m.ParkingAllotmentId && !m.ExtraChargeId);
-                  if (!scheduleRows.length) return null;
-                  const totalDue = scheduleRows.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-                  const totalPaid = scheduleRows.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+                  const parkingRows = milestoneList.filter((m: any) => !!m.ParkingAllotmentId);
+                  const extraRows = milestoneList.filter((m: any) => !!m.ExtraChargeId);
+                  if (!milestoneList.length) return null;
+                  const totalDue = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
+                  const totalPaid = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+
+                  const renderGroupRows = (label: string, rows: any[]) => rows.length > 0 && (
+                    <React.Fragment key={label}>
+                      <tr className="bg-muted/20">
+                        <td colSpan={6} className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                      </tr>
+                      {rows.map((m: any) => (
+                        <tr key={m.Id} className="border-b border-border">
+                          <td className="px-2.5 py-1.5 text-xs text-muted-foreground">{m.MilestoneNo}</td>
+                          <td className="px-2.5 py-1.5">{m.MilestoneName}</td>
+                          <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
+                          <td className="px-2.5 py-1.5 text-right font-medium">{fmt(m.AmountDue)}</td>
+                          <td className="px-2.5 py-1.5 text-right text-emerald-700">
+                            {fmt(m.AmountPaid)}
+                            {Number(m.PendingVerificationAmount) > 0 && (
+                              <div className="text-[10px] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
+                              m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                                : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
+                                : "text-amber-700 bg-amber-50 border-amber-200"
+                            }`}>{m.Status}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Payment Breakdown</h3>
-                        <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid</span>
+                        <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid — all charges</span>
                       </div>
                       <div className="overflow-x-auto thin-scroll">
                         <div className="min-w-[520px]">
@@ -888,27 +971,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </tr>
                             </thead>
                             <tbody>
-                              {scheduleRows.map((m: any) => (
-                                <tr key={m.Id} className="border-b border-border">
-                                  <td className="px-2.5 py-1.5 text-xs text-muted-foreground">{m.MilestoneNo}</td>
-                                  <td className="px-2.5 py-1.5">{m.MilestoneName}</td>
-                                  <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
-                                  <td className="px-2.5 py-1.5 text-right font-medium">{fmt(m.AmountDue)}</td>
-                                  <td className="px-2.5 py-1.5 text-right text-emerald-700">
-                                    {fmt(m.AmountPaid)}
-                                    {Number(m.PendingVerificationAmount) > 0 && (
-                                      <div className="text-[10px] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
-                                    )}
-                                  </td>
-                                  <td className="px-2.5 py-1.5">
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
-                                      m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                                        : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
-                                        : "text-amber-700 bg-amber-50 border-amber-200"
-                                    }`}>{m.Status}</span>
-                                  </td>
-                                </tr>
-                              ))}
+                              {renderGroupRows("Base Value Schedule", scheduleRows)}
+                              {renderGroupRows("Parking", parkingRows)}
+                              {renderGroupRows("Extra Charges", extraRows)}
                             </tbody>
                           </table>
                         </div>
@@ -1236,7 +1301,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div key={f.key}>
                           <label className="text-xs text-muted-foreground block mb-1">{f.label}</label>
                           <input type={f.type} value={(bank as any)[f.key] || ""}
-                            disabled={booking.Status === "Approved"}
+                            disabled={booking.Status === "Approved" || bankLocked}
                             onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
                             className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
                         </div>
@@ -1252,7 +1317,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div key={f.key}>
                           <label className="text-xs text-muted-foreground block mb-1">{f.label}</label>
                           <input type={f.type} value={(bank as any)[f.key] || ""}
-                            disabled={booking.Status === "Approved"}
+                            disabled={booking.Status === "Approved" || bankLocked}
                             onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
                             className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
                         </div>
@@ -1260,7 +1325,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Nominee Address</label>
                         <textarea value={bank.NomineeAddress}
-                          disabled={booking.Status === "Approved"}
+                          disabled={booking.Status === "Approved" || bankLocked}
                           onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none disabled:opacity-60 disabled:cursor-not-allowed" rows={2} />
                       </div>
@@ -1268,11 +1333,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {booking.Status === "Approved" && (
                       <p className="text-xs text-muted-foreground">Locked — this Booking is Approved. Bank/KYC details can no longer be edited here.</p>
                     )}
-                    {canEdit && booking.Status !== "Approved" && (
-                      <button onClick={handleSaveBank} disabled={bankSaving}
-                        className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                        {bankSaving ? "Saving..." : "Save Bank/KYC Details"}
-                      </button>
+                    {booking.Status !== "Approved" && (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                        <p className="text-sm font-medium">Bank/KYC Details</p>
+                        {bankLocked ? (
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Saved</span>
+                            {canEdit && (
+                              <button onClick={() => setBankLocked(false)}
+                                className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100">
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        ) : canEdit ? (
+                          <button onClick={handleSaveBank} disabled={bankSaving}
+                            className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
+                            {bankSaving ? "Saving..." : "Save Bank/KYC Details"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Not saved</span>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
