@@ -41,6 +41,7 @@ import {
   SlidersHorizontal,
   UsersRound,
   ShieldCheck,
+  CalendarClock,
   Wand2,
 } from "lucide-react";
 import {
@@ -343,6 +344,13 @@ const materialSetupItems: SetupItem[] = [
     color: "text-purple-500",
   },
   {
+    icon: CalendarClock,
+    label: "Payment Terms",
+    path: "/masters/payment-terms",
+    color: "text-sky-500",
+    pageKey: "payment-terms",
+  },
+  {
     icon: ClipboardList,
     label: "Inventory",
     path: "/material/inventory-master",
@@ -359,9 +367,17 @@ const materialSetupItems: SetupItem[] = [
 const followupSetupItems: SetupItem[] = [
   {
     icon: ClipboardList,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
+    label: "Task Master",
+    path: "/followup/setup/task-master",
+    color: "text-teal-500",
+    pageKey: "task-master",
+  },
+  {
+    icon: Users,
+    label: "Department Master",
+    path: "/followup/setup/department-master",
+    color: "text-cyan-500",
+    pageKey: "followup-department-master",
   },
 ];
 
@@ -1272,7 +1288,7 @@ export const MobileNav: React.FC = () => {
                                   <Icon size={15} className={color} />
                                 </div>
                                 <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
-                                  {label}
+                                  {label.replace(/ Master$/, "")}
                                 </span>
                               </button>
                             );

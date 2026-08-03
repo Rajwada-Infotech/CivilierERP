@@ -49,6 +49,12 @@ export interface FieldDef {
     form?: Record<string, unknown>,
   ) => { value: string; label: string }[];
   asyncOptions?: () => Promise<{ value: string; label: string }[]>;
+  /** For a "select" field backed by asyncOptions — once options load, seed
+   * new (non-edit) records with the first option (e.g. the most recent
+   * Financial Year, when the options query already sorts newest-first).
+   * Never overrides a value already present, so editing an existing record
+   * is unaffected. */
+  defaultToFirstOption?: boolean;
   prefix?: string;
   uppercase?: boolean;
   fullWidth?: boolean;
@@ -231,9 +237,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   canEdit = true,
   canDelete = true,
   canExport = true,
+  gridCols = 2,
   isRowLocked,
   isDeleteLocked,
-  gridCols = 2,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -275,6 +281,25 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Seed defaultToFirstOption fields once their options arrive — only for a
+  // record that's still untouched (new record, field not yet set), so this
+  // never clobbers a value being edited.
+  React.useEffect(() => {
+    fields.forEach((field) => {
+      if (field.type === "select" && field.defaultToFirstOption) {
+        const opts = asyncOptionsCache[field.name];
+        if (opts?.length) {
+          setForm((prev) =>
+            editingId === null && !prev[field.name]
+              ? { ...prev, [field.name]: opts[0].value }
+              : prev,
+          );
+        }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asyncOptionsCache, editingId]);
 
   // keep internal data in sync when initialData changes (e.g. after DB refetch)
   const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
@@ -654,7 +679,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     />
                   ) : field.type === "toggle" ? (
-                    <div className="flex items-center gap-3 pt-1">
+                    <div className="flex items-center gap-3 pt-7">
                       <button
                         type="button"
                         onClick={() =>

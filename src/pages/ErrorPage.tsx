@@ -4,12 +4,6 @@ interface ErrorPageProps {
   error: Error | null;
 }
 
-/**
- * Full-page render-error fallback, used by ErrorBoundary in AppLayout.
- * Styled to match the project's blueprint / engineering-drawing theme.
- *
- * Drop this file into src/pages/ErrorPage.tsx — no other changes needed.
- */
 export function ErrorPage({ error }: ErrorPageProps) {
   const isDev = import.meta.env.DEV;
   const errorMessage = error?.message || "An unknown error occurred.";

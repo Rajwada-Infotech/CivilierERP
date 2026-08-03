@@ -99,7 +99,8 @@ import {
   MessageCircle,
   Lock,
 } from "lucide-react";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { relevantUOMs, convertRate } from "@/lib/uomConversion";
 import {
   alternatesForItem,
@@ -200,6 +201,7 @@ interface POForm {
   docNo: string;
   status: string;
   costCenterId: string;
+  paymentTermId: string;
 }
 
 interface DropdownOption {
@@ -226,7 +228,22 @@ interface POListItem {
   remarks: string;
   poType: string;
   sourceWODocNo: string | null;
+  /** MR this PO is tagged to — direct or, for a Quotation-sourced PO, the
+   *  Quotation's own MR (see backend's EffectiveMRDocNo). */
+  effectiveMRDocNo: string | null;
 }
+
+const PO_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "docNo" },
+  { header: "PO Number", accessor: "poNumber" },
+  { header: "Date", accessor: (r) => r.poDate ? new Date(r.poDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Supplier", accessor: "supplierName" },
+  { header: "Company", accessor: "companyName" },
+  { header: "Project", accessor: "projectName" },
+  { header: "Total Amount", accessor: (r) => Number(r.totalAmount) || 0 },
+  { header: "Status", accessor: "status" },
+  { header: "Type", accessor: "poType" },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -290,6 +307,7 @@ const EMPTY_FORM = (): POForm => ({
   docNo: "",
   status: "Draft",
   costCenterId: "",
+  paymentTermId: "",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -674,6 +692,14 @@ const PurchaseOrderMaster: React.FC = () => {
       ),
   });
 
+  const { data: paymentTerms = [] } = useQuery<{ id: number; label: string; days: number }[]>({
+    queryKey: ["payment-terms-po"],
+    queryFn: () =>
+      fetchWithAuth("/api/payment-terms/options").then((r) =>
+        r.json().catch(() => ({})),
+      ),
+  });
+
   // ── Normalise data ────────────────────────────────────────────────────────
   const suppliers = useMemo(
     () =>
@@ -1013,6 +1039,7 @@ const PurchaseOrderMaster: React.FC = () => {
         remarks: item.Remarks ?? "",
         poType: item.POType ?? "Direct",
         sourceWODocNo: item.SourceWODocNo ?? null,
+        effectiveMRDocNo: item.EffectiveMRDocNo ?? null,
       })),
     [dbItems, suppliers, companies, allProjects],
   );
@@ -1674,6 +1701,7 @@ const PurchaseOrderMaster: React.FC = () => {
           : "Pending", // creation always auto-submits; backend ignores this field on create anyway
       Remarks: form.remarks || null,
       CostCenterId: form.costCenterId ? parseInt(form.costCenterId, 10) : null,
+      PaymentTermId: form.paymentTermId ? parseInt(form.paymentTermId, 10) : null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
         ? null
@@ -2152,6 +2180,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
       docNo,
       status: raw.Status ?? "Draft",
       costCenterId: String(raw.CostCenterId ?? ""),
+      paymentTermId: String(raw.PaymentTermId ?? ""),
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2354,6 +2383,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           icon={ShoppingCart}
           action={
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={listData as unknown as Record<string, unknown>[]}
+                columns={PO_EXPORT_COLUMNS}
+                title="Purchase Orders"
+                filename="purchase-orders"
+                disabled={!listData.length || !rights.canExport}
+              />
               <input
                 ref={importFileInputRef}
                 type="file"
@@ -2519,6 +2555,23 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
                     ),
+                  },
+                  {
+                    id: "effectiveMRDocNo",
+                    accessorKey: "effectiveMRDocNo",
+                    header: "MR Ref",
+                    size: 130,
+                    meta: { className: "hidden lg:table-cell" },
+                    cell: ({ getValue }: any) => {
+                      const v = getValue() as string | null;
+                      return v ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                          {v}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      );
+                    },
                   },
                   {
                     id: "totalAmount",
@@ -2955,6 +3008,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             "—",
                         },
                         {
+                          label: "Payment Terms",
+                          value: viewingPO.PaymentTermDescription
+                            ? `${viewingPO.PaymentTermDescription} (${viewingPO.PaymentTermDays} days)`
+                            : "—",
+                        },
+                        {
                           label: "Total Amount",
                           value:
                             (viewingPO.TotalAmount ?? viewingPO.totalAmount) !=
@@ -2984,13 +3043,17 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     ))}
                   </div>
                   {/* Source document references */}
-                  {(viewingPO.SourceMRDocNo ||
+                  {(viewingPO.EffectiveMRDocNo ||
+                    viewingPO.SourceMRDocNo ||
                     viewingPO.SourceWODocNo ||
                     viewingPO.SourceWDDocNo) && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {viewingPO.SourceMRDocNo && (
+                      {(viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo) && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                          <Link2 size={9} /> MR: {viewingPO.SourceMRDocNo}
+                          <Link2 size={9} /> MR: {viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}
+                          {!viewingPO.SourceMRDocNo && viewingPO.EffectiveMRDocNo && (
+                            <span className="opacity-60 font-normal">(via Quotation)</span>
+                          )}
                         </span>
                       )}
                       {viewingPO.SourceWODocNo && (
@@ -3016,6 +3079,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       </p>
                     </div>
                   )}
+                  <DocumentChainPanel
+                    docType="po"
+                    id={viewingPO.PurchaseOrderID ?? viewingPO.purchaseOrderID ?? null}
+                  />
                 </div>
 
                 {/* Supplier / Billing / Project panels */}
@@ -4028,6 +4095,25 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     Cost Center is required
                   </p>
                 )}
+              </div>
+
+              {/* Payment Terms — Invoice computes its Due Date from Vendor
+                  Invoice Date + this term's Days once the PO/GRN is linked. */}
+              <div>
+                <FieldLabel>Payment Terms</FieldLabel>
+                <select
+                  value={form.paymentTermId}
+                  onChange={(e) => setField("paymentTermId", e.target.value)}
+                  disabled={isReadOnly}
+                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                >
+                  <option value="">— Select Payment Term —</option>
+                  {paymentTerms.map((pt) => (
+                    <option key={pt.id} value={pt.id}>
+                      {pt.label} ({pt.days} days)
+                    </option>
+                  ))}
+                </select>
               </div>
 
             </div>

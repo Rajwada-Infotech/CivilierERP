@@ -252,7 +252,7 @@ const MetricsDashboard = () => {
               <Button
                 onClick={() => fetchData(false)}
                 disabled={loading}
-                className="gradient-accent gap-2 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-2 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
               >
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                 {loading ? "Connecting…" : metrics ? "Refresh Now" : "Connect"}

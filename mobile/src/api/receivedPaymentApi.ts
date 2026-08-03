@@ -145,6 +145,31 @@ export async function addReceivedPayment(payload: ReceivedPaymentFormPayload): P
   return res.json().catch(() => ({}));
 }
 
+export async function updateReceivedPayment(id: string, payload: ReceivedPaymentFormPayload): Promise<ReceivedPaymentRecord> {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to update received payment");
+  return res.json().catch(() => ({}));
+}
+
+export async function deleteReceivedPayment(id: string): Promise<void> {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete received payment");
+}
+
+export async function approveReceivedPayment(id: string): Promise<void> {
+  const res = await fetchWithAuth(`${BASE}/${id}/approve`, { method: "PUT" });
+  if (!res.ok) throw new Error("Failed to approve received payment");
+}
+
+export async function rejectReceivedPayment(id: string): Promise<void> {
+  const res = await fetchWithAuth(`${BASE}/${id}/reject`, { method: "PUT" });
+  if (!res.ok) throw new Error("Failed to reject received payment");
+}
+
 // ─── Option fetchers (Company/Project/Customer/Bank/FinYear/DocType) ───────
 
 export const fetchCompanyOptions = async (): Promise<{ id: number; label: string }[]> => {

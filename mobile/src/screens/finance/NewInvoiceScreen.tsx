@@ -26,6 +26,14 @@ import { fonts } from "@/theme/fonts";
 
 const ACCENT = "#6467f2";
 
+// A stable reference for "no data yet" — `data: x = []` in a destructure
+// evaluates a brand-new array literal every render while `data` is still
+// undefined (query pending, or perpetually failing on a flaky connection),
+// which breaks referential equality for any effect/memo depending on that
+// value and can loop it forever. Reusing one module-level empty array
+// keeps the reference stable regardless of how long the query takes.
+const EMPTY_LIST: any[] = [];
+
 type SourceKind = "PO" | "WORK_DONE" | "GRN" | "TOD";
 const SOURCE_TABS: Array<{ kind: SourceKind; label: string; icon: React.ComponentType<{ size?: number; color?: string }> }> = [
   { kind: "PO", label: "Purchase Order", icon: FileText },
@@ -76,7 +84,7 @@ function TextField({
 function PickerField({
   label, value, placeholder, onPress, disabled, width = "48%",
 }: {
-  label: string; value: string; placeholder: string; onPress: () => void; disabled?: boolean; width?: string;
+  label: string; value: string; placeholder: string; onPress: () => void; disabled?: boolean; width?: `${number}%`;
 }) {
   return (
     <View style={{ width, marginBottom: 14, opacity: disabled ? 0.5 : 1 }}>
@@ -172,7 +180,6 @@ export default function NewInvoiceScreen() {
   const [sgstRate, setSgstRate] = useState("0");
   const [igstRate, setIgstRate] = useState("0");
   const [remarks, setRemarks] = useState("");
-  const [costCenterId, setCostCenterId] = useState<number | null>(null);
   const [costCenterLabel, setCostCenterLabel] = useState("");
 
   const [emiEnabled, setEmiEnabled] = useState(false);
@@ -190,13 +197,13 @@ export default function NewInvoiceScreen() {
   const [costCenterPickerOpen, setCostCenterPickerOpen] = useState(false);
   const [termsSheetOpen, setTermsSheetOpen] = useState(false);
 
-  const { data: companies = [] } = useQuery({ queryKey: ["inv-companies"], queryFn: fetchCompanyOptions });
-  const { data: allProjects = [] } = useQuery({ queryKey: ["inv-projects"], queryFn: fetchProjectOptions });
+  const { data: companies = EMPTY_LIST } = useQuery({ queryKey: ["inv-companies"], queryFn: fetchCompanyOptions });
+  const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["inv-projects"], queryFn: fetchProjectOptions });
   const { data: finYears = [] } = useQuery({ queryKey: ["inv-finyears"], queryFn: fetchFinYearOptions });
   const { data: supplierHeads = [] } = useQuery({ queryKey: ["inv-supplier-heads"], queryFn: fetchSupplierHeads });
-  const { data: poList = [], isLoading: poLoading } = useQuery({ queryKey: ["inv-po-list"], queryFn: fetchPOOptions, enabled: sourceKind === "PO" });
-  const { data: wdList = [], isLoading: wdLoading } = useQuery({ queryKey: ["inv-wd-list"], queryFn: fetchWorkDoneOptions, enabled: sourceKind === "WORK_DONE" });
-  const { data: grnList = [], isLoading: grnLoading } = useQuery({ queryKey: ["inv-grn-list"], queryFn: fetchGRNOptions, enabled: sourceKind === "GRN" });
+  const { data: poList = EMPTY_LIST, isLoading: poLoading } = useQuery({ queryKey: ["inv-po-list"], queryFn: fetchPOOptions, enabled: sourceKind === "PO" });
+  const { data: wdList = EMPTY_LIST, isLoading: wdLoading } = useQuery({ queryKey: ["inv-wd-list"], queryFn: fetchWorkDoneOptions, enabled: sourceKind === "WORK_DONE" });
+  const { data: grnList = EMPTY_LIST, isLoading: grnLoading } = useQuery({ queryKey: ["inv-grn-list"], queryFn: fetchGRNOptions, enabled: sourceKind === "GRN" });
   const { data: todTypes = [] } = useQuery({ queryKey: ["inv-tod-types"], queryFn: fetchExpenseDocTypes, enabled: sourceKind === "TOD" });
   const { data: billingTermOptions = [] } = useQuery({ queryKey: ["inv-billing-terms"], queryFn: fetchBillingTermOptions, enabled: termsSheetOpen });
   const { data: costCenters = [] } = useQuery({ queryKey: ["inv-cost-centers"], queryFn: fetchCostCenterOptionsInv, enabled: costCenterPickerOpen });
@@ -402,7 +409,7 @@ export default function NewInvoiceScreen() {
         EEmiStartDate: emiEnabled ? emiStartDate : null,
         EReminder: dueDate || null,
         ERemarks: remarks || null,
-        ECompanyId: companyId ? Number(companyId) : null,
+        ECompanyId: Number(companyId), // validated non-empty above (line 370 throws if falsy)
         ECostCenter: costCenterLabel || null,
         ESourceType: (selectedPO ? "PO" : selectedWD ? "WORK_DONE" : grnMerged ? "GRN" : sourceKind === "TOD" ? "TOD" : null) as any,
         ESourceId: selectedPO?.PurchaseOrderID ?? selectedWD?.ID ?? selectedGRNIds[0] ?? null,
@@ -643,7 +650,6 @@ export default function NewInvoiceScreen() {
         onClose={() => setCostCenterPickerOpen(false)}
         onSelect={(id) => {
           setCostCenterLabel(costCenters.find((c) => String(c.id) === id)?.label ?? "");
-          setCostCenterId(Number(id));
           setCostCenterPickerOpen(false);
         }}
       />

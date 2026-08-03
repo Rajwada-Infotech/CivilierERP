@@ -38,6 +38,7 @@ import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
+import { friendlyErrorMessage } from "@/lib/friendlyError";
 
 interface Project {
   Id?: number;
@@ -674,7 +675,9 @@ export default function ProjectMaster() {
         tradeLicenseNo: d.TradeLicenseNo ?? "",
       }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      toast.error(
+        friendlyErrorMessage(err, "Couldn't fetch compliance details for this company."),
+      );
     } finally {
       setComplianceLoading(false);
     }
@@ -734,7 +737,10 @@ export default function ProjectMaster() {
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();
     },
-    onError: (e: any) => toast.error(e.message || "Something went wrong"),
+    onError: (e: any) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't save this project. Please check the details and try again."),
+      ),
   });
 
   const deleteMutation = useMutation({
@@ -745,7 +751,10 @@ export default function ProjectMaster() {
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       setDeleteConfirm(null);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't delete this project. It may still be in use elsewhere."),
+      ),
   });
 
   const cascadeDeleteMutation = useMutation({
@@ -762,7 +771,10 @@ export default function ProjectMaster() {
       setCascadeTarget(null);
       setCascadeConfirmText("");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't delete this project and its linked data."),
+      ),
   });
 
   const resetForm = () => {
@@ -777,9 +789,9 @@ export default function ProjectMaster() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/"))
-      return toast.error("Please select an image file");
+      return toast.error("Please select an image file (PNG, JPG, etc.).");
     if (file.size > 5 * 1024 * 1024)
-      return toast.error("Image must be under 5 MB");
+      return toast.error("That image is too large — please use a file under 5 MB.");
     const reader = new FileReader();
     reader.onload = () => {
       setImagePreview(reader.result as string);
@@ -839,10 +851,12 @@ export default function ProjectMaster() {
     type = "text",
     ph = "",
     readOnly = false,
+    required = false,
   ) => (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {type === "date" ? (
         <div className="relative">
@@ -922,9 +936,9 @@ export default function ProjectMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
-              <Plus size={16} /> Add Project
+              <Plus size={13} /> Add Project
             </button>
           )
         }
@@ -1002,7 +1016,7 @@ export default function ProjectMaster() {
                   onClick={() => setActiveTab(tab)}
                   className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize whitespace-nowrap transition-colors ${
                     activeTab === tab
-                      ? "gradient-accent text-white"
+                      ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1076,8 +1090,8 @@ export default function ProjectMaster() {
                     </div>
                   </div>
 
-                  {fi("Project Code *", "code", "text", "e.g. PRJ-001")}
-                  {fi("Project Name *", "name")}
+                  {fi("Project Code", "code", "text", "e.g. PRJ-001", false, true)}
+                  {fi("Project Name", "name", "text", "", false, true)}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", projectTypes)}
 
@@ -1396,7 +1410,7 @@ export default function ProjectMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

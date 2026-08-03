@@ -1,10 +1,11 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import * as mrApi from "@/api/materialRequestApi";
 import {
@@ -52,7 +53,7 @@ import { toShortFinYear } from "@/utils/finYear";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
 import {
   alternatesForItem,
@@ -174,89 +175,22 @@ const fmtDate = (d?: string | null) =>
       })
     : "—";
 
-// ─── Linked Purchase Orders ─────────────────────────────────────────────────────
-// Every PO raised against this MR, newest first, with a running "what's left"
-// balance — same audit-trail pattern as GRN ↔ Vehicle In/Out. Clicking a row
-// opens that PO directly in preview mode (?view=<id>, matches the deep-link
-// convention PurchaseOrderMaster.tsx already supports).
-
-const LinkedPurchaseOrders: React.FC<{
-  mrId: number;
-  navigate: ReturnType<typeof useNavigate>;
-}> = ({ mrId, navigate }) => {
-  const { data: linkedPOs = [], isLoading } = useQuery({
-    queryKey: ["mr-linked-pos", mrId],
-    queryFn: () => mrApi.getMRLinkedPOs(mrId),
-  });
-
-  if (isLoading) {
-    return (
-      <div className="h-16 rounded-xl border border-dashed border-border animate-pulse" />
-    );
-  }
-  if (linkedPOs.length === 0) return null;
-
-  return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
-        <ShoppingCart size={13} className="text-muted-foreground" />
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Linked Purchase Orders
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-muted/20 text-[9px] uppercase tracking-widest text-muted-foreground">
-              <th className="px-3 py-2 text-left">PO Number</th>
-              <th className="px-3 py-2 text-left">Date</th>
-              <th className="px-3 py-2 text-right">Ordered Qty</th>
-              <th className="px-3 py-2 text-left">Status</th>
-              <th className="px-3 py-2 text-right">Remaining Qty</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {linkedPOs.map((po) => (
-              <tr
-                key={po.purchaseOrderId}
-                className="hover:bg-muted/20 cursor-pointer transition-colors"
-                onClick={() =>
-                  navigate(`/material/purchase-order?view=${po.purchaseOrderId}`)
-                }
-              >
-                <td className="px-3 py-2 font-mono font-semibold text-primary">
-                  {po.poNumber}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">
-                  {fmtDate(po.date)}
-                </td>
-                <td className="px-3 py-2 text-right font-medium">
-                  {po.orderedQty}
-                </td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={po.status} />
-                </td>
-                <td className="px-3 py-2 text-right font-medium">
-                  {po.remainingQtyAfter > 0 ? (
-                    <span className="text-amber-500">{po.remainingQtyAfter}</span>
-                  ) : (
-                    <span className="text-emerald-500">0</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Priority", accessor: "Priority" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Item Count", accessor: (r) => Number(r.ItemCount) || 0 },
+  { header: "Total Qty", accessor: (r) => Number(r.TotalQty) || 0 },
+  { header: "Requested", accessor: (r) => fmtDate(r.RequestDate as string) },
+  { header: "Required By", accessor: (r) => fmtDate(r.RequiredByDate as string) },
+  { header: "Status", accessor: "Status" },
+];
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
   const rights = usePageRights("material-request");
-  const navigate = useNavigate();
   const { currentUser } = useAuth();
   const isAdmin = !!currentUser && isPrivilegedRole(currentUser.role);
   const queryClient = useQueryClient();
@@ -1817,10 +1751,8 @@ export default function MaterialRequest() {
             </div>
           </div>
 
-          {/* ── Linked Purchase Orders ── */}
-          <LinkedPurchaseOrders mrId={viewingRecord.MRId} navigate={navigate} />
-
-          {/* ── Document chain ── */}
+          {/* ── Document chain — tagged PO doc ref is enough here, the full
+              Linked Purchase Orders table was redundant with this ── */}
           <DocumentChainPanel docType="mr" id={viewingRecord.MRId} />
 
         </div>
@@ -1864,6 +1796,13 @@ export default function MaterialRequest() {
         action={
           viewMode === "list" ? (
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={(listData?.data || []) as unknown as Record<string, unknown>[]}
+                columns={EXPORT_COLUMNS}
+                title="Material Requests"
+                filename="material-requests"
+                disabled={loadingList || !listData?.data?.length || !rights.canExport}
+              />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}

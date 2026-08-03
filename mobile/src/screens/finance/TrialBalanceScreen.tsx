@@ -1,26 +1,34 @@
-// RN port of src/pages/finance/TrialBalance.tsx — FY-scoped account tree
-// (Range/As On period modes aren't ported, same "one piece at a time"
-// scoping as the rest of Finance mobile) with Company/Project/Cost Centre
+// RN port of src/pages/finance/TrialBalance.tsx — account tree with all
+// three period modes (FY / Range / As On), Company/Project/Cost Centre
 // filters, expand/collapse, tap-to-drill inline transaction list per
-// account, and the Cost Centre panel (individual PO/GRN/Invoice postings)
-// that REPLACES the tree when a cost centre is selected — same behavior
-// as web, not a filter on the tree.
+// account (with payment-detail drill-through — tapping a payment-sourced
+// row opens that payment's full detail), PDF export (via expo-print — CSV
+// isn't ported, it needs a file-write capability like expo-file-system that
+// isn't installed; PDF covers the sharing/printing use case), and the Cost
+// Centre panel (individual PO/GRN/Invoice postings) that REPLACES the tree
+// when a cost centre is selected — same behavior as web, not a filter on it.
 import { useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Modal } from "react-native";
+import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, RefreshControl, Modal, Alert } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import {
   Scale, ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw,
-  TrendingUp, TrendingDown, IndianRupee, Briefcase, FolderKanban, Target, Calendar, X,
+  TrendingUp, TrendingDown, IndianRupee, Briefcase, FolderKanban, Target, Calendar,
+  CalendarRange, CalendarCheck, X, Download, Landmark,
 } from "lucide-react-native";
 import {
   fetchFinYears, fetchCompanyOptionsTB, fetchProjectOptionsTB, fetchCostCenterOptions,
   fetchTrialBalance, fetchTrialBalanceEntityTransactions, fetchCostCentreTransactions,
   toDateStr,
-  type TBNode, type Option, type TBTransactionsResponse, type CCTransactionsResponse,
+  type TBNode, type Option, type TBTransaction, type TBTransactionsResponse, type CCTransactionsResponse,
 } from "@/api/trialBalanceApi";
+import { getPaymentById, type PaymentRecord } from "@/api/newPaymentApi";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { SectionLabel } from "@/components/home/SectionLabel";
+
+type FilterMode = "fy" | "range" | "ason";
 
 const ACCENT = "#6467f2";
 
@@ -70,6 +78,16 @@ function collectAllIds(nodes: TBNode[]): number[] {
   return ids;
 }
 
+function flattenAll(nodes: TBNode[]): TBNode[] {
+  const result: TBNode[] = [];
+  function walk(n: TBNode) {
+    result.push(n);
+    n.children.forEach(walk);
+  }
+  nodes.forEach(walk);
+  return result;
+}
+
 function StatTile({ label, value, icon: Icon, accent }: { label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string }) {
   return (
     <View style={{ width: "48%", marginBottom: 10 }} className="rounded-xl overflow-hidden">
@@ -113,6 +131,88 @@ function OptionSheet({
   );
 }
 
+function DateField({ label, value, onChangeText, highlight }: { label: string; value: string; onChangeText: (v: string) => void; highlight?: boolean }) {
+  return (
+    <View style={{ width: "48%", marginBottom: 8 }}>
+      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase", marginBottom: 4 }}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder="YYYY-MM-DD"
+        placeholderTextColor={`${colors.mutedForeground}80`}
+        style={{
+          color: colors.foreground, fontSize: 12, fontFamily: fonts.body.regular,
+          backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: highlight ? ACCENT : colors.border,
+          borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9,
+        }}
+      />
+    </View>
+  );
+}
+
+function ModeTab({ active, onPress, icon: Icon, label }: { active: boolean; onPress: () => void; icon: React.ComponentType<{ size?: number; color?: string }>; label: string }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg"
+      style={{ backgroundColor: active ? ACCENT : "transparent", borderWidth: 1, borderColor: active ? ACCENT : colors.border }}
+    >
+      <Icon size={10} color={active ? "#fff" : colors.mutedForeground} />
+      <Text style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.medium }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// Plain, print-safe HTML — same approach as Invoice/Contract's Print.
+function buildTrialBalanceHtml(nodes: TBNode[], periodLabel: string): string {
+  const fmtHtml = (n: number) => (n === 0 ? "—" : `₹${Math.round(n).toLocaleString("en-IN")}`);
+  const rows = flattenAll(nodes)
+    .map((n) => {
+      const indent = "&nbsp;&nbsp;".repeat(n.level);
+      const namePrefix = n.isGroup ? "▸ " : "";
+      return `<tr${n.isGroup ? ' class="grp"' : ""}>
+        <td>${indent}${namePrefix}${n.name}${n.code ? ` <span class="code">${n.code}</span>` : ""}</td>
+        <td class="amt">${fmtHtml(n.opening.debit)}</td>
+        <td class="amt">${fmtHtml(n.opening.credit)}</td>
+        <td class="amt">${fmtHtml(n.transactions.debit)}</td>
+        <td class="amt">${fmtHtml(n.transactions.credit)}</td>
+        <td class="amt">${fmtHtml(n.closing.debit)}</td>
+        <td class="amt">${fmtHtml(n.closing.credit)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  return `
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; padding: 20px; }
+          h1 { font-size: 18px; margin: 0 0 2px; }
+          h2 { font-size: 11px; color: #555; margin: 0 0 14px; font-weight: normal; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { padding: 5px 4px; border-bottom: 1px solid #eee; font-size: 10px; text-align: left; }
+          th { background: #f5f5f5; text-transform: uppercase; color: #666; font-size: 9px; }
+          .amt { text-align: right; }
+          .code { color: #888; font-size: 9px; }
+          .grp td { font-weight: 700; background: #fafafa; }
+        </style>
+      </head>
+      <body>
+        <h1>Trial Balance</h1>
+        <h2>${periodLabel}</h2>
+        <table>
+          <tr>
+            <th>Account</th><th>Opening Dr</th><th>Opening Cr</th>
+            <th>Txn Dr</th><th>Txn Cr</th><th>Closing Dr</th><th>Closing Cr</th>
+          </tr>
+          ${rows}
+        </table>
+      </body>
+    </html>
+  `;
+}
+
 function FilterChip({ label, icon: Icon, onPress }: { label: string; icon: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={{ width: "48%", marginBottom: 8 }} className="flex-row items-center justify-between rounded-xl px-3 py-2.5" >
@@ -144,14 +244,58 @@ export default function TrialBalanceScreen() {
   const [drillData, setDrillData] = useState<TBTransactionsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
+  // Period mode — FY (default), a manual date Range, or a single As On date
+  // (opening = start of the FY through the day before, closing = as of
+  // that date). Matches web's three tabs.
+  const [filterMode, setFilterMode] = useState<FilterMode>("fy");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const [asOnFyStart, setAsOnFyStart] = useState("");
+  const [asOn, setAsOn] = useState("");
+
+  const [exporting, setExporting] = useState(false);
+
+  // Payment-detail drill-through — tapping a payment-sourced row in the
+  // account drill-down opens the payment's own full detail.
+  const [payDetailId, setPayDetailId] = useState<number | null>(null);
+  const { data: payDetail, isLoading: payDetailLoading } = useQuery({
+    queryKey: ["tb-payment-detail", payDetailId],
+    queryFn: () => getPaymentById(payDetailId!),
+    enabled: payDetailId != null,
+  });
+
   const { data: finYears = [] } = useQuery({ queryKey: ["tb-finyears"], queryFn: fetchFinYears });
   const { data: companies = [] } = useQuery({ queryKey: ["tb-companies"], queryFn: fetchCompanyOptionsTB });
   const { data: allProjects = [] } = useQuery({ queryKey: ["tb-projects"], queryFn: fetchProjectOptionsTB });
   const { data: costCenters = [] } = useQuery({ queryKey: ["tb-cost-centers"], queryFn: fetchCostCenterOptions });
 
   const activeFY = finYears.find((f) => f.FId === selectedFYId) ?? finYears.find((f) => f.FStatus === 1 || f.FStatus === true) ?? finYears[0] ?? null;
-  const from = activeFY ? toDateStr(activeFY.FStartDate) : "";
-  const to = activeFY ? toDateStr(activeFY.FEndDate) : "";
+
+  // Seed the Range/As-On date fields from the active FY the first time
+  // each mode's inputs are still empty, same as web's switchMode().
+  const switchMode = (mode: FilterMode) => {
+    setFilterMode(mode);
+    if (!activeFY) return;
+    const fyStart = toDateStr(activeFY.FStartDate);
+    const fyEnd = toDateStr(activeFY.FEndDate);
+    if (mode === "range") {
+      if (!rangeFrom) setRangeFrom(fyStart);
+      if (!rangeTo) setRangeTo(fyEnd);
+    } else if (mode === "ason") {
+      if (!asOnFyStart) setAsOnFyStart(fyStart);
+    }
+  };
+
+  const from = filterMode === "fy" ? (activeFY ? toDateStr(activeFY.FStartDate) : "")
+    : filterMode === "range" ? rangeFrom
+    : asOnFyStart;
+  const to = filterMode === "fy" ? (activeFY ? toDateStr(activeFY.FEndDate) : "")
+    : filterMode === "range" ? rangeTo
+    : (asOn || asOnFyStart);
+
+  const periodLabel = filterMode === "fy" ? (activeFY?.FName ?? "")
+    : filterMode === "range" ? `${fmtDate(rangeFrom)} – ${fmtDate(rangeTo)}`
+    : asOn ? `As On ${fmtDate(asOn)}` : "";
 
   const projects = useMemo(() => (selCompanyId ? (allProjects as Option[]).filter((p) => p.company_id === selCompanyId) : allProjects), [allProjects, selCompanyId]);
 
@@ -207,6 +351,30 @@ export default function TrialBalanceScreen() {
     setRefreshing(false);
   };
 
+  const openSourceEntry = (t: TBTransaction) => {
+    const srcType = (t.sourceType ?? "").toLowerCase();
+    const payId = t.payment?.id ?? (srcType === "newpayment" ? t.sourceId : null);
+    if (payId) setPayDetailId(payId);
+  };
+
+  const handleExportPdf = async () => {
+    if (rows.length === 0) return;
+    setExporting(true);
+    try {
+      const html = buildTrialBalanceHtml(displayRows, periodLabel);
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Trial Balance" });
+      } else {
+        await Print.printAsync({ uri });
+      }
+    } catch (e: any) {
+      Alert.alert("Export failed", e?.message ?? "Could not generate the Trial Balance PDF.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <ScrollView
       className="flex-1"
@@ -225,6 +393,9 @@ export default function TrialBalanceScreen() {
             Account-wise opening, transaction and closing balances
           </Text>
         </View>
+        <Pressable onPress={handleExportPdf} disabled={exporting || rows.length === 0} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border, opacity: rows.length === 0 ? 0.4 : 1 }}>
+          {exporting ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Download size={14} color={colors.mutedForeground} />}
+        </Pressable>
         <Pressable onPress={() => refetch()} disabled={isFetching} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
           {isFetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
         </Pressable>
@@ -236,11 +407,33 @@ export default function TrialBalanceScreen() {
         </View>
       )}
 
-      {/* Filters */}
+      {/* Period mode */}
       <View className="mt-5">
+        <SectionLabel>Period</SectionLabel>
+        <View className="flex-row gap-1.5 mb-2.5">
+          <ModeTab active={filterMode === "fy"} onPress={() => switchMode("fy")} icon={Calendar} label="FY" />
+          <ModeTab active={filterMode === "range"} onPress={() => switchMode("range")} icon={CalendarRange} label="Range" />
+          <ModeTab active={filterMode === "ason"} onPress={() => switchMode("ason")} icon={CalendarCheck} label="As On" />
+        </View>
+        {filterMode === "fy" ? (
+          <FilterChip label={activeFY ? activeFY.FName : "Select FY…"} icon={Calendar} onPress={() => setFyPickerOpen(true)} />
+        ) : filterMode === "range" ? (
+          <View className="flex-row flex-wrap justify-between">
+            <DateField label="From" value={rangeFrom} onChangeText={setRangeFrom} />
+            <DateField label="To" value={rangeTo} onChangeText={setRangeTo} />
+          </View>
+        ) : (
+          <View className="flex-row flex-wrap justify-between">
+            <DateField label="FY Start" value={asOnFyStart} onChangeText={setAsOnFyStart} />
+            <DateField label="As On" value={asOn} onChangeText={setAsOn} highlight />
+          </View>
+        )}
+      </View>
+
+      {/* Filters */}
+      <View className="mt-3">
         <SectionLabel>Filters</SectionLabel>
         <View className="flex-row flex-wrap justify-between">
-          <FilterChip label={activeFY ? activeFY.FName : "Select FY…"} icon={Calendar} onPress={() => setFyPickerOpen(true)} />
           <FilterChip label={companies.find((c) => c.id === selCompanyId)?.label || "All companies"} icon={Briefcase} onPress={() => setCompanyPickerOpen(true)} />
           <FilterChip label={projects.find((p) => p.id === selProjectId)?.label || "All projects"} icon={FolderKanban} onPress={() => setProjectPickerOpen(true)} />
           <FilterChip label={costCenters.find((c) => c.id === selCostCenterId)?.label || "All cost centres"} icon={Target} onPress={() => setCostCenterPickerOpen(true)} />
@@ -414,23 +607,29 @@ export default function TrialBalanceScreen() {
                               No transactions found in the selected period.
                             </Text>
                           ) : (
-                            drillData.transactions.map((t, i) => (
-                              <View
-                                key={t.entryId ?? i}
-                                className="flex-row items-center justify-between px-3 py-2"
-                                style={i < drillData.transactions.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}40` } : undefined}
-                              >
-                                <View className="flex-1 min-w-0 pr-2">
-                                  <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium }}>{t.voucherNo || "—"}</Text>
-                                  <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular, marginTop: 1 }}>
-                                    {fmtDate(t.date)}{t.narration ? ` · ${t.narration}` : ""}
+                            drillData.transactions.map((t, i) => {
+                              const isPayment = (t.sourceType ?? "").toLowerCase() === "newpayment" && !!(t.payment?.id ?? t.sourceId);
+                              return (
+                                <Pressable
+                                  key={t.entryId ?? i}
+                                  onPress={isPayment ? () => openSourceEntry(t) : undefined}
+                                  className="flex-row items-center justify-between px-3 py-2"
+                                  style={i < drillData.transactions.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}40` } : undefined}
+                                >
+                                  <View className="flex-1 min-w-0 pr-2">
+                                    <Text numberOfLines={1} style={{ color: isPayment ? ACCENT : colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium, textDecorationLine: isPayment ? "underline" : "none" }}>
+                                      {t.voucherNo || "—"}
+                                    </Text>
+                                    <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular, marginTop: 1 }}>
+                                      {fmtDate(t.date)}{t.narration ? ` · ${t.narration}` : ""}
+                                    </Text>
+                                  </View>
+                                  <Text style={{ color: t.debit ? "#fb7185" : "#34d399", fontSize: 11, fontFamily: fonts.heading.semibold }}>
+                                    {t.debit ? fmt(t.debit) : fmt(t.credit)}
                                   </Text>
-                                </View>
-                                <Text style={{ color: t.debit ? "#fb7185" : "#34d399", fontSize: 11, fontFamily: fonts.heading.semibold }}>
-                                  {t.debit ? fmt(t.debit) : fmt(t.credit)}
-                                </Text>
-                              </View>
-                            ))
+                                </Pressable>
+                              );
+                            })
                           )}
                         </View>
                       </View>
@@ -475,6 +674,51 @@ export default function TrialBalanceScreen() {
         onClose={() => setCostCenterPickerOpen(false)}
         onSelect={(id) => { setSelCostCenterId(id as number | null); setDrillNodeId(null); setCostCenterPickerOpen(false); }}
       />
+
+      {/* Payment-detail drill-through */}
+      <Modal visible={payDetailId != null} transparent animationType="fade" onRequestClose={() => setPayDetailId(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setPayDetailId(null)}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", borderWidth: 1, borderColor: colors.border }}>
+            <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <View className="flex-row items-center gap-2">
+                <Landmark size={14} color={ACCENT} />
+                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>Payment Detail</Text>
+              </View>
+              <Pressable onPress={() => setPayDetailId(null)} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
+            </View>
+            {payDetailLoading ? (
+              <View className="py-10 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
+            ) : !payDetail ? (
+              <Text className="text-center py-10" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>Could not load this payment.</Text>
+            ) : (
+              <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+                <View className="flex-row flex-wrap justify-between">
+                  {[
+                    ["Reference", payDetail.docNo || "—"],
+                    ["Date", fmtDate(payDetail.date)],
+                    ["Mode", payDetail.mode || "—"],
+                    ["Status", payDetail.displayStatus || payDetail.status || "—"],
+                    ["Paid To", payDetail.paidTo || "—"],
+                    ["Bank", payDetail.bankName || "—"],
+                    ["Company", payDetail.company || "—"],
+                    ["Project", payDetail.project || "—"],
+                    ["Expense Ref", payDetail.expenseRef || "—"],
+                  ].map(([label, value]) => (
+                    <View key={label} className="rounded-xl px-3 py-2.5" style={{ width: "48%", marginBottom: 10, backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>{label}</Text>
+                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>{value}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View className="flex-row items-center justify-between px-4 py-3 rounded-xl mt-1" style={{ backgroundColor: `${ACCENT}18`, borderWidth: 1, borderColor: `${ACCENT}33` }}>
+                  <Text style={{ color: ACCENT, fontSize: 11, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 0.8 }}>Amount</Text>
+                  <Text style={{ color: ACCENT, fontSize: 15, fontFamily: fonts.heading.bold }}>{fmt(payDetail.amount ?? 0)}</Text>
+                </View>
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }

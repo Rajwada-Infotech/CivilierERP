@@ -48,6 +48,7 @@ export interface ProjectOption {
   ProjectId: number;
   ProjectName: string;
   ProjectCode: string | null; // enterprise.short_name
+  CompanyId: number | null;
 }
 
 // ── Payload type shared by create + update ────────────────────────────────────

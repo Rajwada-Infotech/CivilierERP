@@ -5,12 +5,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +22,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+
+const VIO_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Entry Time", accessor: (r) => r.EntryTime ? new Date(r.EntryTime as string).toLocaleString("en-IN") : "" },
+  { header: "Vehicle No", accessor: "VehicleNo" },
+  { header: "Supplier", accessor: "SupplierName" },
+  { header: "PO Number", accessor: "PONumber" },
+  { header: "Status", accessor: "Status" },
+];
+
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -419,7 +432,7 @@ const buildEmpty = (activeFinYear?: string) => ({
   poNumber: "",
   vehicleNo: "",
   entryTime: toLocalDateTimeInput(new Date()), // datetime-local
-  exitTime: null as string | null,
+  exitTime: toLocalDateTimeInput(new Date()) as string | null, // defaults to now — backfill only, never future (see max on the input)
   challanNo: "",
   attachments: [] as vehApi.VehicleAttachment[],
   remarks: "",
@@ -613,6 +626,17 @@ export default function VehicleInOut() {
   // the PO changes; prefilled from the record's own saved items on edit.
   const [receivedQtyByItem, setReceivedQtyByItem] = useState<Record<number, string>>({});
 
+  // Real-time photo captured beside "Qty This Lot", keyed by PO line item
+  // id — base64 data URL, sent as part of that item's line on save (stored
+  // directly on VehicleInOutItems.PhotoBase64, not through the binary
+  // header-level Attachments pipeline). Reset/prefilled alongside
+  // receivedQtyByItem everywhere that resets. capturingPoItemId tracks
+  // which item's camera button opened the shared capture modal below —
+  // null means the modal is being used for the general vehicle/plate photo
+  // instead (its original purpose).
+  const [photoByItem, setPhotoByItem] = useState<Record<number, string>>({});
+  const [capturingPoItemId, setCapturingPoItemId] = useState<number | null>(null);
+
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
   const [debitNoteItem, setDebitNoteItem] = useState<any>(null);
@@ -697,12 +721,36 @@ export default function VehicleInOut() {
     retry: false,
   });
 
+  // POs still owed goods (ordered > received-so-far across all Vehicle
+  // In/Out lots) — same query the "Pending Vehicle In/Out" widget uses.
+  // Only covers Approved/Received POs (a Pending-status PO has no
+  // received-qty history yet, so it's never filtered out below on that
+  // basis). Used to hide fully-received POs from the picker instead of
+  // making the user scroll past ones with nothing left to deliver.
+  const { data: pendingSummary, isLoading: loadingPendingSummary } = useQuery({
+    queryKey: ["veh-po-pending-summary"],
+    queryFn: () =>
+      fetchWithAuth("/api/vehicle-in-out/pending-summary")
+        .then((r) => r.json().catch(() => []))
+        .then((d) => (Array.isArray(d) ? d : [])),
+    staleTime: 60_000,
+  });
+  const pendingPoIds = useMemo(
+    () => new Set((pendingSummary ?? []).map((r: any) => Number(r.poId))),
+    [pendingSummary],
+  );
+
   // Selectable POs — status-filtered, and narrowed to the header's own
   // Company/Project once those are picked (a PO for a different project has
   // no business showing up here). PO still drives supplier/company/project
   // auto-fill on select, same as before — this only narrows the list shown.
   const filteredPOs = useMemo(() => {
     return (allPOs as any[]).filter((po: any) => {
+      // Always keep whatever PO is currently selected on the form — even
+      // if it's since become fully received — so editing an existing
+      // record never finds its own PO silently missing from the list.
+      if (form.poId && Number(po.PurchaseOrderID) === Number(form.poId))
+        return true;
       if (
         po.Status !== "Approved" &&
         po.Status !== "Pending" &&
@@ -713,9 +761,18 @@ export default function VehicleInOut() {
         return false;
       if (form.projectId && Number(po.ProjectId) !== Number(form.projectId))
         return false;
+      // Fully-received POs (Approved/Received with nothing left to
+      // deliver) are hidden — but only once the pending-summary query has
+      // actually loaded, so the list doesn't flash empty on first render.
+      if (
+        !loadingPendingSummary &&
+        (po.Status === "Approved" || po.Status === "Received") &&
+        !pendingPoIds.has(Number(po.PurchaseOrderID))
+      )
+        return false;
       return true;
     });
-  }, [allPOs, form.companyId, form.projectId]);
+  }, [allPOs, form.companyId, form.projectId, form.poId, pendingPoIds, loadingPendingSummary]);
 
   // Live PO line items + how much is already received across other lots
   // (excludes this record's own rows when editing, via editingId) — the
@@ -775,6 +832,7 @@ export default function VehicleInOut() {
       projectId: po?.ProjectId ?? null,
     });
     setReceivedQtyByItem({});
+    setPhotoByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -798,6 +856,7 @@ export default function VehicleInOut() {
       setErrors({});
       setForm(buildEmpty(activeFinYear));
       setReceivedQtyByItem({});
+      setPhotoByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -815,6 +874,7 @@ export default function VehicleInOut() {
       setErrors({});
       setForm(buildEmpty(activeFinYear));
       setReceivedQtyByItem({});
+      setPhotoByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -857,9 +917,10 @@ export default function VehicleInOut() {
         .map(([poItemId, raw]) => ({
           poItemId: Number(poItemId),
           receivedQty: parseFloat(raw) || 0,
+          photoBase64: photoByItem[Number(poItemId)] || null,
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem],
+    [receivedQtyByItem, photoByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -869,6 +930,7 @@ export default function VehicleInOut() {
     if (!form.projectId) errs.projectId = "Project is required";
     if (!form.vehicleNo.trim()) errs.vehicleNo = "Vehicle number is required";
     if (!form.entryTime) errs.entryTime = "Entry time is required";
+    if (!form.challanNo.trim()) errs.challanNo = "Supplier ref / Challan No is required";
 
     // Mirror the backend's cap client-side so the user gets an inline
     // error instead of a round-trip failure — "don't let me save 1000
@@ -884,7 +946,7 @@ export default function VehicleInOut() {
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
       toast.error(
-        errs.items || errs.companyId || errs.projectId || "Please fix the errors",
+        errs.items || errs.companyId || errs.projectId || errs.vehicleNo || errs.entryTime || errs.challanNo || "Please fix the errors",
       );
       return false;
     }
@@ -921,6 +983,7 @@ export default function VehicleInOut() {
   const resetForm = () => {
     setForm(buildEmpty(activeFinYear));
     setReceivedQtyByItem({});
+    setPhotoByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -955,6 +1018,13 @@ export default function VehicleInOut() {
       Array.isArray(full.Items)
         ? Object.fromEntries(
             full.Items.map((it: any) => [it.POItemId, String(it.ReceivedQty)]),
+          )
+        : {},
+    );
+    setPhotoByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => it.PhotoBase64).map((it: any) => [it.POItemId, it.PhotoBase64]),
           )
         : {},
     );
@@ -1126,10 +1196,21 @@ export default function VehicleInOut() {
   };
 
   // ── Camera capture ───────────────────────────────────────────────────────────
+  // Shared modal, two targets: capturingPoItemId set → the item's photo is
+  // kept as base64 in local state (photoByItem) and sent with that line on
+  // save, no upload here; null → the original behavior, uploaded as a
+  // binary header-level attachment via vehApi.
   const capturePhoto = useCallback(async () => {
     const dataUrl = webcamRef.current?.getScreenshot();
     if (!dataUrl) {
       toast.error("Could not capture photo — try again");
+      return;
+    }
+    if (capturingPoItemId != null) {
+      setPhotoByItem((prev) => ({ ...prev, [capturingPoItemId]: dataUrl }));
+      setShowCamera(false);
+      setCapturingPoItemId(null);
+      toast.success("Photo captured");
       return;
     }
     setUploading(true);
@@ -1146,7 +1227,7 @@ export default function VehicleInOut() {
     } finally {
       setUploading(false);
     }
-  }, [form.attachments]);
+  }, [form.attachments, capturingPoItemId]);
 
   const switchCamera = () =>
     setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
@@ -1231,6 +1312,13 @@ export default function VehicleInOut() {
         action={
           !showForm ? (
             <div className="flex items-center gap-2 flex-wrap">
+              <ExportMenu
+                data={records as unknown as Record<string, unknown>[]}
+                columns={VIO_EXPORT_COLUMNS}
+                title="Vehicle In/Out"
+                filename="vehicle-in-out"
+                disabled={!records.length || !rights.canExport}
+              />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <button
                 onClick={handleDownloadTemplate}
@@ -1256,6 +1344,7 @@ export default function VehicleInOut() {
                     setEditingId(null);
                     setForm(buildEmpty(activeFinYear));
                     setReceivedQtyByItem({});
+                    setPhotoByItem({});
                     setErrors({});
                   }}
                   className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
@@ -1335,6 +1424,7 @@ export default function VehicleInOut() {
                             contactPerson: "",
                           });
                           setReceivedQtyByItem({});
+                          setPhotoByItem({});
                         }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
@@ -1384,6 +1474,7 @@ export default function VehicleInOut() {
                             contactPerson: "",
                           });
                           setReceivedQtyByItem({});
+                          setPhotoByItem({});
                         }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
@@ -1536,6 +1627,7 @@ export default function VehicleInOut() {
                           // Switching POs invalidates any received-qty
                           // entered against the previous PO's line items.
                           setReceivedQtyByItem({});
+                          setPhotoByItem({});
                         }}
                         className={inpSel}
                       >
@@ -1648,6 +1740,7 @@ export default function VehicleInOut() {
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
@@ -1720,6 +1813,52 @@ export default function VehicleInOut() {
                                         overLimit ? "border-destructive text-destructive" : "border-border"
                                       } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                                     />
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center justify-center">
+                                      {photoByItem[it.poItemId] ? (
+                                        <div className="relative group">
+                                          <img
+                                            src={photoByItem[it.poItemId]}
+                                            alt={`${it.itemName || "Item"} capture`}
+                                            className="w-9 h-9 rounded-lg object-cover border border-border cursor-pointer"
+                                            onClick={() => {
+                                              setCameraError(null);
+                                              setCapturingPoItemId(it.poItemId);
+                                              setShowCamera(true);
+                                            }}
+                                            title="Tap to retake"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPhotoByItem((prev) => {
+                                                const next = { ...prev };
+                                                delete next[it.poItemId];
+                                                return next;
+                                              })
+                                            }
+                                            title="Remove photo"
+                                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                          >
+                                            <XCircle size={12} />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setCameraError(null);
+                                            setCapturingPoItemId(it.poItemId);
+                                            setShowCamera(true);
+                                          }}
+                                          title="Capture a real-time photo of this item"
+                                          className="w-9 h-9 rounded-lg border border-dashed border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                                        >
+                                          <Camera size={14} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1795,27 +1934,40 @@ export default function VehicleInOut() {
                       <input
                         type="datetime-local"
                         value={form.exitTime ?? ""}
-                        onChange={(e) =>
-                          pf({ exitTime: e.target.value || null })
-                        }
+                        max={toLocalDateTimeInput(new Date())}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val && val > toLocalDateTimeInput(new Date())) {
+                            toast.error("Exit time can't be in the future — backfill an earlier time instead.");
+                            pf({ exitTime: toLocalDateTimeInput(new Date()) });
+                            return;
+                          }
+                          pf({ exitTime: val || null });
+                        }}
                         className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                       />
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-1">
-                      Leave blank if vehicle hasn't exited yet
+                      Defaults to now — backfill an earlier time, or clear if the vehicle hasn't exited yet
                     </p>
                   </div>
 
                   {/* Supplier Ref / Challan No */}
                   <div>
-                    <FieldLabel>Supplier Ref / Challan No</FieldLabel>
+                    <FieldLabel required>Supplier Ref / Challan No</FieldLabel>
                     <input
                       type="text"
                       value={form.challanNo}
-                      onChange={(e) => pf({ challanNo: e.target.value })}
-                      className={inp}
+                      onChange={(e) => {
+                        pf({ challanNo: e.target.value });
+                        if (errors.challanNo) setErrors((p) => ({ ...p, challanNo: "" }));
+                      }}
+                      className={`${inp} ${errors.challanNo ? "border-destructive focus:ring-destructive" : ""}`}
                       placeholder="e.g. CH-20240601-001"
                     />
+                    {errors.challanNo && (
+                      <p className="text-[10px] text-destructive mt-1">{errors.challanNo}</p>
+                    )}
                   </div>
 
                   {/* Attachment / Camera */}
@@ -1850,6 +2002,7 @@ export default function VehicleInOut() {
                         type="button"
                         onClick={() => {
                           setCameraError(null);
+                          setCapturingPoItemId(null);
                           setShowCamera(true);
                         }}
                         disabled={uploading}
@@ -1885,6 +2038,7 @@ export default function VehicleInOut() {
                     onClick={() => {
                       setForm(buildEmpty(activeFinYear));
                       setReceivedQtyByItem({});
+                      setPhotoByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -2215,6 +2369,10 @@ export default function VehicleInOut() {
                   )}
                 </div>
 
+                {/* Full chain — PO this lot came from, and (via the PO)
+                    whichever Material Request or Quotation it's tagged to */}
+                <DocumentChainPanel docType="vio" id={viewingRec.VehicleInOutID} />
+
                 {/* Times */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="px-3 py-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
@@ -2519,14 +2677,19 @@ export default function VehicleInOut() {
               <div className="flex items-center gap-2">
                 <Camera size={15} className="text-muted-foreground" />
                 <h2 className="text-sm font-semibold text-foreground">
-                  Capture Vehicle / Plate Photo
+                  {capturingPoItemId != null
+                    ? `Capture Photo — ${poItemsRemaining.find((p) => p.poItemId === capturingPoItemId)?.itemName || "Item"}`
+                    : "Capture Vehicle / Plate Photo"}
                 </h2>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => setShowCamera(false)}
+                onClick={() => {
+                  setShowCamera(false);
+                  setCapturingPoItemId(null);
+                }}
               >
                 <XCircle size={15} />
               </Button>
@@ -2579,7 +2742,7 @@ export default function VehicleInOut() {
                   </button>
 
                   {/* Multi-capture hint */}
-                  {form.attachments.length > 0 && (
+                  {capturingPoItemId == null && form.attachments.length > 0 && (
                     <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[11px] backdrop-blur-sm">
                       <ImageIcon size={11} />
                       {form.attachments.length} attached
@@ -2602,7 +2765,7 @@ export default function VehicleInOut() {
                 )}
                 {uploading ? "Saving…" : "Capture"}
               </Button>
-              {form.attachments.length > 0 && (
+              {form.attachments.length > 0 && capturingPoItemId == null && (
                 <Button
                   variant="outline"
                   className="flex-1"

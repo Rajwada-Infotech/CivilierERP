@@ -1062,9 +1062,6 @@ const CrmProjectAutoSetup: React.FC = () => {
                     // Anything left this block could still generate right
                     // now — mirrors the backend's own eligibility check
                     // (IsGenerated=0, HasUnits=1, UnitCount>0).
-                    const pendingNonGround = nonGroundFloors.some((f) => !f.IsGenerated && f.UnitCount > 0);
-                    const pendingGround = !!groundFloor && !groundFloor.IsGenerated && !!groundFloor.HasUnits && groundFloor.UnitCount > 0;
-                    const blockHasPending = pendingNonGround || pendingGround;
                     // Fully done: at least one non-Ground floor exists and
                     // every one of them (plus Ground, if it's marked
                     // sellable) is already generated.
@@ -1072,7 +1069,6 @@ const CrmProjectAutoSetup: React.FC = () => {
                       && nonGroundFloors.every((f) => f.IsGenerated)
                       && (!groundFloor || groundFloor.IsGenerated || !groundFloor.HasUnits);
                     const totalGeneratedUnits = (floorsByBlock.get(b.Id) || []).reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
-                    const showEditor = !blockFullyGenerated || !!unitTemplateOpenFor[b.Id];
 
                     return (
                       <div key={b.Id} className="rounded-lg border border-border/60 p-3 space-y-2">

@@ -281,14 +281,14 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           </div>
         ))}
         {stats && (
-          <p className="text-[9px] text-white/25 mt-2">{stats.workOrders.toLocaleString("en-IN")} total work orders</p>
+          <p className="text-[9px] text-white/25 mt-2">{(stats.workOrders ?? 0).toLocaleString("en-IN")} total work orders</p>
         )}
       </FloatingCard>
 
       <FloatingCard delay={0.6} className="top-[32%] right-[2%] w-44 p-4" style={{ zIndex: 2 }}>
         <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Active Projects</p>
         {stats ? (
-          <p className="text-xl font-bold text-white">{stats.projects.toLocaleString("en-IN")}</p>
+          <p className="text-xl font-bold text-white">{(stats.projects ?? 0).toLocaleString("en-IN")}</p>
         ) : (
           <div className="h-6 w-10 rounded bg-white/10 animate-pulse mb-1" />
         )}
@@ -311,7 +311,7 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           <div>
             <p className="text-xs font-semibold text-white/80">Supplier Network</p>
             {stats ? (
-              <p className="text-[10px] text-white/35">{stats.activeSuppliers} active · {stats.quotations} quotations</p>
+              <p className="text-[10px] text-white/35">{stats.activeSuppliers ?? 0} active · {stats.quotations ?? 0} quotations</p>
             ) : (
               <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse mt-1" />
             )}
@@ -325,7 +325,7 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(167,139,250,0.8)" }}>GRN Module</span>
         </div>
         {stats ? (
-          <p className="text-xs text-white/60">{stats.grns.toLocaleString("en-IN")} receipts recorded</p>
+          <p className="text-xs text-white/60">{(stats.grns ?? 0).toLocaleString("en-IN")} receipts recorded</p>
         ) : (
           <div className="h-3 w-32 rounded bg-white/10 animate-pulse" />
         )}
@@ -527,9 +527,18 @@ export default function Login() {
   const [loginName, setLoginName] = useState("");
   const [stats, setStats] = useState<PublicStats | null>(null);
 
+  // Cycles the headline metric shown in the two simpler hero cards so the
+  // strip isn't the same 3 numbers forever — Work Orders keeps its gauge
+  // static since that one's tied to a specific completion-% ring.
+  const [spotlight, setSpotlight] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSpotlight((i) => (i + 1) % 2), 4000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     fetch("/api/public-stats")
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error("stats unavailable"); return r.json(); })
       .then((d) => setStats(d))
       .catch(() => {/* keep null, cards show skeleton */});
   }, []);
@@ -648,16 +657,26 @@ export default function Login() {
           <motion.div className="flex items-center gap-3"
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
 
-            {/* Card 1 — Projects */}
-            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
+            {/* Card 1 — rotates Projects <-> Active Suppliers */}
+            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl overflow-hidden"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 110 }}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Projects</span>
+                <AnimatePresence mode="wait">
+                  <motion.span key={`c1-label-${spotlight}`} className="text-[10px] font-semibold uppercase tracking-widest text-white/35"
+                    initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
+                    {spotlight === 0 ? "Projects" : "Active Suppliers"}
+                  </motion.span>
+                </AnimatePresence>
                 <motion.span className="w-1.5 h-1.5 rounded-full bg-emerald-400"
                   animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1.4, repeat: Infinity }} />
               </div>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.projects.toLocaleString("en-IN")}</span>
+                <AnimatePresence mode="wait">
+                  <motion.span key={`c1-val-${spotlight}`} className="text-2xl font-bold text-white leading-none"
+                    initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
+                    {((spotlight === 0 ? stats.projects : stats.activeSuppliers) ?? 0).toLocaleString("en-IN")}
+                  </motion.span>
+                </AnimatePresence>
               ) : (
                 <div className="h-7 w-12 rounded bg-white/10 animate-pulse" />
               )}
@@ -669,12 +688,22 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Card 2 — GRNs / Receipts */}
-            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
+            {/* Card 2 — rotates GRNs Received <-> Quotations */}
+            <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl overflow-hidden"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 120 }}>
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">GRNs Received</span>
+              <AnimatePresence mode="wait">
+                <motion.span key={`c2-label-${spotlight}`} className="text-[10px] font-semibold uppercase tracking-widest text-white/35"
+                  initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
+                  {spotlight === 0 ? "GRNs Received" : "Quotations"}
+                </motion.span>
+              </AnimatePresence>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.grns.toLocaleString("en-IN")}</span>
+                <AnimatePresence mode="wait">
+                  <motion.span key={`c2-val-${spotlight}`} className="text-2xl font-bold text-white leading-none"
+                    initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
+                    {((spotlight === 0 ? stats.grns : stats.quotations) ?? 0).toLocaleString("en-IN")}
+                  </motion.span>
+                </AnimatePresence>
               ) : (
                 <div className="h-7 w-16 rounded bg-white/10 animate-pulse" />
               )}
@@ -696,7 +725,7 @@ export default function Login() {
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 108 }}>
               <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Work Orders</span>
               {stats ? (
-                <span className="text-2xl font-bold text-white leading-none">{stats.workOrders.toLocaleString("en-IN")}</span>
+                <span className="text-2xl font-bold text-white leading-none">{(stats.workOrders ?? 0).toLocaleString("en-IN")}</span>
               ) : (
                 <div className="h-7 w-14 rounded bg-white/10 animate-pulse" />
               )}
@@ -712,7 +741,7 @@ export default function Login() {
                 </svg>
                 <div>
                   {stats ? (
-                    <p className="text-xs font-bold text-white/80">{stats.workOrderCompletionPct}%</p>
+                    <p className="text-xs font-bold text-white/80">{stats.workOrderCompletionPct ?? 0}%</p>
                   ) : (
                     <div className="h-3 w-8 rounded bg-white/10 animate-pulse mb-1" />
                   )}

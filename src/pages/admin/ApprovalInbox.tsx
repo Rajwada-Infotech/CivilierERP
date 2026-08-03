@@ -499,6 +499,21 @@ function labelizeKey(key: string): string {
     .trim();
 }
 
+// PO/GRN/etc. detail endpoints return their line items as an array under
+// one of these keys (LineItems is the normalized-form convention most
+// modules now use — see purchaseOrders.js's GET /:id — POItems/Items cover
+// older/other modules' naming). Rendered as a real per-item table below
+// instead of the generic "N items" collapse formatPreviewValue gives any
+// other array, so a reviewer approving a PO actually sees what's on it.
+function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
+  if (!detail) return [];
+  for (const key of ["LineItems", "POItems", "Items"]) {
+    const v = detail[key];
+    if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
+  }
+  return [];
+}
+
 function formatPreviewValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -555,6 +570,8 @@ const RecordPreviewModal: React.FC<{
 
   const effectiveAmount = getEffectiveAmount(item);
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
+
+  const lineItems = extractLineItems(detail);
 
   const extraFields = detail
     ? Object.entries(detail).filter(
@@ -621,6 +638,48 @@ const RecordPreviewModal: React.FC<{
               Rejection Note
             </p>
             <p className="text-xs text-foreground">{item.RejectionNote}</p>
+          </div>
+        )}
+
+        {/* Line items — shown as separate rows (qty/rate/amount per item),
+            not folded into the single cumulative Amount above, so a
+            reviewer can actually check what's being approved. */}
+        {lineItems.length > 0 && (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+              <Package size={10} className="text-emerald-500" /> Items ({lineItems.length})
+            </p>
+            <div className="rounded-xl border border-border overflow-x-auto">
+              <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
+                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
+                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
+                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {lineItems.map((li, i) => {
+                    const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+                    const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                    const unit = (li.UomName ?? li.UOMSymbol ?? li.unit ?? "—") as string;
+                    const rate = Number(li.Rate ?? li.rate ?? 0);
+                    const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
+                    return (
+                      <tr key={i} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-3 py-2 font-medium">{name}</td>
+                        <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
+                        <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{unit}</td>
+                        <td className="px-3 py-2 text-right hidden sm:table-cell">{formatINR(rate)}</td>
+                        <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

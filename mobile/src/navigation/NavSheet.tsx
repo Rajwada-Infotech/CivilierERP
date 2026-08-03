@@ -16,7 +16,7 @@ import {
   Grip, X, User, LogOut, ChevronRight,
   LayoutDashboard, FileText, ArrowLeftRight, BookText, Search,
   Receipt, Wallet, ArrowRightLeft, ArrowDownToLine, BookOpen, Scale,
-  Truck, FileCheck2, Package, Ship, ClipboardList, RotateCcw,
+  FileCheck2, Package, Ship, ClipboardList, RotateCcw,
   ArchiveRestore, TrendingUp, ArrowLeftRight as SwapIcon, Repeat,
   ClipboardEdit, Cpu,
 } from "lucide-react-native";
@@ -72,8 +72,11 @@ const FINANCE_NAV_TREE: NavTree = [
   },
 ];
 
-// RN port of materialNavItems (MaterialSidebar.ts) — same tree, same order.
-// No mobile screen exists yet for any of these, so every leaf alerts.
+// RN port of materialNavItems (MaterialSidebar.ts) — same tree, same order,
+// same 9 entries (no "Suppliers" leaf — that doesn't exist on web's
+// Material sidebar and was mobile-only drift, removed). Leaves without a
+// `nav` (Quotation, Transfer, Debit Note, Amendment, Fixed Asset Record)
+// have no mobile screen yet and alert instead.
 const MATERIAL_NAV_TREE: NavTree = [
   { kind: "leaf", label: "Material Dashboard", icon: LayoutDashboard, nav: "MaterialDashboard" },
   {
@@ -81,23 +84,22 @@ const MATERIAL_NAV_TREE: NavTree = [
     label: "Transaction",
     icon: Receipt,
     children: [
-      { label: "Material Request", icon: ClipboardList },
+      { label: "Material Request", icon: ClipboardList, nav: "MaterialRequest" },
       { label: "Quotation", icon: FileCheck2 },
-      { label: "Purchase Order", icon: FileText },
-      { label: "Vehicle In/Out", icon: Ship },
-      { label: "GRN", icon: Package },
-      { label: "Issues", icon: ArchiveRestore },
-      { label: "Issue Return", icon: RotateCcw },
+      { label: "Purchase Order", icon: FileText, nav: "PurchaseOrder" },
+      { label: "Vehicle In/Out", icon: Ship, nav: "VehicleInOut" },
+      { label: "GRN", icon: Package, nav: "GRN" },
+      { label: "Issues", icon: ArchiveRestore, nav: "MaterialIssues" },
+      { label: "Issue Return", icon: RotateCcw, nav: "MaterialIssueReturn" },
     ],
   },
-  { kind: "leaf", label: "Short Close", icon: ArchiveRestore },
-  { kind: "leaf", label: "L1 Chart", icon: TrendingUp },
-  { kind: "leaf", label: "Stock", icon: SwapIcon },
-  { kind: "leaf", label: "Transfer", icon: Repeat },
-  { kind: "leaf", label: "Debit Note", icon: ClipboardEdit },
-  { kind: "leaf", label: "Amendment", icon: ClipboardEdit },
-  { kind: "leaf", label: "Fixed Asset Record", icon: Cpu },
-  { kind: "leaf", label: "Suppliers", icon: Truck },
+  { kind: "leaf", label: "Short Close", icon: ArchiveRestore, nav: "ShortClose" },
+  { kind: "leaf", label: "L1 Chart", icon: TrendingUp, nav: "L1Chart" },
+  { kind: "leaf", label: "Stock", icon: SwapIcon, nav: "Stock" },
+  { kind: "leaf", label: "Transfer", icon: Repeat, nav: "StockTransfer" },
+  { kind: "leaf", label: "Debit Note", icon: ClipboardEdit, nav: "DebitNote" },
+  { kind: "leaf", label: "Amendment", icon: ClipboardEdit, nav: "Amendment" },
+  { kind: "leaf", label: "Fixed Asset Record", icon: Cpu, nav: "FixedAssetRecord" },
 ];
 
 const MODULE_NAV_TREES: Partial<Record<string, NavTree>> = {

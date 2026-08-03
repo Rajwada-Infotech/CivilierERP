@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
-import { CalendarDays, AlertCircle, ChevronRight, Truck } from "lucide-react";
+import { CalendarDays, AlertCircle, ChevronRight, Truck, FileText, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fmt } from "./helpers";
@@ -262,4 +262,78 @@ export function GRNChainBadge({
       ))}
     </div>
   );
+}
+
+// ─── Linked Document Badge ────────────────────────────────────────────────────
+// Shows the source document chain for a booking row in the invoice list.
+//   GRN   → PO DocNo  ›  GRN DocNo(s)
+//   PO    → PO DocNo
+//   WO_PO → WO_PO DocNo
+//   WORK_DONE → Work Done DocNo
+//   TOD/null  → —
+// All data comes from already-fetched ExpenseRecord fields — no extra API call.
+type LinkedDocBadgeProps = {
+  eSourceType?: string | null;
+  sourceDocNo?: string | null;   // GRN DocNo | PO DocNo | WD DocNo
+  linkedPODocNo?: string | null; // Parent PO DocNo (populated only for GRN rows)
+  linkedGrnDocNos?: string[];    // Extra GRN DocNos for multi-GRN combined invoices
+};
+export function LinkedDocBadge({
+  eSourceType,
+  sourceDocNo,
+  linkedPODocNo,
+  linkedGrnDocNos,
+}: LinkedDocBadgeProps) {
+  if (!eSourceType || eSourceType === "TOD") {
+    return <span className="text-muted-foreground text-xs">—</span>;
+  }
+
+  if (eSourceType === "GRN") {
+    const grnNos = linkedGrnDocNos?.length
+      ? linkedGrnDocNos
+      : sourceDocNo
+        ? [sourceDocNo]
+        : [];
+    return (
+      <div className="flex flex-col gap-1">
+        {linkedPODocNo && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+            <FileText size={9} className="shrink-0" />
+            {linkedPODocNo}
+          </span>
+        )}
+        <div className="flex flex-wrap gap-1">
+          {grnNos.length > 0 ? grnNos.map((g) => (
+            <span
+              key={g}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
+            >
+              <Truck size={9} className="shrink-0" />
+              {g}
+            </span>
+          )) : <span className="text-muted-foreground text-xs">—</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (eSourceType === "PO" || eSourceType === "WO_PO") {
+    return sourceDocNo ? (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+        <FileText size={9} className="shrink-0" />
+        {sourceDocNo}
+      </span>
+    ) : <span className="text-muted-foreground text-xs">—</span>;
+  }
+
+  if (eSourceType === "WORK_DONE") {
+    return sourceDocNo ? (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-mono whitespace-nowrap">
+        <Wrench size={9} className="shrink-0" />
+        {sourceDocNo}
+      </span>
+    ) : <span className="text-muted-foreground text-xs">—</span>;
+  }
+
+  return <span className="text-muted-foreground text-xs">—</span>;
 }

@@ -364,7 +364,7 @@ export default function PageDefinitionsAdmin() {
           rights.canCreate && (
             <button
               onClick={openAdd}
-              className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
               <Plus size={13} /> Add Page
             </button>
@@ -417,7 +417,7 @@ export default function PageDefinitionsAdmin() {
                 onClick={() => setModuleFilter(m)}
                 className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition ${
                   moduleFilter === m
-                    ? "gradient-accent text-white border-transparent"
+                    ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent shadow-sm"
                     : "bg-muted text-muted-foreground border-border hover:bg-muted/70"
                 }`}
               >
@@ -691,7 +691,7 @@ export default function PageDefinitionsAdmin() {
                         onClick={() => toggleAction(a.key)}
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition ${
                           checked
-                            ? "gradient-accent text-white border-transparent"
+                            ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent shadow-sm"
                             : "bg-muted text-muted-foreground border-border hover:bg-muted/70"
                         }`}
                       >
@@ -733,7 +733,7 @@ export default function PageDefinitionsAdmin() {
                 <button
                   type="submit"
                   disabled={saveMut.isPending}
-                  className="flex-1 gradient-accent text-white py-2.5 rounded-lg text-sm font-heading disabled:opacity-60 flex items-center justify-center gap-2 transition"
+                  className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white py-2.5 rounded-lg text-sm font-heading disabled:opacity-60 flex items-center justify-center gap-2 transition-all"
                 >
                   {saveMut.isPending ? (
                     <Loader2 size={14} className="animate-spin" />

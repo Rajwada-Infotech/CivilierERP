@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, FileText, ShoppingCart, Truck, Receipt } from "lucide-react";
+import { ArrowRight, FileText, ShoppingCart, Truck, Car, Receipt } from "lucide-react";
 import {
   getDocumentChain,
   CHAIN_ROUTES,
@@ -12,6 +12,7 @@ import {
 const DOC_ICON: Record<ChainDocType, React.ElementType> = {
   mr: FileText,
   po: ShoppingCart,
+  vio: Car,
   grn: Truck,
   expense: Receipt,
 };
@@ -19,6 +20,7 @@ const DOC_ICON: Record<ChainDocType, React.ElementType> = {
 const DOC_COLOR: Record<ChainDocType, string> = {
   mr: "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:text-indigo-400",
   po: "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400",
+  vio: "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400",
   grn: "bg-teal-500/10 border-teal-500/20 text-teal-700 dark:text-teal-400",
   expense: "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400",
 };

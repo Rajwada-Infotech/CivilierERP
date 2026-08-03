@@ -25,7 +25,7 @@ import {
 } from "@/api/roleApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-// ΓöÇΓöÇΓöÇ TYPES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── TYPES ───────────────────────────────────────────────────────────────────
 interface PageDef {
   key: string;
   label: string;
@@ -37,14 +37,14 @@ interface PageDef {
 /**
  * A record can only be edited after it's Approved if guardEdit() (see
  * backend/services/approvalService.js) sees this specific action granted
- * for the page ΓÇö every other action on the page (view/create/edit/etc.) is
+ * for the page — every other action on the page (view/create/edit/etc.) is
  * completely untouched by this screen. Wiring: backend/middleware/
  * permissions.js's resolveAllowPostApproval() reads it via the exact same
  * getEffectivePagePermissions() merge Menu Rights uses.
  */
 const POST_APPROVAL_ACTION: PageAction = "post-approval";
 
-// ΓöÇΓöÇΓöÇ COMPONENT ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function PostApprovalRights() {
   const [pageDefs, setPageDefs] = useState<PageDef[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(true);
@@ -61,13 +61,13 @@ export default function PostApprovalRights() {
   }, []);
 
   // Only pages where guardEdit() actually enforces a post-approval check
-  // are shown here ΓÇö granting this elsewhere would do nothing.
+  // are shown here — granting this elsewhere would do nothing.
   const eligiblePages = useMemo(
     () => pageDefs.filter((p) => p.actions.includes(POST_APPROVAL_ACTION)),
     [pageDefs],
   );
 
-  // ΓöÇΓöÇ Subject mode: edit a Role's baseline, or a specific user's overrides ΓöÇΓöÇΓöÇΓöÇ
+  // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
   type Subject = "user" | "role";
   const [subject, setSubject] = useState<Subject>("user");
 
@@ -82,7 +82,7 @@ export default function PostApprovalRights() {
   const [roleSearch, setRoleSearch] = useState("");
   const [loadingRoles, setLoadingRoles] = useState(true);
 
-  // Full permission set for the selected subject ΓÇö every page/action, not
+  // Full permission set for the selected subject — every page/action, not
   // just the post-approval-eligible ones. Saving writes this whole array
   // back, so a user's existing view/create/edit/etc rights on unrelated
   // pages are never touched by this screen.
@@ -211,7 +211,7 @@ export default function PostApprovalRights() {
     setSaving(true);
     try {
       await saveRolePermissions(selectedRoleId, permissions);
-      toast.success("Post-approval rights saved ΓÇö every user with this role gets this immediately");
+      toast.success("Post-approval rights saved — every user with this role gets this immediately");
       setDirty(false);
     } catch {
       toast.error("Failed to save");
@@ -262,7 +262,7 @@ export default function PostApprovalRights() {
           </div>
           {subject === "role" && (
             <p className="text-xs text-muted-foreground/70 mb-3">
-              Sets the baseline every user with this role inherits, effective immediately ΓÇö a user's own overrides (Custom User-wise) can only add on top of this.
+              Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) can only add on top of this.
             </p>
           )}
 
@@ -273,7 +273,7 @@ export default function PostApprovalRights() {
                 className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
               >
                 <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
-                  {loadingUsers ? "Loading usersΓÇª" : selectedUser ? selectedUser.name : "Choose a userΓÇª"}
+                  {loadingUsers ? "Loading users…" : selectedUser ? selectedUser.name : "Choose a user…"}
                 </span>
                 <div className="flex items-center gap-2">
                   {selectedUser && (
@@ -291,7 +291,7 @@ export default function PostApprovalRights() {
                       <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <input
                         autoFocus
-                        placeholder="Search userΓÇª"
+                        placeholder="Search user…"
                         value={userSearch}
                         onChange={(e) => setUserSearch(e.target.value)}
                         className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
@@ -332,7 +332,7 @@ export default function PostApprovalRights() {
                 className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
               >
                 <span className={selectedRole ? "text-foreground font-medium" : "text-muted-foreground"}>
-                  {loadingRoles ? "Loading rolesΓÇª" : selectedRole ? selectedRole.RName : "Choose a roleΓÇª"}
+                  {loadingRoles ? "Loading roles…" : selectedRole ? selectedRole.RName : "Choose a role…"}
                 </span>
                 <ChevronDown size={15} className={`text-muted-foreground transition-transform duration-200 ${roleDropdownOpen ? "rotate-180" : ""}`} />
               </button>
@@ -343,7 +343,7 @@ export default function PostApprovalRights() {
                       <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <input
                         autoFocus
-                        placeholder="Search roleΓÇª"
+                        placeholder="Search role…"
                         value={roleSearch}
                         onChange={(e) => setRoleSearch(e.target.value)}
                         className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
@@ -379,7 +379,7 @@ export default function PostApprovalRights() {
 
         {loadingDefs && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
-            <Loader2 size={12} className="animate-spin" /> Loading eligible pagesΓÇª
+            <Loader2 size={12} className="animate-spin" /> Loading eligible pages…
           </div>
         )}
 
@@ -416,10 +416,10 @@ export default function PostApprovalRights() {
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                {saving ? "SavingΓÇª" : "Save"}
+                {saving ? "Saving…" : "Save"}
               </button>
             </div>
 

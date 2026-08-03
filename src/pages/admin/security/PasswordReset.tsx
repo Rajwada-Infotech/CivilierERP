@@ -2,7 +2,6 @@ import React, { useState, useCallback, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
-import type { UserRole } from "@/contexts/types";
 import { toast } from "sonner";
 import {
   Eye,
@@ -96,6 +95,17 @@ function ResetDialog({
   const [showConfirm, setShowConfirm]       = useState(false);
   const [loading, setLoading]               = useState(false);
 
+  // ResetDialog stays mounted across different users (only `user` changes),
+  // so without this the previous account's password stays sitting in the
+  // fields — both after a successful save and when switching to reset a
+  // different account. Reset whenever the target user changes.
+  React.useEffect(() => {
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowNew(false);
+    setShowConfirm(false);
+  }, [user?.id]);
+
   const strength    = passwordStrength(newPassword);
   const matches     = newPassword && confirmPassword && newPassword === confirmPassword;
   const mismatch    = confirmPassword && newPassword !== confirmPassword;
@@ -127,13 +137,6 @@ function ResetDialog({
 
         {/* Header */}
         <div className="relative px-6 pt-6 pb-5 bg-gradient-to-br from-blue-500/8 via-transparent to-transparent border-b border-border">
-          <button
-            onClick={() => { if (!loading) onClose(); }}
-            className="absolute top-4 right-4 p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <X size={14} />
-          </button>
-
           <div className="flex items-center gap-4">
             {/* Avatar */}
             <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0 shadow-sm`}>
@@ -173,7 +176,7 @@ function ResetDialog({
                 type={showNew ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Enter new password"
+                placeholder="At least 6 characters"
                 autoFocus
                 className="w-full px-3 py-2.5 pr-9 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
               />
@@ -185,6 +188,15 @@ function ResetDialog({
                 {showNew ? <EyeOff size={13} /> : <Eye size={13} />}
               </button>
             </div>
+
+            {/* Live length hint — shows as soon as they've typed something
+                too short, instead of only failing silently on submit. */}
+            {newPassword && newPassword.length < 6 && (
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-500">
+                <AlertCircle size={11} />
+                {6 - newPassword.length} more character{6 - newPassword.length === 1 ? "" : "s"} needed
+              </p>
+            )}
 
             {/* Strength bar */}
             {newPassword && (
@@ -252,14 +264,16 @@ function ResetDialog({
           <button
             onClick={() => { if (!loading) onClose(); }}
             disabled={loading}
-            className="flex-1 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+            className="w-24 shrink-0 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleReset}
             disabled={!canSubmit}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
+              canSubmit && !loading ? "animate-breathe" : ""
+            }`}
           >
             {loading ? (
               <RefreshCw size={13} className="animate-spin" />
@@ -334,14 +348,11 @@ function UserCard({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-const ALL_ROLES = ["All", "super_admin", "admin", "dba", "manager", "director", "user"];
-
 export default function PasswordReset() {
   const { allUsers: contextUsers } = useAuth();
   const [localUsers, setLocalUsers] = useState<typeof contextUsers | null>(null);
   const [refreshing, setRefreshing]  = useState(false);
   const [filter, setFilter]          = useState("");
-  const [roleFilter, setRoleFilter]  = useState("All");
   const [selectedUser, setSelectedUser] = useState<{
     id: string; name: string; email: string; role: string;
   } | null>(null);
@@ -372,7 +383,6 @@ export default function PasswordReset() {
 
   const filtered = useMemo(() => {
     let list = [...allUsers];
-    if (roleFilter !== "All") list = list.filter((u) => u.role === roleFilter);
     if (filter.trim()) {
       const q = filter.toLowerCase();
       list = list.filter((u) =>
@@ -380,13 +390,7 @@ export default function PasswordReset() {
       );
     }
     return list;
-  }, [allUsers, filter, roleFilter]);
-
-  // Unique roles present in the user list
-  const presentRoles = useMemo(() => {
-    const roles = new Set(allUsers.map((u) => u.role).filter(Boolean));
-    return ALL_ROLES.filter((r) => r === "All" || roles.has(r as UserRole));
-  }, [allUsers]);
+  }, [allUsers, filter]);
 
   const activeCount   = allUsers.filter((u) => u.isActive).length;
   const inactiveCount = allUsers.length - activeCount;
@@ -433,44 +437,22 @@ export default function PasswordReset() {
           ))}
         </div>
 
-        {/* ── Search + filters ── */}
-        <div className="space-y-3">
-          {/* Search bar */}
-          <div className="relative max-w-sm">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search by name or email…"
-              className="w-full pl-9 pr-8 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
-            />
-            {filter && (
-              <button
-                onClick={() => setFilter("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-
-          {/* Role filter chips */}
-          {presentRoles.length > 2 && (
-            <div className="flex flex-wrap gap-1.5">
-              {presentRoles.map((role) => (
-                <button
-                  key={role}
-                  onClick={() => setRoleFilter(role)}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
-                    roleFilter === role
-                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                      : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  {role === "All" ? "All Roles" : roleLabel(role)}
-                </button>
-              ))}
-            </div>
+        {/* ── Search ── */}
+        <div className="relative max-w-sm">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Search by name or email…"
+            className="w-full pl-9 pr-8 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
+          />
+          {filter && (
+            <button
+              onClick={() => setFilter("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X size={12} />
+            </button>
           )}
         </div>
 
@@ -478,22 +460,22 @@ export default function PasswordReset() {
         {filtered.length === 0 ? (
           <div className="py-16 flex flex-col items-center gap-4 text-center rounded-2xl border border-dashed border-border bg-muted/20">
             <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
-              {filter || roleFilter !== "All"
+              {filter
                 ? <Search size={22} className="text-muted-foreground/50" />
                 : <User size={22} className="text-muted-foreground/50" />
               }
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">
-                {filter || roleFilter !== "All" ? "No users match your filters" : "No users loaded yet"}
+                {filter ? "No users match your search" : "No users loaded yet"}
               </p>
               <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
-                {filter || roleFilter !== "All"
-                  ? "Try adjusting your search or clearing the role filter."
+                {filter
+                  ? "Try a different name or email."
                   : "Click Refresh to load the user list from the server."}
               </p>
             </div>
-            {!filter && roleFilter === "All" && (
+            {!filter && (
               <button
                 onClick={handleRefresh}
                 disabled={refreshing}
@@ -503,12 +485,12 @@ export default function PasswordReset() {
                 {refreshing ? "Loading…" : "Load Users"}
               </button>
             )}
-            {(filter || roleFilter !== "All") && (
+            {filter && (
               <button
-                onClick={() => { setFilter(""); setRoleFilter("All"); }}
+                onClick={() => setFilter("")}
                 className="text-xs text-blue-500 hover:underline"
               >
-                Clear filters
+                Clear search
               </button>
             )}
           </div>
@@ -523,7 +505,7 @@ export default function PasswordReset() {
                 />
               ))}
             </div>
-            {(filter || roleFilter !== "All") && (
+            {filter && (
               <p className="text-xs text-muted-foreground text-center">
                 Showing {filtered.length} of {allUsers.length} users
               </p>

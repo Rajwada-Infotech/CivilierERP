@@ -249,7 +249,6 @@ describe("backend sanity: route and migration inventory", () => {
       "redis.js",
       "middleware/auth.js",
       "services/approvalService.js",
-      "escalationEngine.js",
     ].forEach((relativePath) => {
       expect(fs.existsSync(path.join(backendRoot, relativePath))).toBe(true);
     });
@@ -271,7 +270,6 @@ describe("backend sanity: route and migration inventory", () => {
       "boq.js",
       "materialRequests.js",
       "materialIssues.js",
-      "followupSalesDeed.js",
       "ticketRoutes.js",
     ].forEach((file) => {
       expect(fs.existsSync(path.join(backendRoot, "routes", file))).toBe(true);

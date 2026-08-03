@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ShoppingCart,
   Hammer,
@@ -50,6 +50,7 @@ export function DocSelectorPanel({
   filterProjectId,
   filterFinYear,
   filterSupplier,
+  filterPOId,
   bookedPOIds,
   bookedWorkDoneIds,
   bookedWOPOIds,
@@ -68,6 +69,13 @@ export function DocSelectorPanel({
   const [multiGrnSelectedIds, setMultiGrnSelectedIds] = useState<Set<number>>(
     new Set(),
   );
+
+  // Jump straight to the GRN tab the moment a PO is picked in the
+  // standalone "Filter by PO" dropdown, so its filtered GRNs are visible
+  // without the user having to find the tab themselves.
+  useEffect(() => {
+    if (filterPOId) setTab("GRN");
+  }, [filterPOId]);
 
   const selectTod = async (tod: TodItem) => {
     setTodFetching(true);
@@ -192,6 +200,9 @@ export function DocSelectorPanel({
     // Only Approved GRNs can be used for expense booking — matches the
     // backend guard in expenseBooking.js (POST /).
     if (g.Status !== "Approved") return false;
+    // "Filter by PO" dropdown outside this panel — narrows to just that
+    // PO's own GRNs.
+    if (filterPOId && g.POID !== filterPOId) return false;
     if (
       filterCompanyId &&
       g.CompanyId &&

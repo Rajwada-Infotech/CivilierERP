@@ -11,12 +11,15 @@
 // "not built on mobile yet" alert.
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
   Package, Truck, FileText, ShoppingCart, Receipt, Layers, RefreshCw,
   PackageCheck, Send, Ruler, ClipboardList, TrendingUp,
 } from "lucide-react-native";
 import { fetchMaterialDashboard, type MaterialDashboardData } from "@/api/materialDashboardApi";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { SectionLabel } from "@/components/home/SectionLabel";
@@ -163,6 +166,12 @@ function QuickAction({ label, icon: Icon, onPress }: { label: string; icon: Reac
 }
 
 export default function MaterialDashboardScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const goToPurchaseOrder = () => navigation.navigate("PurchaseOrder");
+  const goToGRN = () => navigation.navigate("GRN");
+  const goToMaterialRequest = () => navigation.navigate("MaterialRequest");
+  const goToMaterialIssues = () => navigation.navigate("MaterialIssues");
+  const goToStock = () => navigation.navigate("Stock");
   const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<MaterialDashboardData>({
@@ -228,12 +237,12 @@ export default function MaterialDashboardScreen() {
             <SectionLabel>Overview</SectionLabel>
             <View className="flex-row flex-wrap justify-between">
               <StatTile label="Total Items" value={fmtNum(data?.items.count ?? 0)} sub={`${data?.items.groupCount ?? 0} item groups`} icon={Package} accent="#10b981" onPress={() => notBuiltYet("Item Master")} />
-              <StatTile label="GRNs This Month" value={fmtNum(data?.grns.thisMonth ?? 0)} sub={`${data?.grns.today ?? 0} today · ${fmtRupees(data?.grns.thisMonthValue ?? 0)}`} icon={Truck} accent="#3b82f6" onPress={() => notBuiltYet("GRN")} />
-              <StatTile label="Open POs" value={fmtNum(data?.purchaseOrders.open ?? 0)} sub={`${fmtRupees(data?.purchaseOrders.openValue ?? 0)} outstanding`} icon={ShoppingCart} accent="#f59e0b" onPress={() => notBuiltYet("Purchase Order")} />
+              <StatTile label="GRNs This Month" value={fmtNum(data?.grns.thisMonth ?? 0)} sub={`${data?.grns.today ?? 0} today · ${fmtRupees(data?.grns.thisMonthValue ?? 0)}`} icon={Truck} accent="#3b82f6" onPress={() => goToGRN()} />
+              <StatTile label="Open POs" value={fmtNum(data?.purchaseOrders.open ?? 0)} sub={`${fmtRupees(data?.purchaseOrders.openValue ?? 0)} outstanding`} icon={ShoppingCart} accent="#f59e0b" onPress={() => goToPurchaseOrder()} />
               <StatTile label="Pending Expenses" value={fmtNum(data?.expenses.pending ?? 0)} sub={`${fmtRupees(data?.expenses.pendingAmount ?? 0)} pending`} icon={Receipt} accent="#ef4444" onPress={() => notBuiltYet("Expenses")} />
-              <StatTile label="Net Stock" value={fmtNum((data?.stock.totalIn ?? 0) - (data?.stock.totalOut ?? 0))} sub={`${fmtNum(data?.stock.uniqueItems ?? 0)} items tracked`} icon={Layers} accent="#14b8a6" onPress={() => notBuiltYet("Stock")} />
-              <StatTile label="Material Issues" value={fmtNum(data?.materialIssues.thisMonth ?? 0)} sub={`${data?.materialIssues.today ?? 0} today`} icon={PackageCheck} accent="#f97316" onPress={() => notBuiltYet("Material Issues")} />
-              <StatTile label="Material Requests" value={fmtNum(data?.materialRequests.total ?? 0)} sub={`${data?.materialRequests.pending ?? 0} pending`} icon={Send} accent="#6366f1" onPress={() => notBuiltYet("Material Requests")} wide />
+              <StatTile label="Net Stock" value={fmtNum((data?.stock.totalIn ?? 0) - (data?.stock.totalOut ?? 0))} sub={`${fmtNum(data?.stock.uniqueItems ?? 0)} items tracked`} icon={Layers} accent="#14b8a6" onPress={() => goToStock()} />
+              <StatTile label="Material Issues" value={fmtNum(data?.materialIssues.thisMonth ?? 0)} sub={`${data?.materialIssues.today ?? 0} today`} icon={PackageCheck} accent="#f97316" onPress={() => goToMaterialIssues()} />
+              <StatTile label="Material Requests" value={fmtNum(data?.materialRequests.total ?? 0)} sub={`${data?.materialRequests.pending ?? 0} pending`} icon={Send} accent="#6366f1" onPress={() => goToMaterialRequest()} wide />
             </View>
           </View>
 
@@ -250,7 +259,7 @@ export default function MaterialDashboardScreen() {
           {/* Recent activity */}
           <View className="mt-3">
             <SectionLabel>Recent Activity</SectionLabel>
-            <GlassPanel title="Recent GRNs" onViewAll={() => notBuiltYet("GRN")}>
+            <GlassPanel title="Recent GRNs" onViewAll={() => goToGRN()}>
               {(data?.recentGRNs ?? []).length === 0 ? (
                 <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
                   No GRNs recorded yet.
@@ -259,7 +268,7 @@ export default function MaterialDashboardScreen() {
                 data!.recentGRNs.slice(0, 6).map((g, i, arr) => <GrnRow key={g.GRNID ?? i} item={g} isLast={i === Math.min(arr.length, 6) - 1} />)
               )}
             </GlassPanel>
-            <GlassPanel title="Recent Purchase Orders" onViewAll={() => notBuiltYet("Purchase Order")}>
+            <GlassPanel title="Recent Purchase Orders" onViewAll={() => goToPurchaseOrder()}>
               {(data?.recentPOs ?? []).length === 0 ? (
                 <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
                   No purchase orders yet.
@@ -274,10 +283,10 @@ export default function MaterialDashboardScreen() {
           <View className="mt-1 mb-2">
             <SectionLabel>Quick Actions</SectionLabel>
             <View className="flex-row flex-wrap justify-between">
-              <QuickAction label="New GRN" icon={Truck} onPress={() => notBuiltYet("GRN")} />
-              <QuickAction label="Purchase Order" icon={ShoppingCart} onPress={() => notBuiltYet("Purchase Order")} />
-              <QuickAction label="Issues" icon={PackageCheck} onPress={() => notBuiltYet("Issues")} />
-              <QuickAction label="Material Request" icon={Send} onPress={() => notBuiltYet("Material Request")} />
+              <QuickAction label="New GRN" icon={Truck} onPress={() => goToGRN()} />
+              <QuickAction label="Purchase Order" icon={ShoppingCart} onPress={() => goToPurchaseOrder()} />
+              <QuickAction label="Issues" icon={PackageCheck} onPress={() => goToMaterialIssues()} />
+              <QuickAction label="Material Request" icon={Send} onPress={() => goToMaterialRequest()} />
               <QuickAction label="Expense Booking" icon={Receipt} onPress={() => notBuiltYet("Expense Booking")} />
               <QuickAction label="UOM Master" icon={Ruler} onPress={() => notBuiltYet("UOM Master")} />
               <QuickAction label="Inventory" icon={ClipboardList} onPress={() => notBuiltYet("Inventory")} />

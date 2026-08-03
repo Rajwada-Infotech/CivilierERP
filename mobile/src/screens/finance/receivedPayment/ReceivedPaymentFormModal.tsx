@@ -2,10 +2,10 @@
 // Web renders this as a swapped-in view within the same page; mobile uses
 // a full-screen modal instead, matching PaymentFormModal.tsx's convention.
 // Field order follows the same "context fields first, then amount/purpose/
-// mode" convention requested for the outbound Payment form. Deliberately
-// dropped vs. web: editing an existing record, Contract-linking (on-account
-// advance tagging), print, submit-for-approval, and delete — all stay
-// web-only for now, consistent with Payment's create-only mobile scope.
+// mode" convention requested for the outbound Payment form. Create AND
+// edit are supported (editingRecord prop, mirroring PaymentFormModal's
+// modal-prop pattern). Deliberately dropped vs. web: Contract-linking
+// (on-account advance tagging), print, and submit-for-approval.
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,9 +14,9 @@ import { X, ArrowDownCircle } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import {
-  addReceivedPayment, fetchCompanyOptions, fetchProjectOptions, fetchCustomerOptions,
+  addReceivedPayment, updateReceivedPayment, fetchCompanyOptions, fetchProjectOptions, fetchCustomerOptions,
   fetchBankOptions, fetchFinYearOptions, fetchDocTypes, fetchNextDocNumber,
-  PAYMENT_MODES, type ReceivedPaymentFormPayload,
+  PAYMENT_MODES, type ReceivedPaymentFormPayload, type ReceivedPayment,
 } from "@/api/receivedPaymentApi";
 import { ModeBadge } from "./ReceivedPaymentBadges";
 import { PickerRow, OptionPickerModal, type PickerOption } from "../payment/OptionPicker";
@@ -89,9 +89,10 @@ function validateForm(f: FormState): string | null {
   return null;
 }
 
-export function ReceivedPaymentFormModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { visible: boolean; onClose: () => void; editingRecord?: ReceivedPayment | null }) {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const isEditing = !!editingRecord;
   const [form, setForm] = useState<FormState>(blankForm());
   const [saving, setSaving] = useState(false);
   const [docNoPreview, setDocNoPreview] = useState("");
@@ -100,12 +101,25 @@ export function ReceivedPaymentFormModal({ visible, onClose }: { visible: boolea
   const [picker, setPicker] = useState<"company" | "project" | "finYear" | "customer" | "bank" | null>(null);
 
   useEffect(() => {
-    if (visible) {
+    if (!visible) return;
+    if (editingRecord) {
+      const r = editingRecord;
+      setForm({
+        companyId: r.companyId != null ? String(r.companyId) : "", companyName: r.companyName,
+        projectId: r.projectId != null ? String(r.projectId) : "", projectName: r.projectName,
+        finYear: r.finYear || "", customerName: r.customerName || r.receivedFrom,
+        depositBankId: r.depositBankId != null ? String(r.depositBankId) : "", depositBankName: r.depositBankName || "",
+        date: r.docDate || new Date().toISOString().slice(0, 10), amount: String(r.amount), mode: r.mode,
+        checkNumber: r.checkNumber || "", chequeDate: r.chequeDate || "", isPostDated: !!r.isPostDated,
+        transactionId: r.transactionId || "", bankName: r.bankName || "", remarks: r.remarks || "",
+      });
+      setDocNoPreview(r.docNo);
+    } else {
       setForm(blankForm());
       setDocNoPreview("");
       fetchDocTypes("RECP").then((rows) => setRecDocTypeId(rows[0]?.TypeOfDocId ?? null)).catch(() => setRecDocTypeId(null));
     }
-  }, [visible]);
+  }, [visible, editingRecord]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -175,9 +189,15 @@ export function ReceivedPaymentFormModal({ visible, onClose }: { visible: boolea
     };
     setSaving(true);
     try {
-      await addReceivedPayment(payload);
-      queryClient.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false });
-      Alert.alert("Saved", "Payment recorded.");
+      if (isEditing) {
+        await updateReceivedPayment(editingRecord!.id, payload);
+        queryClient.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false });
+        Alert.alert("Saved", "Payment updated.");
+      } else {
+        await addReceivedPayment(payload);
+        queryClient.invalidateQueries({ queryKey: ["received-payments-mobile"], exact: false });
+        Alert.alert("Saved", "Payment recorded.");
+      }
       onClose();
     } catch (err: any) {
       Alert.alert("Failed to save", err.message ?? "Something went wrong.");
@@ -200,7 +220,7 @@ export function ReceivedPaymentFormModal({ visible, onClose }: { visible: boolea
             <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
               <ArrowDownCircle size={14} color="#10b981" />
             </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>New Received Payment</Text>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{isEditing ? "Edit Received Payment" : "New Received Payment"}</Text>
           </View>
           <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
             <X size={15} color={colors.mutedForeground} />
@@ -285,7 +305,7 @@ export function ReceivedPaymentFormModal({ visible, onClose }: { visible: boolea
             style={{ backgroundColor: "#10b981", opacity: saving ? 0.7 : 1 }}
           >
             {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Save Payment</Text>
+              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{isEditing ? "Update Payment" : "Save Payment"}</Text>
             )}
           </Pressable>
         </View>

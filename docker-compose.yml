@@ -1,6 +1,6 @@
 services:
   frontend-build:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run build && rm -rf /frontend-dist/* && cp -R dist/. /frontend-dist/"
     volumes:
@@ -101,15 +101,28 @@ services:
     image: nginx:1.27-alpine
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - frontend_dist:/usr/share/nginx/html:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+      # APK releases — a plain host folder, not part of the git repo or the
+      # frontend build image. Drop/replace .apk files here directly on the
+      # EC2 host and nginx serves the new one immediately, no rebuild needed.
+      - ./apk-releases:/var/www/apk-releases:ro
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - civilier-network
     restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
 volumes:
   redis_data:

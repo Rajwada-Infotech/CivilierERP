@@ -98,6 +98,7 @@ export interface GRNItemLine {
 export interface GRNFormDataPayload {
   grnNo: string;
   grnDate: string;
+  docDate?: string;
   supplierId: number;
   poId: number;
   vehicleInOutId?: number | null;

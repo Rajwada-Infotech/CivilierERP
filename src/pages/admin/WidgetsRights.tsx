@@ -249,7 +249,7 @@ export default function WidgetsRights() {
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
-              className={`gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
+              className={`bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
                 ${saveStatus === "saved"
                   ? "!bg-none !bg-emerald-500 border border-emerald-500/30"
                   : saveStatus === "error"
@@ -448,7 +448,7 @@ export default function WidgetsRights() {
                     className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all whitespace-nowrap
                       ${categoryFilter === cat
                         ? cat === "All"
-                          ? "gradient-accent text-white border-transparent font-semibold"
+                          ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
                           : cat === "Charts"
                             ? "bg-blue-500 text-white border-blue-500 font-semibold"
                             : cat === "KPIs"
@@ -465,7 +465,7 @@ export default function WidgetsRights() {
                                         ? "bg-teal-500 text-white border-teal-500 font-semibold"
                                         : cat === "Tools"
                                           ? "bg-orange-500 text-white border-orange-500 font-semibold"
-                                          : "gradient-accent text-white border-transparent font-semibold"
+                                          : "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
                         : cat === "All"
                           ? "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
                           : cat === "Charts"

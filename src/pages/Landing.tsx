@@ -122,7 +122,7 @@ export default function Landing() {
             style={{ background: "linear-gradient(135deg,#7c3aed,#a78bfa,#c4b5fd)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", display: "inline-block" }}
             animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
             transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}>
-            entire project
+            entire business !
           </motion.span>
         </motion.h1>
 

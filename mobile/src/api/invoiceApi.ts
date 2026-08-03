@@ -1,9 +1,11 @@
 // RN port of src/pages/material/MaterialExpenseBooking.tsx +
-// ExpenseBookingPreviewModal.tsx — list/detail/create/update, GRN as a
-// document source, EMI, and billing terms. Field names copied verbatim
-// from ExpenseBooking/helpers.ts's dbToRecord()/recordToDb(). Not ported:
-// file attachments (the web Invoice form has none either — no backend
-// column for it), the multi-GRN combine flow, and GL posting writes
+// ExpenseBookingPreviewModal.tsx — list/detail/create/update/delete, GRN
+// as a document source, EMI, and billing terms. Field names copied
+// verbatim from ExpenseBooking/helpers.ts's dbToRecord()/recordToDb().
+// Delete follows web's two-step canDeleteInvoice() gate + deleteInvoice()
+// (EMI/debit-note/BRS-cleared/has-payments guards, same as
+// DeleteBlockedDialog.tsx). Not ported: file attachments (the web Invoice
+// form has none either — no backend column for it), and GL posting writes
 // (view-only fetchInvoicePosting — this app never triggers a money-posting
 // side effect from mobile).
 import { fetchWithAuth } from "@/services/fetchWithAuth";
@@ -189,6 +191,30 @@ export async function fetchInvoiceById(id: string): Promise<InvoiceRecord> {
   if (!res.ok) throw new Error("Failed to fetch invoice");
   const row = await res.json().catch(() => ({}));
   return dbToRecord(row);
+}
+
+// ── Delete (with can-delete guard, matching DeleteBlockedDialog.tsx) ───────
+
+export interface DeleteBlockInfo {
+  reason: "brs_cleared" | "has_payments" | "debit_note" | string;
+  clearedPayments?: { paymentId: number; paymentName: string; amount: number }[];
+  linkedPayments?: { paymentId: number; paymentName: string; amount: number }[];
+}
+
+export type CanDeleteResult = { deletable: true } | ({ deletable: false } & DeleteBlockInfo);
+
+export async function canDeleteInvoice(id: string): Promise<CanDeleteResult> {
+  const res = await fetchWithAuth(`${INVOICE_API}/${id}/can-delete`);
+  if (!res.ok) throw new Error("Could not verify whether this booking can be deleted.");
+  return res.json();
+}
+
+export async function deleteInvoice(id: string): Promise<void> {
+  const res = await fetchWithAuth(`${INVOICE_API}/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? body.message ?? "Failed to delete booking.");
+  }
 }
 
 // ── New/Edit Invoice form ───────────────────────────────────────────────────

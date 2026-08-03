@@ -3,17 +3,19 @@
 // status filter chips (BookingListToolbar), and a card per record
 // (RecordCard), collapsed to a single column the way the web page's own
 // grid collapses on a phone. "New Invoice" opens NewInvoiceScreen (PO /
-// Work Done / Other Expense sources — GRN and Edit aren't ported yet, so
-// row actions still fall back to the "not built on mobile yet" alert).
+// Work Done / GRN / Other Expense sources, plus Edit). Delete runs the
+// same can-delete gate as web (requestDelete → canDeleteInvoice(), and if
+// blocked, an alert summarizing the reason — EMI/debit-note/BRS-cleared/
+// has-payments — instead of web's itemized DeleteBlockedDialog).
 import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   Receipt, CheckCircle2, Clock, CreditCard, Search, X, Plus, Eye, Pencil, Trash2, RefreshCw,
 } from "lucide-react-native";
-import { fetchInvoices, type InvoiceRecord } from "@/api/invoiceApi";
+import { fetchInvoices, canDeleteInvoice, deleteInvoice, type InvoiceRecord } from "@/api/invoiceApi";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { SectionLabel } from "@/components/home/SectionLabel";
@@ -34,10 +36,6 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string; icon: React.Compone
 
 function fmt(n: number) {
   return Math.round(n || 0).toLocaleString("en-IN");
-}
-
-function notBuiltYet(title: string) {
-  Alert.alert(title, `The ${title} isn't built on mobile yet — use the web app for now.`);
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -73,7 +71,7 @@ function StatTile({ label, value, icon: Icon, accent }: { label: string; value: 
   );
 }
 
-function RecordCard({ rec, onPreview, onEdit }: { rec: InvoiceRecord; onPreview: () => void; onEdit: () => void }) {
+function RecordCard({ rec, onPreview, onEdit, onDelete }: { rec: InvoiceRecord; onPreview: () => void; onEdit: () => void; onDelete: () => void }) {
   const net = rec.netAmount ?? rec.basicAmount * (1 + (rec.cgstRate + rec.sgstRate) / 100);
   return (
     <View className="rounded-xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
@@ -133,7 +131,7 @@ function RecordCard({ rec, onPreview, onEdit }: { rec: InvoiceRecord; onPreview:
           <Pressable onPress={onEdit} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
             <Pencil size={13} color={colors.mutedForeground} />
           </Pressable>
-          <Pressable onPress={() => notBuiltYet("Delete Invoice")} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.destructive}30` }}>
+          <Pressable onPress={onDelete} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: `${colors.destructive}30` }}>
             <Trash2 size={13} color={colors.destructive} />
           </Pressable>
         </View>
@@ -142,8 +140,22 @@ function RecordCard({ rec, onPreview, onEdit }: { rec: InvoiceRecord; onPreview:
   );
 }
 
+function blockReasonMessage(result: Exclude<Awaited<ReturnType<typeof canDeleteInvoice>>, { deletable: true }>): string {
+  if (result.reason === "brs_cleared") {
+    const list = (result.clearedPayments ?? []).map((p) => `• ${p.paymentName || `Payment #${p.paymentId}`} — ₹${Number(p.amount).toLocaleString("en-IN")}`).join("\n");
+    return `This booking has payments cleared in BRS. To delete it: 1) mark the payment Uncleared in BRS, 2) delete the payment, 3) return here.${list ? `\n\n${list}` : ""}`;
+  }
+  if (result.reason === "has_payments") {
+    const list = (result.linkedPayments ?? []).map((p) => `• ${p.paymentName || `Payment #${p.paymentId}`} — ₹${Number(p.amount).toLocaleString("en-IN")}`).join("\n");
+    return `This booking has linked payment records. Delete the payment(s) first.${list ? `\n\n${list}` : ""}`;
+  }
+  if (result.reason === "debit_note") return "This booking has linked Debit Notes. Please delete or unlink them first.";
+  return typeof result.reason === "string" && result.reason ? result.reason : "This booking cannot be deleted.";
+}
+
 export default function InvoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
@@ -154,6 +166,35 @@ export default function InvoiceScreen() {
     queryFn: () => fetchInvoices(page, statusFilter),
     staleTime: 60 * 1000,
   });
+
+  const requestDelete = async (rec: InvoiceRecord) => {
+    let result;
+    try {
+      result = await canDeleteInvoice(rec.id);
+    } catch (err: any) {
+      Alert.alert("Couldn't check", err.message ?? "Could not verify whether this booking can be deleted.");
+      return;
+    }
+    if (!result.deletable) {
+      Alert.alert("Cannot Delete Booking", blockReasonMessage(result));
+      return;
+    }
+    Alert.alert("Delete Booking", "Are you sure you want to delete this expense booking? This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteInvoice(rec.id);
+            queryClient.invalidateQueries({ queryKey: ["invoices"], exact: false });
+          } catch (err: any) {
+            Alert.alert("Delete failed", err.message ?? "Failed to delete booking.");
+          }
+        },
+      },
+    ]);
+  };
 
   const filtered = useMemo(() => {
     const rows = data?.data ?? [];
@@ -281,6 +322,7 @@ export default function InvoiceScreen() {
               rec={rec}
               onPreview={() => navigation.navigate("InvoicePreview", { id: rec.id })}
               onEdit={() => navigation.navigate("NewInvoice", { id: rec.id })}
+              onDelete={() => requestDelete(rec)}
             />
           ))}
         </View>

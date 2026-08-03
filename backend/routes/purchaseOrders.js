@@ -246,6 +246,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     CostCenterId,
     VendorInvoiceDate,
     VendorInvoiceNo,
+    PaymentTermId,
   } = payload;
 
   const poItemsArray = Array.isArray(POItems)
@@ -344,7 +345,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
 
   const uomMap = await buildUomMap(pool);
   const fyId = await resolveFyId(pool, finYear);
-  const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
+  const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
 
   const transaction = pool.transaction();
   await transaction.begin();
@@ -461,6 +462,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
     if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
     if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
+    if (hasPT) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
 
     const result = await insertReq.query(`
         INSERT INTO dbo.PurchaseOrders (
@@ -480,6 +482,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
           ${hasCC ? ", CostCenterId" : ""}
           ${hasVID ? ", VendorInvoiceDate" : ""}
           ${hasVIN ? ", VendorInvoiceNo" : ""}
+          ${hasPT ? ", PaymentTermId" : ""}
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -499,6 +502,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
           ${hasCC ? ", @CostCenterId" : ""}
           ${hasVID ? ", @VendorInvoiceDate" : ""}
           ${hasVIN ? ", @VendorInvoiceNo" : ""}
+          ${hasPT ? ", @PaymentTermId" : ""}
         )
       `);
 
@@ -538,16 +542,16 @@ async function getPOCols(pool) {
       .query("SELECT 1 AS f FROM sys.columns WHERE object_id=OBJECT_ID(@T) AND name=@C");
     return !!r.recordset[0];
   };
-  const [hasCC, hasVID, hasVIN] = await Promise.all([
-    check("CostCenterId"), check("VendorInvoiceDate"), check("VendorInvoiceNo"),
+  const [hasCC, hasVID, hasVIN, hasPT] = await Promise.all([
+    check("CostCenterId"), check("VendorInvoiceDate"), check("VendorInvoiceNo"), check("PaymentTermId"),
   ]);
-  _poCols = { hasCC, hasVID, hasVIN };
+  _poCols = { hasCC, hasVID, hasVIN, hasPT };
   return _poCols;
 }
 
 async function getPOSelect(pool) {
   if (_poSelect) return _poSelect;
-  const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
+  const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
 
   _poSelect = `
   SELECT
@@ -617,15 +621,28 @@ async function getPOSelect(pool) {
     ${hasVID ? "po.VendorInvoiceDate" : "CAST(NULL AS DATE) AS VendorInvoiceDate"},
     ${hasVIN ? "po.VendorInvoiceNo" : "CAST(NULL AS NVARCHAR(100)) AS VendorInvoiceNo"},
     ${hasCC ? "cc.Name" : "CAST(NULL AS NVARCHAR(200))"} AS CostCenterName,
+    ${hasPT ? "po.PaymentTermId" : "CAST(NULL AS INT) AS PaymentTermId"},
+    ${hasPT ? "pt.Description" : "CAST(NULL AS NVARCHAR(500))"} AS PaymentTermDescription,
+    ${hasPT ? "pt.Days" : "CAST(NULL AS INT)"} AS PaymentTermDays,
     td.Prefix             AS DocTypePrefix,
-    td.Description        AS DocTypeDescription
+    td.Description        AS DocTypeDescription,
+    -- The MR this PO is ultimately tagged to — direct (po.SourceMRId, set
+    -- when the PO was raised straight off an MR) or indirect (raised off a
+    -- Quotation that itself was raised off an MR — po.SourceMRDocNo isn't
+    -- reliably back-filled in that case, so fall back to the Quotation's
+    -- own SourceMRDocNo). See backend/routes/materialChain.js's
+    -- getEffectiveMR for the same fallback used by the chain API.
+    COALESCE(po.SourceMRDocNo, qt.SourceMRDocNo) AS EffectiveMRDocNo,
+    COALESCE(po.SourceMRId, qt.SourceMRId)       AS EffectiveMRId
   FROM dbo.PurchaseOrders po
   LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId    = po.SupplierID
   LEFT JOIN dbo.enterprise        co ON co.id         = po.CompanyId
   LEFT JOIN dbo.enterprise        pr ON pr.id         = po.ProjectId
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
+  LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
+  ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;
   return _poSelect;
 }
@@ -903,6 +920,7 @@ router.put(
       CostCenterId,
       VendorInvoiceDate,
       VendorInvoiceNo,
+      PaymentTermId,
     } = req.body;
 
     const poItemsArray = Array.isArray(POItems)
@@ -938,7 +956,7 @@ router.put(
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
-      const { hasCC, hasVID, hasVIN } = await getPOCols(pool);
+      const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
 
       transaction = pool.transaction();
       await transaction.begin();
@@ -984,6 +1002,7 @@ router.put(
       if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
       if (hasVID) updateReq.input("VendorInvoiceDate2", sql.Date, VendorInvoiceDate || null);
       if (hasVIN) updateReq.input("VendorInvoiceNo2", sql.NVarChar(100), VendorInvoiceNo || null);
+      if (hasPT) updateReq.input("PaymentTermId2", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
 
       const result = await updateReq.query(`
         UPDATE dbo.PurchaseOrders SET
@@ -1016,6 +1035,7 @@ router.put(
           ${hasCC ? ", CostCenterId = @CostCenterId2" : ""}
           ${hasVID ? ", VendorInvoiceDate = @VendorInvoiceDate2" : ""}
           ${hasVIN ? ", VendorInvoiceNo = @VendorInvoiceNo2" : ""}
+          ${hasPT ? ", PaymentTermId = @PaymentTermId2" : ""}
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 

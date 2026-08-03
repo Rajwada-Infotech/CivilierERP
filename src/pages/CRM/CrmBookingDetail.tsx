@@ -5,8 +5,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download,
-  Trash2, Plus, IdCard, Users2, CheckCircle2, Wallet, Car,
-  ChevronUp, ChevronDown, ChevronsUpDown, ShieldAlert, Check, X as XIcon,
+  Trash2, Wallet, Car,
+  ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -124,14 +124,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchDetail(bookingId),
   });
   const booking = data?.booking;
-  const customer = data?.customer;
+  // customer is available via data?.customer if needed in future tabs
   const agreement = data?.agreement;
   // Once the booking's Agreement has at least one uploaded document, Unit/
   // Parking/Extra-Charge changes route through the amendment-approval queue
   // instead of applying directly (see isLegalWorkStarted in the backend) —
   // the numbers may already be baked into a document under review.
   const legalWorkStarted = !!(agreement && agreement.DocumentCount > 0);
-  const paymentSummary = data?.paymentSummary || {};
+  // paymentSummary available via data?.paymentSummary if reinstated
 
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
@@ -166,7 +166,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchInvoices(bookingId),
     enabled: tab === "Payment & Invoice",
   });
-  const { data: onAccount } = useQuery({
+  useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
     enabled: tab === "Payment & Invoice",

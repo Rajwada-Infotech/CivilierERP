@@ -43,7 +43,8 @@ import {
   Lock,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import {
   computeRemainingPOItems,
   hasRemainingItems,
@@ -77,6 +78,17 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+const GRN_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "GRN Date", accessor: (r) => r.GrnDate ? new Date(r.GrnDate as string).toLocaleDateString("en-IN") : "" },
+  { header: "Supplier", accessor: "SupplierName" },
+  { header: "PO Number", accessor: "PONumber" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Status", accessor: "Status" },
+];
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
@@ -805,6 +817,7 @@ function InfoPill({
 export default function GRN() {
   queryClient = useQueryClient();
   const rights = usePageRights("grn-master");
+  const today = new Date().toISOString().slice(0, 10);
   _canDelete = rights.canDelete;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1571,6 +1584,7 @@ export default function GRN() {
     const payload: GRNFormDataPayload = {
       grnNo: formData.grnNo || "",
       grnDate: formData.grnDate,
+      docDate: formData.docDate,
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
       vehicleInOutId: formData.vehicleInOutId
@@ -1897,6 +1911,13 @@ export default function GRN() {
         action={
           !showForm ? (
             <div className="flex flex-wrap items-center gap-2">
+              <ExportMenu
+                data={grns as unknown as Record<string, unknown>[]}
+                columns={GRN_EXPORT_COLUMNS}
+                title="Goods Receipt Notes"
+                filename="grn"
+                disabled={!grns.length || !rights.canExport}
+              />
               <input
                 ref={importFileInputRef}
                 type="file"
@@ -2386,16 +2407,16 @@ export default function GRN() {
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    {/* Tracks the linked Vehicle In/Out document's date —
-                        goods are received on that date, not necessarily
-                        today, so this is no longer freely editable. */}
                     <input
                       type="date"
                       value={formData.grnDate}
-                      readOnly
-                      disabled
-                      title="GRN Date follows the linked Vehicle In/Out document's date"
-                      className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
+                      max={today}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val > today) return; // reject future dates
+                        setFormData((prev) => ({ ...prev, grnDate: val }));
+                      }}
+                      className={`${inp} pl-9`}
                     />
                   </div>
                 </div>
@@ -2407,15 +2428,16 @@ export default function GRN() {
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    {/* Locked to today — entries are dated when they're
-                        actually made, not backdated/postdated. */}
                     <input
                       type="date"
                       value={formData.docDate}
-                      readOnly
-                      disabled
-                      title="Doc date is always today's date"
-                      className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
+                      max={today}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val > today) return; // reject future dates
+                        setFormData((prev) => ({ ...prev, docDate: val }));
+                      }}
+                      className={`${inp} pl-9`}
                     />
                   </div>
                 </div>

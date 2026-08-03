@@ -368,6 +368,45 @@ const ChequeMaster: React.FC = () => {
     win.print();
   };
 
+  // Banks tagged (via BankMaster's Company field) to the currently selected
+  // Company. A bank with no company tag at all is left out once a company is
+  // chosen — same "explicit tag required" rule CrmProjectBank uses for banks.
+  const selectedCompanyLabel = useMemo(
+    () => companies.find((c) => String(c.id) === form.companyId)?.label ?? null,
+    [companies, form.companyId],
+  );
+  const banksForCompany = useMemo(() => {
+    if (!selectedCompanyLabel) return dbBanks;
+    const matches = dbBanks.filter(
+      (b) => (b.companyName || "").trim().toLowerCase() === selectedCompanyLabel.trim().toLowerCase(),
+    );
+    // Keep an already-selected bank visible even if it predates company
+    // tagging (or its tag doesn't match) — editing shouldn't blank the field.
+    if (form.bankId && !matches.some((b) => String(b.id) === form.bankId)) {
+      const current = dbBanks.find((b) => String(b.id) === form.bankId);
+      if (current) return [current, ...matches];
+    }
+    return matches;
+  }, [dbBanks, selectedCompanyLabel, form.bankId]);
+
+  const handleCompanyChange = (companyId: string) => {
+    // A bank picked under the old company may not belong to the new one —
+    // clear it rather than silently save a cheque lot under a mismatched bank.
+    setForm((p) => ({
+      ...p,
+      companyId,
+      bankId: "",
+      bankName: "",
+      accountNumber: "",
+      ifscCode: "",
+    }));
+    setValue("companyId", companyId, { shouldValidate: !!errors.companyId });
+    setValue("bankId", "");
+    setValue("bankName", "");
+    setValue("accountNumber", "");
+    setValue("ifscCode", "");
+  };
+
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
     setForm((p) => ({
@@ -450,8 +489,8 @@ const ChequeMaster: React.FC = () => {
     !!form.companyId &&
     !!form.bankId &&
     !!form.lotNumber.trim() &&
-    form.chqStart.length === 15 &&
-    form.chqEnd.length === 15 &&
+    form.chqStart.length >= 6 &&
+    form.chqEnd.length >= 6 &&
     micrSeq(form.chqEnd) >= micrSeq(form.chqStart);
 
   const handleSave = async () => {
@@ -535,10 +574,10 @@ const ChequeMaster: React.FC = () => {
           if (!lotNumber) throw new Error("Lot Number is required");
           if (!startRaw) throw new Error("First Cheque Number is required");
           if (!endRaw)   throw new Error("Last Cheque Number is required");
-          if (!/^[A-Za-z0-9]{15}$/.test(startRaw))
-            throw new Error(`First Cheque Number must be 15 alphanumeric chars (MICR format) — got "${startRaw}"`);
-          if (!/^[A-Za-z0-9]{15}$/.test(endRaw))
-            throw new Error(`Last Cheque Number must be 15 alphanumeric chars (MICR format) — got "${endRaw}"`);
+          if (!/^[A-Za-z0-9]{6}([A-Za-z0-9]{9})?$/.test(startRaw))
+            throw new Error(`First Cheque Number must be at least 6 alphanumeric chars (MICR format) — got "${startRaw}"`);
+          if (!/^[A-Za-z0-9]{6}([A-Za-z0-9]{9})?$/.test(endRaw))
+            throw new Error(`Last Cheque Number must be at least 6 alphanumeric chars (MICR format) — got "${endRaw}"`);
 
           const companyMatch = companies.find(
             (c) => c.label.toLowerCase() === companyRaw.toLowerCase(),
@@ -660,8 +699,8 @@ const ChequeMaster: React.FC = () => {
 
   const totalCheques = calcTotal(form.chqStart, form.chqEnd);
   const rangeValid =
-    form.chqStart.length === 15 &&
-    form.chqEnd.length === 15 &&
+    form.chqStart.length >= 6 &&
+    form.chqEnd.length >= 6 &&
     micrSeq(form.chqEnd) >= micrSeq(form.chqStart);
 
   if (loadingCheques || loadingBanks)
@@ -779,7 +818,7 @@ const ChequeMaster: React.FC = () => {
                   <div className="relative">
                     <select
                       value={form.companyId}
-                      onChange={(e) => setField("companyId", e.target.value)}
+                      onChange={(e) => handleCompanyChange(e.target.value)}
                       className={`${sel} ${errors.companyId ? "border-destructive" : ""}`}
                     >
                       <option value="">Select Company...</option>
@@ -805,6 +844,11 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Bank Name <span className="text-destructive">*</span>
+                    {form.companyId && (
+                      <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                        ({selectedCompanyLabel} only)
+                      </span>
+                    )}
                   </label>
                   <div className="relative">
                     <Landmark
@@ -817,7 +861,7 @@ const ChequeMaster: React.FC = () => {
                       className={`${sel} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
                     >
                       <option value="">Select Bank...</option>
-                      {dbBanks.map((b) => (
+                      {banksForCompany.map((b) => (
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
                           {b.branchName ? ` — ${b.branchName}` : ""}
@@ -832,6 +876,11 @@ const ChequeMaster: React.FC = () => {
                   {errors.bankId && (
                     <p className="text-xs text-destructive mt-1">
                       Bank is required
+                    </p>
+                  )}
+                  {!errors.bankId && form.companyId && banksForCompany.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      No banks are tagged to {selectedCompanyLabel} yet — add one in Bank Master.
                     </p>
                   )}
                 </div>
@@ -941,6 +990,9 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     First Cheque Number <span className="text-destructive">*</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      (6 digits, or full 15-char MICR)
+                    </span>
                   </label>
                   <div className="relative">
                     <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -949,7 +1001,7 @@ const ChequeMaster: React.FC = () => {
                       maxLength={15}
                       value={form.chqStart}
                       onChange={(e) => setField("chqStart", e.target.value.toUpperCase())}
-                      placeholder="e.g. 600001400001042"
+                      placeholder="e.g. 600001"
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.chqStart ? "border-destructive" : ""}`}
                     />
                   </div>
@@ -957,7 +1009,7 @@ const ChequeMaster: React.FC = () => {
                     <MicrBreakdown value={form.chqStart} />
                   )}
                   {errors.chqStart && (
-                    <p className="text-xs text-destructive mt-1">First cheque number is required</p>
+                    <p className="text-xs text-destructive mt-1">Enter at least the 6-digit cheque number</p>
                   )}
                 </div>
 
@@ -965,6 +1017,9 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Last Cheque Number <span className="text-destructive">*</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      (6 digits, or full 15-char MICR)
+                    </span>
                   </label>
                   <div className="relative">
                     <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -973,7 +1028,7 @@ const ChequeMaster: React.FC = () => {
                       maxLength={15}
                       value={form.chqEnd}
                       onChange={(e) => setField("chqEnd", e.target.value.toUpperCase())}
-                      placeholder="e.g. 600050400001042"
+                      placeholder="e.g. 600050"
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.chqEnd ? "border-destructive" : ""}`}
                     />
                   </div>
@@ -984,7 +1039,7 @@ const ChequeMaster: React.FC = () => {
                     <p className="text-xs text-destructive mt-1">
                       {micrSeq(form.chqEnd) < micrSeq(form.chqStart)
                         ? "Last cheque number must be ≥ first"
-                        : "Last cheque number is required"}
+                        : "Enter at least the 6-digit cheque number"}
                     </p>
                   )}
                 </div>

@@ -13,6 +13,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+const DownloadAndroidApp = lazy(() => import("./pages/DownloadAndroidApp"));
 import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
@@ -139,19 +140,23 @@ const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
-const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
-const RoomMaster = lazy(() => import("./pages/followup/RoomMaster"));
-const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
+const UnitMaster = lazy(() => import("./pages/admin/masters/UnitMaster"));
+const RoomMaster = lazy(() => import("./pages/admin/masters/RoomMaster"));
+const BlockMaster = lazy(() => import("./pages/admin/masters/BlockMaster"));
 const PaymentPlanMaster = lazy(
-  () => import("./pages/followup/PaymentPlanMaster"),
+  () => import("./pages/admin/masters/PaymentPlanMaster"),
 );
-const ParkingMaster = lazy(() => import("./pages/followup/ParkingMaster"));
+const ParkingMaster = lazy(() => import("./pages/admin/masters/ParkingMaster"));
 const ParkingSlotMaster = lazy(
-  () => import("./pages/followup/ParkingSlotMaster"),
+  () => import("./pages/admin/masters/ParkingSlotMaster"),
 );
 const ExtraChargeMaster = lazy(
-  () => import("./pages/followup/ExtraChargeMaster"),
+  () => import("./pages/admin/masters/ExtraChargeMaster"),
 );
+const DepartmentMaster = lazy(
+  () => import("./pages/admin/masters/DepartmentMaster"),
+);
+const TaskMaster = lazy(() => import("./pages/admin/masters/TaskMaster"));
 const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
 const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
 const CrmParkingBookingPage = lazy(() => import("./pages/CRM/CrmParkingBooking"));
@@ -285,6 +290,9 @@ const GeneralLedgerMaster = lazy(
 const CostCenterMaster = lazy(
   () => import("./pages/masters/CostCenterMaster"),
 );
+const PaymentTermMaster = lazy(
+  () => import("./pages/masters/PaymentTermMaster"),
+);
 const ProfitCenterMaster = lazy(
   () => import("./pages/masters/ProfitCenterMaster"),
 );
@@ -304,61 +312,13 @@ const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
-const FollowupDashboard = lazy(
-  () => import("./pages/followup/FollowupDashboard"),
+const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
+const FollowupReminders = lazy(
+  () => import("./pages/admin/masters/Reminders"),
 );
-const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
-const POReminders = lazy(() => import("./pages/followup/POReminders"));
-const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
-const CHQReminders = lazy(() => import("./pages/followup/CHQReminders"));
-const GRNReminders = lazy(() => import("./pages/followup/GRNReminders"));
-const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
-const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
-const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
-const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-
-// BookingsPage / FollowupUnitSelection / FollowupApplications / WelcomeCallsPage retired below
-// (0 live rows, duplicate CRM entry points — see server.js ALL_ROUTES comment for details).
-const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
-const ApplicantTimeline = lazy(
-  () => import("./pages/followup/ApplicantTimeline"),
+const PendingTasksPage = lazy(
+  () => import("./pages/admin/masters/PendingTasks"),
 );
-const NocPage = lazy(() =>
-  import("./pages/followup/NOC").then((module) => ({
-    default: module.NOCPage,
-  })),
-);
-const BankNOCPage = lazy(() =>
-  import("./pages/followup/BankNOC").then((module) => ({
-    default: module.BankNOCPage,
-  })),
-);
-const SalesDeedPage = lazy(() =>
-  import("./pages/followup/SalesDeed").then((module) => ({
-    default: module.SalesDeedPage,
-  })),
-);
-const HandoverPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.HandoverPage,
-  })),
-);
-const ConstructionUpdatesPage = lazy(
-  () => import("./pages/followup/ConstructionUpdates"),
-);
-// LegalMilestonesPage retired below (0 live rows, duplicate of crmLegalMilestones.js).
-const PrePossessionPage = lazy(
-  () => import("./pages/followup/PrePossessionClearance"),
-);
-const PossessionNoticePage = lazy(
-  () => import("./pages/followup/PossessionNotice"),
-);
-const FinanceDemandsPage = lazy(() =>
-  import("./pages/followup/FinanceDemands").then((module) => ({
-    default: module.FinanceDemandsPage,
-  })),
-);
-const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
 const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
@@ -420,37 +380,6 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
-const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
-const ApplicantsPipelinePage = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.ApplicantsPage,
-  })),
-);
-const UnitSelectionPipelinePage = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.UnitSelectionPage,
-  })),
-);
-const FollowupPaymentsPage = lazy(() =>
-  import("./pages/followup/FinancePayments").then((module) => ({
-    default: module.FinancePaymentsPage,
-  })),
-);
-const CustomerReportPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.CustomerReportPage,
-  })),
-);
-const FinancialReportPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.FinancialReportPage,
-  })),
-);
-const ProjectStatusReportPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.ProjectStatusReportPage,
-  })),
-);
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
@@ -648,6 +577,9 @@ function AppRoutes() {
         <Route path="activity" element={<PortalActivity />} />
         <Route path="profile" element={<PortalProfile />} />
       </Route>
+
+      {/* Public — reachable without logging in, so the QR/link can be shared freely */}
+      <Route path="/download-android-app" element={<DownloadAndroidApp />} />
 
       {/* AUTH */}
       <Route
@@ -850,332 +782,10 @@ function AppRoutes() {
         path="/followup"
         element={
           <ProtectedRoute pageKey="followup-dashboard">
-            <FollowupDashboard />
+            <FollowUp />
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/followup/reminders"
-        element={
-          <ProtectedRoute pageKey="followup-reminders">
-            <FollowupReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/tasks"
-        element={
-          <ProtectedRoute pageKey="followup-tasks">
-            <FollowupTasks />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/log"
-        element={
-          <ProtectedRoute pageKey="followup-log">
-            <FollowupLog />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/reminders"
-        element={
-          <ProtectedRoute pageKey="followup-reminders">
-            <FollowupReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/po-reminders"
-        element={
-          <ProtectedRoute pageKey="po-reminders">
-            <POReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/wo-reminders"
-        element={
-          <ProtectedRoute pageKey="wo-reminders">
-            <WOReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/chq-reminders"
-        element={
-          <ProtectedRoute pageKey="chq-reminders">
-            <CHQReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/grn-reminders"
-        element={
-          <ProtectedRoute pageKey="grn-reminders">
-            <GRNReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/tds-reminders"
-        element={
-          <ProtectedRoute pageKey="tds-reminders">
-            <TDSReminders />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/tasks"
-        element={
-          <ProtectedRoute pageKey="followup-tasks">
-            <FollowupTasks />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/pending-tasks"
-        element={
-          <ProtectedRoute pageKey="followup-pending-tasks">
-            <PendingTasksPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/customer-master"
-        element={
-          <ProtectedRoute pageKey="followup-customer-master">
-            <CustomerMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/unit-master"
-        element={
-          <ProtectedRoute pageKey="followup-unit-master">
-            <UnitMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/room-master"
-        element={
-          <ProtectedRoute pageKey="followup-room-master">
-            <RoomMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/block-master"
-        element={
-          <ProtectedRoute pageKey="followup-block-master">
-            <BlockMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/payment-plan-master"
-        element={
-          <ProtectedRoute pageKey="payment-plan-master">
-            <PaymentPlanMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/parking-master"
-        element={
-          <ProtectedRoute pageKey="followup-parking-master">
-            <ParkingMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/parking-slot-master"
-        element={
-          <ProtectedRoute pageKey="followup-parking-slot-master">
-            <ParkingSlotMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/setup/extra-charge-master"
-        element={
-          <ProtectedRoute pageKey="followup-extra-charge-master">
-            <ExtraChargeMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/follow-ups/log"
-        element={
-          <ProtectedRoute pageKey="followup-log">
-            <FollowupLog />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/applications/:id"
-        element={
-          <ProtectedRoute pageKey="followup-applications">
-            <ApplicantDetail />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/applicants/:id"
-        element={
-          <ProtectedRoute pageKey="followup-applicants">
-            <ApplicantDetail />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/applicant-timeline/:id"
-        element={
-          <ProtectedRoute pageKey="followup-applicant-timeline">
-            <ApplicantTimeline />
-          </ProtectedRoute>
-        }
-      />
-      {/* Applications / Bookings / Unit Selection / Welcome Calls list routes retired —
-          0 live rows, superseded by the real CRM system (see server.js ALL_ROUTES comment). */}
-      <Route
-        path="/followup/closure/noc"
-        element={
-          <ProtectedRoute pageKey="followup-noc">
-            <NocPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/closure/bank-noc"
-        element={
-          <ProtectedRoute pageKey="followup-noc">
-            <BankNOCPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/closure/sales-deed"
-        element={
-          <ProtectedRoute pageKey="followup-sales-deed">
-            <SalesDeedPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/closure/handover"
-        element={
-          <ProtectedRoute pageKey="followup-handover">
-            <HandoverPage />
-          </ProtectedRoute>
-        }
-      />
-      {/* Legal Milestones list route retired — 0 live rows, superseded by crmLegalMilestones.js. */}
-      <Route
-        path="/followup/closure/pre-possession"
-        element={
-          <ProtectedRoute pageKey="followup-pre-possession">
-            <PrePossessionPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/closure/possession-notice"
-        element={
-          <ProtectedRoute pageKey="followup-possession-notice">
-            <PossessionNoticePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/construction/updates"
-        element={
-          <ProtectedRoute pageKey="followup-construction-updates">
-            <ConstructionUpdatesPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/finance/demands"
-        element={
-          <ProtectedRoute pageKey="followup-demands">
-            <FinanceDemandsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/finance/payments"
-        element={
-          <ProtectedRoute pageKey="followup-payments">
-            <FollowupPaymentsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/reports/customer"
-        element={
-          <ProtectedRoute pageKey="followup-report-customer">
-            <CustomerReportPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/reports/financial"
-        element={
-          <ProtectedRoute pageKey="followup-report-financial">
-            <FinancialReportPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/reports/project-status"
-        element={
-          <ProtectedRoute pageKey="followup-report-project-status">
-            <ProjectStatusReportPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/agreement/document-vault"
-        element={
-          <ProtectedRoute pageKey="followup-document-vault">
-            <DocumentVaultPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/agreement/communicator"
-        element={
-          <ProtectedRoute pageKey="followup-communicator">
-            <CommunicatorPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/pipeline/applicants"
-        element={
-          <ProtectedRoute pageKey="followup-applicants">
-            <ApplicantsPipelinePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/pipeline/unit-selections"
-        element={
-          <ProtectedRoute pageKey="followup-unit-selections">
-            <UnitSelectionPipelinePage />
-          </ProtectedRoute>
-        }
-      />
-      {/* Note: FollowupPipelinePage also exports an "agreements" entity
-          (AgreementsPage) hitting /api/followup-agreements — same table
-          the retired /followup/agreement/agreements page (Agreements.tsx)
-          and /followup/agreement/workflow page used. Both of those routes
-          were removed (0 live rows in either table, and CRM > Documents >
-          Agreements is the real, actively-developed Agreement system) —
-          not routing this embedded variant either, for the same reason. */}
 
       {/* MASTERS */}
       <Route
@@ -1338,7 +948,7 @@ function AppRoutes() {
       <Route
         path="/material/work-order"
         element={
-          <ProtectedRoute pageKey="work-order-master">
+          <ProtectedRoute pageKey="engineering-work-order">
             <WorkOrderMaster />
           </ProtectedRoute>
         }
@@ -1587,7 +1197,7 @@ function AppRoutes() {
       <Route
         path="/masters/account-group"
         element={
-          <ProtectedRoute pageKey="account-group">
+          <ProtectedRoute pageKey="account-head">
             <AccountGroupMaster />
           </ProtectedRoute>
         }
@@ -1629,6 +1239,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="cost-center">
             <CostCenterMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/payment-terms"
+        element={
+          <ProtectedRoute pageKey="payment-terms">
+            <PaymentTermMaster />
           </ProtectedRoute>
         }
       />
@@ -2246,9 +1864,12 @@ function AppRoutes() {
       <Route path="/crm/setup/unit-master"         element={<ProtectedRoute pageKey="followup-unit-master"><UnitMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/block-master"        element={<ProtectedRoute pageKey="followup-block-master"><BlockMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/room-master"         element={<ProtectedRoute pageKey="followup-room-master"><RoomMaster /></ProtectedRoute>} />
+      <Route path="/crm/setup/payment-plan-master" element={<ProtectedRoute pageKey="payment-plan-master"><PaymentPlanMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />
@@ -2279,12 +1900,7 @@ function App() {
         <AuthSessionBridge>
           {initialLoading ? <Loader /> : null}
           {initialLoading ? null : (
-            <Router
-              future={{
-                v7_startTransition: true,
-                v7_relativeSplatPath: true,
-              }}
-            >
+            <Router>
               <ModuleProvider>
                 <ThemeProvider>
                   <AppRoutes />

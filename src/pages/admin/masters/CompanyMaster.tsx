@@ -25,6 +25,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
+import { friendlyErrorMessage } from "@/lib/friendlyError";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -638,7 +639,10 @@ export default function CompanyMaster() {
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setShowForm(false);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't save this company. Please check the details and try again."),
+      ),
   });
 
   const deleteMutation = useMutation({
@@ -659,7 +663,10 @@ export default function CompanyMaster() {
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setDeleteConfirm(null);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        friendlyErrorMessage(e, "Couldn't delete this company. It may still be in use elsewhere."),
+      ),
   });
 
   const filtered = companies.filter(
@@ -704,7 +711,7 @@ export default function CompanyMaster() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      toast.error("Logo must be under 2 MB");
+      toast.error("That logo is too large — please use an image under 2 MB.");
       return;
     }
     const reader = new FileReader();
@@ -750,7 +757,7 @@ export default function CompanyMaster() {
       <div key={key}>
         <label className="block text-xs font-medium text-muted-foreground mb-1">
           {cleanLabel}
-          {showStar && <span className="ml-0.5">*</span>}
+          {showStar && <span className="text-red-500 ml-0.5">*</span>}
         </label>
         {type === "date" ? (
           <>
@@ -843,9 +850,9 @@ export default function CompanyMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
             >
-              <Plus size={16} /> Add Company
+              <Plus size={13} /> Add Company
             </button>
           )
         }
@@ -920,7 +927,7 @@ export default function CompanyMaster() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {tab}
                 </button>
@@ -1163,7 +1170,7 @@ export default function CompanyMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

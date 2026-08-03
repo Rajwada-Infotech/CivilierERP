@@ -68,6 +68,7 @@ const LINK_OPTIONS = [
   { value: "Payment", label: "Payment (Outgoing)" },
   { value: "Received Payment", label: "Received Payment" },
   { value: "Debit Note", label: "Debit Note" },
+  { value: "Task", label: "Task" },
 ];
 
 // ── Form state ────────────────────────────────────────────────────────────────
@@ -353,6 +354,11 @@ const TypeOfDocMaster: React.FC = () => {
   );
   const selectedProjectCode = selectedProject?.ProjectCode ?? null;
 
+  // Once a Company is picked, only its own Projects are selectable.
+  const visibleProjects = form.CompanyId
+    ? projects.filter((p) => String(p.CompanyId) === String(form.CompanyId))
+    : projects;
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   const invalidate = () =>
@@ -567,7 +573,20 @@ const TypeOfDocMaster: React.FC = () => {
                   <select
                     value={form.CompanyId}
                     onChange={(e) =>
-                      setForm({ ...form, CompanyId: e.target.value })
+                      setForm({
+                        ...form,
+                        CompanyId: e.target.value,
+                        // Selected Project may not belong to the new Company.
+                        ProjectId:
+                          e.target.value &&
+                          projects.some(
+                            (p) =>
+                              String(p.ProjectId) === String(form.ProjectId) &&
+                              String(p.CompanyId) !== String(e.target.value),
+                          )
+                            ? ""
+                            : form.ProjectId,
+                      })
                     }
                     className="w-full border border-border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   >
@@ -592,8 +611,10 @@ const TypeOfDocMaster: React.FC = () => {
                     }
                     className="w-full border border-border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   >
-                    <option value="">All Projects</option>
-                    {projects.map((p) => (
+                    <option value="">
+                      {form.CompanyId ? "All Projects in Company" : "All Projects"}
+                    </option>
+                    {visibleProjects.map((p) => (
                       <option key={p.ProjectId} value={p.ProjectId}>
                         {p.ProjectCode ? `${p.ProjectCode} – ` : ""}
                         {p.ProjectName}

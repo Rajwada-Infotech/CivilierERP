@@ -22,6 +22,10 @@ import { SectionLabel } from "@/components/home/SectionLabel";
 
 const ACCENT = "#6467f2";
 
+// A stable reference for "no data yet" — see NewContractScreen.tsx's
+// EMPTY_LIST comment for why an inline `= []` default is unsafe here.
+const EMPTY_LIST: any[] = [];
+
 const STATUS_STYLE: Record<string, string> = {
   Draft: colors.mutedForeground,
   Pending: "#f59e0b",
@@ -178,14 +182,14 @@ export default function JournalVoucherScreen() {
     staleTime: 30_000,
   });
 
-  const { data: ledgerOptions = [] } = useQuery({
+  const { data: ledgerOptions = EMPTY_LIST } = useQuery({
     queryKey: ["jv-ledger-options"],
     queryFn: getJournalVoucherLedgerOptions,
     enabled: formOpen,
   });
 
-  const { data: companies = [] } = useQuery({ queryKey: ["jv-companies"], queryFn: fetchCompanyOptions, enabled: formOpen });
-  const { data: allProjects = [] } = useQuery({ queryKey: ["jv-projects"], queryFn: fetchProjectOptions, enabled: formOpen });
+  const { data: companies = EMPTY_LIST } = useQuery({ queryKey: ["jv-companies"], queryFn: fetchCompanyOptions, enabled: formOpen });
+  const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["jv-projects"], queryFn: fetchProjectOptions, enabled: formOpen });
 
   // Form state
   const [jvDate, setJvDate] = useState(new Date().toISOString().slice(0, 10));

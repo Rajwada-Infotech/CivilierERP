@@ -1,19 +1,19 @@
 // RN port of src/pages/finance/Brs.tsx (web) — Bank Reconciliation
 // Statement. Web's `md:hidden` mobile card block is the direct template
-// for BrsCard below. Clear/Unclear toggle and the Bounce action are
-// supported (they ARE the page's core function, not an edit/delete
-// extra); Re-issue (bounced → prefilled new Payment) stays web-only since
-// the mobile Payment form doesn't support prefill-from-navigation yet —
-// bounced entries without a replacement show a hint to use the web app
-// instead of a dead button.
+// for BrsCard below. Clear/Unclear toggle, Bounce, and Re-issue (bounced
+// → prefilled new Payment, via navigation params instead of web's
+// router-state) are all supported now, matching web's handleReissue flow.
 import { useMemo, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Switch, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck, CheckCircle2, Clock, Ban, IndianRupee, AlertTriangle, Landmark,
   Search, X, RefreshCw, ShieldOff, ArrowRight, CornerDownRight, SlidersHorizontal,
 } from "lucide-react-native";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
@@ -73,8 +73,8 @@ function PassbookCheck({ checked, loading, onPress }: { checked: boolean; loadin
   );
 }
 
-function BrsCard({ entry, toggling, onToggle, onBounce }: {
-  entry: BrsEntry; toggling: boolean; onToggle: () => void; onBounce: () => void;
+function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
+  entry: BrsEntry; toggling: boolean; onToggle: () => void; onBounce: () => void; onReissue: () => void;
 }) {
   const cleared = isCleared(entry);
   const bounced = isBounced(entry);
@@ -154,7 +154,10 @@ function BrsCard({ entry, toggling, onToggle, onBounce }: {
               <Text style={{ color: "#059669", fontSize: 10, fontFamily: fonts.body.semibold }}>{entry.ReplacementDocNo}</Text>
             </View>
           ) : (
-            <Text style={{ color: colors.mutedForeground, fontSize: 10, fontStyle: "italic" }}>Re-issue this payment from the web app.</Text>
+            <Pressable onPress={onReissue} className="self-start flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#d9770660" }}>
+              <CornerDownRight size={10} color="#d97706" />
+              <Text style={{ color: "#d97706", fontSize: 10.5, fontFamily: fonts.body.medium }}>Re-issue</Text>
+            </Pressable>
           )
         ) : entry.OriginalDocNo ? (
           <View className="self-start flex-row items-center gap-1.5 px-2 py-1.5 rounded-lg" style={{ backgroundColor: "#d9770615", borderWidth: 1, borderColor: "#d9770640" }}>
@@ -176,6 +179,7 @@ export default function BrsScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const rights = usePageRights("brs");
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [search, setSearch] = useState("");
   const [bankId, setBankId] = useState<number | undefined>(undefined);
   const [fromDate, setFromDate] = useState("");
@@ -245,6 +249,19 @@ export default function BrsScreen() {
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
+  };
+
+  const handleReissue = (entry: BrsEntry) => {
+    navigation.navigate("Payment", {
+      reissue: {
+        replacesPaymentId: entry.SourceID,
+        replacesDocNo: entry.DocNo || "",
+        amount: entry.Amount,
+        paymentName: entry.PaymentName,
+        companyName: entry.CompanyName || "",
+        bounceReason: entry.BounceReason,
+      },
+    });
   };
 
   if (!rights.canView) {
@@ -393,6 +410,7 @@ export default function BrsScreen() {
               toggling={togglingKey === `${item.SourceType}-${item.SourceID}`}
               onToggle={() => handleToggle(item)}
               onBounce={() => setBounceEntry(item)}
+              onReissue={() => handleReissue(item)}
             />
           )}
           ListEmptyComponent={

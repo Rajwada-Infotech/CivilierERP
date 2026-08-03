@@ -450,7 +450,7 @@ function TicketDetailDialog({
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        className="h-8 text-xs"
+                        className="h-8 text-xs bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
                         disabled={resolveMutation.isPending}
                         onClick={() => resolveMutation.mutate()}
                       >

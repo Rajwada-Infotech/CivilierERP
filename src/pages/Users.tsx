@@ -440,7 +440,7 @@ const Users = () => {
         action={
           <button
             onClick={openAddDrawer}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
           >
             <UserPlus size={15} />
             Add User
@@ -684,7 +684,7 @@ const Users = () => {
                 <button
                   type="submit"
                   disabled={addMutation.isPending || updateMutation.isPending}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50"
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50 transition-all"
                 >
                   {addMutation.isPending || updateMutation.isPending
                     ? "Saving…"
@@ -772,7 +772,7 @@ const Users = () => {
 
             <button
               onClick={() => setViewUserId(null)}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg"
+              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg transition-all"
             >
               Close
             </button>

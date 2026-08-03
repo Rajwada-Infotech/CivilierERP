@@ -38,6 +38,7 @@ type PageAction =
   | "delete"
   | "print"
   | "export"
+  | "import"
   | "post-approval";
 
 interface PageDef {
@@ -56,6 +57,7 @@ const ALL_ACTIONS: { key: PageAction; label: string }[] = [
   { key: "delete", label: "Delete" },
   { key: "print", label: "Print" },
   { key: "export", label: "Export" },
+  { key: "import", label: "Import" },
   { key: "post-approval", label: "Post-Approval" },
 ];
 
@@ -725,40 +727,56 @@ export default function MenuRights() {
         ) : (
           <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
             {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-card/60">
-              <div className="flex items-center gap-3 flex-wrap">
-                {/* Subject badge */}
-                <div className="flex items-center gap-2">
-                  <ShieldCheck size={14} className="text-primary" />
-                  <span className="text-sm font-heading font-semibold text-foreground">
-                    {subject === "user" ? selectedUser?.name : selectedRole?.RName}
-                  </span>
-                  <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground capitalize">
-                    {subject === "user"
-                      ? selectedUser?.role.replace(/_/g, " ")
-                      : "role baseline"}
-                  </span>
-                </div>
-                {/* Stats */}
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {stats.pagesGranted}/{stats.total} pages
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-muted border border-border">
-                    {stats.actionsGranted} actions
-                  </span>
-                  {dirty && (
-                    <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                      Unsaved
+            <div className="flex flex-col gap-3 px-5 py-3.5 border-b border-border bg-card/60">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Subject badge */}
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={14} className="text-primary" />
+                    <span className="text-sm font-heading font-semibold text-foreground">
+                      {subject === "user" ? selectedUser?.name : selectedRole?.RName}
                     </span>
-                  )}
+                    <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground capitalize">
+                      {subject === "user"
+                        ? selectedUser?.role.replace(/_/g, " ")
+                        : "role baseline"}
+                    </span>
+                  </div>
+                  {/* Stats */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      {stats.pagesGranted}/{stats.total} pages
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-muted border border-border">
+                      {stats.actionsGranted} actions
+                    </span>
+                    {dirty && (
+                      <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                        Unsaved
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Page search — its own line-item so it never squeezes the module chips */}
+                <div className="relative w-44">
+                  <Search
+                    size={11}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <input
+                    placeholder="Search page…"
+                    value={pageSearch}
+                    onChange={(e) => setPageSearch(e.target.value)}
+                    className="w-full pl-7 pr-3 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
                 </div>
               </div>
 
-              {/* Filters */}
-              <div className="flex items-center gap-2">
-                {/* Module filter */}
-                <div className="flex items-center gap-1 overflow-x-auto">
+              {/* Module filter — wraps across lines instead of clipping/scrolling
+                  horizontally, so every module chip stays reachable without a
+                  hidden scrollbar (Sales Automation etc. no longer cut off). */}
+              <div className="flex items-center gap-1.5 flex-wrap">
                   {modules.map((mod) => (
                     <button
                       key={mod}
@@ -766,7 +784,7 @@ export default function MenuRights() {
                       className={`px-2.5 py-1 text-[11px] rounded-lg border whitespace-nowrap transition-colors font-medium ${
                         moduleFilter === mod
                           ? mod === "All"
-                            ? "gradient-accent text-white border-transparent font-semibold"
+                            ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
                             : mod === "General"
                               ? "bg-slate-500 text-white border-slate-500 font-semibold"
                               : mod === "Finance"
@@ -785,7 +803,7 @@ export default function MenuRights() {
                                             ? "bg-cyan-500 text-white border-cyan-500 font-semibold"
                                             : mod === "Reports"
                                               ? "bg-yellow-500 text-white border-yellow-500 font-semibold"
-                                              : "gradient-accent text-white border-transparent font-semibold"
+                                              : "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
                           : mod === "All"
                             ? "border-border bg-muted text-muted-foreground hover:bg-muted/80"
                             : mod === "General"
@@ -813,20 +831,6 @@ export default function MenuRights() {
                     </button>
                   ))}
                 </div>
-                {/* Page search */}
-                <div className="relative w-44">
-                  <Search
-                    size={11}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    placeholder="Search page…"
-                    value={pageSearch}
-                    onChange={(e) => setPageSearch(e.target.value)}
-                    className="w-full pl-7 pr-3 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-              </div>
             </div>
 
             {/* Table */}
@@ -982,7 +986,7 @@ export default function MenuRights() {
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
               >
                 {saving ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />

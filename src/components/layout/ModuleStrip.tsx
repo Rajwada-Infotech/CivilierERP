@@ -6,8 +6,7 @@ import { ChevronRight } from "lucide-react";
 import {
   Bank,
   Box,
-  Category2,
-  ClipboardText,
+  Notepad,
   Message2,
   ShoppingCart,
   Building3,
@@ -16,6 +15,7 @@ import {
   VideoPlay,
   Shield,
 } from "iconsax-react";
+import { HardHat } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +24,16 @@ import { useTheme } from "@/contexts/ThemeContext";
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
+
+// iconsax icons take a `variant` prop ("Bold"/"Outline"); lucide's HardHat
+// doesn't know that prop but happily ignores extra ones via its ...rest
+// spread, so this adapter just gives it the same call signature as the
+// iconsax icons above so it drops into MODULES without special-casing the
+// render below.
+const HardHatIcon: React.FC<{ size?: number; variant?: string; className?: string; style?: React.CSSProperties }> = ({
+  variant,
+  ...rest
+}) => <HardHat {...rest} />;
 
 const MODULES = [
   {
@@ -45,22 +55,22 @@ const MODULES = [
     ringRgb: "16,185,129",
   },
   {
-    id: "followup" as Module,
-    icon: Category2,
-    label: "Follow-Up",
-    desc: "Sales, agreements & CRM",
-    color: "#0d9488",
-    bg: "rgba(13,148,136,0.18)",
-    ringRgb: "13,148,136",
-  },
-  {
     id: "engineering" as Module,
-    icon: ClipboardText,
+    icon: HardHatIcon,
     label: "Engineering",
     desc: "Projects, work orders & site",
     color: "#f97316",
     bg: "rgba(249,115,22,0.22)",
     ringRgb: "249,115,22",
+  },
+  {
+    id: "followup" as Module,
+    icon: Notepad,
+    label: "Follow-Up",
+    desc: "Sales, agreements & CRM",
+    color: "#0d9488",
+    bg: "rgba(13,148,136,0.18)",
+    ringRgb: "13,148,136",
   },
   {
     id: "ticket" as Module,
@@ -135,6 +145,8 @@ type TooltipState = {
   desc: string;
   y: number;
 } | null;
+
+
 
 // ── ModuleStrip ───────────────────────────────────────────────────────────────
 

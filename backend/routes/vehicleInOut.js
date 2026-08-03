@@ -207,6 +207,9 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
     .map((it) => ({
       poItemId: parseInt(it.poItemId, 10),
       receivedQty: Number(it.receivedQty) || 0,
+      // Optional real-time capture, base64 data URL — passed straight
+      // through to the row without any validation of its own.
+      photoBase64: typeof it.photoBase64 === "string" && it.photoBase64 ? it.photoBase64 : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
@@ -251,11 +254,12 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("ItemId", sql.NVarChar(100), line.po.itemId || null)
       .input("ItemName", sql.NVarChar(255), line.po.itemName || null)
       .input("UomName", sql.NVarChar(50), line.po.uomName || null)
-      .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty).query(`
+      .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
+      .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64)
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64)
       `);
   }
 }
@@ -477,7 +481,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -635,6 +639,13 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
+  if (!challanNo)
+    return res.status(400).json({ error: "challanNo is required" });
+  // Exit time is a backfill of when the vehicle actually left — never a
+  // future appointment. The UI already caps the picker at "now", this is
+  // just the server-side backstop.
+  if (exitTime && new Date(exitTime).getTime() > Date.now())
+    return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   const pool = getPool();
   let recordId = null;
@@ -692,7 +703,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
         entryTime ? new Date(entryTime) : new Date(),
       )
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
-      .input("ChallanNo", sql.NVarChar(100), challanNo || null)
+      .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("Status", sql.NVarChar(30), "Draft")
       .input("CreatedBy", sql.NVarChar(150), email)
@@ -777,6 +788,10 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
 
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
+  if (!challanNo)
+    return res.status(400).json({ error: "challanNo is required" });
+  if (exitTime && new Date(exitTime).getTime() > Date.now())
+    return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   try {
     const pool = getPool();
@@ -800,7 +815,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       .input("VehicleNo", sql.NVarChar(50), vehicleNo)
       .input("EntryTime", sql.DateTime, entryTime ? new Date(entryTime) : null)
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
-      .input("ChallanNo", sql.NVarChar(100), challanNo || null)
+      .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
         UPDATE dbo.VehicleInOut SET

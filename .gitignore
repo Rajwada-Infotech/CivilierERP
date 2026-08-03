@@ -9,6 +9,9 @@ lerna-debug.log*
 
 password.md
 
+# SSL certificates - never commit
+certbot/conf/
+certbot/www/
 # Dependency directories
 node_modules
 .vite/
@@ -49,3 +52,15 @@ hotfix_ticketroutes.txt
 backend/BACKEND_DB_TODO.md
 .claude/
 CivilierERP Documentation.pdf
+
+# APK releases — served by nginx from this host folder (see docker-compose.yml
+# / nginx.conf), never committed. Drop the built .apk files here on the
+# deploy host directly.
+/apk-releases/*
+!/apk-releases/.gitkeep
+
+# Local-dev-only copies for testing the download page against a real APK —
+# Vite serves public/ as real static files (checked before the SPA fallback),
+# so this avoids the fallback silently serving index.html renamed to .apk.
+# Never committed; production is served from /apk-releases/ by nginx instead.
+public/downloads/

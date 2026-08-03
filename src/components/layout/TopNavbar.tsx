@@ -43,6 +43,7 @@ import {
   Car,
   PlusCircle,
   Wallet,
+  CalendarClock,
   Wand2,
 } from "lucide-react";
 import {
@@ -297,6 +298,13 @@ const materialSetupItems = [
     pageKey: "t-c-master",
   },
   {
+    icon: CalendarClock,
+    label: "Payment Terms",
+    path: "/masters/payment-terms",
+    color: "text-sky-500",
+    pageKey: "payment-terms",
+  },
+  {
     icon: ClipboardList,
     label: "Inventory",
     path: "/material/inventory-master",
@@ -315,9 +323,17 @@ const materialSetupItems = [
 const followupSetupItems = [
   {
     icon: ClipboardList,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
+    label: "Task Master",
+    path: "/followup/setup/task-master",
+    color: "text-teal-500",
+    pageKey: "task-master",
+  },
+  {
+    icon: Users,
+    label: "Department Master",
+    path: "/followup/setup/department-master",
+    color: "text-cyan-500",
+    pageKey: "followup-department-master",
   },
 ];
 
@@ -693,7 +709,7 @@ const SetupDropdown = ({
                       : undefined
                   }
                 >
-                  {label}
+                  {label.replace(/ Master$/, "")}
                 </span>
               </button>
             );
