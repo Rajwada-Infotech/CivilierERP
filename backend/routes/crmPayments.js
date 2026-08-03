@@ -578,6 +578,45 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   return { receiptId, ReceiptNo: receiptNo, bookingId: targetRow.BookingId, overflowAmount, onAccountId, OnAccountReceiptNo: onAccountReceiptNo, brokerWarning };
 }
 
+// Runs once Finance approves a CRM-linked ReceivedPayment row that has
+// CrmBookingId set but no CrmMilestoneId — a manual on-account deposit
+// (POST /booking/:id/on-account below), not a payment against a specific
+// milestone. Mirrors applyCrmMilestonePaymentApproval's role: this is where
+// the real CrmOnAccountPayment insert, GL posting, and auto-sweep onto the
+// next due milestone now happen, only once an approver acts. Previously
+// this all ran synchronously in the same request that submitted it,
+// bypassing Finance approval entirely.
+async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmail) {
+  const receiptNo = await getNextDocNumber(pool, "OACC", "OACC");
+  const result = await pool.request()
+    .input("no",   sql.NVarChar(30),  receiptNo)
+    .input("bid",  sql.Int,           rp.CrmBookingId)
+    .input("amt",  sql.Decimal(18,2), rp.RPAmount)
+    .input("rdt",  sql.Date,          rp.RPDocDate || null)
+    .input("mode", sql.NVarChar(50),  rp.RPMode || null)
+    .input("tref", sql.NVarChar(200), rp.RPTransactionID || null)
+    .input("note", sql.NVarChar(sql.MAX), rp.RPRemarks || null)
+    .input("cb",   sql.Int,           actorUserId)
+    .input("bkid", sql.Int,           rp.RPDepositBankId || null)
+    .input("bkname", sql.NVarChar(200), rp.RPDepositBankName || null)
+    .input("srp",  sql.Int,           rp.RPPaymentID)
+    .query(`
+      INSERT INTO dbo.CrmOnAccountPayment
+        (ReceiptNo, BookingId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName, SourceReceivedPaymentId)
+      OUTPUT INSERTED.Id
+      VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME(), @bkid, @bkname, @srp)
+    `);
+  const onAccountId = result.recordset[0].Id;
+
+  const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
+
+  // Same auto-sweep a milestone overflow already gets — the deposit
+  // shouldn't sit unapplied any more than an overpayment's overflow does.
+  await autoApplyOnAccount(pool, rp.CrmBookingId, actorUserId, actorEmail);
+
+  return { ...outcome, onAccountId, ReceiptNo: receiptNo };
+}
+
 // POST /:id/receipts — record a receipt against a milestone (supports partial/installment receipts)
 router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (req, res) => {
   try {
@@ -873,10 +912,18 @@ router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "v
   }
 });
 
-// POST /booking/:bookingId/on-account — record a new on-account deposit.
-// Not tied to any milestone at creation time — that's the whole point;
-// it's applied later via PUT /on-account/:id/apply, possibly split across
-// several milestones as they come due.
+// POST /booking/:bookingId/on-account — submit a new on-account deposit for
+// Finance approval. Previously this inserted CrmOnAccountPayment, posted GL,
+// and auto-swept the money onto the next milestone all in this same request
+// — bypassing Finance approval entirely, unlike every other CRM payment
+// (migration 269's whole point: "Every CRM payment ... now submits into
+// Finance's existing Received Payment approval queue"). That gap let real
+// money reach the ledger and the customer's balance with zero review. Fixed
+// by submitting into the same ReceivedPayment queue milestone payments use
+// (CrmBookingId set, CrmMilestoneId left null so receivedPayment.js's
+// approve handler routes it to applyCrmOnAccountPaymentApproval below
+// instead of applyCrmMilestonePaymentApproval) — the real insert/GL/auto-
+// sweep now only happens once an approver acts.
 router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -888,53 +935,40 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    const bkRes = await pool.request().input("bid", sql.Int, bid)
+      .query("SELECT ProjectId, ProjectName, CompanyId, ApplicationId, BookingNo FROM dbo.CrmBooking WHERE Id = @bid");
+    if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const booking = bkRes.recordset[0];
+
     // Same rule as a milestone payment: a deposit against a project with one
     // or more tagged bank accounts must say which one it landed in. A
     // project with nothing tagged falls back to the open company bank
     // list, so nothing is mandated there.
-    const projRes = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
-    if (!projRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    const tagged = await pool.request().input("pid", sql.Int, projRes.recordset[0].ProjectId)
+    const tagged = await pool.request().input("pid", sql.Int, booking.ProjectId)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
     if (tagged.recordset[0].Cnt > 0 && !b.DepositBankId) {
       return res.status(400).json({ error: "Deposit bank is required for this project" });
     }
 
-    const receiptNo = await getNextDocNumber(pool, "OACC", "OACC");
-    const result = await pool.request()
-      .input("no",   sql.NVarChar(30),  receiptNo)
-      .input("bid",  sql.Int,           bid)
-      .input("amt",  sql.Decimal(18,2), amount)
-      .input("rdt",  sql.Date,          b.ReceivedDate || null)
-      .input("mode", sql.NVarChar(50),  b.PaymentMode || null)
-      .input("tref", sql.NVarChar(200), b.TransactionRef || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int,           actorId(req))
-      .input("bkid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
-      .input("bkname", sql.NVarChar(200), b.DepositBankName || null)
-      .query(`
-        INSERT INTO dbo.CrmOnAccountPayment
-          (ReceiptNo, BookingId, Amount, ReceivedDate, PaymentMode, TransactionRef, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME(), @bkid, @bkname)
-      `);
-    const onAccountId = result.recordset[0].Id;
-
     const actorEmail = req.user?.email || req.user?.name || null;
-    try {
-      const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
-      await recordGLPosting("crm-on-account-payment", onAccountId, outcome, actorEmail);
-    } catch (glErr) {
-      await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
-    }
+    const { createReceivedPaymentInternal } = require("./receivedPayment");
+    const rp = await createReceivedPaymentInternal(pool, {
+      RPReceivedFrom: booking.BookingNo,
+      RPProjectName: booking.ProjectName,
+      RPProjectId: booking.ProjectId,
+      RPCompanyId: booking.CompanyId,
+      RPDocDate: b.ReceivedDate || null,
+      RPMode: b.PaymentMode || null,
+      RPAmount: amount,
+      RPTransactionID: b.TransactionRef || null,
+      RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
+      RPDepositBankId: b.DepositBankId || null,
+      RPDepositBankName: b.DepositBankName || null,
+      CrmBookingId: bid,
+      CrmApplicationId: booking.ApplicationId,
+    }, actorEmail || String(actorId(req)));
 
-    // Auto-sweep this deposit onto whichever milestone is next due, same as
-    // an overflow diversion does — a manual on-account deposit shouldn't sit
-    // unapplied any more than an overpayment's overflow does.
-    await autoApplyOnAccount(pool, bid, actorId(req), actorEmail);
-
-    res.status(201).json({ success: true, id: onAccountId, ReceiptNo: receiptNo });
+    res.status(201).json({ success: true, submitted: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo });
   } catch (e) {
     console.error("[crm-payments] POST /booking/:id/on-account error:", e.message);
     res.status(500).json({ error: e.message });
@@ -976,5 +1010,6 @@ module.exports = router;
 // Application-stage token payment onto the new Booking's first milestone.
 module.exports.createReceiptForMilestone = createReceiptForMilestone;
 module.exports.applyCrmMilestonePaymentApproval = applyCrmMilestonePaymentApproval;
+module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApproval;
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;

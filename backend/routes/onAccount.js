@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const requireAuth = require("../middleware/auth");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 const { buildGrnGstData }           = require("../utils/buildGrnGstData");
@@ -11,6 +12,12 @@ const { syncBillStatus }            = require("../utils/syncBillStatus");
 const { getOAAdjustmentsForInvoice } = require("../utils/oaAdjustments");
 
 router.use(requireAuth);
+// Every route below previously had ONLY requireAuth (i.e. "is logged in",
+// no role/page check at all) — any authenticated user of any role could
+// move money between a party's on-account balance and any invoice. Gated
+// the same way every other finance route file does, using the
+// "on-account-adjustment" page key (view/create actions) already registered
+// for this screen.
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
@@ -20,7 +27,7 @@ const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 // hook and POST /apply-adjustment below) — rather than summing the ledger on
 // every call. dbo.OnAccountLedger remains the full audit trail (used by
 // /report), this is just the fast current-balance read.
-router.get("/balance/:partyId", async (req, res) => {
+router.get("/balance/:partyId", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
   const partyId = parseInt(req.params.partyId, 10);
   if (!partyId) return res.status(400).json({ error: "Invalid partyId" });
   try {
@@ -36,7 +43,7 @@ router.get("/balance/:partyId", async (req, res) => {
 });
 
 // ── GET /balance-by-ref/:expenseRef — resolve party from invoice ref, return balance
-router.get("/balance-by-ref/:expenseRef", async (req, res) => {
+router.get("/balance-by-ref/:expenseRef", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
   const expenseRef = decodeURIComponent(req.params.expenseRef);
   try {
     const pool = getPool();
@@ -54,7 +61,7 @@ router.get("/balance-by-ref/:expenseRef", async (req, res) => {
 
 // ── POST /record — internal: called by payment flow to create/adjust OA entries
 // Body: { partyId, partyType, txnDate, txnType, amount, refType, refDocNo, refId, adjRefDocNo, companyId, projectId, notes, createdBy }
-router.post("/record", async (req, res) => {
+router.post("/record", requirePageRight("on-account-adjustment", "create"), async (req, res) => {
   const { partyId, partyType, txnDate, txnType, amount, refType, refDocNo, refId, adjRefDocNo, companyId, projectId, notes } = req.body;
   const createdBy = req.user?.email || "system";
   if (!partyId || !txnType || !amount || amount <= 0) return res.status(400).json({ error: "Missing required fields" });
@@ -91,7 +98,7 @@ router.post("/record", async (req, res) => {
 });
 
 // ── GET /invoices-for-party/:partyId — invoices linked to a specific supplier/contractor
-router.get("/invoices-for-party/:partyId", async (req, res) => {
+router.get("/invoices-for-party/:partyId", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
   const partyId = parseInt(req.params.partyId, 10);
   if (!partyId) return res.status(400).json({ error: "Invalid partyId" });
   try {
@@ -192,7 +199,15 @@ router.get("/invoices-for-party/:partyId", async (req, res) => {
 
 // ── POST /apply-adjustment — apply OA balance to an invoice ───────────────
 // Body: { expenseRef, amount (to apply), partyId? (override), paymentId?, paymentDocNo? }
-router.post("/apply-adjustment", async (req, res) => {
+// No second approval step here, deliberately — unlike a brand-new payment
+// entering the system, this reallocates a balance that was already approved
+// when it first arrived (same reasoning as CRM's own on-account-to-milestone
+// sweep, also legitimately no-approval). The control that matters here is
+// WHO can call this — requirePageRight below — plus a clear, queryable
+// audit trail: every adjustment already lands in dbo.OnAccountLedger with
+// CreatedBy/TxnDate/Notes (visible via GET /report), and is logged here too
+// for fast incident-response grep.
+router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "create"), async (req, res) => {
   const { expenseRef, amount, paymentDocNo, paymentId, partyId: bodyPartyId } = req.body;
   const createdBy = req.user?.email || "system";
   if (!expenseRef || !amount || amount <= 0) return res.status(400).json({ error: "expenseRef and amount required" });
@@ -290,6 +305,7 @@ router.post("/apply-adjustment", async (req, res) => {
       await syncBillStatus(pool, sql, expenseRef);
     }
 
+    console.log(`[on-account] apply-adjustment: ${createdBy} applied ₹${applyAmt} from party ${party.partyId} onto invoice ${expenseRef}`);
     res.json({ applied: applyAmt, remainingBalance: Math.max(0, balance - applyAmt) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -300,7 +316,7 @@ router.post("/apply-adjustment", async (req, res) => {
 // a specific invoice, so the Payment page can show "On A/C adjusted with
 // ₹X from <Supplier>" in the amount breakdown when that invoice is picked
 // again for payment (see utils/oaAdjustments.js).
-router.get("/adjustments-for-invoice/:expenseRef", async (req, res) => {
+router.get("/adjustments-for-invoice/:expenseRef", requireAnyPageRight(["new-payment", "on-account-adjustment"], "view"), async (req, res) => {
   const expenseRef = decodeURIComponent(req.params.expenseRef);
   try {
     const pool = getPool();
@@ -322,7 +338,7 @@ router.get("/adjustments-for-invoice/:expenseRef", async (req, res) => {
 // Detail / Payment Milestones' own "Apply On-Account" flow), so these rows
 // carry Source='CRM' + booking context instead of invoice fields, and the
 // frontend must not offer the Adjust action for them.
-router.get("/adjustable", async (req, res) => {
+router.get("/adjustable", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
   const { partyId } = req.query;
   try {
     const pool = getPool();
@@ -486,7 +502,7 @@ router.get("/adjustable", async (req, res) => {
 });
 
 // ── GET /report — On Account report ──────────────────────────────────────
-router.get("/report", async (req, res) => {
+router.get("/report", requireAnyPageRight(["on-account-report", "reports"], "view"), async (req, res) => {
   const { companyId, projectId, partyId, partyType, dateFrom, dateTo, page = 1, pageSize = 50 } = req.query;
   try {
     const pool = getPool();
@@ -567,7 +583,7 @@ router.get("/report", async (req, res) => {
 });
 
 // ── GET /party-summary — balance summary per party ────────────────────────
-router.get("/party-summary", async (req, res) => {
+router.get("/party-summary", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().query(`

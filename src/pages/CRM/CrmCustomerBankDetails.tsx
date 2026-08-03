@@ -115,6 +115,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // staff see the reason up front instead of a save that silently never
   // unlocks Agreement prep.
   const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
+  const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
   const bookingAmountPaid = milestone1Status === "Paid";
 
   useQuery({
@@ -122,6 +123,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
     queryFn: async () => {
       const d = await fetchBankDetail(row.BookingId);
       setMilestone1Status(d?.Milestone1Status ?? null);
+      setMilestone1PendingApproval(!!d?.Milestone1PendingApproval);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
@@ -210,9 +212,15 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         </DialogHeader>
 
         {!bookingAmountPaid ? (
-          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-            <AlertTriangle size={13} /> Booking Amount (Milestone 1) must be paid before Bank & Nominee / Financing details can be completed.
-          </div>
+          milestone1PendingApproval ? (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <Lock size={13} /> Booking Amount submitted — awaiting Finance approval. This form unlocks automatically once Account's Head approves it.
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <AlertTriangle size={13} /> Booking Amount (Milestone 1) must be paid before Bank & Nominee / Financing details can be completed.
+            </div>
+          )
         ) : !canEdit ? (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.

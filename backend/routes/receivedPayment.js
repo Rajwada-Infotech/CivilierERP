@@ -694,6 +694,23 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
     return res.json({ success: true, brokerWarning });
   }
 
+  // CrmBookingId set but no CrmMilestoneId — a manual on-account deposit
+  // (POST /booking/:id/on-account in crmPayments.js), not a payment against
+  // a specific milestone. Same detour as the branch above: the real
+  // CrmOnAccountPayment insert/GL/auto-sweep only happens here, once
+  // approved, instead of when it was originally submitted.
+  if (crmRow?.CrmBookingId) {
+    try {
+      const { applyCrmOnAccountPaymentApproval } = require("./crmPayments");
+      const outcome = await applyCrmOnAccountPaymentApproval(pool, crmRow, actorUserId, actor);
+      await recordGLPosting("crm-received-payment", pid, outcome, actor);
+    } catch (crmErr) {
+      await recordGLPosting("crm-received-payment", pid, { failed: true, reason: crmErr.message }, actor);
+    }
+    await invalidateReceivedPaymentWorkflowCaches();
+    return res.json({ success: true });
+  }
+
   // GL posting AFTER the status commit (postVoucher has its own transaction),
   // with the outcome recorded so an approved-but-unposted receipt is findable
   // (dbo.GLPostingLog — see migration 154), mirroring the approval engine.

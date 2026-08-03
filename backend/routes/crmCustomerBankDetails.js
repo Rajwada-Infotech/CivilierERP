@@ -84,9 +84,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // CrmCustomerBankDetail (on CrmBooking/CrmPaymentMilestone) but the
     // dialog needs both — Milestone 1 to decide whether the form should even
     // be usable yet, FinancingType as a field on the same save.
+    // Milestone1PendingApproval: money has been submitted for Milestone 1 and
+    // is sitting in Finance's approval queue — surfaced so staff see "awaiting
+    // Finance approval" instead of reading a locked form as simply stuck.
     const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT b.FinancingType,
-             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status
+             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
+             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Id,
+             CAST(CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.ReceivedPayment rp
+               JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+                 AND rp.RPStatus = 'Pending'
+             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
@@ -137,6 +147,20 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // The frontend already refuses to save unless Milestone 1 (Booking
+    // Amount) is Paid — bookingAmountPaid check in CrmCustomerBankDetails.tsx
+    // — but that was client-side only. Anyone calling this endpoint directly
+    // (a stale tab, a race between two staff members, a future frontend
+    // change that forgets to re-check) could write KYC data before the
+    // booking amount was actually paid. Mirror the same rule here, server-
+    // side, using the identical Milestone1Status subquery GET already uses.
+    const m1 = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    `);
+    if (m1.recordset[0]?.Status !== "Paid") {
+      return res.status(400).json({ error: "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved" });
+    }
 
     // Financing Type (Self-funded / Loan-financed) lives on CrmBooking, not
     // CrmCustomerBankDetail — it's a simple declaration, not sensitive KYC
