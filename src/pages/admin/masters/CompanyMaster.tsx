@@ -26,6 +26,7 @@ import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { INDIA_STATE_CITIES, INDIA_STATES } from "@/lib/indiaStateCities";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -1071,8 +1072,43 @@ export default function CompanyMaster() {
                   <div className="col-span-full">
                     {fi("Registered Address", "registeredAddress")}
                   </div>
-                  {fi("City", "city")}
-                  {fi("State", "state")}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">State</label>
+                    <div className="relative">
+                      <select
+                        value={form.state ?? ""}
+                        onChange={(e) =>
+                          setForm((c) => ({ ...c, state: e.target.value, city: "" }))
+                        }
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Select State —</option>
+                        {INDIA_STATES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+                    <input
+                      list="company-city-options"
+                      type="text"
+                      value={form.city ?? ""}
+                      onChange={(e) =>
+                        setForm((c) => ({ ...c, city: e.target.value }))
+                      }
+                      disabled={!form.state}
+                      placeholder={form.state ? "Type or select a city" : "Select state first"}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <datalist id="company-city-options">
+                      {(INDIA_STATE_CITIES[form.state] ?? []).map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  </div>
                   {fi("Country", "country")}
                   {fi("Pincode", "pincode")}
                   {fi("Phone", "phone")}

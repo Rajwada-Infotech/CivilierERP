@@ -262,7 +262,7 @@ function ProjectViewModal({
           fields: [
             { label: "Address Line 1", value: project.addressLine1 },
             { label: "Address Line 2", value: project.addressLine2 },
-            { label: "Address Line 3", value: project.addressLine3 },
+            { label: "City/District", value: project.addressLine3 },
             { label: "ZIP Code", value: project.zipCode },
             { label: "Full Address", value: fullAddress },
             { label: "Latitude", value: project.latitude },
@@ -1322,7 +1322,7 @@ export default function ProjectMaster() {
                   </div>
                   <div className="col-span-full md:col-span-2">
                     {fi(
-                      "Address Line 3",
+                      "City/District",
                       "addressLine3",
                       "text",
                       "City / District",
