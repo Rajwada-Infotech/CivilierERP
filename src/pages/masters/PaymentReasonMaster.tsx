@@ -151,13 +151,22 @@ export default function PaymentReasonMaster() {
                 <Edit2 size={13} />
               </button>
             )}
+            {rights.canDelete && (
+              <button
+                onClick={() => setPurging(r)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete permanently"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
             {rights.canDelete && r.isActive && (
               <button
                 onClick={() => setDeleting(r)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 title="Deactivate"
               >
-                <Trash2 size={13} />
+                <X size={13} />
               </button>
             )}
             {rights.canEdit && !r.isActive && (
@@ -167,15 +176,6 @@ export default function PaymentReasonMaster() {
                 title="Reactivate"
               >
                 <RotateCcw size={13} />
-              </button>
-            )}
-            {rights.canDelete && (
-              <button
-                onClick={() => setPurging(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                title="Delete permanently"
-              >
-                <X size={13} />
               </button>
             )}
           </div>

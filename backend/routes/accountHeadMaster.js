@@ -193,7 +193,7 @@ router.get("/:id", async (req, res, next) => {
     const query = `SELECT ${selectColumns.join(", ")},
         su.email AS SupplierLoginEmail
       FROM dbo.AccountHeadMaster lh
-      LEFT JOIN dbo.users su ON su.LinkedLHeadId = lh.LHeadId AND su.role = 'supplier'
+      LEFT JOIN dbo.users su ON su.LinkedLHeadId = lh.LHeadId AND su.RoleId = (SELECT RId FROM dbo.Role WHERE LOWER(RName) = 'supplier')
       WHERE lh.LHeadId = @id`;
 
     const result = await pool.request().input("id", sql.Int, id).query(query);
@@ -267,7 +267,7 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       FROM dbo.AccountHeadMaster lh
       LEFT JOIN dbo.AccountGroup ag     ON ag.AGId     = lh.LBelongsTo
       LEFT JOIN dbo.AccountGroup parent ON parent.AGId = ag.ParentGroupId
-      LEFT JOIN dbo.users su            ON su.LinkedLHeadId = lh.LHeadId AND su.role = 'supplier'`;
+      LEFT JOIN dbo.users su            ON su.LinkedLHeadId = lh.LHeadId AND su.RoleId = (SELECT RId FROM dbo.Role WHERE LOWER(RName) = 'supplier')`;
 
     const request = pool.request();
     const conditions = [];
@@ -533,8 +533,8 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
         .input("password", sql.NVarChar(255), supplierPasswordHash)
         .input("RoleId", sql.Int, supplierRoleId)
         .input("LinkedLHeadId", sql.Int, newLHeadId).query(`
-          INSERT INTO dbo.users (name, email, password, role, RoleId, created_datetime, discontinue, can_accept_tickets, LinkedLHeadId)
-          VALUES (@name, @email, @password, 'supplier', @RoleId, GETDATE(), 0, 0, @LinkedLHeadId)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, LinkedLHeadId)
+          VALUES (@name, @email, @password, @RoleId, GETDATE(), 0, 0, @LinkedLHeadId)
         `);
     }
 
@@ -943,7 +943,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
         .request()
         .input("id", sql.Int, req.params.id)
         .input("password", sql.NVarChar(255), newSupplierPasswordHash)
-        .query("UPDATE dbo.users SET password=@password WHERE LinkedLHeadId=@id AND role='supplier'");
+        .query("UPDATE dbo.users SET password=@password WHERE LinkedLHeadId=@id AND RoleId = (SELECT RId FROM dbo.Role WHERE LOWER(RName) = 'supplier')");
     }
 
     await tx.commit();

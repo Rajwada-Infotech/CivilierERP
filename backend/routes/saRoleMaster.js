@@ -18,7 +18,7 @@ router.get("/users", verifyToken, guard, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT u.id, u.name, u.email, u.role, u.RoleId,
+      SELECT u.id, u.name, u.email, u.RoleId,
              r.RName AS RoleName, r.RDesc
       FROM dbo.Users u
       JOIN dbo.Role r ON r.RId = u.RoleId

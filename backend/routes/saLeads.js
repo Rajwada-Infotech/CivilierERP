@@ -114,7 +114,7 @@ router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().query(`
-      SELECT u.id AS Id, u.name AS Name, u.role
+      SELECT u.id AS Id, u.name AS Name, ro.RName AS role
       FROM dbo.Users u
       JOIN dbo.Role ro ON ro.RId = u.RoleId
       WHERE u.discontinue = 0

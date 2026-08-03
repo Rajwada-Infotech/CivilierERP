@@ -25,10 +25,12 @@ export interface FinanceDashboardData {
   };
   cheques: {
     totalCount: number;
-    pendingCount: number;
+    activeCount: number;
+    inactiveCount: number;
   };
   parties: {
     supplierCount: number;
+    activeSupplierCount: number;
     customerCount: number;
     activeGLCount: number;
   };
@@ -259,10 +261,12 @@ function normalizeFinanceDashboard(
     },
     cheques: raw.cheques ?? {
       totalCount: 0,
-      pendingCount: 0,
+      activeCount: 0,
+      inactiveCount: 0,
     },
     parties: raw.parties ?? {
       supplierCount: 0,
+      activeSupplierCount: 0,
       customerCount: 0,
       activeGLCount: 0,
     },
