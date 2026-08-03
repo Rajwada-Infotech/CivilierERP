@@ -556,11 +556,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const bookingAmountBalance = Math.max(0, bookingAmountDue - bookingAmountPaid);
   const bookingAmountPaidInFull = bookingAmountDue > 0 && bookingAmountBalance < 1;
   const mandatoryReady = !!booking?.UnitReviewConfirmed && !!booking?.PlanReviewConfirmed && bookingAmountPaidInFull;
+  // Which specific gating step to point staff at, in the order they must be
+  // completed — replaces the old generic "complete the checklist" message
+  // with the actual step name and where to go do it, since the 3 gates live
+  // on 3 different tabs (Booking, Payment Plan, Payment & Invoice).
+  const pendingStepMessage = !booking?.UnitReviewConfirmed
+    ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — confirm \"Unit, Rate & Total Value are correct\" on the Booking tab." }
+    : !booking?.PlanReviewConfirmed
+    ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — review and confirm the Payment Plan tab." }
+    : !bookingAmountPaidInFull
+    ? { tab: "Payment & Invoice" as Tab, text: "Step 3 (Booking Amount Paid) is pending — the Booking Amount must be fully paid on the Payment & Invoice tab." }
+    : null;
 
   const goStep = (dir: 1 | -1) => {
     const next = TABS[activeTabIndex + dir];
     if (next) setTab(next);
   };
+  const isLastTab = activeTabIndex === TABS.length - 1;
 
   const [bookingRequesting, setBookingRequesting] = useState(false);
   const handleFinalBook = async () => {
@@ -1552,27 +1564,35 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* Footer navigation */}
-            <div className="flex items-center justify-between gap-2 pt-4 border-t border-border mt-4">
-              <div className="flex items-center gap-2">
+            {/* Footer navigation — Previous + (Save & Next, or Confirm & Book
+                on the last tab only), both in the bottom-right cluster. No
+                separate Close button here — the dialog's own "X" (top-right)
+                already covers that. */}
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
+              {isLastTab && !mandatoryReady && booking.Status !== "Approved" && pendingStepMessage && (
+                <button onClick={() => setTab(pendingStepMessage.tab)}
+                  className="flex-1 text-left text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 hover:bg-amber-100">
+                  {pendingStepMessage.text}
+                </button>
+              )}
+              <div className="flex items-center gap-2 shrink-0">
                 <button onClick={() => goStep(-1)} disabled={activeTabIndex === 0}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1">
                   <ArrowLeft size={14} /> Previous
                 </button>
-                <button onClick={() => goStep(1)} disabled={activeTabIndex === TABS.length - 1}
-                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1">
-                  Next <ArrowRight size={14} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                {canEdit && booking.Status !== "Approved" && (
+                {!isLastTab ? (
+                  <button onClick={() => goStep(1)}
+                    className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
+                    Save &amp; Next <ArrowRight size={14} />
+                  </button>
+                ) : canEdit && booking.Status !== "Approved" ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady}
-                    title={!mandatoryReady ? "Complete the checklist and the booking payment first" : undefined}
+                    title={!mandatoryReady ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
                     {bookingRequesting ? "Submitting..." : "Confirm & Book"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
           </>
