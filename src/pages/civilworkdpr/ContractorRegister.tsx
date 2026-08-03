@@ -980,7 +980,7 @@ const ContractorRegister: React.FC = () => {
                 loading={loadingAllocations}
                 searchable={true}
                 paginated={true}
-                defaultPageSize={20}
+                defaultPageSize={10}
                 emptyMessage="No contractor allocations yet."
                 rowClassName={(row) => (row.original.id === allocDeleteConfirmId ? "bg-destructive/5" : "")}
               />
@@ -1287,7 +1287,7 @@ const ContractorRegister: React.FC = () => {
                 loading={loadingLabour}
                 searchable={true}
                 paginated={true}
-                defaultPageSize={20}
+                defaultPageSize={10}
                 emptyMessage="No daily labour entries yet."
                 rowClassName={(row) => (row.original.id === labourDeleteConfirmId ? "bg-destructive/5" : "")}
               />

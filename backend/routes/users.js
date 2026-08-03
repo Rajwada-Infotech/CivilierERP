@@ -5,7 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql, queryWithRetry } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { redisGet, redisSet, redisDel } = require("../redis");
+const { redisGet, redisSet, redisDel, invalidateUserSession } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -353,6 +353,11 @@ router.put(
         `);
       }
 
+      // Discontinuing a user must stop their existing tokens immediately,
+      // same as an outright delete — re-activating is safe to leave to the
+      // cache's own short TTL since there's no urgency there.
+      if (discontinue) invalidateUserSession(id).catch(() => {});
+
       res.json({ message: "User updated" });
     } catch (err) {
       if (
@@ -446,6 +451,10 @@ router.delete(
       if (!delResult.rowsAffected[0]) {
         return res.status(404).json({ error: "User not found" });
       }
+
+      // Deleted — any still-valid JWT for this user must stop working on
+      // their very next request, not after the auth middleware's cache TTL.
+      invalidateUserSession(id).catch(() => {});
 
       res.json({ message: "User deleted" });
     } catch (err) {

@@ -526,7 +526,7 @@ const TypeOfDocMaster: React.FC = () => {
             columns={columns}
             searchPlaceholder="Search document types…"
             paginated={true}
-            defaultPageSize={20}
+            defaultPageSize={10}
             emptyMessage="No document types yet."
             rowClassName={(row) =>
               row.original.TypeOfDocId === editingId

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -379,7 +379,9 @@ const CrmPaymentMilestones: React.FC = () => {
       cell: (i) => {
         const m = i.row.original;
         const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
-        return <span className="text-orange-600 font-semibold">{balance > 0 ? fmt(balance) : "—"}</span>;
+        return balance > 0
+          ? <span className="text-red-600 font-semibold flex items-center gap-1"><ArrowDownCircle size={12} className="shrink-0" />{fmt(balance)}</span>
+          : <span className="text-emerald-600 font-semibold flex items-center gap-1"><CheckCircle2 size={12} className="shrink-0" />Settled</span>;
       } },
     { id: "status", header: "Status", size: 120, enableSorting: false,
       cell: (i) => {
@@ -546,8 +548,10 @@ const CrmPaymentMilestones: React.FC = () => {
                         <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
                       </div>
                       <div className="flex items-baseline justify-between pt-1.5 mt-0.5 border-t border-border">
-                        <span className="font-semibold text-foreground">Balance</span>
-                        <span className="font-bold text-orange-600 tabular-nums">{fmt(summary.balance)}</span>
+                        <span className="font-semibold text-foreground">Balance (Underpaid)</span>
+                        <span className={`font-bold tabular-nums flex items-center gap-1 ${summary.balance > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                          {summary.balance > 0 && <ArrowDownCircle size={13} className="shrink-0" />}{fmt(summary.balance)}
+                        </span>
                       </div>
                       {summary.overdue > 0 && (
                         <div className="flex items-baseline justify-between text-xs pt-1">
@@ -574,10 +578,12 @@ const CrmPaymentMilestones: React.FC = () => {
 
           {/* On-Account balance */}
           {onAccountData && (onAccountData.payments?.length > 0) && (
-            <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-blue-200 bg-blue-50/40" : "border-border"}`}>
+            <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-emerald-200 bg-emerald-50/40" : "border-border"}`}>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className="text-blue-600" /> On-Account Balance</h3>
-                <span className={`text-lg font-bold ${onAccountBalance > 0 ? "text-blue-700" : "text-muted-foreground"}`}>{fmt(onAccountBalance)}</span>
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className={onAccountBalance > 0 ? "text-emerald-600" : "text-muted-foreground"} /> On-Account Balance (Overpaid)</h3>
+                <span className={`text-lg font-bold flex items-center gap-1 ${onAccountBalance > 0 ? "text-emerald-700" : "text-muted-foreground"}`}>
+                  {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
+                </span>
               </div>
               <div className="space-y-1">
                 {onAccountData.payments.map((p: any) => (
