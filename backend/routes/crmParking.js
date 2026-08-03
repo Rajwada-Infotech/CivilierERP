@@ -10,7 +10,7 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
 router.use(authMiddleware);
@@ -180,23 +180,15 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     `);
   const allotmentId = result.recordset[0].Id;
 
-  // A new payable line item — its own milestone, due immediately, not
-  // folded into the base unit's staged % milestones.
-  const nextNo = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(MAX(MilestoneNo), 0) + 1 AS N FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("no",  sql.Int, nextNo.recordset[0].N)
-    .input("name",sql.NVarChar(200), `Parking — ${ParkingType}${slotNo ? ` (${slotNo})` : ""}`)
-    .input("amt", sql.Decimal(18, 2), totalAmount)
-    .input("cb",  sql.Int, actorUserId)
-    .input("paid", sql.Int, allotmentId)
-    .query(`
-      INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, Status, CreatedBy, CreatedAt, ParkingAllotmentId)
-      VALUES (@bid, @no, @name, @amt, 'Pending', @cb, SYSDATETIME(), @paid)
-    `);
-
+  // No longer gets a dedicated milestone of its own — its ₹ value folds
+  // straight into the shared %-based milestones via rollupBookingTotals's
+  // recalculateRemainingMilestones call below, spreading proportionally
+  // across whatever's still open (already-Paid/Waived stages are left
+  // untouched). PaymentStatus is now a synced read of the booking-wide
+  // settled state (isBookingFullySettled) rather than tracked per-sale —
+  // see crmWorkflowGuards.js.
   await rollupBookingTotals(pool, bookingId);
+  await syncParkingPaymentStatus(pool, bookingId);
   await logCrmAudit(pool, "Booking", bookingId, actorUserId, [
     { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
   ]);
@@ -250,7 +242,10 @@ async function applyEditParking(pool, id, b) {
       .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, UpdatedAt = SYSDATETIME() WHERE Id = @mid`);
   }
 
-  if (BookingId) await rollupBookingTotals(pool, BookingId);
+  if (BookingId) {
+    await rollupBookingTotals(pool, BookingId);
+    await syncParkingPaymentStatus(pool, BookingId);
+  }
   return { TotalAmount: totalAmount };
 }
 
@@ -272,10 +267,18 @@ async function applyReleaseParking(pool, id) {
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw parkingError(activeErr);
 
+  // Legacy shape: a dedicated milestone still exists for this sale — keep
+  // using its own Status, same as before. New-shape sales (no linked
+  // milestone) fall back to the booking-wide settled check instead, since
+  // their value has no isolated "paid" point of its own once blended.
   const milestone = await pool.request().input("paid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
-  if (milestone.recordset.length && milestone.recordset[0].Status === "Paid") {
-    throw parkingError("This parking charge has already been paid and cannot be released", 409);
+  if (milestone.recordset.length) {
+    if (milestone.recordset[0].Status === "Paid") {
+      throw parkingError("This parking charge has already been paid and cannot be released", 409);
+    }
+  } else if (await isBookingFullySettled(pool, BookingId)) {
+    throw parkingError("This booking is fully paid off — parking can no longer be released", 409);
   }
 
   await pool.request().input("id", sql.Int, id)
@@ -286,6 +289,7 @@ async function applyReleaseParking(pool, id) {
   }
 
   await rollupBookingTotals(pool, BookingId);
+  await syncParkingPaymentStatus(pool, BookingId);
   return {};
 }
 

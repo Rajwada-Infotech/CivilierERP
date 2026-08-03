@@ -568,7 +568,7 @@ async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneI
   if (!grandTotal) return;
 
   const msRes = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id, MilestoneNo, AmountDue, [Percent], Status, ExtraChargeId, ParkingAllotmentId FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+    .query("SELECT Id, MilestoneNo, AmountDue, AmountPaid, [Percent], Status, ExtraChargeId, ParkingAllotmentId FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
   const rows = msRes.recordset;
   if (!rows.length) return;
 
@@ -584,9 +584,20 @@ async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneI
   // treat them the same as Paid/Waived: excluded from the proportional pool
   // entirely, contributing their own AmountDue to settledTotal so the
   // %-based milestones redistribute onto what's actually left over.
+  // Re-applied fix (was present on an earlier version of this file but is
+  // missing from this working copy): any milestone with real money already
+  // recorded against it (AmountPaid > 0) must never have its AmountDue moved
+  // by a later redistribution, even if its Status hasn't reached "Paid" yet.
+  // This is now MORE important than before, not less — Parking/Extra
+  // Charges call this function on every add/edit/release (see
+  // rollupBookingTotals in crmParking.js/crmExtraCharges.js), so a partially
+  // or fully paid milestone (most commonly Milestone #1, the real ₹ booking
+  // amount) is now at risk of this exact corruption far more often than
+  // when GrandTotal only changed occasionally.
   const isSettled = (r) =>
     ["Paid", "Waived"].includes(r.Status) || r.Id === fixedMilestoneId ||
-    r.ExtraChargeId != null || r.ParkingAllotmentId != null;
+    r.ExtraChargeId != null || r.ParkingAllotmentId != null ||
+    Number(r.AmountPaid || 0) > 0;
   const settled = rows.filter(isSettled);
   const open = rows.filter((r) => !isSettled(r));
   if (!open.length) return; // nothing left to redistribute onto
@@ -628,6 +639,44 @@ async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneI
       .input("pct", sql.Decimal(5, 2), percent)
       .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
   }
+}
+
+// Parking/Extra Charges added to a booking now fold their ₹ value straight
+// into the shared %-based milestones (via recalculateRemainingMilestones)
+// instead of getting a dedicated milestone of their own — see crmParking.js/
+// crmExtraCharges.js. Once blended that way, a payment against e.g.
+// "Foundation" is part-unit/part-parking/part-extra-charge; there's no way
+// to isolate "which rupee paid for the parking slot specifically". The only
+// honest, unambiguous answer is booking-wide: nothing riding on the shared
+// total can be considered settled until the WHOLE total is — so this is the
+// single source of truth for "has this charge been paid" wherever a charge
+// has no dedicated milestone of its own (edit-lock, release-lock, matrix
+// display). Bookings that still have a legacy dedicated milestone (created
+// before this change) keep using that milestone's own Status instead — see
+// the ParkingAllotmentId/ExtraChargeId lookup each caller does first.
+async function isBookingFullySettled(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT
+      (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) AS TotalPaid,
+      (SELECT GrandTotal FROM dbo.CrmBooking WHERE Id = @bid) AS GrandTotal
+  `);
+  const row = r.recordset[0];
+  if (!row || !row.GrandTotal) return false;
+  return Number(row.TotalPaid) + 0.01 >= Number(row.GrandTotal);
+}
+
+// Keeps CrmParkingAllotment.PaymentStatus (the column the Parking Matrix /
+// Parking Booking pages actually read) in sync with the derived booking-wide
+// settled state above. Only touches BookingId-linked rows — standalone
+// parking sales (BookingId IS NULL) manage their own PaymentStatus via a
+// direct mark-paid action and have no milestone/blended-total concept at
+// all, see migration 219.
+async function syncParkingPaymentStatus(pool, bookingId) {
+  const settled = await isBookingFullySettled(pool, bookingId);
+  await pool.request()
+    .input("bid", sql.Int, bookingId)
+    .input("st", sql.NVarChar(20), settled ? "Paid" : "Pending")
+    .query(`UPDATE dbo.CrmParkingAllotment SET PaymentStatus = @st WHERE BookingId = @bid AND IsActive = 1`);
 }
 
 // Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
@@ -842,4 +891,6 @@ module.exports = {
   requireActiveBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,
+  isBookingFullySettled,
+  syncParkingPaymentStatus,
 };

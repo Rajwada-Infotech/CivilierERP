@@ -991,7 +991,15 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
         UPDATE dbo.CrmPaymentMilestone SET
           AmountDue = @amt,
           [Percent] = @pct,
-          Status = CASE WHEN Status = 'Paid' THEN Status WHEN AmountPaid >= @amt THEN 'Paid' ELSE Status END,
+          -- Bug fixed here: previously "WHEN Status = 'Paid' THEN Status"
+          -- kept a milestone frozen as Paid forever once it first reached
+          -- that status, even after resync raised AmountDue past what was
+          -- actually collected (e.g. a stale schedule undercounted the real
+          -- Booking Amount by a few hundred rupees, so "fully paid against
+          -- the wrong number" no longer means fully paid). Re-evaluate
+          -- honestly against the just-updated amount every time instead —
+          -- never silently mask a real shortfall.
+          Status = CASE WHEN AmountPaid >= @amt THEN 'Paid' ELSE 'Pending' END,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

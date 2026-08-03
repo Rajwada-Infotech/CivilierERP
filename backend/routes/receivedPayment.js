@@ -245,7 +245,14 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       .input("RPCompanyName", sql.NVarChar(255), RPCompanyName || null)
       .input("RPReceivedFrom", sql.NVarChar(255), RPReceivedFrom || "")
       .input("RPProjectName", sql.NVarChar(255), RPProjectName || "")
-      .input("RPDocDate", sql.Date, RPDocDate || null)
+      // RPDocDate is NOT NULL — a caller that omits it (e.g. CRM's
+      // createReceiptForMilestone when the payment form doesn't collect a
+      // date) must not crash the insert; default to today, same fallback
+      // already used for the SalePayment doc-number branch above. Bug: this
+      // previously inserted NULL, 500-ing the whole request before the
+      // ReceivedPayment row (and thus the approval-queue entry) was ever
+      // created — CRM payment submissions silently never reached approval.
+      .input("RPDocDate", sql.Date, RPDocDate || new Date().toISOString().slice(0, 10))
       .input("RPMode", sql.NVarChar(50), RPMode || "Cash")
       .input("RPAmount", sql.Decimal(18, 2), Number(RPAmount) || 0)
       .input("RPBankName", sql.NVarChar(255), RPBankName || null)
@@ -411,6 +418,9 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       .input("RPCompanyName", sql.NVarChar(255), RPCompanyName || null)
       .input("RPReceivedFrom", sql.NVarChar(255), RPReceivedFrom || "")
       .input("RPProjectName", sql.NVarChar(255), RPProjectName || "")
+      // RPDocDate is NOT NULL — an edit that omits it must not blank out the
+      // date the record was originally created with; COALESCE against the
+      // existing value in the SET clause below instead of overwriting it.
       .input("RPDocDate", sql.Date, RPDocDate || null)
       .input("RPMode", sql.NVarChar(50), RPMode || "Cash")
       .input("RPAmount", sql.Decimal(18, 2), Number(RPAmount) || 0)
@@ -445,7 +455,7 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
           RPCompanyName   = @RPCompanyName,
           RPReceivedFrom  = @RPReceivedFrom,
           RPProjectName   = @RPProjectName,
-          RPDocDate       = @RPDocDate,
+          RPDocDate       = COALESCE(@RPDocDate, RPDocDate),
           RPMode          = @RPMode,
           RPAmount        = @RPAmount,
           RPBankName      = @RPBankName,
