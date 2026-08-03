@@ -1321,7 +1321,7 @@ const ItemMaster: React.FC = () => {
             loading={false}
             searchable={false}
             paginated={true}
-            defaultPageSize={20}
+            defaultPageSize={10}
             emptyMessage={
               search
                 ? "No items match your search."

@@ -238,7 +238,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryKey: ["crm-welcome-checklist", booking.BookingId],
     queryFn: () => fetchChecklist(booking.BookingId),
   });
-  const { data: callContext, refetch: refetchCallContext } = useQuery({
+  const { data: callContext } = useQuery({
     queryKey: ["crm-welcome-call-context", booking.BookingId],
     queryFn: () => fetchCallContext(booking.BookingId),
   });

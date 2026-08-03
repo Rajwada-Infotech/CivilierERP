@@ -508,10 +508,22 @@ function getDynamicLimit(score, rpm, memoryUsage) {
   return Math.floor(Math.min(base * loadFactor * memoryFactor, 1000));
 }
 
+// ─────────────────────────────
+// USER SESSION VALIDITY — auth.js caches "does this user still exist and
+// isn't discontinued" for a short TTL to avoid a DB hit on every request.
+// Deleting/discontinuing a user must clear this immediately, otherwise the
+// stale cache entry keeps their existing tokens working until it expires.
+// ─────────────────────────────
+const USER_VALID_PREFIX = "user-valid:";
+const invalidateUserSession = (userId) =>
+  redisDel(`${USER_VALID_PREFIX}${userId}`);
+
 module.exports = {
   getRedis,
   isRedisReady,
   redisGetStrict,
+  USER_VALID_PREFIX,
+  invalidateUserSession,
   closeRedis,
   redisGet,
   redisSet,

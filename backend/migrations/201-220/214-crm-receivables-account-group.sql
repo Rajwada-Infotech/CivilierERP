@@ -1,28 +1,39 @@
--- Migration 191: Trade Receivables / Sundry Debtors account group
+
+-- Migration 191/214: Trade Receivables / Sundry Debtors account group
 --
 -- This chart of accounts had a full Payables hierarchy (LIABILITIES > CURRENT
--- LIABILITIES > TRADE PAYABLES > SUNDRY CREDITORS, AGId 60) because this ERP's
--- only counterparties were suppliers/contractors — but no Receivables side at
+-- LIABILITIES > TRADE PAYABLES > SUNDRY CREDITORS) because this ERP's only
+-- counterparties were suppliers/contractors — but no Receivables side at
 -- all, because there was no customer-facing revenue module before CRM. Every
 -- CRM customer ledger head (and CRM Collections A/c) would otherwise be
 -- invisible in Trial Balance, which requires AccountHeadMaster.LBelongsTo
 -- to be set to a real AccountGroup.
 --
--- Mirrors the Payables hierarchy exactly: ASSETS(2) > CURRENT ASSETS(14) >
+-- Mirrors the Payables hierarchy exactly: ASSETS > CURRENT ASSETS >
 -- TRADE RECEIVABLES > SUNDRY DEBTORS.
+-- Depends on migration 213a (seeds the base ASSETS/CURRENT ASSETS groups).
+-- Looks up groups by Code rather than hardcoded AGId, since AGId values
+-- differ across environments depending on insert order.
 
-DECLARE @AdminUserId INT = (SELECT TOP 1 CreatedBy FROM dbo.AccountGroup WHERE AGId = 53);
+DECLARE @CurrentAssetsId INT = (SELECT AGId FROM dbo.AccountGroup WHERE Code = 'CA');
+DECLARE @AdminUserId INT = (SELECT TOP 1 id FROM dbo.users WHERE email = 'superadmin@civilier.com');
 
-IF NOT EXISTS (SELECT 1 FROM dbo.AccountGroup WHERE Code = 'TR' AND ParentGroupId = 14)
+IF @CurrentAssetsId IS NULL
+BEGIN
+  RAISERROR('CURRENT ASSETS account group (Code=CA) not found -- run migration 213a first', 16, 1);
+  RETURN;
+END
+
+IF NOT EXISTS (SELECT 1 FROM dbo.AccountGroup WHERE Code = 'TR' AND ParentGroupId = @CurrentAssetsId)
 BEGIN
   INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
-  VALUES ('TRADE RECEIVABLES', 'TR', 14, 1, @AdminUserId, SYSDATETIME());
+  VALUES ('TRADE RECEIVABLES', 'TR', @CurrentAssetsId, 1, @AdminUserId, SYSDATETIME());
   PRINT 'Seeded AccountGroup: TRADE RECEIVABLES';
 END
 GO
 
-DECLARE @TradeReceivablesId INT = (SELECT AGId FROM dbo.AccountGroup WHERE Code = 'TR' AND ParentGroupId = 14);
-DECLARE @AdminUserId2 INT = (SELECT TOP 1 CreatedBy FROM dbo.AccountGroup WHERE AGId = 53);
+DECLARE @TradeReceivablesId INT = (SELECT AGId FROM dbo.AccountGroup WHERE Code = 'TR');
+DECLARE @AdminUserId2 INT = (SELECT TOP 1 id FROM dbo.users WHERE email = 'superadmin@civilier.com');
 
 IF NOT EXISTS (SELECT 1 FROM dbo.AccountGroup WHERE Code = 'SDS' AND ParentGroupId = @TradeReceivablesId)
 BEGIN
@@ -37,7 +48,7 @@ GO
 -- account already uses (a cash-in-transit account, not deep-classified
 -- further).
 UPDATE dbo.AccountHeadMaster
-  SET LBelongsTo = 14
+  SET LBelongsTo = (SELECT AGId FROM dbo.AccountGroup WHERE Code = 'CA')
 WHERE LHeadName = 'CRM Collections A/c' AND LHeadType = 'GL' AND LBelongsTo IS NULL;
 PRINT 'Classified CRM Collections A/c under CURRENT ASSETS';
 GO

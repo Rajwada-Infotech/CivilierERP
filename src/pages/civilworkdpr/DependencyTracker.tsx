@@ -632,7 +632,7 @@ const DependencyTracker: React.FC = () => {
                 loading={loadingProgress}
                 searchable={false}
                 paginated={true}
-                defaultPageSize={20}
+                defaultPageSize={10}
                 emptyMessage="No progress logged for this project yet."
                 rowClassName={(row) =>
                   row.original.id === deleteConfirmId ? "bg-destructive/5" : ""

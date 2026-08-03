@@ -1591,7 +1591,7 @@ const CardMaster: React.FC = () => {
                 columns={columns}
                 searchable={false}
                 paginated={true}
-                defaultPageSize={20}
+                defaultPageSize={10}
                 emptyMessage={
                   search
                     ? "No cards match your search."

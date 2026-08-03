@@ -34,47 +34,7 @@ import { friendlyErrorMessage } from "@/lib/friendlyError";
 
 const GST_TYPES = ["Registered", "Unregistered"];
 
-// Indian states + major cities
-const INDIA_STATE_CITIES: Record<string, string[]> = {
-  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Kurnool", "Rajamahendravaram", "Tirupati", "Kadapa", "Kakinada", "Anantapur"],
-  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tezpur"],
-  "Assam": ["Guwahati", "Silchar", "Dibrugarh", "Jorhat", "Nagaon", "Tinsukia", "Tezpur", "Bongaigaon"],
-  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Bihar Sharif", "Arrah", "Begusarai"],
-  "Chhattisgarh": ["Raipur", "Bhilai", "Korba", "Bilaspur", "Durg", "Rajnandgaon", "Jagdalpur"],
-  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa", "Ponda"],
-  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar", "Junagadh", "Anand", "Bharuch", "Morbi", "Nadiad"],
-  "Haryana": ["Faridabad", "Gurgaon", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar", "Karnal", "Sonipat", "Panchkula"],
-  "Himachal Pradesh": ["Shimla", "Solan", "Dharamsala", "Mandi", "Palampur", "Baddi", "Kullu", "Hamirpur"],
-  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar", "Phusro", "Hazaribagh", "Giridih"],
-  "Karnataka": ["Bengaluru", "Mysuru", "Hubli", "Mangaluru", "Belagavi", "Kalaburagi", "Davanagere", "Ballari", "Shivamogga", "Tumakuru", "Udupi"],
-  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Palakkad", "Alappuzha", "Kannur", "Kottayam", "Malappuram"],
-  "Madhya Pradesh": ["Bhopal", "Indore", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas", "Satna", "Ratlam", "Rewa", "Murwara"],
-  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur", "Kolhapur", "Amravati", "Navi Mumbai", "Vasai-Virar", "Mira-Bhayandar"],
-  "Manipur": ["Imphal", "Thoubal", "Bishnupur", "Churachandpur"],
-  "Meghalaya": ["Shillong", "Tura", "Jowai"],
-  "Mizoram": ["Aizawl", "Lunglei", "Champhai"],
-  "Nagaland": ["Kohima", "Dimapur", "Mokokchung"],
-  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Brahmapur", "Sambalpur", "Puri", "Balasore", "Bhadrak"],
-  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda", "Mohali", "Hoshiarpur", "Batala"],
-  "Rajasthan": ["Jaipur", "Jodhpur", "Kota", "Bikaner", "Ajmer", "Udaipur", "Bhilwara", "Alwar", "Sikar", "Bharatpur", "Sri Ganganagar"],
-  "Sikkim": ["Gangtok", "Namchi", "Gyalshing"],
-  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tirunelveli", "Tiruppur", "Vellore", "Erode", "Thoothukudi", "Ambattur"],
-  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Khammam", "Karimnagar", "Ramagundam", "Mahbubnagar", "Nalgonda", "Secunderabad"],
-  "Tripura": ["Agartala", "Dharmanagar", "Udaipur"],
-  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Bareilly", "Aligarh", "Moradabad", "Noida", "Gorakhpur", "Mathura"],
-  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani", "Rishikesh", "Kashipur", "Rudrapur"],
-  "West Bengal": ["Kolkata", "Howrah", "Durgapur", "Asansol", "Siliguri", "Bardhaman", "Malda", "Baharampur", "Habra"],
-  "Delhi": ["New Delhi", "Dwarka", "Rohini", "Janakpuri", "Laxmi Nagar", "Saket", "Pitampura", "Vasant Kunj"],
-  "Chandigarh": ["Chandigarh"],
-  "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag", "Baramulla", "Sopore"],
-  "Ladakh": ["Leh", "Kargil"],
-  "Puducherry": ["Puducherry", "Karaikal", "Mahe", "Yanam"],
-  "Andaman and Nicobar Islands": ["Port Blair"],
-  "Dadra and Nagar Haveli and Daman and Diu": ["Daman", "Diu", "Silvassa"],
-  "Lakshadweep": ["Kavaratti"],
-};
-
-const INDIA_STATES = Object.keys(INDIA_STATE_CITIES).sort();
+import { INDIA_STATE_CITIES, INDIA_STATES } from "@/lib/indiaStateCities";
 
 const empty: Partial<Enterprise> = {
   name: "",
@@ -765,7 +725,7 @@ export default function EnterpriseMaster() {
                   columns={columns}
                   searchable={false}
                   paginated={true}
-                  defaultPageSize={20}
+                  defaultPageSize={10}
                   emptyMessage="No records found."
                 />
               </div>
@@ -943,23 +903,23 @@ export default function EnterpriseMaster() {
                     </div>
                   </div>
 
-                  {/* City dropdown — filtered by selected state */}
+                  {/* City — suggestions from selected state, but any city can be typed */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
-                    <div className="relative">
-                      <select
-                        value={(form.city as string) ?? ""}
-                        onChange={(e) => set("city", e.target.value)}
-                        disabled={!form.state}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value="">{form.state ? "— Select City —" : "— Select State first —"}</option>
-                        {(INDIA_STATE_CITIES[form.state as string] ?? []).map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    </div>
+                    <input
+                      list="enterprise-city-options"
+                      type="text"
+                      value={(form.city as string) ?? ""}
+                      onChange={(e) => set("city", e.target.value)}
+                      disabled={!form.state}
+                      placeholder={form.state ? "Type or select a city" : "Select state first"}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <datalist id="enterprise-city-options">
+                      {(INDIA_STATE_CITIES[form.state as string] ?? []).map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
                   </div>
 
                   {field("Country", "country")}

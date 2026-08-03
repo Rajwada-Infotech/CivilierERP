@@ -26,6 +26,73 @@ export interface FetchWithAuthOptions extends RequestInit {
 // shared across tabs.
 const REDIRECTING_KEY = "__auth_redirecting";
 
+// ── Mutation activity logging ───────────────────────────────────────────────
+// The Activity Browser previously only ever logged page navigations (GET,
+// actionType "read" — see AppLayout.tsx's useModuleActivityLogger), because
+// nothing hooked into actual data-changing requests. Every write in the app
+// already flows through this one function, so logging it here covers every
+// page automatically instead of needing a manual call added to each of the
+// ~150 mutating call sites individually.
+const MUTATION_ACTION_TYPE: Record<string, "create" | "update" | "delete"> = {
+  POST: "create",
+  PUT: "update",
+  PATCH: "update",
+  DELETE: "delete",
+};
+
+function getStoredUserForLogging(): { id?: string; name?: string; email?: string; role?: string } {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+// Fire-and-forget — a logging failure must never affect the actual request.
+// Uses a raw fetch() rather than calling fetchWithAuth recursively.
+function logMutationActivity(method: string, url: string) {
+  if (typeof window === "undefined") return;
+  const actionType = MUTATION_ACTION_TYPE[method.toUpperCase()];
+  if (!actionType) return;
+
+  const user = getStoredUserForLogging();
+  if (!user?.id) return;
+
+  let sessionId = localStorage.getItem("currentSessionId");
+  if (!sessionId) {
+    sessionId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem("currentSessionId", sessionId);
+    localStorage.setItem("sessionLoginTime", String(Date.now()));
+  }
+
+  const token = localStorage.getItem("token");
+  fetch(apiUrl("/api/user-activity"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Skip-Activity-Log": "1",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      userId: user.id,
+      userName: user.name || "",
+      userEmail: user.email || "",
+      userRole: user.role || "",
+      event: "action",
+      timestamp: new Date().toISOString(),
+      actionType,
+      resource: url,
+      details: `${method.toUpperCase()} ${url} (from ${window.location.pathname})`,
+      requestMethod: method.toUpperCase(),
+      requestUrl: url,
+      sessionId,
+    }),
+  }).catch(() => {});
+}
+
 export async function fetchWithAuth(
   url: string,
   options: FetchWithAuthOptions = {},
@@ -91,7 +158,20 @@ export async function fetchWithAuth(
       !sessionStorage.getItem(REDIRECTING_KEY)
     ) {
       sessionStorage.setItem(REDIRECTING_KEY, "1");
-      toast.error("Session expired. Please login again.");
+      // The account may have been deleted/discontinued while the user was
+      // still signed in (see backend/middleware/auth.js's USER_REVOKED
+      // check) — distinguish that from a plain expired token so the person
+      // isn't left thinking they just need to log back in as normal.
+      let message = "Session expired. Please login again.";
+      try {
+        const body = await response.clone().json();
+        if (body?.code === "USER_REVOKED") {
+          message = "Your access has been revoked. Please log in again.";
+        }
+      } catch {
+        // Non-JSON or empty body — fall back to the generic message.
+      }
+      toast.error(message);
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       window.location.href = "/login";
@@ -105,6 +185,14 @@ export async function fetchWithAuth(
       "You do not have permission to perform this action.",
       response.status,
     );
+  }
+
+  if (
+    !skipActivityLog &&
+    response.ok &&
+    url !== "/api/user-activity"
+  ) {
+    logMutationActivity(fetchOptions.method || "GET", url);
   }
 
   return response;
