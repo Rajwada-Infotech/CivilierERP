@@ -16,6 +16,7 @@ const { syncApplicationOnBookingTerminal } = require("../services/crmApplication
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
+const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -61,6 +62,7 @@ const BOOKING_SELECT = `
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
+    b.UnitParkingGstRate, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
     b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
     b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
     b.ReadyForApprovalAt,
@@ -273,7 +275,6 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
       .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
       .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
-      .input("hsn",   sql.VarChar(20),   b.HsnCode || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -286,13 +287,19 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
           AssignedTo = ISNULL(@asgn, AssignedTo),
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          HsnCode = ISNULL(@hsn, HsnCode),
+          -- HsnCode is no longer settable here — it's fully auto-resolved by
+          -- recalculateBookingGst below (Unit+Parking value decides 1% vs
+          -- 5%), never a manual per-booking input. See migration 283.
           -- GrandTotal tracks TotalValue changes without disturbing the
           -- already-rolled-up Parking/ExtraCharges totals.
           GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
           Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
       `);
+
+    // TotalValue may have just moved — Unit+Parking could have crossed the
+    // Rs. 45L GST bracket.
+    await recalculateBookingGst(pool, id);
 
     await logCrmAudit(pool, "Booking", id, actor, [
       { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
@@ -414,6 +421,11 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // New unit means a new TotalValue — Unit+Parking could have crossed the
+    // Rs. 45L GST bracket.
+    await recalculateBookingGst(pool, id);
+
     if (newPlanId) {
       // Only the %-based schedule steps get wiped and regenerated — a
       // Parking/Extra-Charge milestone is a fixed line item tied to a real

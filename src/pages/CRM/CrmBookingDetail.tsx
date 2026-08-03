@@ -887,6 +887,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 </div>
 
+                {/* GST is fixed, HSN-Master-driven — never a per-booking
+                    input anywhere in this app. Unit+Parking picks 1% or 5%
+                    off the Rs. 45L bracket automatically; Extra Work is
+                    always 18%. The only way to change a rate is editing the
+                    HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
+                <div className="rounded-lg border border-border p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">GST (fixed — set by HSN Master)</p>
+                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode}</span>}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <span className="text-muted-foreground block">Unit+Parking GST</span>
+                      <span className="font-semibold">{booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"} ({fmt(booking.UnitParkingGstAmount)})</span>
+                    </div>
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <span className="text-muted-foreground block">Extra Work GST (18%)</span>
+                      <span className="font-semibold">{fmt(booking.ExtraWorkGstAmount)}</span>
+                    </div>
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <span className="text-muted-foreground block">Total GST</span>
+                      <span className="font-semibold">{fmt(booking.TotalGstAmount)}</span>
+                    </div>
+                  </div>
+                </div>
+
                 {booking.Status !== "Approved" && (
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
                     <p className="text-sm font-medium">Unit, Rate & Total Value are correct</p>
