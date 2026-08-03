@@ -43,3 +43,6 @@ export const updatePaymentReason = (id: number, payload: { name: string; descrip
 
 export const deletePaymentReason = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => handle(r));
+
+export const permanentlyDeletePaymentReason = (id: number) =>
+  fetchWithAuth(`${BASE}/${id}/permanent`, { method: "DELETE" }).then((r) => handle(r));
