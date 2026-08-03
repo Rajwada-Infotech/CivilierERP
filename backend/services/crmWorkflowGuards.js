@@ -2,6 +2,7 @@ const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { ensurePortalUser } = require("./crmPortalProvision");
 const { emitNotification } = require("./notify");
+const { generateInvoicePdf } = require("./invoicePdf");
 
 // AnnualIncome is deliberately excluded — the source spec lists income as
 // "if applicable", unlike every other field here which is a hard blocker.
@@ -876,6 +877,15 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
       VALUES (@no, @bid, 'Booking', @amt, @desc, @cb, SYSDATETIME())
     `);
   const invoiceId = result.recordset[0].Id;
+
+  // Same best-effort rule as the manual invoice route — a PDF-rendering
+  // problem must never block the booking's own approval submission, which
+  // is what this function runs inside of.
+  try {
+    await generateInvoicePdf(pool, invoiceId);
+  } catch (pdfErr) {
+    console.error("[crmWorkflowGuards] booking invoice PDF generation failed:", pdfErr.message);
+  }
 
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",

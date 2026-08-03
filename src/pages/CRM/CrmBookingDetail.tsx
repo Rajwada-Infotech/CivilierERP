@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  Building2, IndianRupee, Paperclip, FileText, Upload, Download,
+  Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye,
   Trash2, Wallet, Car,
   ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
@@ -93,6 +93,49 @@ async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
   return r.ok ? r.json() : [];
 }
 
+// Auth here is a bearer token via fetchWithAuth, same reason the Customer
+// Portal's own invoice/document previews (PortalAgreement.tsx) fetch as a
+// blob rather than using a plain <a href> — a raw link can't carry the
+// Authorization header, so the PDF has to come through fetchWithAuth first.
+function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; invoice: any; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`${API}/${bookingId}/invoices/${invoice.Id}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [bookingId, invoice.Id]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
+            : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
+        </div>
+        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
+          <span>{invoice.InvoiceType} · {fmt(invoice.Amount)}</span>
+          {blobUrl && (
+            <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`} className="text-primary hover:underline flex items-center gap-1">
+              <Download size={12} /> Download
+            </a>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
   const { canDoAction, currentUser } = useAuth();
@@ -102,6 +145,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
+  const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
@@ -166,7 +210,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchInvoices(bookingId),
     enabled: tab === "Payment & Invoice",
   });
-  useQuery({
+  const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
     enabled: tab === "Payment & Invoice",
@@ -554,6 +598,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const bookingAmountDue = Number(firstMilestone?.AmountDue || booking?.BookingAmount || 0);
   const bookingAmountPaid = Number(firstMilestone?.AmountPaid || booking?.BookingAmountPaid || 0);
   const bookingAmountBalance = Math.max(0, bookingAmountDue - bookingAmountPaid);
+  // Real, tracked on-account credit for this booking — CrmOnAccountPayment
+  // rows submitted separately from milestone payments (their own approval,
+  // their own OACC-xxxx doc, their own Applied/Pending state), NOT something
+  // derivable from Milestone 1's own Paid vs Due. A customer can be exactly
+  // paid-in-full on the Booking Amount and still be sitting on an unrelated
+  // on-account deposit — the two numbers are independent.
+  const bookingOnAccountBalance = Number(onAccountData?.availableBalance || 0);
   const bookingAmountPaidInFull = bookingAmountDue > 0 && bookingAmountBalance < 1;
   const mandatoryReady = !!booking?.UnitReviewConfirmed && !!booking?.PlanReviewConfirmed && bookingAmountPaidInFull;
   // Which specific gating step to point staff at, in the order they must be
@@ -706,6 +757,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     (m: any) => m.Status === "Paid" && Number(m.MilestoneNo) !== 1
       && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
   );
+  // The only thing this dialog could possibly do right now is the Booking
+  // invoice — which is never manually creatable (it's 100% auto-generated at
+  // Confirm & Book, see maybeAutoGenerateBookingInvoice) — so the normal
+  // type-select + milestone-select form has nothing real to offer. Showing
+  // it anyway just presented staff with an empty "Select a paid milestone"
+  // dead end; a locked, explanatory panel replaces it in this specific
+  // window only — the instant another milestone becomes eligible, the
+  // regular form comes back automatically.
+  const hasBookingInvoice = (invoices as any[]).some((inv: any) => inv.InvoiceType === "Booking");
+  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0;
 
   const handleGenerateInvoice = async () => {
     if (invoiceForm.InvoiceType === "Milestone") {
@@ -1035,10 +1096,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-primary" /> Booking Amount</h3>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
-                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Balance</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due Remaining</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
+                    {/* The customer's real, tracked on-account credit
+                        (CrmOnAccountPayment, its own OACC-xxxx deposits) —
+                        independent of whether Milestone 1 itself is exactly
+                        paid. Shown only when non-zero so a booking with no
+                        on-account deposits doesn't display a redundant ₹0
+                        card. */}
+                    {bookingOnAccountBalance > 0 && (
+                      <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2"><span className="text-sky-700 block">Balance (On Account)</span><span className="font-semibold text-sky-700">{fmt(bookingOnAccountBalance)}</span></div>
+                    )}
                   </div>
                   {Number(firstMilestone?.PendingVerificationAmount) > 0 && (
                     <p className="text-[11px] text-amber-700 flex items-center gap-1">
@@ -1486,6 +1556,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 </span>
                               </th>
                             ))}
+                            <th className="text-left px-2.5 py-2 text-xs text-muted-foreground font-medium whitespace-nowrap">PDF</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1497,6 +1568,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <td className="px-2.5 py-2 whitespace-nowrap text-xs text-muted-foreground">{inv.InvoiceDate ? new Date(inv.InvoiceDate).toLocaleDateString("en-IN") : "—"}</td>
                               <td className="px-2.5 py-2 whitespace-nowrap">{inv.Status || "Active"}</td>
                               <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">
+                                <button onClick={() => setPreviewInvoice(inv)}
+                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  <Eye size={12} /> View
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1510,56 +1587,83 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                       <h3 className="text-sm font-semibold">Generate Invoice</h3>
-                      <div className="space-y-2">
-                        <select value={invoiceForm.InvoiceType}
-                          onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                          <option value="Milestone">Milestone Payment</option>
-                          <option value="Maintenance">Maintenance</option>
-                          <option value="Other">Other</option>
-                        </select>
-                        {invoiceForm.InvoiceType === "Milestone" ? (
-                          <>
-                            <select value={invoiceForm.MilestoneId}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, MilestoneId: e.target.value }))}
+                      {bookingInvoiceOnly ? (
+                        <>
+                          <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
+                            <FileText size={14} className="shrink-0 mt-0.5" />
+                            <span>
+                              <span className="font-medium">Booking Invoice — auto-generated.</span>{" "}
+                              This booking has only its Booking Amount paid so far, and that invoice is
+                              created automatically the moment you click <span className="font-medium">Confirm &amp; Book</span> —
+                              it never needs to be raised manually here. Once another milestone is paid, you'll be
+                              able to generate its invoice from this same dialog.
+                            </span>
+                          </div>
+                          <div className="flex justify-end pt-1">
+                            <button onClick={() => setInvoiceDialog(false)}
+                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                              Close
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <select value={invoiceForm.InvoiceType}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
                               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                              <option value="">— Select a paid milestone —</option>
-                              {uninvoicedPaidMilestones.map((m: any) => (
-                                <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmt(m.AmountPaid)}</option>
-                              ))}
+                              <option value="Milestone">Milestone Payment</option>
+                              <option value="Maintenance">Maintenance</option>
+                              <option value="Other">Other</option>
                             </select>
-                            {uninvoicedPaidMilestones.length === 0 && (
-                              <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
+                            {invoiceForm.InvoiceType === "Milestone" ? (
+                              <>
+                                <select value={invoiceForm.MilestoneId}
+                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, MilestoneId: e.target.value }))}
+                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                                  <option value="">— Select a paid milestone —</option>
+                                  {uninvoicedPaidMilestones.map((m: any) => (
+                                    <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmt(m.AmountPaid)}</option>
+                                  ))}
+                                </select>
+                                {uninvoicedPaidMilestones.length === 0 && (
+                                  <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
+                                )}
+                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
+                              </>
+                            ) : (
+                              <>
+                                <input type="number" placeholder="Amount" value={invoiceForm.Amount}
+                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                                <input type="date" value={invoiceForm.InvoiceDate}
+                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
+                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                              </>
                             )}
-                            <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
-                          </>
-                        ) : (
-                          <>
-                            <input type="number" placeholder="Amount" value={invoiceForm.Amount}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
+                            <input placeholder="Description" value={invoiceForm.Description}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
                               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                            <input type="date" value={invoiceForm.InvoiceDate}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                          </>
-                        )}
-                        <input placeholder="Description" value={invoiceForm.Description}
-                          onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
-                          className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                      </div>
-                      <div className="flex justify-end gap-2 pt-1">
-                        <button onClick={() => setInvoiceDialog(false)}
-                          className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                          Cancel
-                        </button>
-                        <button onClick={handleGenerateInvoice}
-                          disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId)}
-                          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                          {saving ? "Generating..." : "Generate"}
-                        </button>
-                      </div>
+                          </div>
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={() => setInvoiceDialog(false)}
+                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                              Cancel
+                            </button>
+                            <button onClick={handleGenerateInvoice}
+                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId)}
+                              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                              {saving ? "Generating..." : "Generate"}
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
+                )}
+
+                {previewInvoice && (
+                  <InvoicePdfDialog bookingId={bookingId} invoice={previewInvoice} onClose={() => setPreviewInvoice(null)} />
                 )}
               </div>
             )}

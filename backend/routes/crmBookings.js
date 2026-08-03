@@ -15,6 +15,7 @@ const { releaseAllParkingForBooking } = require("./crmParking");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
+const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -936,9 +937,44 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, InvoiceNo: invoiceNo });
+    const invoiceId = result.recordset[0].Id;
+    // Best-effort, same request — the invoice record itself is the source of
+    // truth and must not fail to create just because PDF rendering hit a
+    // problem; the download route regenerates on demand if the file is ever
+    // missing, so a rendering failure here is recoverable, not data loss.
+    try {
+      await generateInvoicePdf(pool, invoiceId);
+    } catch (pdfErr) {
+      console.error("[crm-bookings] invoice PDF generation failed:", pdfErr.message);
+    }
+    res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF. Regenerates it
+// on the fly if the file is missing from disk (e.g. a fresh deploy that
+// didn't carry over /uploads) instead of 404ing on a real, existing invoice.
+router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.id);
+    const invoiceId = parseInt(req.params.invoiceId);
+    const row = await pool.request().input("iid", sql.Int, invoiceId).input("bid", sql.Int, bookingId)
+      .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid");
+    if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    const invoiceNo = row.recordset[0].InvoiceNo;
+    let filePath = invoicePdfPath(invoiceNo);
+    if (!fs.existsSync(filePath)) {
+      filePath = await generateInvoicePdf(pool, invoiceId);
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
