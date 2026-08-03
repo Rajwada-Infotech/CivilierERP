@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown, BadgeDollarSign } from "lucide-react";
+import { ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown, BadgeDollarSign, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { Button } from "@/components/ui/button";
@@ -595,8 +595,9 @@ export default function OnAccountAdjustment() {
                       {entry.Source === "CRM" && (
                         <div className="rounded-xl border border-border overflow-hidden text-xs">
                           <div className="flex items-center justify-between px-3 py-2 bg-muted/10">
-                            <p className="text-muted-foreground">Next Milestone Due</p>
-                            <p className={`font-mono font-semibold tabular-nums ${entry.CrmNextMilestoneDue != null ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                            <p className="text-muted-foreground">Next Milestone Due (Underpaid)</p>
+                            <p className={`font-mono font-semibold tabular-nums flex items-center gap-1 ${entry.CrmNextMilestoneDue != null ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>
+                              {entry.CrmNextMilestoneDue != null && <ArrowDownCircle size={13} className="shrink-0" />}
                               {entry.CrmNextMilestoneDue != null ? formatINR(entry.CrmNextMilestoneDue) : "—"}
                             </p>
                           </div>
@@ -608,8 +609,10 @@ export default function OnAccountAdjustment() {
                       )}
                       <div className="flex items-center justify-between pt-1 border-t border-border">
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">On A/C Amt</p>
-                          <p className="font-mono text-sm font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</p>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">On A/C Amt (Overpaid)</p>
+                          <p className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <ArrowUpCircle size={13} className="shrink-0" />{formatINR(entry.ExcessAmount)}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Party Balance</p>
@@ -665,7 +668,9 @@ export default function OnAccountAdjustment() {
                           <td className="px-4 py-3 text-xs font-medium tabular-nums text-right">
                             {entry.Source === "CRM" ? (
                               entry.CrmNextMilestoneDue != null ? (
-                                <span className="text-amber-600 dark:text-amber-400">{formatINR(entry.CrmNextMilestoneDue)}</span>
+                                <span className="text-red-600 dark:text-red-400 inline-flex items-center gap-1 justify-end">
+                                  <ArrowDownCircle size={12} className="shrink-0" />{formatINR(entry.CrmNextMilestoneDue)}
+                                </span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
                               )
@@ -680,7 +685,9 @@ export default function OnAccountAdjustment() {
                               ? formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0) : "—"}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(entry.ExcessAmount)}</span>
+                            <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 justify-end">
+                              <ArrowUpCircle size={12} className="shrink-0" />{formatINR(entry.ExcessAmount)}
+                            </span>
                           </td>
                           <td className="px-4 py-3 text-right">
                             <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(live)}</span>

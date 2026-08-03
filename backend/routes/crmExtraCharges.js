@@ -6,7 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
 router.use(authMiddleware);
@@ -87,20 +87,12 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
     `);
   const extraChargeId = result.recordset[0].Id;
 
-  const nextNo = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(MAX(MilestoneNo), 0) + 1 AS N FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("no",  sql.Int, nextNo.recordset[0].N)
-    .input("name",sql.NVarChar(200), b.Description.trim())
-    .input("amt", sql.Decimal(18, 2), totalAmount)
-    .input("cb",  sql.Int, actorUserId)
-    .input("ecid",sql.Int, extraChargeId)
-    .query(`
-      INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, Status, CreatedBy, CreatedAt, ExtraChargeId)
-      VALUES (@bid, @no, @name, @amt, 'Pending', @cb, SYSDATETIME(), @ecid)
-    `);
-
+  // No longer gets a dedicated milestone of its own — its ₹ value folds
+  // straight into the shared %-based milestones via rollupBookingTotals's
+  // recalculateRemainingMilestones call below, spreading proportionally
+  // across whatever's still open (already-Paid/Waived stages are left
+  // untouched). See isBookingFullySettled in crmWorkflowGuards.js for how
+  // "has this charge been paid" is now answered without a 1:1 milestone.
   await rollupBookingTotals(pool, bookingId);
   await logCrmAudit(pool, "Booking", bookingId, actorUserId, [
     { field: "ExtraCharge", oldVal: null, newVal: `${b.Description.trim()} = ₹${totalAmount}` },
@@ -118,10 +110,19 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw chargeError(activeErr);
 
+  // Legacy shape (created before charges were folded into the shared
+  // milestones): a dedicated CrmPaymentMilestone still exists for this
+  // charge — keep using ITS Status exactly as before, never touch the new
+  // blended model for a booking edited this way. New-shape charges (no
+  // linked milestone) fall through to the booking-wide settled check.
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
-  if (milestone.recordset.length && milestone.recordset[0].Status === "Paid") {
-    throw chargeError("This charge has already been paid and cannot be edited", 409);
+  if (milestone.recordset.length) {
+    if (milestone.recordset[0].Status === "Paid") {
+      throw chargeError("This charge has already been paid and cannot be edited", 409);
+    }
+  } else if (await isBookingFullySettled(pool, BookingId)) {
+    throw chargeError("This booking is fully paid off — charges can no longer be edited", 409);
   }
 
   const amount = parseFloat(b.Amount);
@@ -180,8 +181,12 @@ async function applyReleaseExtraCharge(pool, id) {
 
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
-  if (milestone.recordset.length && milestone.recordset[0].Status === "Paid") {
-    throw chargeError("This charge has already been paid and cannot be removed", 409);
+  if (milestone.recordset.length) {
+    if (milestone.recordset[0].Status === "Paid") {
+      throw chargeError("This charge has already been paid and cannot be removed", 409);
+    }
+  } else if (await isBookingFullySettled(pool, BookingId)) {
+    throw chargeError("This booking is fully paid off — charges can no longer be removed", 409);
   }
 
   await pool.request().input("id", sql.Int, id)

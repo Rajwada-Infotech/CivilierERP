@@ -252,7 +252,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
 
   await pool.request()
     .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "Customer")
+    .input("PartyType", sql.NVarChar(20), "A")
     .input("TxnDate", sql.Date, row.ReceivedDate)
     .input("TxnType", sql.NVarChar(10), "CREDIT")
     .input("Amount", sql.Decimal(18, 2), amount)
@@ -297,7 +297,7 @@ async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEma
 
   await pool.request()
     .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "Customer")
+    .input("PartyType", sql.NVarChar(20), "A")
     .input("TxnDate", sql.Date, txnDate || new Date())
     .input("TxnType", sql.NVarChar(10), "DEBIT")
     .input("Amount", sql.Decimal(18, 2), appliedAmount)
