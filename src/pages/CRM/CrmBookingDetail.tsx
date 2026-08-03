@@ -215,6 +215,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // tab was opened, so returning to an already-filled-in booking doesn't
   // present open, editable fields as if nothing had been saved yet.
   const [bankLocked, setBankLocked] = useState(false);
+  // Persisted proof that a staff member explicitly reviewed/confirmed this
+  // data at the Booking stage (BookingStageVerifiedAt/By on
+  // CrmCustomerBankDetail) — distinct from bankLocked above, which is just
+  // "does the row have data". Cleared server-side the instant the row is
+  // edited from any other save path, so this can never point at stale data.
+  const [bankVerifiedAt, setBankVerifiedAt] = useState<string | null>(null);
+  const [bankVerifiedByName, setBankVerifiedByName] = useState<string | null>(null);
   useEffect(() => {
     if (tab !== "Bank Details" || !booking?.ApplicationId) return;
     let cancelled = false;
@@ -233,6 +240,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           Occupation: d?.Occupation || "", AnnualIncome: d?.AnnualIncome != null ? String(d.AnnualIncome) : "",
         });
         setBankLocked(!!(d && (d.BankName || d.AccountNo || d.PanNo)));
+        setBankVerifiedAt(d?.BookingStageVerifiedAt || null);
+        setBankVerifiedByName(d?.BookingStageVerifiedByName || null);
       })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
@@ -245,11 +254,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${booking.ApplicationId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bank),
+        body: JSON.stringify({ ...bank, VerifyBookingStage: true }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Save failed");
-      toast.success("Bank/KYC details saved");
+      toast.success("Bank/KYC details verified and saved");
       setBankLocked(true);
+      setBankVerifiedAt(new Date().toISOString());
+      setBankVerifiedByName(currentUser?.name || null);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -1335,10 +1346,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                     {booking.Status !== "Approved" && (
                       <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                        <p className="text-sm font-medium">Bank/KYC Details</p>
+                        <div>
+                          <p className="text-sm font-medium">Bank/KYC Details</p>
+                          {bankLocked && bankVerifiedAt && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              Verified by {bankVerifiedByName || "—"} on {new Date(bankVerifiedAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
                         {bankLocked ? (
                           <div className="flex items-center gap-2">
-                            <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Saved</span>
+                            <span className="flex items-center gap-1 text-xs font-medium text-green-600">
+                              <Check size={13} /> {bankVerifiedAt ? "Verified" : "Saved"}
+                            </span>
                             {canEdit && (
                               <button onClick={() => setBankLocked(false)}
                                 className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100">
@@ -1349,7 +1369,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         ) : canEdit ? (
                           <button onClick={handleSaveBank} disabled={bankSaving}
                             className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
-                            {bankSaving ? "Saving..." : "Save Bank/KYC Details"}
+                            {bankSaving ? "Saving..." : "Verify & Save Bank/KYC Details"}
                           </button>
                         ) : (
                           <span className="text-xs text-muted-foreground">Not saved</span>
