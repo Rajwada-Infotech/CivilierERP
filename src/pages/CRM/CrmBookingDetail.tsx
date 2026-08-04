@@ -1861,7 +1861,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             <select value={invoiceForm.InvoiceType}
                               onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
                               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                              <option value="Milestone">Milestone Payment</option>
+                              {uninvoicedPaidMilestones.length > 0 && <option value="Milestone">Milestone Payment</option>}
                               {uninvoicedOnAccountPayments.length > 0 && <option value="OnAccount">On-Account Payment</option>}
                               <option value="Maintenance">Maintenance</option>
                               <option value="Other">Other</option>
