@@ -136,10 +136,18 @@ router.get("/customer-options", requirePageRight("loan-sanction", "view"), async
         ORDER BY CustomerName
       `),
     ]);
+    // Deduplicate: CRM is the primary source. If the same name exists in both
+    // AH and CRM, drop the AH entry so the person doesn't appear twice.
+    const crmNames = new Set(
+      crmRes.recordset.map((r) => r.label.trim().toUpperCase()),
+    );
+    const ahFiltered = ahRes.recordset.filter(
+      (r) => !crmNames.has(r.label.trim().toUpperCase()),
+    );
     const options = [
-      ...ahRes.recordset.map((r) => ({ id: r.id, label: r.label, source: "AH", sourceLabel: "Customer Master" })),
+      ...ahFiltered.map((r) => ({ id: r.id, label: r.label, source: "AH", sourceLabel: "Customer Master" })),
       ...crmRes.recordset.map((r) => ({ id: r.id, label: r.label, source: "CRM", sourceLabel: "CRM Customer" })),
-    ];
+    ].sort((a, b) => a.label.localeCompare(b.label));
     res.json(options);
   } catch (err) {
     res.status(500).json({ error: err.message });
