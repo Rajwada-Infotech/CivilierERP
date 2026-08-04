@@ -389,7 +389,7 @@ export default function LoanSanctionPage() {
       ) : (
         <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-6 sm:px-8 py-5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
             <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
             <div className="flex items-center gap-3 min-w-0">
               <button
@@ -433,7 +433,7 @@ export default function LoanSanctionPage() {
           </div>
 
           {/* Tab bar */}
-          <div className="flex items-center gap-1 px-4 sm:px-6 pt-1 border-b border-border bg-card overflow-x-auto">
+          <div className="flex items-center gap-1 px-6 sm:px-8 pt-2 border-b border-border bg-card overflow-x-auto">
             {tabs.map((t) => {
               const disabled = !viewingLoan && (t.id === "schedule" || t.id === "chain");
               return (
@@ -442,7 +442,7 @@ export default function LoanSanctionPage() {
                   type="button"
                   disabled={disabled}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
+                  className={`flex items-center gap-1.5 px-5 py-3.5 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
                     disabled
                       ? "opacity-40 cursor-not-allowed border-transparent text-muted-foreground"
                       : tab === t.id
@@ -457,16 +457,14 @@ export default function LoanSanctionPage() {
             })}
           </div>
 
-          <div className="p-5 sm:p-6 space-y-6">
+          <div className="p-7 sm:p-8 space-y-8">
             {/* Overview tab — General + Loan Details merged into one clean view */}
             {tab === "overview" && (
-              <div className="space-y-6">
+              <div className="space-y-8">
                 {!readOnly && (
-                  <div className="space-y-1.5">
-                    <label className={labelCls}>
-                      Loan Type <span className="text-red-500">*</span>
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-2">
+                    <label className={labelCls}>Loan Type <span className="text-red-500">*</span></label>
+                    <div className="grid grid-cols-3 gap-3">
                       {LOAN_TYPES.map((lt) => (
                         <button
                           key={lt}
@@ -524,11 +522,9 @@ export default function LoanSanctionPage() {
                   </>
                 ) : (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className={labelCls}>
-                          Lender Company <span className="text-red-500">*</span>
-                        </label>
+                    <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <label className={labelCls}>Lender Company <span className="text-red-500">*</span></label>
                         <select
                           className={inputCls}
                           value={form.lenderCompanyId}
@@ -542,10 +538,8 @@ export default function LoanSanctionPage() {
                           ))}
                         </select>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className={labelCls}>
-                          Borrower {isCustomerLoan ? "Customer" : "Company"} <span className="text-red-500">*</span>
-                        </label>
+                      <div className="space-y-2">
+                        <label className={labelCls}>Borrower {isCustomerLoan ? "Customer" : "Company"} <span className="text-red-500">*</span></label>
                         {isCustomerLoan ? (
                           <CustomerComboField
                             customers={customers as CustomerOption[]}
@@ -573,11 +567,9 @@ export default function LoanSanctionPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className={labelCls}>
-                          Loan Date <span className="text-red-500">*</span>
-                        </label>
+                    <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <label className={labelCls}>Loan Date <span className="text-red-500">*</span></label>
                         <input
                           type="date"
                           className={inputCls}
@@ -585,10 +577,8 @@ export default function LoanSanctionPage() {
                           onChange={(e) => set("loanDate", e.target.value)}
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className={labelCls}>
-                          Amount <span className="text-red-500">*</span>
-                        </label>
+                      <div className="space-y-2">
+                        <label className={labelCls}>Amount <span className="text-red-500">*</span></label>
                         <input
                           type="number"
                           className={inputCls}
@@ -598,8 +588,8 @@ export default function LoanSanctionPage() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
                         <label className={labelCls}>Interest Rate (% p.a.)</label>
                         <ComboField
                           value={form.interestRate}
@@ -609,7 +599,7 @@ export default function LoanSanctionPage() {
                           inputClassName={inputCls}
                         />
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         <label className={labelCls}>Tenure (months)</label>
                         <ComboField
                           value={form.tenureMonths}
@@ -635,8 +625,8 @@ export default function LoanSanctionPage() {
                         </p>
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
                         <label className={labelCls}>Purpose</label>
                         <input
                           className={inputCls}
@@ -645,7 +635,7 @@ export default function LoanSanctionPage() {
                           onChange={(e) => set("purpose", e.target.value)}
                         />
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         <label className={labelCls}>Remarks</label>
                         <input
                           className={inputCls}
@@ -857,7 +847,7 @@ export default function LoanSanctionPage() {
           </div>
 
           {!readOnly && (
-            <div className="flex justify-end gap-2 px-5 sm:px-6 pb-5 sm:pb-6">
+            <div className="flex justify-end gap-3 px-7 sm:px-8 pb-7 sm:pb-8 pt-2">
               <button
                 onClick={closeForm}
                 className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
