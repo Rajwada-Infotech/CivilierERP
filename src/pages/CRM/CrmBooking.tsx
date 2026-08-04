@@ -400,6 +400,7 @@ const CrmBooking: React.FC = () => {
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
                 Unit {fmt(b.TotalValue)}
+                {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
                 {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
                 {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
               </div>

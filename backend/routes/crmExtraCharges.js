@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
@@ -160,11 +160,79 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   return { TotalAmount: totalAmount };
 }
 
+// Extra Work, unlike Parking, is never tied to a scarce/exclusive resource
+// (no physical slot to hold) — Application-stage rows are created directly
+// (ApplicationId set, BookingId NULL) rather than through a hold-then-
+// convert flow. Kept in the shared release/add functions below so both the
+// Application step and the Booking tab exercise identical logic.
+async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUserId) {
+  const amount = parseFloat(b.Amount);
+  if (!b.Description?.trim()) throw chargeError("Description is required");
+  if (!Number.isFinite(amount) || amount <= 0) throw chargeError("Amount must be greater than 0");
+
+  const app = await pool.request().input("aid", sql.Int, applicationId)
+    .query("SELECT Id, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+  if (!app.recordset.length) throw chargeError("Application not found", 404);
+  // Same Draft/Pending gate as Parking's Application-stage step
+  // (ParkingSelectionStep) — free to change pre-approval, locked after.
+  if (!["Draft", "Pending"].includes(app.recordset[0].Status)) {
+    throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
+  }
+
+  if (b.ExtraChargeMasterId) {
+    const master = await pool.request().input("id", sql.Int, parseInt(b.ExtraChargeMasterId))
+      .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
+    if (!master.recordset.length) throw chargeError("Selected charge type is not active");
+  }
+  const gstRate = await getHsnRate(pool, EXTRA_WORK_HSN_CODE);
+  const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
+  const totalAmount = amount + gstAmount;
+
+  const result = await pool.request()
+    .input("aid",  sql.Int, applicationId)
+    .input("mid",  sql.Int, b.ExtraChargeMasterId ? parseInt(b.ExtraChargeMasterId) : null)
+    .input("desc", sql.NVarChar(300), b.Description.trim())
+    .input("amt",  sql.Decimal(18, 2), amount)
+    .input("gstr", sql.Decimal(5, 2), gstRate)
+    .input("gsta", sql.Decimal(18, 2), gstAmount)
+    .input("tot",  sql.Decimal(18, 2), totalAmount)
+    .input("cb",   sql.Int, actorUserId)
+    .query(`
+      INSERT INTO dbo.CrmExtraCharge
+        (ApplicationId, ExtraChargeMasterId, Description, Amount, GstRate, GstAmount, TotalAmount, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@aid, @mid, @desc, @amt, @gstr, @gsta, @tot, @cb, SYSDATETIME())
+    `);
+  const extraChargeId = result.recordset[0].Id;
+
+  await logCrmAudit(pool, "Application", applicationId, actorUserId, [
+    { field: "ExtraWork", oldVal: null, newVal: `${b.Description.trim()} = ₹${totalAmount}` },
+  ]);
+
+  return { id: extraChargeId, TotalAmount: totalAmount };
+}
+
 async function applyReleaseExtraCharge(pool, id) {
   const row = await pool.request().input("id", sql.Int, id)
-    .query("SELECT BookingId FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
+    .query("SELECT BookingId, ApplicationId FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw chargeError("Extra charge not found", 404);
-  const { BookingId } = row.recordset[0];
+  const { BookingId, ApplicationId } = row.recordset[0];
+
+  // Application-stage row (no Booking yet) — gate on the Application's own
+  // Draft/Pending status instead of requireActiveBooking (which would
+  // wrongly report "Booking not found" for a BookingId that was never
+  // supposed to exist yet), and there's no milestone/GST rollup to redo.
+  if (!BookingId) {
+    if (ApplicationId) {
+      const app = await pool.request().input("aid", sql.Int, ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (app.recordset.length && !["Draft", "Pending"].includes(app.recordset[0].Status)) {
+        throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
+      }
+    }
+    await pool.request().input("id", sql.Int, id).query("UPDATE dbo.CrmExtraCharge SET IsActive = 0 WHERE Id = @id");
+    return {};
+  }
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw chargeError(activeErr);
@@ -189,6 +257,44 @@ async function applyReleaseExtraCharge(pool, id) {
   await rollupBookingTotals(pool, BookingId);
   return {};
 }
+
+// GET /application/:applicationId — Extra Work added at the Application
+// stage (BookingId still NULL). Registered BEFORE GET /:bookingId
+// deliberately — same single-segment greedy-match issue crmParking.js's
+// POST /standalone documents ("/application" would otherwise be parsed as
+// a bookingId and 404 with a misleading "not found").
+router.get("/application/:applicationId", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const applicationId = parseInt(req.params.applicationId);
+    const result = await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT c.*, m.ChargeName AS MasterChargeName
+      FROM dbo.CrmExtraCharge c
+      LEFT JOIN dbo.ExtraChargeMaster m ON m.Id = c.ExtraChargeMasterId
+      WHERE c.ApplicationId = @aid AND c.IsActive = 1
+      ORDER BY c.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-extra-charges] GET /application error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /application/:applicationId — add Extra Work at the Application
+// stage. Non-mandatory, same Draft/Pending lock as Parking's own
+// Application-stage step (applyAddExtraChargeToApplication above).
+router.post("/application/:applicationId", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const applicationId = parseInt(req.params.applicationId);
+    const result = await applyAddExtraChargeToApplication(pool, applicationId, req.body, actorId(req));
+    res.status(201).json({ success: true, ...result });
+  } catch (e) {
+    console.error("[crm-extra-charges] POST /application error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
 
 // GET /:bookingId — list extra charges for a booking
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
@@ -282,7 +388,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
 // same way as POST/PUT once legal work has started — the Reason and pending
 // signal travel via query params here since DELETE has no JSON body in the
 // frontend's fetch call.
-router.delete("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -292,6 +398,14 @@ router.delete("/:id", requirePageRight("crm-bookings", "edit"), async (req, res)
       .query("SELECT BookingId FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Extra charge not found" });
     const bookingId = row.recordset[0].BookingId;
+
+    // Application-stage row — no Booking exists yet, so none of the
+    // booking-specific guards below apply. applyReleaseExtraCharge itself
+    // gates on the Application's own Draft/Pending status instead.
+    if (!bookingId) {
+      const result = await applyReleaseExtraCharge(pool, id);
+      return res.json({ success: true, ...result });
+    }
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -317,3 +431,4 @@ module.exports = router;
 module.exports.applyAddExtraCharge = applyAddExtraCharge;
 module.exports.applyEditExtraCharge = applyEditExtraCharge;
 module.exports.applyReleaseExtraCharge = applyReleaseExtraCharge;
+module.exports.applyAddExtraChargeToApplication = applyAddExtraChargeToApplication;

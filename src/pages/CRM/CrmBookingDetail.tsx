@@ -10,6 +10,7 @@ import {
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -93,6 +94,22 @@ async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
   return r.ok ? r.json() : [];
 }
 
+// Live "what will this actually cost" preview for the Extra Charge add
+// form — 18% is fixed from the HSN Master "Extra Work" row (useGstRates
+// fetches it live, never hardcoded), matching exactly what the backend will
+// charge once submitted.
+function ExtraWorkGstPreview({ amount }: { amount: number }) {
+  const { data: rates, isLoading } = useGstRates();
+  if (isLoading || !rates) return null;
+  const gst = computeExtraWorkGst(amount, rates);
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+      <span>GST ({gst.rate}%, fixed — HSN Master)</span>
+      <span className="font-semibold">{fmtInr(gst.gstAmount)} → Total {fmtInr(gst.total)}</span>
+    </div>
+  );
+}
+
 // Auth here is a bearer token via fetchWithAuth, same reason the Customer
 // Portal's own invoice/document previews (PortalAgreement.tsx) fetch as a
 // blob rather than using a plain <a href> — a raw link can't carry the
@@ -148,7 +165,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
-  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+  // No GstRate field here anymore — Extra Charges are always taxed at the
+  // fixed 18% HSN Master rate (backend ignores any client-supplied rate),
+  // so there's nothing left to pick.
+  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "" });
   const [chargesSaving, setChargesSaving] = useState(false);
   const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
   const [editingParkingId, setEditingParkingId] = useState<number | null>(null);
@@ -421,7 +441,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
           Description: extraForm.Description.trim(),
           Amount: parseFloat(extraForm.Amount),
-          GstRate: parseFloat(extraForm.GstRate) || 0,
           Reason: legalWorkStarted ? extraReason.trim() : undefined,
         }),
       });
@@ -429,7 +448,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (!res.ok) throw new Error(resData.error);
       toast.success(resData.pending ? "Amendment request submitted — pending approval" : (isEdit ? `Charge updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}` : `Charge added — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`));
       setEditingExtraId(null);
-      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "" });
       setExtraReason("");
       invalidateCharges();
     } catch (e: any) {
@@ -445,12 +464,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       ExtraChargeMasterId: c.ExtraChargeMasterId ? String(c.ExtraChargeMasterId) : "",
       Description: c.Description || "",
       Amount: c.Amount != null ? String(c.Amount) : "",
-      GstRate: c.GstRate != null ? String(c.GstRate) : "18",
     });
   };
   const cancelEditExtra = () => {
     setEditingExtraId(null);
-    setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+    setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "" });
     setExtraReason("");
   };
 
@@ -882,7 +900,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{fmt(booking.RatePerSqFt)}</div>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Total Value</label>
+                    <label className="text-xs text-muted-foreground block mb-1">Grand Total</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30 font-semibold">{fmt(booking.GrandTotal ?? booking.TotalValue)}</div>
                   </div>
                 </div>
@@ -892,24 +910,65 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     off the Rs. 45L bracket automatically; Extra Work is
                     always 18%. The only way to change a rate is editing the
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
-                <div className="rounded-lg border border-border p-3 space-y-2">
+                <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">GST (fixed — set by HSN Master)</p>
-                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode}</span>}
+                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Unit+Parking GST</span>
-                      <span className="font-semibold">{booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"} ({fmt(booking.UnitParkingGstAmount)})</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Extra Work GST (18%)</span>
-                      <span className="font-semibold">{fmt(booking.ExtraWorkGstAmount)}</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Total GST</span>
-                      <span className="font-semibold">{fmt(booking.TotalGstAmount)}</span>
-                    </div>
+
+                  {/* Same explicit sequence everywhere this is shown (see
+                      GstBreakdownBox in CrmApplication.tsx): Unit (+ its own
+                      GST), Parking (+ its own GST), Extra Work (+ its own
+                      GST) -> Amount (all three bases combined) -> GST
+                      (combined) -> Total Amount. Unit and Parking share the
+                      same HSN-resolved rate (the Rs. 45L bracket); Extra
+                      Work is always 18% regardless of that bracket. */}
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Unit</span>
+                    <span>{fmt(Number(booking.TotalValue))}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground pl-2">
+                    <span>Unit GST</span>
+                    <span>{fmt(booking.UnitGstAmount)}</span>
+                  </div>
+                  {Number(booking.ParkingTotal) > 0 && (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Parking</span>
+                        <span>{fmt(Number(booking.ParkingTotal) - Number(booking.ParkingGstAmount || 0))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground pl-2">
+                        <span>Parking GST</span>
+                        <span>{fmt(booking.ParkingGstAmount)}</span>
+                      </div>
+                    </>
+                  )}
+                  {Number(booking.ExtraChargesTotal) > 0 && (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Extra Work</span>
+                        <span>{fmt(Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground pl-2">
+                        <span>Extra Work GST (18%)</span>
+                        <span>{fmt(booking.ExtraWorkGstAmount)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-border pt-1">
+                    <span className="text-foreground">Amount</span>
+                    <span className="font-medium text-foreground">
+                      {fmt(Number(booking.TotalValue) + (Number(booking.ParkingTotal) - Number(booking.ParkingGstAmount || 0)) + (Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0)))}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-foreground">GST</span>
+                    <span className="font-medium text-foreground">{fmt(booking.TotalGstAmount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
+                    <span>Total Amount</span>
+                    <span className="text-primary">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
 
@@ -994,17 +1053,21 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Total Price Breakdown</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Unit Value</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
                           <div className="font-medium">{fmt(unitValue)}</div>
                         </div>
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Parking</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Unit GST</div>
+                          <div className="font-medium">{fmt(booking.UnitGstAmount)}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Parking incl. GST</div>
                           <div className="font-medium">{fmt(parkingTotal)}</div>
                         </div>
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Extra Charges</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
                           <div className="font-medium">{fmt(extraTotal)}</div>
                         </div>
                         <div className="rounded-lg bg-primary/10 px-2.5 py-2">
@@ -1262,6 +1325,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <input type="number" min="1" value={parkingForm.Quantity}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
                                     className="w-16 text-sm border border-border rounded px-1.5 py-1 bg-background" />
+                                  {/* Approximate preview at the booking's CURRENT bracket
+                                      rate — if this quantity change itself crosses the
+                                      Rs. 45L bracket, the confirmed rate/amount (possibly
+                                      different) is what actually saves. */}
+                                  {parkingForm.Quantity && Number(parkingForm.Quantity) > 0 && booking.UnitParkingGstRate != null && (
+                                    <span className="text-[11px] text-sky-700 whitespace-nowrap">
+                                      ≈ {fmtInr(Number(p.RateSnapshot) * Number(parkingForm.Quantity) * (1 + Number(booking.UnitParkingGstRate) / 100))} incl. GST
+                                    </span>
+                                  )}
                                   <button onClick={handleAddParking} disabled={chargesSaving}
                                     className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
                                     Save
@@ -1367,7 +1439,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             ExtraChargeMasterId: e.target.value,
                             Description: selected?.Name || f.Description,
                             Amount: selected?.DefaultAmount ? String(selected.DefaultAmount) : f.Amount,
-                            GstRate: selected?.GstRate != null ? String(selected.GstRate) : f.GstRate,
                           }));
                         }}
                           className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
@@ -1384,15 +1455,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <input type="number" placeholder="Amount" value={extraForm.Amount}
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                           className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                        <select value={extraForm.GstRate} onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-                          className="w-20 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                          {["0", "5", "12", "18", "28"].map((r) => <option key={r} value={r}>{r}%</option>)}
-                        </select>
                         <button onClick={handleAddExtra} disabled={chargesSaving}
                           className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
+                      {/* Live GST preview — 18% is fixed from the HSN Master
+                          "Extra Work" row; there's no rate to pick anymore. */}
+                      {extraForm.Amount && Number(extraForm.Amount) > 0 && (
+                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
+                      )}
                     </>
                   )}
                 </div>

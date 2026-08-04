@@ -92,9 +92,24 @@ async function recalculateBookingGst(pool, bookingId) {
   const extraChargesTotal = Number(extraRow.recordset[0].Total || 0);
   const extraWorkGstAmount = round2(extraRow.recordset[0].Gst || 0);
 
-  const unitParkingGstAmount = round2(unitParking * unitParkingRate / 100);
+  // Unit's own share of the combined Unit+Parking GST — this is the piece
+  // that was previously computed (folded into unitParkingGstAmount below)
+  // but never actually added into GrandTotal, because GrandTotal only ever
+  // picked up tax through ParkingTotal (which only carries PARKING's own
+  // repriced share). Parking's share is parkingTotal - parkingBase (already
+  // baked into parkingTotal by the repricing UPDATE above); Unit's share is
+  // computed the same way, directly on totalValue.
+  const unitGstAmount = round2(totalValue * unitParkingRate / 100);
+  const parkingGstAmount = round2(parkingTotal - parkingBase);
+  const unitParkingGstAmount = round2(unitGstAmount + parkingGstAmount);
   const totalGstAmount = round2(unitParkingGstAmount + extraWorkGstAmount);
-  const grandTotal = round2(totalValue + parkingTotal + extraChargesTotal);
+
+  // Grand Total = (Unit + Parking, pre-tax) + GST on that combined amount +
+  // Extra Charges (already its own tax-inclusive total) — exactly
+  // "Unit + Parking = Amount, Amount + GST = Total Amount", with Extra Work
+  // priced and taxed as its own separate line. Unit's GST is now genuinely
+  // part of what the customer owes, not just a displayed-but-uncharged figure.
+  const grandTotal = round2(totalValue + unitGstAmount + parkingTotal + extraChargesTotal);
 
   await pool.request()
     .input("bid", sql.Int, bookingId)
@@ -103,6 +118,8 @@ async function recalculateBookingGst(pool, bookingId) {
     .input("gt", sql.Decimal(18, 2), grandTotal)
     .input("hsn", sql.VarChar(20), hsnCode)
     .input("upr", sql.Decimal(5, 2), unitParkingRate)
+    .input("ug", sql.Decimal(18, 2), unitGstAmount)
+    .input("pg", sql.Decimal(18, 2), parkingGstAmount)
     .input("upg", sql.Decimal(18, 2), unitParkingGstAmount)
     .input("ewg", sql.Decimal(18, 2), extraWorkGstAmount)
     .input("tg", sql.Decimal(18, 2), totalGstAmount)
@@ -110,13 +127,14 @@ async function recalculateBookingGst(pool, bookingId) {
       UPDATE dbo.CrmBooking SET
         ParkingTotal = @pt, ExtraChargesTotal = @et, GrandTotal = @gt,
         HsnCode = @hsn,
-        UnitParkingGstRate = @upr, UnitParkingGstAmount = @upg,
+        UnitParkingGstRate = @upr,
+        UnitGstAmount = @ug, ParkingGstAmount = @pg, UnitParkingGstAmount = @upg,
         ExtraWorkGstAmount = @ewg, TotalGstAmount = @tg
       WHERE Id = @bid
     `);
 
   return {
-    hsnCode, unitParkingRate, unitParkingGstAmount,
+    hsnCode, unitParkingRate, unitGstAmount, parkingGstAmount, unitParkingGstAmount,
     extraWorkGstAmount, totalGstAmount,
     parkingTotal, extraChargesTotal, grandTotal,
   };

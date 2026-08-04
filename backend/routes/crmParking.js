@@ -518,6 +518,11 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       holds.push({
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
+        // RateSnapshot exposed here too (real Allotment rows already carry
+        // their own via pa.* in ALLOTMENT_SELECT) so the frontend GST
+        // preview can sum a clean pre-tax base across both shapes without
+        // having to invert a tax-inclusive TotalAmount.
+        RateSnapshot: lineAmount,
         TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
       });
     }

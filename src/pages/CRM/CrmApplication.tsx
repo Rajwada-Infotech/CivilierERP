@@ -8,11 +8,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -22,6 +23,7 @@ const UNIT_API = "/api/unit-master";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const DOC_API = "/api/crm/booking-documents";
 const PARKING_API = "/api/crm/parking";
+const EXTRA_CHARGE_API = "/api/crm/extra-charges";
 const CO_APPLICANT_API = "/api/crm/co-applicants";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 const BANK_MASTER_API = "/api/bank-master";
@@ -168,6 +170,78 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
 const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 const labelCls = "text-xs text-muted-foreground block mb-1";
 
+// Live "cost + GST" preview shown at every point Unit/Parking/Extra Work
+// values are picked — Application's Project/Unit and Parking steps, and
+// (via the same component reused in CrmBookingDetail.tsx) the Booking's own
+// Parking & Extra Work tab. Rate is always fetched live from HSN Master
+// (useGstRates), never hardcoded — this is a preview of the exact same fixed
+// rule the backend enforces (crmGst.js), not a separate/independent guess.
+const GstBreakdownBox: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
+  const { data: rates, isLoading } = useGstRates();
+  if (isLoading || !rates) {
+    return <p className="text-[11px] text-muted-foreground">Loading GST rates from HSN Master…</p>;
+  }
+  const gst = computeUnitParkingGst(unitValue, parkingBase, rates);
+  return (
+    <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-sky-800 font-medium">GST ({gst.hsnCode}) — fixed, from HSN Master</span>
+        <span className="text-sky-800 font-semibold">{gst.rate}%</span>
+      </div>
+
+      {/* Follows the exact stated formula, in this exact order:
+          Unit (+ its own GST), Parking (+ its own GST) -> Amount (Unit +
+          Parking, pre-tax) -> GST (combined) -> Total Amount. No row repeats
+          a figure another row already shows. */}
+      <div className="flex items-center justify-between text-sky-700">
+        <span>Unit</span>
+        <span>{fmtInr(gst.unitBase)}</span>
+      </div>
+      <div className="flex items-center justify-between text-sky-700 pl-2">
+        <span>Unit GST ({gst.rate}%)</span>
+        <span>{fmtInr(gst.unitGstAmount)}</span>
+      </div>
+      {gst.parkingBase > 0 && (
+        <>
+          <div className="flex items-center justify-between text-sky-700">
+            <span>Parking</span>
+            <span>{fmtInr(gst.parkingBase)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sky-700 pl-2">
+            <span>Parking GST ({gst.rate}%)</span>
+            <span>{fmtInr(gst.parkingGstAmount)}</span>
+          </div>
+        </>
+      )}
+
+      <div className="flex items-center justify-between border-t border-sky-200 pt-1 text-sky-800">
+        <span>Amount (Unit{gst.parkingBase > 0 ? " + Parking" : ""})</span>
+        <span className="font-medium">{fmtInr(gst.base)}</span>
+      </div>
+      <div className="flex items-center justify-between text-sky-800">
+        <span>GST</span>
+        <span className="font-medium">{fmtInr(gst.gstAmount)}</span>
+      </div>
+      <div className="flex items-center justify-between border-t border-sky-200 pt-1 font-semibold text-sky-900">
+        <span>Total Amount</span>
+        <span>{fmtInr(gst.total)}</span>
+      </div>
+      <p className="text-[10px] text-sky-600">
+        {gst.base <= 4500000
+          ? "At or under ₹45L — 1% bracket applies."
+          : "Over ₹45L — 5% bracket applies."} Crosses automatically as Parking is added or changed — never editable here.
+      </p>
+    </div>
+  );
+};
+
+const GstGrandTotalText: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
+  const { data: rates } = useGstRates();
+  if (!rates) return <>—</>;
+  const gst = computeUnitParkingGst(unitValue, parkingBase, rates);
+  return <>{fmtInr(gst.total)}</>;
+};
+
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -272,6 +346,16 @@ const CrmApplication: React.FC = () => {
     },
     enabled: !!viewingAppId,
   });
+  // Same shape/endpoint as the wizard's own detailExtraCharges, keyed by
+  // viewingAppId for the same reason viewingAppParking above is.
+  const { data: viewingAppExtraCharges = [] } = useQuery({
+    queryKey: ["crm-app-extra-charges", viewingAppId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${viewingAppId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!viewingAppId,
+  });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
@@ -293,6 +377,7 @@ const CrmApplication: React.FC = () => {
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
+  const { data: crmGstRates } = useGstRates();
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
   // — react-query dedupes/caches across the two, so the Details tab (Step
   // 6) can show the parking total without firing its own separate fetch.
@@ -304,7 +389,20 @@ const CrmApplication: React.FC = () => {
     },
     enabled: !!applicationId,
   });
-  const detailParkingTotal = (detailParkingAllotments as any[]).reduce((s, a) => s + (Number(a.TotalAmount) || 0), 0);
+  // Pre-tax base (RateSnapshot x Quantity) — for the GST preview box, which
+  // needs to compute its own rate/amount from a clean base, not sum a
+  // TotalAmount that may already carry a different (soon to be replaced) rate.
+  const detailParkingBase = (detailParkingAllotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
+  // Same queryKey ExtraWorkSelectionStep (Step 3) uses for this applicationId.
+  const { data: detailExtraCharges = [] } = useQuery({
+    queryKey: ["crm-app-extra-charges", applicationId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!applicationId,
+  });
+  const detailExtraChargesTotal = (detailExtraCharges as any[]).reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
 
   const selectedCustomer = useMemo(() =>
     (customers as any[]).find((c: any) => String(c.Id) === form.CustomerId) || null,
@@ -550,6 +648,10 @@ const CrmApplication: React.FC = () => {
     const rate = Number(form.RatePerSqFt) || 0;
     return area && rate ? Math.round(area * rate) : 0;
   }, [selectedUnit, form.RatePerSqFt]);
+  const unitParkingGstPreview = useMemo(
+    () => (crmGstRates ? computeUnitParkingGst(computedTotal, detailParkingBase, crmGstRates) : null),
+    [crmGstRates, computedTotal, detailParkingBase],
+  );
 
   // Brief, real-money preview of the plan actually picked — Booking is the
   // plan's own fixed ₹ (never a % — see CrmPaymentPlans.tsx), every
@@ -561,7 +663,12 @@ const CrmApplication: React.FC = () => {
   );
   const selectedPlanMilestones = useMemo(() => parseMilestones(selectedPaymentPlan?.MilestonesJson), [selectedPaymentPlan]);
   const selectedPlanBookingAmount = Number(selectedPaymentPlan?.BookingAmount || 0);
-  const selectedPlanRemainder = Math.max(0, computedTotal - selectedPlanBookingAmount);
+  // Extra Work's own GST-inclusive total folds into GrandTotal (and, once a
+  // real Booking exists, into the same shared %-based milestones via
+  // recalculateRemainingMilestones) exactly like Parking — this preview
+  // needs to include it too, or it understates what each later milestone %
+  // will actually resolve to once the booking is created.
+  const selectedPlanRemainder = Math.max(0, (unitParkingGstPreview?.total ?? computedTotal) + detailExtraChargesTotal - selectedPlanBookingAmount);
 
   // Token Amount defaults to the plan's own fixed Booking Amount the moment
   // a plan is picked — Token Type is no longer a free "Percentage vs Amount"
@@ -803,7 +910,7 @@ const CrmApplication: React.FC = () => {
     setSaving(true);
     try {
       await saveBankDetailsRef.current?.();
-      advanceStep(4);
+      advanceStep(5);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -1279,7 +1386,7 @@ const CrmApplication: React.FC = () => {
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
           <div className="flex items-center gap-1.5 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
+            {["Project/Unit", "Parking", "Extra Work", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
               const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
               return (
@@ -1443,6 +1550,14 @@ const CrmApplication: React.FC = () => {
                     )}
                   </div>
                 )}
+
+                {/* GST preview — live from the moment a Rate is entered,
+                    including any Parking already picked on Step 2 in this
+                    same application, so staff see the real combined bracket
+                    from the very start, not just at the very end. */}
+                {form.RatePerSqFt && computedTotal ? (
+                  <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+                ) : null}
 
                 {/* Payment Plan — mandatory the moment a unit is picked.
                     Options are this unit's own tagged plans (set in Unit
@@ -1677,6 +1792,15 @@ const CrmApplication: React.FC = () => {
           )}
 
           {step === 3 && applicationId && (
+            <ExtraWorkSelectionStep
+              applicationId={applicationId}
+              computedTotal={computedTotal}
+              canEdit={canEditUnitSelection}
+              wizardAppStatus={wizardAppStatus}
+            />
+          )}
+
+          {step === 4 && applicationId && (
             <BankDetailsStep
               applicationId={applicationId}
               applicantName={selectedCustomer?.CustomerName || ""}
@@ -1685,7 +1809,7 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 4 && applicationId && (
+          {step === 5 && applicationId && (
             <CoApplicantStep
               applicationId={applicationId}
               applicantName={selectedCustomer?.CustomerName || ""}
@@ -1696,11 +1820,11 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 5 && applicationId && (
+          {step === 6 && applicationId && (
             <AttachmentsStep applicationId={applicationId} />
           )}
 
-          {step === 6 && (
+          {step === 7 && (
             <div className="space-y-4">
               <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-3 text-xs">
                 <div>
@@ -1713,25 +1837,36 @@ const CrmApplication: React.FC = () => {
                 </div>
               </div>
 
-              {/* Unit, price, parking — one brief, well-derived summary
-                  pulling together everything decided across the earlier
-                  steps, so nothing has to be re-checked tab by tab. */}
+              {/* Unit, Parking, and the fixed HSN GST -> Amount -> Total
+                  Amount — one single breakdown, not a separate mini-summary
+                  repeating the same figures right above it. */}
               {selectedUnit && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-primary" /> Unit & Price</p>
+                  <p className="text-muted-foreground">{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</p>
+                </div>
+              )}
+
+              {selectedUnit && computedTotal > 0 && (
+                <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+              )}
+
+              {/* Extra Work — separate from the Unit+Parking GST bracket
+                  entirely (own fixed 18% HSN rate, never affects which
+                  bracket Unit+Parking lands in), so it's its own summary
+                  rather than folded into GstBreakdownBox above. */}
+              {(detailExtraCharges as any[]).length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-1">
-                  <p className="font-semibold text-foreground flex items-center gap-1.5"><Building2 size={12} className="text-primary" /> Unit & Price</p>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</span>
-                    <span className="font-semibold text-foreground shrink-0">{computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}</span>
-                  </div>
-                  {detailParkingTotal > 0 && (
-                    <div className="flex items-center justify-between text-muted-foreground">
-                      <span>Parking ({(detailParkingAllotments as any[]).length})</span>
-                      <span className="font-semibold text-foreground shrink-0">₹{detailParkingTotal.toLocaleString("en-IN")}</span>
+                  <p className="font-semibold text-foreground">Extra Work</p>
+                  {(detailExtraCharges as any[]).map((c: any) => (
+                    <div key={c.Id} className="flex items-center justify-between text-muted-foreground">
+                      <span className="truncate pr-2">{c.Description} <span className="text-[10px]">(GST {c.GstRate}%)</span></span>
+                      <span className="font-medium text-foreground shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
                     </div>
-                  )}
-                  <div className="flex items-center justify-between border-t border-border pt-1 mt-1">
-                    <span className="text-muted-foreground">Grand Total</span>
-                    <span className="font-semibold text-primary">₹{(computedTotal + detailParkingTotal).toLocaleString("en-IN")}</span>
+                  ))}
+                  <div className="flex items-center justify-between border-t border-border pt-1 font-semibold text-foreground">
+                    <span>Extra Work Total</span>
+                    <span>₹{detailExtraChargesTotal.toLocaleString("en-IN")}</span>
                   </div>
                 </div>
               )}
@@ -1882,15 +2017,15 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 3 && (
-                <button onClick={handleBankDetailsNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
-                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
+                <button onClick={() => advanceStep(4)}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 4 && (
-                <button onClick={() => advanceStep(5)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
-                  Next <ChevronRight size={14} />
+                <button onClick={handleBankDetailsNext} disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
@@ -1900,6 +2035,12 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {step === 6 && (
+                <button onClick={() => advanceStep(7)}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  Next <ChevronRight size={14} />
+                </button>
+              )}
+              {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
                   {saving ? "Submitting..." : "Submit Application"}
@@ -2002,7 +2143,8 @@ const CrmApplication: React.FC = () => {
             const unitRate = Number(a.RatePerSqFt) || 0;
             const unitTotal = unitArea && unitRate ? Math.round(unitArea * unitRate) : 0;
             const parkingRows = viewingAppParking as any[];
-            const parkingTotal = parkingRows.reduce((s, p) => s + (Number(p.TotalAmount) || 0), 0);
+            const parkingBase = parkingRows.reduce((s, p) => s + (Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1), 0);
+            const unitParkingGst = crmGstRates ? computeUnitParkingGst(unitTotal, parkingBase, crmGstRates) : null;
             // Same plan lookup + milestone math as the wizard's step-1 plan
             // preview (selectedPaymentPlan/selectedPlanMilestones) — reused
             // here against the already-cached payment-plans list instead of
@@ -2010,8 +2152,13 @@ const CrmApplication: React.FC = () => {
             const plan = (paymentPlans as any[]).find((p: any) => String(p.Id) === String(a.PaymentPlanId)) || null;
             const planMilestones = parseMilestones(plan?.MilestonesJson);
             const planBookingAmount = Number(plan?.BookingAmount || 0);
-            const planRemainder = Math.max(0, unitTotal - planBookingAmount);
-            const grandTotal = unitTotal + parkingTotal;
+            const extraChargeRows = viewingAppExtraCharges as any[];
+            const extraChargesTotal = extraChargeRows.reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
+            // Extra Work's own GST-inclusive total folds into GrandTotal
+            // exactly like Parking — same reasoning as selectedPlanRemainder
+            // in the live wizard.
+            const grandTotal = (unitParkingGst?.total ?? (unitTotal + parkingBase)) + extraChargesTotal;
+            const planRemainder = Math.max(0, grandTotal - planBookingAmount);
             return (
               <div className="space-y-4">
                 <div className="rounded-xl border border-border p-4 space-y-2">
@@ -2061,6 +2208,12 @@ const CrmApplication: React.FC = () => {
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Financials</h3>
 
+                  {/* Price breakdown FIRST (Unit, Parking, then the fixed
+                      HSN GST -> Amount -> Total Amount), Payment Plan
+                      breakdown AFTER it — the plan literally splits that
+                      same Total Amount across milestones, so it has to be
+                      shown once the figure it's dividing up already exists
+                      on screen, not before. */}
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Unit Price</span>
                     <span className="font-medium text-foreground">
@@ -2072,16 +2225,36 @@ const CrmApplication: React.FC = () => {
 
                   {parkingRows.length > 0 && (
                     <div className="pt-2 border-t border-border space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Parking ({parkingRows.length})</span>
-                        <span className="font-medium text-foreground">₹{parkingTotal.toLocaleString("en-IN")}</span>
-                      </div>
                       {parkingRows.map((p: any) => (
-                        <div key={p.Id} className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
-                          <span>{p.CurrentParkingType}{p.SlotNo ? ` — Slot ${p.SlotNo}` : ` × ${p.Quantity}`}{p.Kind === "Hold" ? " (Held)" : ""}</span>
-                          <span>₹{Number(p.TotalAmount).toLocaleString("en-IN")}</span>
+                        <div key={p.Id} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Parking — {p.CurrentParkingType}{p.SlotNo ? ` (Slot ${p.SlotNo})` : ` × ${p.Quantity}`}{p.Kind === "Hold" ? " (Held)" : ""}</span>
+                          <span className="font-medium text-foreground">₹{((Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1)).toLocaleString("en-IN")}</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {(unitTotal > 0 || parkingBase > 0) && (
+                    <div className="pt-2 border-t border-border">
+                      <GstBreakdownBox unitValue={unitTotal} parkingBase={parkingBase} />
+                    </div>
+                  )}
+
+                  {/* Extra Work — its own fixed 18% HSN rate, separate from
+                      the Unit+Parking bracket, so its own summary. */}
+                  {extraChargeRows.length > 0 && (
+                    <div className="pt-2 border-t border-border space-y-1">
+                      <p className="text-xs font-medium text-foreground">Extra Work</p>
+                      {extraChargeRows.map((c: any) => (
+                        <div key={c.Id} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="truncate pr-2">{c.Description} <span className="text-[10px]">(GST {c.GstRate}%)</span></span>
+                          <span className="font-medium text-foreground shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between font-medium text-foreground">
+                        <span>Extra Work Total</span>
+                        <span>₹{extraChargesTotal.toLocaleString("en-IN")}</span>
+                      </div>
                     </div>
                   )}
 
@@ -2092,6 +2265,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                     {plan && planMilestones.length > 0 ? (
                       <>
+                        <p className="text-[10px] text-muted-foreground pl-2">Split of the Total Amount above (₹{grandTotal.toLocaleString("en-IN")}, GST included) — Booking is the plan's own fixed figure, everything after it divides the remainder by %.</p>
                         <div className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
                           <span>Booking</span>
                           <span className="font-medium text-foreground">₹{planBookingAmount.toLocaleString("en-IN")}</span>
@@ -2109,13 +2283,6 @@ const CrmApplication: React.FC = () => {
                       <p className="text-[11px] text-muted-foreground pl-2">{a.PaymentPlanName ? "No milestone breakdown set on this plan." : "Set once a Payment Plan is picked."}</p>
                     )}
                   </div>
-
-                  {(unitTotal > 0 || parkingTotal > 0) && (
-                    <div className="pt-2 border-t border-border flex items-center justify-between text-xs font-semibold">
-                      <span>Total</span>
-                      <span className="text-primary">₹{grandTotal.toLocaleString("en-IN")}</span>
-                    </div>
-                  )}
 
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
@@ -2528,7 +2695,9 @@ const ParkingSelectionStep: React.FC<{
     }
   };
 
-  const parkingTotal = (allotments as any[]).reduce((s, a) => s + (Number(a.TotalAmount) || 0), 0);
+  // Pre-tax base for the GST preview — see RateSnapshot note on the GET
+  // /application/:applicationId route (both Allotment and Hold shapes carry it).
+  const parkingBase = (allotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
 
   return (
     <div className="space-y-4">
@@ -2537,10 +2706,16 @@ const ParkingSelectionStep: React.FC<{
       <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
         <IndianRupee size={11} className="text-primary shrink-0" />
         Unit ₹{computedTotal.toLocaleString("en-IN")}
-        {parkingTotal > 0 && ` + Parking ₹${parkingTotal.toLocaleString("en-IN")}`}
+        {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
         {" = "}
-        <span className="font-semibold text-foreground">Grand Total ₹{(computedTotal + parkingTotal).toLocaleString("en-IN")}</span>
+        <span className="font-semibold text-foreground">
+          Grand Total <GstGrandTotalText unitValue={computedTotal} parkingBase={parkingBase} />
+        </span>
       </div>
+
+      {/* GST preview — updates live the instant a parking type is added or
+          removed, since that can cross the ₹45L bracket. */}
+      {computedTotal > 0 && <GstBreakdownBox unitValue={computedTotal} parkingBase={parkingBase} />}
 
       {/* Already-added allotments */}
       <div className="rounded-lg border border-border p-3 space-y-2">
@@ -2648,6 +2823,126 @@ const ParkingSelectionStep: React.FC<{
               {adding ? "Adding..." : `Add ${currentType.ParkingType}`}
             </button>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Step 3: Extra Work ──────────────────────────────────────────────────────────
+// Unlike Parking (Step 2), Extra Work is never tied to a scarce/exclusive
+// resource — no physical slot to hold — so items added here are real
+// dbo.CrmExtraCharge rows straight away (ApplicationId set, BookingId NULL),
+// not a hold-then-convert flow. Non-mandatory, exactly like Parking. Locked
+// the same Draft/Pending way Parking is (canEdit prop, identical gate on the
+// backend) — free to add/remove pre-approval, frozen once Approved.
+const ExtraWorkSelectionStep: React.FC<{
+  applicationId: number;
+  computedTotal: number;
+  canEdit: boolean;
+  wizardAppStatus: string | null;
+}> = ({ applicationId, computedTotal, canEdit, wizardAppStatus }) => {
+  const { data: charges = [], refetch } = useQuery({
+    queryKey: ["crm-app-extra-charges", applicationId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`);
+      return r.ok ? r.json() : [];
+    },
+  });
+  const { data: rates } = useGstRates();
+
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const chargesTotal = (charges as any[]).reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
+
+  const handleAdd = async () => {
+    if (!description.trim()) { toast.error("Description is required"); return; }
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    setAdding(true);
+    try {
+      const res = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Description: description.trim(), Amount: amt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add extra work");
+      toast.success(`${description.trim()} added — ${fmtInr(data.TotalAmount)}`);
+      setDescription(""); setAmount("");
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRemove = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`${EXTRA_CHARGE_API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const preview = amount && Number(amount) > 0 && rates ? computeExtraWorkGst(Number(amount), rates) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+        <IndianRupee size={11} className="text-primary shrink-0" />
+        Unit {fmtInr(computedTotal)}
+        {chargesTotal > 0 && ` + Extra Work ${fmtInr(chargesTotal)}`}
+        {" — Extra Work is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
+      </div>
+
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Work</label>
+          {!canEdit && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+              <Lock size={11} /> Locked ({wizardAppStatus})
+            </span>
+          )}
+        </div>
+        {(charges as any[]).length > 0 ? (
+          <div className="space-y-1.5">
+            {(charges as any[]).map((c: any) => (
+              <div key={c.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+                <span>{c.Description} · {fmtInr(c.Amount)} + GST {fmtInr(c.GstAmount)} = <span className="font-medium">{fmtInr(c.TotalAmount)}</span></span>
+                {canEdit && (
+                  <button onClick={() => handleRemove(c.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No extra work added yet — optional.</p>
+        )}
+      </div>
+
+      {canEdit && (
+        <div className="rounded-lg border border-border p-3 space-y-2">
+          <input placeholder="Description (e.g. Modular Kitchen)" value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          <input type="number" placeholder="Amount" value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+          {preview && (
+            <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <span>GST ({preview.rate}%, fixed — HSN Master)</span>
+              <span className="font-semibold">{fmtInr(preview.gstAmount)} → Total {fmtInr(preview.total)}</span>
+            </div>
+          )}
+          <button onClick={handleAdd} disabled={adding || !description.trim() || !amount}
+            className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+            {adding ? "Adding..." : "Add Extra Work"}
+          </button>
         </div>
       )}
     </div>
