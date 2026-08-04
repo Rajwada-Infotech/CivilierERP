@@ -283,39 +283,8 @@ const CrmApplication: React.FC = () => {
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
   // explicit, mandatory pick once a unit is on the application.)
-  const [invoiceRow, setInvoiceRow] = useState<any | null>(null);
-  const [invoiceForm, setInvoiceForm] = useState({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
-  const [invoiceSaving, setInvoiceSaving] = useState(false);
-  const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [viewingAppId, setViewingAppId] = useState<number | null>(null);
   const saveBankDetailsRef = useRef<null | (() => Promise<void>)>(null);
-
-  // Every real payment now invoices itself automatically (see crmPayments.js
-  // createReceiptForMilestone) — this manual dialog is only a fallback for a
-  // genuine edge case (an ad-hoc charge with no milestone behind it). Even
-  // then it shouldn't open blank: pre-fill Amount from the booking's actual
-  // outstanding balance and Date to today, so staff are correcting a real
-  // number instead of typing one from scratch.
-  useEffect(() => {
-    if (!invoiceRow?.BookingId) return;
-    let cancelled = false;
-    setInvoiceLoading(true);
-    fetchWithAuth(`/api/crm/bookings/${invoiceRow.BookingId}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (cancelled || !d) return;
-        const milestones: any[] = d.milestones || [];
-        const outstanding = milestones.reduce((s, m) => s + Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
-        setInvoiceForm({
-          Amount: outstanding > 0 ? String(outstanding) : "",
-          InvoiceType: "Booking",
-          InvoiceDate: new Date().toISOString().slice(0, 10),
-          Description: "",
-        });
-      })
-      .finally(() => { if (!cancelled) setInvoiceLoading(false); });
-    return () => { cancelled = true; };
-  }, [invoiceRow?.BookingId]);
 
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
   const { data: viewingAppDetail } = useQuery({
@@ -991,35 +960,6 @@ const CrmApplication: React.FC = () => {
     }
   };
 
-  const handleGenerateInvoice = async () => {
-    if (!invoiceRow) return;
-    const amount = parseFloat(invoiceForm.Amount);
-    if (!Number.isFinite(amount) || amount <= 0) { toast.error("Amount must be greater than 0"); return; }
-    setInvoiceSaving(true);
-    try {
-      const res = await fetchWithAuth(`/api/crm/bookings/${invoiceRow.BookingId}/invoices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          Amount: amount,
-          InvoiceType: invoiceForm.InvoiceType,
-          InvoiceDate: invoiceForm.InvoiceDate || undefined,
-          Description: invoiceForm.Description || undefined,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to generate invoice");
-      toast.success("Booking invoice generated");
-      setInvoiceRow(null);
-      setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" });
-      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setInvoiceSaving(false);
-    }
-  };
-
   // The manual retry path — Submitting an Application already auto-creates
   // its Booking (see crmApplications.js PUT /:id/submit); this exists purely
   // for when that auto-create didn't happen (no unit picked yet at submit
@@ -1139,12 +1079,6 @@ const CrmApplication: React.FC = () => {
           <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
-          </button>
-          <button
-            onClick={() => setInvoiceRow(i.row.original)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
-          >
-            <FileText size={12} /> Generate Invoice
           </button>
         </div>
       ) },
@@ -2047,66 +1981,6 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Generate Booking Invoice ── */}
-      <Dialog open={!!invoiceRow} onOpenChange={(o) => { if (!o) { setInvoiceRow(null); setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" }); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">Generate Booking Invoice</DialogTitle></DialogHeader>
-          {invoiceRow && (
-            <div className="space-y-3">
-              <p className="text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
-                Every real payment already generates its own invoice automatically — use this only for a genuine ad-hoc charge that isn't tied to a milestone. Amount below is pre-filled from the booking's actual outstanding balance.
-              </p>
-              <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
-                <div className="flex justify-between items-center px-3 py-2">
-                  <span className="text-xs text-muted-foreground">Booking</span>
-                  <span className="text-sm font-medium font-mono">{invoiceRow.BookingNo}</span>
-                </div>
-                <div className="flex justify-between items-center px-3 py-2">
-                  <span className="text-xs text-muted-foreground">Applicant</span>
-                  <span className="text-sm font-medium">{invoiceRow.ApplicantName}</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Amount *</label>
-                  <input type="number" value={invoiceForm.Amount} disabled={invoiceLoading}
-                    onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50"
-                    placeholder={invoiceLoading ? "Loading outstanding balance..." : ""} />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Invoice Type</label>
-                  <select value={invoiceForm.InvoiceType} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="Booking">Booking</option>
-                    <option value="Milestone">Milestone</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Invoice Date</label>
-                  <input type="date" value={invoiceForm.InvoiceDate} onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Description</label>
-                <textarea value={invoiceForm.Description} onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setInvoiceRow(null); setInvoiceForm({ Amount: "", InvoiceType: "Booking", InvoiceDate: "", Description: "" }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleGenerateInvoice} disabled={invoiceSaving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {invoiceSaving ? "Generating..." : "Generate Invoice"}
-            </button>
           </div>
         </DialogContent>
       </Dialog>
