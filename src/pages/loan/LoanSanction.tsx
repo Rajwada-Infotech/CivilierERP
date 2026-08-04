@@ -1050,7 +1050,7 @@ function CustomerComboField({
       </div>
 
       {open && (
-        <div className="absolute z-20 mt-2 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
+        <div className="absolute z-50 mt-2 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
           {filtered.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground text-center">No customers found</p>
           ) : (
@@ -1133,7 +1133,7 @@ function ComboField({
         </button>
       </div>
       {open && (
-        <div className="absolute z-20 mt-2 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
+        <div className="absolute z-50 mt-2 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
           {options.map((o) => (
             <button
               key={o.value}
