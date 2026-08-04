@@ -11,6 +11,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
 const { maybeResolveAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
+const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -328,6 +329,37 @@ router.get("/invoices", async (req, res) => {
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-portal] GET /invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /invoices/:invoiceId/pdf — same invoice PDF the staff side downloads,
+// scoped to invoices on a booking belonging to THIS logged-in customer only
+// (via applicationId, same ownership check every other portal route uses —
+// portalUser.customerId comes from the JWT, never a client-supplied value).
+router.get("/invoices/:invoiceId/pdf", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const invoiceId = parseInt(req.params.invoiceId);
+    const row = await pool.request().input("iid", sql.Int, invoiceId).input("aid", sql.Int, appId).query(`
+      SELECT inv.InvoiceNo
+      FROM dbo.CrmInvoice inv
+      JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
+      WHERE inv.Id = @iid AND b.ApplicationId = @aid
+    `);
+    if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    const invoiceNo = row.recordset[0].InvoiceNo;
+    let filePath = invoicePdfPath(invoiceNo);
+    if (!fs.existsSync(filePath)) {
+      filePath = await generateInvoicePdf(pool, invoiceId);
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (e) {
+    console.error("[crm-portal] GET /invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

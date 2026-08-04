@@ -12,41 +12,30 @@ const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
+const { recalculateBookingGst } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal from the
-// live allotment/extra-charge rows — never trust an incrementally maintained
-// running total, always re-derive from source rows so it can't drift.
-// Only meaningful for unit-linked allotments (BookingId set) — a standalone
+// Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal AND the
+// fixed HSN-driven GST (which re-prices every active parking allotment to
+// the resolved Unit+Parking bracket rate — see crmGst.js) from the live
+// allotment/extra-charge rows — never trust an incrementally maintained
+// running total, always re-derive from source rows so it can't drift. Only
+// meaningful for unit-linked allotments (BookingId set) — a standalone
 // parking-only sale has no CrmBooking to roll into.
 async function rollupBookingTotals(pool, bookingId) {
   if (!bookingId) return;
-  const parking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(SUM(TotalAmount), 0) AS Total FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1");
-  const extra = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(SUM(TotalAmount), 0) AS Total FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1");
-  const parkingTotal = parking.recordset[0].Total;
-  const extraTotal = extra.recordset[0].Total;
-
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("pt", sql.Decimal(18, 2), parkingTotal)
-    .input("et", sql.Decimal(18, 2), extraTotal)
-    .query(`
-      UPDATE dbo.CrmBooking SET
-        ParkingTotal = @pt, ExtraChargesTotal = @et,
-        GrandTotal = ISNULL(TotalValue, 0) + @pt + @et
-      WHERE Id = @bid
-    `);
+  const gst = await recalculateBookingGst(pool, bookingId);
 
   // GrandTotal just moved — every not-yet-settled milestone's ₹/% needs to
-  // be re-derived against the new total, or the payment schedule silently
-  // stops adding up to what the customer actually owes.
+  // be re-derived against the new (truly final, post-repricing) total, or
+  // the payment schedule silently stops adding up to what the customer
+  // actually owes. Must run AFTER recalculateBookingGst, not before — it
+  // reprices parking and can itself move GrandTotal again.
   await recalculateRemainingMilestones(pool, bookingId);
 
-  return { parkingTotal, extraTotal };
+  return gst ? { parkingTotal: gst.parkingTotal, extraTotal: gst.extraChargesTotal } : { parkingTotal: 0, extraTotal: 0 };
 }
 
 // A slot can only ever back one active allotment at a time — same rule as a

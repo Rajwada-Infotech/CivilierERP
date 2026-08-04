@@ -47,10 +47,10 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
           COUNT(*) AS BookingCount,
           SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
         FROM dbo.SaLead l
-        LEFT JOIN dbo.FollowupBookings fb
-          ON fb.Id = l.BookingId
-         AND ISNULL(fb.IsDeleted, 0) = 0
-        WHERE l.BookingId IS NOT NULL
+        LEFT JOIN dbo.CrmBooking fb
+          ON fb.Id = l.CrmBookingId
+         AND ISNULL(fb.IsActive, 1) = 1
+        WHERE l.CrmBookingId IS NOT NULL
       )
       SELECT
         (SELECT COUNT(*) FROM dbo.SaCampaign WHERE IsActive = 1) AS TotalCampaigns,
@@ -135,7 +135,7 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
     `);
 
     const totalLeads = await pool.request().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE IsActive = 1`);
-    const bookings = await pool.request().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE BookingId IS NOT NULL`);
+    const bookings = await pool.request().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLead WHERE CrmBookingId IS NOT NULL`);
 
     const statusMap = {};
     statusCounts.recordset.forEach((r) => { statusMap[r.Status] = r.Cnt; });
@@ -210,7 +210,7 @@ router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async
         COUNT(DISTINCT l.Id) AS LeadsAssigned,
         COUNT(DISTINCT c.Id) AS CallsMade,
         COUNT(DISTINCT v.Id) AS SiteVisits,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
       FROM dbo.Users u
       LEFT JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id

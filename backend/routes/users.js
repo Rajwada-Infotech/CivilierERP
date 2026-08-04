@@ -426,7 +426,6 @@ router.delete(
           UPDATE dbo.ExpenseBooking       SET EApprovedBy = NULL WHERE EApprovedBy = @id;
           UPDATE dbo.FinYear              SET FUpdatedBy  = NULL WHERE FUpdatedBy  = @id;
           UPDATE dbo.FinYear              SET FApprovedBy = NULL WHERE FApprovedBy = @id;
-          UPDATE dbo.FollowupApplications SET AssignedTo  = NULL WHERE AssignedTo  = @id;
           UPDATE dbo.HSN                  SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
           UPDATE dbo.HSN                  SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
           UPDATE dbo.TCMaster             SET CreatedBy   = NULL WHERE CreatedBy   = @id;
@@ -435,6 +434,20 @@ router.delete(
           UPDATE dbo.UOMMaster            SET CreatedBy   = NULL WHERE CreatedBy   = @id;
           UPDATE dbo.UOMMaster            SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
           UPDATE dbo.UOMMaster            SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+
+          -- CRM tables with a real FK to Users — never wired up when the CRM
+          -- module was built, so deleting a user ever assigned/referenced on
+          -- any of these would hit a live FK violation. All nullable.
+          UPDATE dbo.CrmAgreementDocument SET RequestedBy    = NULL WHERE RequestedBy    = @id;
+          UPDATE dbo.CrmApplication       SET AssignedTo     = NULL WHERE AssignedTo     = @id;
+          UPDATE dbo.CrmBooking           SET AssignedTo     = NULL WHERE AssignedTo     = @id;
+          UPDATE dbo.CrmCancellation      SET RequestedBy    = NULL WHERE RequestedBy    = @id;
+          UPDATE dbo.CrmCancellation      SET ApprovedBy     = NULL WHERE ApprovedBy     = @id;
+          UPDATE dbo.CrmHandover          SET KeyHandoverBy  = NULL WHERE KeyHandoverBy  = @id;
+          UPDATE dbo.CrmServiceTicket     SET AssignedTo     = NULL WHERE AssignedTo     = @id;
+          UPDATE dbo.CrmSnagItem          SET RaisedBy       = NULL WHERE RaisedBy       = @id;
+          UPDATE dbo.CrmSnagItem          SET ResolvedBy     = NULL WHERE ResolvedBy     = @id;
+          UPDATE dbo.CrmWelcomeCall       SET CalledBy       = NULL WHERE CalledBy       = @id;
 
           -- Ownership rows: delete entirely (UserId is NOT NULL in these tables)
           DELETE FROM dbo.UserPageRightsJson WHERE UserId = @id;

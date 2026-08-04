@@ -101,8 +101,12 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
 
-    const result = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+    const result = await pool.request().input("bid", sql.Int, bid).query(`
+      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      FROM dbo.CrmCustomerBankDetail d
+      LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
+      WHERE d.BookingId = @bid
+    `);
     if (result.recordset.length) return res.json({ ...result.recordset[0], ...bookingExtra });
 
     // No bank-detail row saved yet — PAN, Aadhaar, Occupation, Annual Income
@@ -233,7 +237,13 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
             Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
             ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
             TransactionRef = ISNULL(@tref, TransactionRef),
-            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
+            -- This is a later, separate edit surface (the final standalone
+            -- Bank & KYC page) than the Booking-tab verify action below —
+            -- whatever was verified at the Booking stage no longer matches
+            -- once this save changes the row, so that verification is stale
+            -- and must be cleared, not left claiming a row it no longer describes.
+            BookingStageVerifiedAt = NULL, BookingStageVerifiedBy = NULL
           WHERE BookingId = @bid
         `);
     } else {
@@ -277,8 +287,12 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
   try {
     const pool = getPool();
     const aid = parseInt(req.params.applicationId);
-    const result = await pool.request().input("aid", sql.Int, aid)
-      .query("SELECT * FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @aid");
+    const result = await pool.request().input("aid", sql.Int, aid).query(`
+      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      FROM dbo.CrmCustomerBankDetail d
+      LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
+      WHERE d.ApplicationId = @aid
+    `);
     if (result.recordset.length) return res.json(result.recordset[0]);
 
     // No bank-detail row saved yet — same PAN/Aadhaar/Occupation/Annual
@@ -355,6 +369,16 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
       notes: b.Notes || null,
     };
 
+    // VerifyBookingStage is only ever sent (true) by the Booking-tab "Save
+    // Bank/KYC Details" button (CrmBookingDetail.tsx) — that's the one
+    // explicit "I reviewed this" action, so it's the only save that should
+    // set the verified-by/at columns. Every other caller of this same
+    // endpoint (Application step's own save, and the Cheque/UTR-only partial
+    // save on submit) omits the flag, which must CLEAR any prior
+    // verification rather than leave it in place — otherwise a stale
+    // verification would keep pointing at data that's since changed.
+    const verify = b.VerifyBookingStage === true;
+
     if (existing.recordset.length) {
       await pool.request()
         .input("aid", sql.Int, aid)
@@ -369,6 +393,7 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
         .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
         .input("tref", sql.NVarChar(200), fields.tref)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
+        .input("verify", sql.Bit, verify)
         .query(`
           UPDATE dbo.CrmCustomerBankDetail SET
             -- Backfill BookingId if a Booking now exists but this row still
@@ -387,7 +412,9 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
             Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
             ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
             TransactionRef = ISNULL(@tref, TransactionRef),
-            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
+            BookingStageVerifiedAt = CASE WHEN @verify = 1 THEN SYSDATETIME() ELSE NULL END,
+            BookingStageVerifiedBy = CASE WHEN @verify = 1 THEN @ub ELSE NULL END
           WHERE ApplicationId = @aid
         `);
     } else {
@@ -404,12 +431,15 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
         .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
         .input("tref", sql.NVarChar(200), fields.tref)
         .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
+        .input("vat", sql.DateTime2, verify ? new Date() : null)
+        .input("vby", sql.Int, verify ? actor : null)
         .query(`
           INSERT INTO dbo.CrmCustomerBankDetail
             (ApplicationId, BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
              NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
-             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
-          VALUES (@aid, @bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
+             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes,
+             BookingStageVerifiedAt, BookingStageVerifiedBy, CreatedBy, CreatedAt)
+          VALUES (@aid, @bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @vat, @vby, @cb, SYSDATETIME())
         `);
     }
 

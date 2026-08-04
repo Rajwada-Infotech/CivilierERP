@@ -162,7 +162,6 @@ const UNIT_HARD_DELETE_REFS = [
   { table: "CrmUnitChangeLog", column: "OldUnitId", label: "Unit change log entry/entries" },
   { table: "CrmUnitChangeLog", column: "NewUnitId", label: "Unit change log entry/entries" },
   { table: "DailyLabourEntry", column: "UnitId", label: "Daily Labour entry/entries" },
-  { table: "FollowupApplications", column: "UnitId", label: "Follow-Up Application(s)" },
   { table: "RoomMaster", column: "UnitId", label: "Room(s)" },
 ];
 

@@ -15,6 +15,8 @@ const { releaseAllParkingForBooking } = require("./crmParking");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
+const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
+const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -60,6 +62,7 @@ const BOOKING_SELECT = `
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
+    b.UnitParkingGstRate, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
     b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
     b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
     b.ReadyForApprovalAt,
@@ -272,7 +275,6 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
       .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
       .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
-      .input("hsn",   sql.VarChar(20),   b.HsnCode || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",    sql.Int,           actorId(req))
       .query(`
@@ -285,13 +287,19 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
           AssignedTo = ISNULL(@asgn, AssignedTo),
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          HsnCode = ISNULL(@hsn, HsnCode),
+          -- HsnCode is no longer settable here — it's fully auto-resolved by
+          -- recalculateBookingGst below (Unit+Parking value decides 1% vs
+          -- 5%), never a manual per-booking input. See migration 283.
           -- GrandTotal tracks TotalValue changes without disturbing the
           -- already-rolled-up Parking/ExtraCharges totals.
           GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
           Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
       `);
+
+    // TotalValue may have just moved — Unit+Parking could have crossed the
+    // Rs. 45L GST bracket.
+    await recalculateBookingGst(pool, id);
 
     await logCrmAudit(pool, "Booking", id, actor, [
       { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
@@ -413,6 +421,11 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // New unit means a new TotalValue — Unit+Parking could have crossed the
+    // Rs. 45L GST bracket.
+    await recalculateBookingGst(pool, id);
+
     if (newPlanId) {
       // Only the %-based schedule steps get wiped and regenerated — a
       // Parking/Extra-Charge milestone is a fixed line item tied to a real
@@ -936,9 +949,44 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, InvoiceNo: invoiceNo });
+    const invoiceId = result.recordset[0].Id;
+    // Best-effort, same request — the invoice record itself is the source of
+    // truth and must not fail to create just because PDF rendering hit a
+    // problem; the download route regenerates on demand if the file is ever
+    // missing, so a rendering failure here is recoverable, not data loss.
+    try {
+      await generateInvoicePdf(pool, invoiceId);
+    } catch (pdfErr) {
+      console.error("[crm-bookings] invoice PDF generation failed:", pdfErr.message);
+    }
+    res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF. Regenerates it
+// on the fly if the file is missing from disk (e.g. a fresh deploy that
+// didn't carry over /uploads) instead of 404ing on a real, existing invoice.
+router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.id);
+    const invoiceId = parseInt(req.params.invoiceId);
+    const row = await pool.request().input("iid", sql.Int, invoiceId).input("bid", sql.Int, bookingId)
+      .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid");
+    if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    const invoiceNo = row.recordset[0].InvoiceNo;
+    let filePath = invoicePdfPath(invoiceNo);
+    if (!fs.existsSync(filePath)) {
+      filePath = await generateInvoicePdf(pool, invoiceId);
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

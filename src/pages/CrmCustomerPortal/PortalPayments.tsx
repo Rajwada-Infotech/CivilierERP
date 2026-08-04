@@ -1,16 +1,60 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Clock, CreditCard, FileText } from "lucide-react";
-import { fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
-import { PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, serif } from "./portalTheme";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download } from "lucide-react";
+import { Dialog, DialogHeader } from "@/components/ui/dialog";
+import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
+import {
+  PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, serif,
+  PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
+} from "./portalTheme";
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
+
+// Same blob-preview pattern PortalAgreement.tsx already uses for agreement
+// documents — the portal's Bearer-token auth means a plain <a href> can't
+// carry the Authorization header, so the PDF has to be fetched as a blob
+// first and turned into an object URL for both the iframe preview and the
+// download link.
+function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; applicationId: number; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    fetch(`${API}/invoices/${invoice.Id}/pdf?applicationId=${applicationId}`, { headers: authHeaders() })
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch(() => setBlobUrl(null));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [invoice.Id, applicationId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{invoice.InvoiceNo}</DialogTitle>
+          <DialogDescription>{invoice.InvoiceType} · {fmtMoney(invoice.Amount)}</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-slate-50 rounded-lg overflow-hidden">
+          {!blobUrl ? <span className="text-sm text-slate-400">Loading preview…</span>
+            : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
+        </div>
+        <div className="flex justify-end items-center pt-1">
+          {blobUrl && (
+            <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`} style={{ color: GOLD }} className="hover:underline flex items-center gap-1 text-sm">
+              <Download size={13} /> Download PDF
+            </a>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const PortalPayments: React.FC = () => {
   const { timeline, applicationId } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
   const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
+  const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
 
   if (!milestones.length) {
     return (
@@ -89,10 +133,20 @@ const PortalPayments: React.FC = () => {
                 <p className="text-sm font-semibold" style={{ color: TEXT }}>{inv.InvoiceNo}</p>
                 <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}</p>
               </div>
-              <p className="text-sm font-bold shrink-0" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>
+              <div className="flex items-center gap-3 shrink-0">
+                <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>
+                <button onClick={() => setPreviewInvoice(inv)}
+                  className="flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: GOLD }}>
+                  <Eye size={13} /> View
+                </button>
+              </div>
             </div>
           ))}
         </Card>
+      )}
+
+      {previewInvoice && (
+        <InvoicePdfDialog invoice={previewInvoice} applicationId={applicationId} onClose={() => setPreviewInvoice(null)} />
       )}
     </div>
   );

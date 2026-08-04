@@ -2,6 +2,7 @@ const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { ensurePortalUser } = require("./crmPortalProvision");
 const { emitNotification } = require("./notify");
+const { generateInvoicePdf } = require("./invoicePdf");
 
 // AnnualIncome is deliberately excluded — the source spec lists income as
 // "if applicable", unlike every other field here which is a hard blocker.
@@ -584,20 +585,31 @@ async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneI
   // treat them the same as Paid/Waived: excluded from the proportional pool
   // entirely, contributing their own AmountDue to settledTotal so the
   // %-based milestones redistribute onto what's actually left over.
-  // Re-applied fix (was present on an earlier version of this file but is
-  // missing from this working copy): any milestone with real money already
-  // recorded against it (AmountPaid > 0) must never have its AmountDue moved
-  // by a later redistribution, even if its Status hasn't reached "Paid" yet.
-  // This is now MORE important than before, not less — Parking/Extra
-  // Charges call this function on every add/edit/release (see
-  // rollupBookingTotals in crmParking.js/crmExtraCharges.js), so a partially
-  // or fully paid milestone (most commonly Milestone #1, the real ₹ booking
-  // amount) is now at risk of this exact corruption far more often than
-  // when GrandTotal only changed occasionally.
+  // Any milestone with real money already recorded against it (AmountPaid >
+  // 0) must never have its AmountDue moved by a later redistribution, even
+  // if its Status hasn't reached "Paid" yet.
+  //
+  // MilestoneNo 1 (the real ₹ Booking Amount) is ALWAYS excluded, not just
+  // when Paid/AmountPaid>0 — this used to rely solely on the transient
+  // fixedMilestoneId argument, which only protects it for the ONE call site
+  // that passes it (generateMilestonesForBooking at creation, resync-
+  // schedule on demand). Every OTHER trigger of this function — adding/
+  // editing/releasing Parking or an Extra Charge, which now fold their value
+  // into this same proportional pool instead of getting their own dedicated
+  // milestone — calls it with no fixedMilestoneId at all. A freshly created,
+  // still-unpaid Milestone 1 doesn't match any of the other isSettled
+  // conditions either, so it was getting silently swept into the %-based
+  // pool and reproportioned the moment Parking was added during booking
+  // creation — a real, reproduced bug (₹20,000 became ₹20,386.14 the instant
+  // a parking slot was attached, before the customer had paid anything).
+  // Milestone 1 is a deliberate flat figure the customer agreed to, never a
+  // percentage-of-total step the way Milestones 2+ are, so it must stay
+  // fixed unconditionally — the only path allowed to change it is resync-
+  // schedule's own explicit UPDATE, which runs before this function anyway.
   const isSettled = (r) =>
     ["Paid", "Waived"].includes(r.Status) || r.Id === fixedMilestoneId ||
     r.ExtraChargeId != null || r.ParkingAllotmentId != null ||
-    Number(r.AmountPaid || 0) > 0;
+    Number(r.AmountPaid || 0) > 0 || Number(r.MilestoneNo) === 1;
   const settled = rows.filter(isSettled);
   const open = rows.filter((r) => !isSettled(r));
   if (!open.length) return; // nothing left to redistribute onto
@@ -865,6 +877,15 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
       VALUES (@no, @bid, 'Booking', @amt, @desc, @cb, SYSDATETIME())
     `);
   const invoiceId = result.recordset[0].Id;
+
+  // Same best-effort rule as the manual invoice route — a PDF-rendering
+  // problem must never block the booking's own approval submission, which
+  // is what this function runs inside of.
+  try {
+    await generateInvoicePdf(pool, invoiceId);
+  } catch (pdfErr) {
+    console.error("[crmWorkflowGuards] booking invoice PDF generation failed:", pdfErr.message);
+  }
 
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",

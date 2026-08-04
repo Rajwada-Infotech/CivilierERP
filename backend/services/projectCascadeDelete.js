@@ -74,6 +74,37 @@ async function deleteProjectCascade(pool, projectId, projectName) {
   try {
     const pid = { type: sql.Int, value: projectId };
 
+    // ── 0. FK-safety pre-check: CRM records still pointing at this project's units ──
+    // dbo.CrmBooking.UnitId and dbo.CrmApplication.PreferredUnitId both carry
+    // real SQL Server FK constraints against dbo.UnitMaster(Id) (migrations
+    // 153/155 — see crmHierarchyLocks.js, which enforces the same rule for a
+    // single-unit hard delete). Step 8 below deletes this project's UnitMaster
+    // rows directly; without this check that DELETE would fail deep inside the
+    // transaction with a bare FK-violation error instead of a clear message.
+    // Deliberately counts ALL rows (booked/applied AND cancelled/rejected),
+    // matching what the real FK constraint itself blocks on — status doesn't
+    // matter to SQL Server, only row existence does. Blocking here rather than
+    // auto-cleaning: whether to cancel/reassign those CRM records is a business
+    // decision this cascade shouldn't make silently on someone's behalf.
+    const crmBlockers = await tx.request().input("pid", sql.Int, projectId).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmBooking bk
+           JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
+         WHERE u.ProjectId = @pid) AS BookingRefs,
+        (SELECT COUNT(*) FROM dbo.CrmApplication app
+           JOIN dbo.UnitMaster u ON u.Id = app.PreferredUnitId
+         WHERE u.ProjectId = @pid) AS ApplicationRefs
+    `);
+    const { BookingRefs, ApplicationRefs } = crmBlockers.recordset[0];
+    if (BookingRefs > 0 || ApplicationRefs > 0) {
+      const parts = [];
+      if (BookingRefs > 0) parts.push(`${BookingRefs} CRM Booking(s)`);
+      if (ApplicationRefs > 0) parts.push(`${ApplicationRefs} CRM Application(s)`);
+      throw new Error(
+        `Cannot delete project "${projectName}": ${parts.join(" and ")} still reference Unit(s) under this project (including historical/cancelled records). Resolve or reassign these CRM records first, then retry the delete.`,
+      );
+    }
+
     // ── 1. Collect root document IDs directly linked to this project ──────
     const boqIds = await scalarIds(tx, "SELECT BoqID FROM dbo.BOQ WHERE ProjectId=@pid", { pid });
     const woIds = await scalarIds(tx, "SELECT Id FROM dbo.WorkOrderHeader WHERE ProjectId=@pid", { pid });
@@ -244,19 +275,6 @@ async function deleteProjectCascade(pool, projectId, projectName) {
       ["ContractorAllocation", "ProjectId"],
       ["DebitNote", "project_id"],
       ["Entry_Type", "project_id"],
-      ["FollowupAgreements", "ProjectId"],
-      ["FollowupAgreementWorkflows", "ProjectId"],
-      ["FollowupApplicants", "ProjectId"],
-      ["FollowupApplications", "ProjectId"],
-      ["FollowupBookings", "ProjectId"],
-      ["FollowupConstructionUpdates", "ProjectId"],
-      ["FollowupHandovers", "ProjectId"],
-      ["FollowupLegalMilestones", "ProjectId"],
-      ["FollowupNOCs", "ProjectId"],
-      ["FollowupPossessionNotices", "ProjectId"],
-      ["FollowupPrePossession", "ProjectId"],
-      ["FollowupSalesDeeds", "ProjectId"],
-      ["FollowupUnitSelections", "ProjectId"],
       ["MaterialIssueReturn", "ProjectId"],
       ["MaterialIssues", "ProjectId"],
       ["RoomMaster", "ProjectId"],
