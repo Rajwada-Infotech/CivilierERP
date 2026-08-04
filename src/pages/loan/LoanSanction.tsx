@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -27,6 +27,8 @@ import {
   TrendingDown,
   AlertCircle,
   AlertTriangle,
+  Percent,
+  ChevronDown,
 } from "lucide-react";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
@@ -46,6 +48,21 @@ import {
 
 const ACCENT = "#22c55e";
 const LOAN_TYPES: LoanType[] = ["Inter-Company", "Intra-Company", "Customer Loan"];
+
+// Common lending benchmarks — shown as quick picks in the dropdown-cum-text
+// field, but the field always accepts a typed custom value too.
+const STANDARD_INTEREST_RATES = [6, 8, 9, 10, 12, 15, 18];
+const STANDARD_TENURES = [3, 6, 12, 18, 24, 36, 48, 60];
+
+// Mirrors backend/routes/loanSanction.js's buildEmiSchedule EMI formula —
+// this is only a live estimate shown while filling the form; the real
+// schedule is generated server-side on sanction.
+function estimateEmi(amount: number, annualRatePct: number, tenureMonths: number): number {
+  const n = Math.max(1, tenureMonths || 1);
+  if (!annualRatePct || annualRatePct <= 0) return amount / n;
+  const r = annualRatePct / 12 / 100;
+  return (amount * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+}
 
 const EMPTY_FORM = {
   loanType: "Inter-Company" as LoanType,
@@ -319,6 +336,11 @@ export default function LoanSanctionPage() {
       ? customerName(form.borrowerCustomerId)
       : companyName(form.borrowerCompanyId);
   const displayAmount = readOnly ? viewingLoan?.Amount ?? null : Number(form.amount) || null;
+  const estimatedEmi = estimateEmi(
+    Number(form.amount) || 0,
+    Number(form.interestRate) || 0,
+    Number(form.tenureMonths) || 1,
+  );
 
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
@@ -578,26 +600,41 @@ export default function LoanSanctionPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <label className={labelCls}>Interest Rate (%)</label>
-                        <input
-                          type="number"
-                          className={inputCls}
-                          placeholder="Optional"
+                        <label className={labelCls}>Interest Rate (% p.a.)</label>
+                        <ComboField
                           value={form.interestRate}
-                          onChange={(e) => set("interestRate", e.target.value)}
+                          onChange={(v) => set("interestRate", v.replace(/[^0-9.]/g, ""))}
+                          options={STANDARD_INTEREST_RATES.map((r) => ({ value: String(r), label: `${r}% p.a.` }))}
+                          placeholder="Select or type a rate"
+                          inputClassName={inputCls}
                         />
                       </div>
                       <div className="space-y-1.5">
                         <label className={labelCls}>Tenure (months)</label>
-                        <input
-                          type="number"
-                          className={inputCls}
-                          placeholder="Optional"
+                        <ComboField
                           value={form.tenureMonths}
-                          onChange={(e) => set("tenureMonths", e.target.value)}
+                          onChange={(v) => set("tenureMonths", v.replace(/[^0-9]/g, ""))}
+                          options={STANDARD_TENURES.map((t) => ({ value: String(t), label: `${t} months` }))}
+                          placeholder="Select or type a tenure"
+                          inputClassName={inputCls}
                         />
                       </div>
                     </div>
+                    {(form.interestRate || form.tenureMonths) && form.amount && (
+                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3.5 py-2.5 flex items-center gap-2">
+                        <Percent size={13} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <p className="text-xs text-muted-foreground">
+                          Estimated EMI:{" "}
+                          <span className="font-semibold text-foreground">
+                            {fmt(estimatedEmi)}
+                          </span>{" "}
+                          / month for {form.tenureMonths || 1} month
+                          {Number(form.tenureMonths) === 1 ? "" : "s"}
+                          {form.interestRate ? ` at ${form.interestRate}% p.a.` : " (flat, no interest)"} — full
+                          breakdown generated on sanctioning.
+                        </p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <label className={labelCls}>Purpose</label>
@@ -953,6 +990,77 @@ function ChainNode({
         </div>
         {action}
       </div>
+    </div>
+  );
+}
+
+// Dropdown-cum-text field — pick a standard value from an app-styled panel,
+// or just type a custom one. Replaces native <datalist> (which renders with
+// unstyled OS/browser chrome that clashes with the rest of the page).
+function ComboField({
+  value,
+  onChange,
+  options,
+  placeholder,
+  inputClassName,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  inputClassName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <div className="relative">
+        <input
+          type="text"
+          className={`${inputClassName} pr-8`}
+          placeholder={placeholder}
+          value={value}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setOpen((o) => !o)}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+      {open && (
+        <div className="absolute z-20 mt-2 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted/60 transition-colors ${
+                value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

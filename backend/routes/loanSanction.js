@@ -114,6 +114,38 @@ async function insertEmiSchedule(tx, loanId, schedule) {
   }
 }
 
+// ── GET /customer-options — combined Customer Master + CRM customer list ──
+// "Loan to Customer" can target either the formal ledger-backed Customer
+// Master (dbo.AccountHeadMaster, LHeadType='A') or a real-estate buyer in
+// dbo.CrmCustomer — two independent id sequences, so each option carries a
+// `source` tag ('AH' | 'CRM') the frontend must send back alongside the id.
+router.get("/customer-options", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const [ahRes, crmRes] = await Promise.all([
+      pool.request().query(`
+        SELECT LHeadId AS id, LHeadName AS label
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'A' AND LHeadStatus = 1
+        ORDER BY LHeadName
+      `),
+      pool.request().query(`
+        SELECT Id AS id, CustomerName AS label
+        FROM dbo.CrmCustomer
+        WHERE IsActive = 1
+        ORDER BY CustomerName
+      `),
+    ]);
+    const options = [
+      ...ahRes.recordset.map((r) => ({ id: r.id, label: r.label, source: "AH", sourceLabel: "Customer Master" })),
+      ...crmRes.recordset.map((r) => ({ id: r.id, label: r.label, source: "CRM", sourceLabel: "CRM Customer" })),
+    ];
+    res.json(options);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — list ──────────────────────────────────────────────────────────
 router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
   try {
@@ -123,7 +155,8 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.LoanId, ls.LoanNo, ls.LoanType,
         ls.LenderCompanyId, lc.name AS LenderCompanyName,
         ls.BorrowerCompanyId, bc.name AS BorrowerCompanyName,
-        ls.BorrowerCustomerId, cust.LHeadName AS BorrowerCustomerName,
+        ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
+        COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
         ls.LoanDate, ls.Amount, ls.InterestRate, ls.TenureMonths,
         ls.Purpose, ls.Status, ls.Remarks,
         ls.LenderLHeadId, ls.BorrowerLHeadId,
@@ -133,7 +166,8 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
-      LEFT JOIN dbo.AccountHeadMaster cust ON cust.LHeadId = ls.BorrowerCustomerId
+      LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       ORDER BY ls.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -151,11 +185,12 @@ router.get("/emi-reminders", async (req, res) => {
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
         ls.LoanNo,
-        COALESCE(bc.name, cust.LHeadName) AS BorrowerName
+        COALESCE(bc.name, cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerName
       FROM dbo.LoanEMISchedule e
       JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
-      LEFT JOIN dbo.AccountHeadMaster cust ON cust.LHeadId = ls.BorrowerCustomerId
+      LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       WHERE e.IsPaid = 0 AND e.DueDate <= DATEADD(day, 7, CAST(GETDATE() AS DATE))
       ORDER BY e.DueDate ASC
     `);
@@ -176,11 +211,12 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
         ls.*,
         lc.name AS LenderCompanyName,
         bc.name AS BorrowerCompanyName,
-        cust.LHeadName AS BorrowerCustomerName
+        COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
-      LEFT JOIN dbo.AccountHeadMaster cust ON cust.LHeadId = ls.BorrowerCustomerId
+      LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       WHERE ls.LoanId = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Loan not found" });
@@ -227,6 +263,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     lenderCompanyId,
     borrowerCompanyId,
     borrowerCustomerId,
+    borrowerCustomerSource,
     loanDate,
     amount,
     interestRate,
@@ -241,6 +278,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   }
   if (!lenderCompanyId) return res.status(400).json({ error: "Lender company is required" });
   const isCustomerLoan = loanType === "Customer Loan";
+  const custSource = borrowerCustomerSource === "CRM" ? "CRM" : "AH";
   if (isCustomerLoan && !borrowerCustomerId) {
     return res.status(400).json({ error: "Borrower customer is required" });
   }
@@ -265,10 +303,17 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     let borrowerCompany = null;
     let borrowerCustomer = null;
     if (isCustomerLoan) {
-      const custRes = await new sql.Request(tx)
-        .input("custId", sql.Int, parseInt(borrowerCustomerId, 10))
-        .query("SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @custId");
-      borrowerCustomer = custRes.recordset[0];
+      if (custSource === "CRM") {
+        const custRes = await new sql.Request(tx)
+          .input("custId", sql.Int, parseInt(borrowerCustomerId, 10))
+          .query("SELECT Id AS custId, CustomerName AS custName FROM dbo.CrmCustomer WHERE Id = @custId");
+        borrowerCustomer = custRes.recordset[0];
+      } else {
+        const custRes = await new sql.Request(tx)
+          .input("custId", sql.Int, parseInt(borrowerCustomerId, 10))
+          .query("SELECT LHeadId AS custId, LHeadName AS custName FROM dbo.AccountHeadMaster WHERE LHeadId = @custId");
+        borrowerCustomer = custRes.recordset[0];
+      }
       if (!borrowerCustomer) throw Object.assign(new Error("Borrower customer not found"), { status: 400 });
     } else {
       const borrRes = await new sql.Request(tx)
