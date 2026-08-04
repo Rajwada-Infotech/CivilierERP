@@ -793,8 +793,30 @@ const CrmBooking: React.FC = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Any close path for the booking-detail card — the X button, clicking
+          outside, or pressing Escape — funnels through CrmBookingDetail's
+          single onClose prop (its Dialog uses onOpenChange={(o) => !o &&
+          onClose()}, which Radix fires for all three). So handling it once
+          here covers all three. Besides clearing local state, drop the
+          ?applicationId= param back to a plain /crm/bookings — leaving it
+          in place kept the underlying list silently filtered to just this
+          one application even after the card closed, and left a stale
+          deep-link sitting in the address bar.
+          Deliberately NOT resetting deepLinkOpened here — appFilter itself
+          clears once the URL updates, so the auto-open effect's own
+          `!appFilter` guard already covers it. Resetting deepLinkOpened
+          too raced against that URL update: for one render, appFilter could
+          still read the old id while deepLinkOpened had already flipped
+          back to false, matching the effect's condition and reopening the
+          same card immediately after it closed. */}
       {viewingBookingId && (
-        <CrmBookingDetail bookingId={viewingBookingId} onClose={() => setViewingBookingId(null)} />
+        <CrmBookingDetail
+          bookingId={viewingBookingId}
+          onClose={() => {
+            setViewingBookingId(null);
+            if (appFilter) navigate("/crm/bookings", { replace: true });
+          }}
+        />
       )}
     </SalesAutoShell>
   );

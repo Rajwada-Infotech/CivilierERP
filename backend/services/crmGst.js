@@ -92,23 +92,27 @@ async function recalculateBookingGst(pool, bookingId) {
   const extraChargesTotal = Number(extraRow.recordset[0].Total || 0);
   const extraWorkGstAmount = round2(extraRow.recordset[0].Gst || 0);
 
-  // Unit's own share of the combined Unit+Parking GST — this is the piece
-  // that was previously computed (folded into unitParkingGstAmount below)
-  // but never actually added into GrandTotal, because GrandTotal only ever
-  // picked up tax through ParkingTotal (which only carries PARKING's own
-  // repriced share). Parking's share is parkingTotal - parkingBase (already
-  // baked into parkingTotal by the repricing UPDATE above); Unit's share is
-  // computed the same way, directly on totalValue.
+  // Unit's own GST portion (tax-exclusive base -> add tax on top, same
+  // convention Parking/Extra Charges already use). Computed on its own
+  // (not just implied inside the combined unitParkingGstAmount below) so it
+  // can be added into grandTotal explicitly instead of only being displayed.
   const unitGstAmount = round2(totalValue * unitParkingRate / 100);
+
+  // unitParkingGstAmount is the combined Unit+Parking tax figure shown to
+  // the customer as one bracket-level number — Unit's portion (above) plus
+  // whatever Parking's repriced rows actually summed to (parkingTotal minus
+  // its own pre-tax base), computed from the real per-row rounding rather
+  // than re-deriving it from the combined base, so this always matches what
+  // grandTotal actually collects to the paisa.
   const parkingGstAmount = round2(parkingTotal - parkingBase);
   const unitParkingGstAmount = round2(unitGstAmount + parkingGstAmount);
   const totalGstAmount = round2(unitParkingGstAmount + extraWorkGstAmount);
 
-  // Grand Total = (Unit + Parking, pre-tax) + GST on that combined amount +
-  // Extra Charges (already its own tax-inclusive total) — exactly
-  // "Unit + Parking = Amount, Amount + GST = Total Amount", with Extra Work
-  // priced and taxed as its own separate line. Unit's GST is now genuinely
-  // part of what the customer owes, not just a displayed-but-uncharged figure.
+  // GrandTotal = Unit (base + its GST) + Parking (base + its GST, already
+  // inclusive in parkingTotal) + Extra Charges (base + its GST, already
+  // inclusive in extraChargesTotal). Every rupee of tax shown anywhere on
+  // this booking is now actually inside the amount the milestone schedule
+  // collects.
   const grandTotal = round2(totalValue + unitGstAmount + parkingTotal + extraChargesTotal);
 
   await pool.request()
@@ -127,11 +131,11 @@ async function recalculateBookingGst(pool, bookingId) {
       UPDATE dbo.CrmBooking SET
         ParkingTotal = @pt, ExtraChargesTotal = @et, GrandTotal = @gt,
         HsnCode = @hsn,
-        UnitParkingGstRate = @upr,
-        UnitGstAmount = @ug, ParkingGstAmount = @pg, UnitParkingGstAmount = @upg,
-        ExtraWorkGstAmount = @ewg, TotalGstAmount = @tg
+        UnitParkingGstRate = @upr, UnitGstAmount = @ug, ParkingGstAmount = @pg,
+        UnitParkingGstAmount = @upg, ExtraWorkGstAmount = @ewg, TotalGstAmount = @tg
       WHERE Id = @bid
     `);
+
 
   return {
     hsnCode, unitParkingRate, unitGstAmount, parkingGstAmount, unitParkingGstAmount,
