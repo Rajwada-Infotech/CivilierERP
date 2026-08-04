@@ -8,33 +8,18 @@ const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
+const { recalculateBookingGst, EXTRA_WORK_HSN_CODE, getHsnRate } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// Same re-derive-from-source pattern as crmParking.js's rollup.
+// Same re-derive-from-source pattern as crmParking.js's rollup — delegates
+// ParkingTotal/ExtraChargesTotal/GrandTotal AND the fixed HSN-driven GST
+// (which re-prices every active parking allotment to the resolved bracket
+// rate) to crmGst.js, then redistributes milestones against the truly
+// final GrandTotal.
 async function rollupBookingTotals(pool, bookingId) {
-  const parking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(SUM(TotalAmount), 0) AS Total FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1");
-  const extra = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(SUM(TotalAmount), 0) AS Total FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1");
-  const parkingTotal = parking.recordset[0].Total;
-  const extraTotal = extra.recordset[0].Total;
-
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("pt", sql.Decimal(18, 2), parkingTotal)
-    .input("et", sql.Decimal(18, 2), extraTotal)
-    .query(`
-      UPDATE dbo.CrmBooking SET
-        ParkingTotal = @pt, ExtraChargesTotal = @et,
-        GrandTotal = ISNULL(TotalValue, 0) + @pt + @et
-      WHERE Id = @bid
-    `);
-
-  // GrandTotal just moved — every not-yet-settled milestone's ₹/% needs to
-  // be re-derived against the new total, or the payment schedule silently
-  // stops adding up to what the customer actually owes.
+  await recalculateBookingGst(pool, bookingId);
   await recalculateRemainingMilestones(pool, bookingId);
 }
 
@@ -60,13 +45,17 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
     .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw chargeError("Booking not found", 404);
 
-  let gstRate = b.GstRate != null ? parseFloat(b.GstRate) : 18;
+  // GST on every Extra Charge is fixed at the HSN Master's own "Extra Work"
+  // rate (9954EXW, 18%) — never taken from ExtraChargeMaster.GstRate or a
+  // client-supplied GstRate anymore. ExtraChargeMaster.GstRate is left
+  // untouched (other things may still read that column); this route simply
+  // stops consuming it, matching "fixed, only editable via HSN Master".
   if (b.ExtraChargeMasterId) {
     const master = await pool.request().input("id", sql.Int, parseInt(b.ExtraChargeMasterId))
-      .query("SELECT GstRate FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
-    gstRate = master.recordset[0].GstRate;
   }
+  const gstRate = await getHsnRate(pool, EXTRA_WORK_HSN_CODE);
   const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
   const totalAmount = amount + gstAmount;
 
@@ -129,13 +118,14 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   if (!b.Description?.trim()) throw chargeError("Description is required");
   if (!Number.isFinite(amount) || amount <= 0) throw chargeError("Amount must be greater than 0");
 
-  let gstRate = b.GstRate != null ? parseFloat(b.GstRate) : 18;
+  // Same fixed HSN-Master rate as applyAddExtraCharge above — never
+  // ExtraChargeMaster.GstRate or a client-supplied GstRate.
   if (b.ExtraChargeMasterId) {
     const master = await pool.request().input("id", sql.Int, parseInt(b.ExtraChargeMasterId))
-      .query("SELECT GstRate FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
-    gstRate = master.recordset[0].GstRate;
   }
+  const gstRate = await getHsnRate(pool, EXTRA_WORK_HSN_CODE);
   const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
   const totalAmount = amount + gstAmount;
 

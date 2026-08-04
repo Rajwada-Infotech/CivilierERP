@@ -14,6 +14,7 @@ import {
   Archive,
   VideoPlay,
   Shield,
+  MoneyRecive,
 } from "iconsax-react";
 import { HardHat } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
@@ -53,6 +54,15 @@ const MODULES = [
     color: "#10b981",
     bg: "rgba(16,185,129,0.22)",
     ringRgb: "16,185,129",
+  },
+  {
+    id: "loan" as Module,
+    icon: MoneyRecive,
+    label: "Loan",
+    desc: "Loan management (coming soon)",
+    color: "#22c55e",
+    bg: "rgba(34,197,94,0.22)",
+    ringRgb: "34,197,94",
   },
   {
     id: "engineering" as Module,

@@ -10,7 +10,9 @@ import {
   addAccountGroup,
   updateAccountGroup,
   deleteAccountGroup,
+  AccountGroupDeleteError,
 } from "@/api/accountApi";
+import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -380,7 +382,9 @@ const AccountGroupMaster: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ["account-groups"] });
       resetForm();
     } catch (err: any) {
-      toast.error(err.message || "Failed to save");
+      toast.error(
+        friendlyErrorMessage(err, "Couldn't save this account group. Please check the details and try again."),
+      );
     } finally {
       setSaving(false);
     }
@@ -388,7 +392,9 @@ const AccountGroupMaster: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (getDescendants(id, allGroups).length > 0) {
-      toast.error("Remove all sub-groups before deleting a parent group.");
+      toast.error(
+        "This group still has sub-groups under it. Remove or move those first, then delete this one.",
+      );
       setDeleteConfirm(null);
       return;
     }
@@ -398,26 +404,34 @@ const AccountGroupMaster: React.FC = () => {
       setDeleteConfirm(null);
       if (editingId === id) resetForm();
       await queryClient.invalidateQueries({ queryKey: ["account-groups"] });
-    } catch (err: any) {
-      // Surface specific backend validation messages for blocked deletions
-      const msg: string = err.message || "";
-      if (msg.includes("General Ledger")) {
-        toast.error(
-          "Cannot delete — this group is linked to one or more General Ledger Accounts. " +
-            "Please delete or reassign those accounts first.",
-          { duration: 6000 },
-        );
-      } else if (
-        msg.includes("Sub Group") ||
-        msg.includes("sub-group") ||
-        msg.includes("HAS_SUBGROUPS")
-      ) {
-        toast.error(
-          "Cannot delete — this group still has sub-groups. Remove all sub-groups first.",
-          { duration: 5000 },
-        );
+    } catch (err) {
+      if (err instanceof AccountGroupDeleteError) {
+        if (err.code === "HAS_SUBGROUPS") {
+          toast.error(
+            "This group still has sub-groups under it. Remove or move those first, then delete this one.",
+            { duration: 5000 },
+          );
+        } else if (err.code === "HAS_LINKED_ACCOUNTS") {
+          const { linkedType, linkedName, usedIn } = err;
+          const usageLine =
+            usedIn && usedIn.length
+              ? `Used in: ${usedIn.map((u) => `${u.label} (${u.count})`).join(", ")}.`
+              : "";
+          toast.error(
+            `Can't delete this group — "${linkedName}" (${linkedType}) is still assigned to it.${
+              usageLine ? ` ${usageLine}` : ""
+            } Reassign or remove that record first.`,
+            { duration: 8000 },
+          );
+        } else {
+          toast.error(
+            friendlyErrorMessage(err, "Couldn't delete this account group. Please try again."),
+          );
+        }
       } else {
-        toast.error(msg || "Failed to delete account group.");
+        toast.error(
+          friendlyErrorMessage(err, "Couldn't delete this account group. Please try again."),
+        );
       }
       setDeleteConfirm(null);
     }

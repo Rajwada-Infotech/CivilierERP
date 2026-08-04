@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Landmark,
   CalendarClock,
+  Banknote,
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate, REMINDER_TYPE_MODULE } from "@/hooks/useReminders";
 import { useModule } from "@/contexts/ModuleContext";
@@ -34,6 +35,7 @@ const TYPE_META: Record<string, ReminderMeta> = {
   material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
   pdc: { icon: Landmark, label: "PDC", color: "text-sky-500" },
   followup: { icon: CalendarClock, label: "Follow-Up", color: "text-teal-500" },
+  loan_emi: { icon: Banknote, label: "Loan EMI", color: "text-green-500" },
 };
 
 const ALL_TABS = [
@@ -46,6 +48,7 @@ const ALL_TABS = [
   "emi_installment",
   "tds",
   "followup",
+  "loan_emi",
 ];
 
 export const ReminderBell = () => {

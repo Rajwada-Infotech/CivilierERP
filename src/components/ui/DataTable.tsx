@@ -174,8 +174,8 @@ export function DataTable<TData extends RowData>({
         </div>
       )}
 
-      {/* ── Table ── */}
-      <div className="overflow-x-auto thin-scroll">
+      {/* ── Table (large screens only) ── */}
+      <div className="hidden lg:block overflow-x-auto thin-scroll">
         {(() => {
           const allCols = table.getAllLeafColumns();
           const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 0), 0);
@@ -279,6 +279,66 @@ export function DataTable<TData extends RowData>({
         </table>
           );
         })()}
+      </div>
+
+      {/* ── Cards (mobile + tablet, below lg) ── */}
+      <div className="lg:hidden">
+        {loading ? (
+          <div className="divide-y divide-border">
+            {Array.from({ length: skeletonRows }).map((_, i) => (
+              <div key={i} className="p-4 space-y-2.5">
+                <div className="h-4 w-2/3 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-1/2 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-1/3 bg-muted rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="px-4 py-10 text-center text-muted-foreground text-sm">
+            {emptyMessage}
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {rows.map((row) => {
+              const headers = table.getFlatHeaders();
+              const cells = row.getVisibleCells();
+              return (
+                <div
+                  key={row.id ? `card-${row.id}` : `card-${row.index}`}
+                  className={`p-4 space-y-2.5 ${rowClassName ? rowClassName(row) : ""}`}
+                >
+                  {cells.map((cell, i) => {
+                    const header = headers[i];
+                    const label = header
+                      ? flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )
+                      : null;
+                    return (
+                      <div
+                        key={cell.id}
+                        className="flex items-start justify-between gap-4"
+                      >
+                        {label && (
+                          <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground shrink-0 pt-0.5">
+                            {label}
+                          </span>
+                        )}
+                        <span className="text-sm text-foreground text-right min-w-0">
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Pagination ── */}

@@ -30,7 +30,7 @@ router.get(
         gst_no, belongs_to,
         address, address_line2, address_line3, city, state, country, pincode,
         phone_number, email, website, fax,
-        pan_no, cin, tan, gst_type, gst_issue_date, trade_license,
+        pan_no AS pan, cin, tan, gst_type, gst_issue_date, trade_license,
         currency, fiscal_year_start,
         start_date, start_fin_year, end_date, date_of_entry, date_of_establishment,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
@@ -381,7 +381,7 @@ router.get("/by-id/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, id)
       .query(
-        "SELECT id, name, short_name, logo, email, phone_number, address, address_line2, city, state, pincode, gst_no, gst_type, pan_no FROM dbo.enterprise WHERE id = @id",
+        "SELECT id, name, short_name, logo, email, phone_number, address, address_line2, city, state, pincode, gst_no, gst_type, pan_no AS pan FROM dbo.enterprise WHERE id = @id",
       );
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });

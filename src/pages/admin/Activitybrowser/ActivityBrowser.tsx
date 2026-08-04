@@ -12,6 +12,7 @@ import {
 } from "./constants";
 import { format } from "date-fns";
 import { parseDeviceInfo } from "@/utils/deviceFingerprint";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search,
   Shield,
@@ -88,6 +89,40 @@ function initials(name: string) {
     .slice(0, 2)
     .map((n) => n[0]?.toUpperCase() || "")
     .join("");
+}
+
+// Module-level cache — avatars rarely change mid-session, and every
+// SessionCard would otherwise trigger its own /api/users fetch.
+let avatarMapCache: Record<string, string> | null = null;
+let avatarMapPromise: Promise<Record<string, string>> | null = null;
+
+function useUserAvatars() {
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>(
+    avatarMapCache ?? {},
+  );
+
+  useEffect(() => {
+    if (avatarMapCache) {
+      setAvatarMap(avatarMapCache);
+      return;
+    }
+    if (!avatarMapPromise) {
+      avatarMapPromise = fetchWithAuth("/api/users")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((list: { id: number | string; avatar_url?: string | null }[]) => {
+          const map: Record<string, string> = {};
+          (Array.isArray(list) ? list : []).forEach((u) => {
+            if (u.avatar_url) map[String(u.id)] = u.avatar_url;
+          });
+          avatarMapCache = map;
+          return map;
+        })
+        .catch(() => ({}));
+    }
+    avatarMapPromise.then(setAvatarMap);
+  }, []);
+
+  return avatarMap;
 }
 
 function roleLabel(role: string) {
@@ -197,6 +232,8 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
 
   const { os, browser } = parseUA(session.deviceInfo);
   const ini = initials(session.userName);
+  const avatarMap = useUserAvatars();
+  const avatarUrl = avatarMap[String(session.userId)];
 
   return (
     <div
@@ -210,8 +247,16 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
         <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-[2fr_1.5fr_1.5fr_1fr_auto]">
           {/* User */}
           <div className="flex items-center gap-3">
-            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-              {ini}
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary overflow-hidden">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={session.userName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                ini
+              )}
               {isActive && (
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-emerald-500" />
               )}
