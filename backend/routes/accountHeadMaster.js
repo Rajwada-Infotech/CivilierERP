@@ -572,8 +572,17 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
+    // Excludes projectMaster.js's auto-created 'PRJ-<id>-CUST' rows — those
+    // reuse LHeadType='C' to mean "Customer" (the project's own receivable
+    // ledger), the same collision documented above at the POST handler's
+    // isCustomerHeadMislabelledC check. Every /options?type=...,C caller in
+    // this codebase (Payment page's Payee/Party, Material Issues, Work
+    // Order) means real Contractors, never a project's own customer ledger,
+    // so this exclusion is unconditional rather than gated on the requested
+    // type — without it the same project name shows up twice (once as its
+    // legitimate Supplier ledger, once as this mislabelled Customer one).
     let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson
-                 FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1`;
+                 FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'`;
     const request = pool.request();
     if (req.query.type) {
       // Accepts a single type ("S") or a comma-separated list ("S,C") —
