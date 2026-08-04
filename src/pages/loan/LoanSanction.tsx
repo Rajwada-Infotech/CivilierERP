@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -997,6 +998,8 @@ function ChainNode({
 // Searchable customer picker that shows a CRM / AH source pill beside each
 // option and fires onChange(id, source) so the form can track which table the
 // customer belongs to.
+// Panel is portalled to document.body so overflow:hidden on ancestors never
+// clips it.
 function CustomerComboField({
   customers,
   value,
@@ -1010,12 +1013,31 @@ function CustomerComboField({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const updateRect = useCallback(() => {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open, updateRect]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node))
-        setOpen(false);
+      if (
+        inputRef.current && !inputRef.current.contains(e.target as Node) &&
+        panelRef.current  && !panelRef.current.contains(e.target as Node)
+      ) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -1023,71 +1045,80 @@ function CustomerComboField({
 
   const selected = customers.find((c) => String(c.id) === value);
   const filtered = query
-    ? customers.filter((c) =>
-        c.label.toLowerCase().includes(query.toLowerCase()),
-      )
+    ? customers.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()))
     : customers;
 
+  const panel = open && rect && createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      }}
+      className="max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5"
+    >
+      {filtered.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground text-center">No customers found</p>
+      ) : (
+        filtered.map((c) => (
+          <button
+            key={`${c.source}-${c.id}`}
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { onChange(String(c.id), c.source); setOpen(false); setQuery(""); }}
+            className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
+              String(c.id) === value && selected?.source === c.source
+                ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                : "text-foreground"
+            }`}
+          >
+            <span className="truncate">{c.label}</span>
+            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+              c.source === "CRM"
+                ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+            }`}>
+              {c.source}
+            </span>
+          </button>
+        ))
+      )}
+    </div>,
+    document.body,
+  );
+
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="relative">
       <div className="relative">
         <input
+          ref={inputRef}
           type="text"
           className={`${inputClassName} pr-8`}
           placeholder="Search customer…"
           value={open ? query : (selected?.label ?? "")}
-          onFocus={() => { setOpen(true); setQuery(""); }}
+          onFocus={() => { setOpen(true); setQuery(""); updateRect(); }}
           onChange={(e) => setQuery(e.target.value)}
         />
         <button
           type="button"
           tabIndex={-1}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => { setOpen((o) => !o); updateRect(); }}
           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
-
-      {open && (
-        <div className="absolute z-50 mt-2 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
-          {filtered.length === 0 ? (
-            <p className="px-3 py-3 text-xs text-muted-foreground text-center">No customers found</p>
-          ) : (
-            filtered.map((c) => (
-              <button
-                key={`${c.source}-${c.id}`}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { onChange(String(c.id), c.source); setOpen(false); setQuery(""); }}
-                className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
-                  String(c.id) === value && selected?.source === c.source
-                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
-                    : "text-foreground"
-                }`}
-              >
-                <span className="truncate">{c.label}</span>
-                <span
-                  className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
-                    c.source === "CRM"
-                      ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
-                      : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                  }`}
-                >
-                  {c.source}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
+      {panel}
     </div>
   );
 }
 
 // Dropdown-cum-text field — pick a standard value from an app-styled panel,
-// or just type a custom one. Replaces native <datalist> (which renders with
-// unstyled OS/browser chrome that clashes with the rest of the page).
+// or just type a custom one. Panel portalled to document.body so it is never
+// clipped by overflow:hidden on ancestor containers.
 function ComboField({
   value,
   onChange,
@@ -1102,56 +1133,87 @@ function ComboField({
   inputClassName: string;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const updateRect = useCallback(() => {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open, updateRect]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (
+        inputRef.current && !inputRef.current.contains(e.target as Node) &&
+        panelRef.current  && !panelRef.current.contains(e.target as Node)
+      ) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  const panel = open && rect && createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      }}
+      className="max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5"
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { onChange(o.value); setOpen(false); }}
+          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors ${
+            value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="relative">
       <div className="relative">
         <input
+          ref={inputRef}
           type="text"
           className={`${inputClassName} pr-8`}
           placeholder={placeholder}
           value={value}
-          onFocus={() => setOpen(true)}
+          onFocus={() => { setOpen(true); updateRect(); }}
           onChange={(e) => onChange(e.target.value)}
         />
         <button
           type="button"
           tabIndex={-1}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => { setOpen((o) => !o); updateRect(); }}
           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
-      {open && (
-        <div className="absolute z-50 mt-2 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-              className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors ${
-                value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {panel}
     </div>
   );
 }
