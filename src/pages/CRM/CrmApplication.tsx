@@ -2307,6 +2307,21 @@ const CrmApplication: React.FC = () => {
 // field is a normal, already-unlocked input.
 const KYC_PREFILL_KEYS = ["PanNo", "AccountHolderName", "AadhaarNo", "Occupation", "AnnualIncome"] as const;
 
+// Mirrors REQUIRED_CUSTOMER_DETAIL_FIELDS in backend/services/crmWorkflowGuards.js
+// (the agreement-prep prerequisite check) exactly — kept in sync manually.
+// Without this, a field like BankName could be saved blank here and silently
+// pass this step, only to surface much later as a confusing "missing
+// customer details" block at agreement prep, or a Booking-tab field that
+// looks like it "never fetched" even though the row really does have most
+// of its data (see: BKG-2026-00001, BookingId 40 — AccountNo/IfscCode saved,
+// BankName silently left null).
+const BANK_STEP_REQUIRED_FIELDS: [keyof typeof EMPTY_BANK, string][] = [
+  ["BankName", "Bank Name"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
+  ["AccountHolderName", "Account Holder Name"], ["NomineeName", "Nominee Name"],
+  ["NomineeRelation", "Nominee Relation"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
+  ["Occupation", "Occupation"],
+];
+
 const BankDetailsStep: React.FC<{
   applicationId: number;
   applicantName?: string;
@@ -2368,6 +2383,18 @@ const BankDetailsStep: React.FC<{
   }, [nomineeSameAsApplicant, applicantAddress]);
 
   const saveBank = useCallback(async (silent = false) => {
+    // Block here, not just downstream at agreement prep — this is the one
+    // place this data is actually typed in, so a gap caught here is a
+    // one-field fix; the same gap caught later (validateAgreementPreparationPrerequisites
+    // in crmWorkflowGuards.js) reads as "why won't the agreement create" with
+    // no obvious link back to this step, or worse, looks like a fetch bug on
+    // a completely different screen (the Booking-tab Bank Details view).
+    const missing = BANK_STEP_REQUIRED_FIELDS.filter(([key]) => !String((bank as any)[key] || "").trim());
+    if (missing.length) {
+      const msg = `Missing required field(s): ${missing.map(([, label]) => label).join(", ")}`;
+      toast.error(msg);
+      throw new Error(msg);
+    }
     setBankSaving(true);
     try {
       const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
@@ -2407,7 +2434,7 @@ const BankDetailsStep: React.FC<{
             ["Occupation", "Occupation"], ["AnnualIncome", "Annual Income"],
           ].map(([key, label]) => (
             <div key={key}>
-              <label className={labelCls}>{label}</label>
+              <label className={labelCls}>{label}{BANK_STEP_REQUIRED_FIELDS.some(([rk]) => rk === key) && " *"}</label>
               {kycLocked.has(key) ? (
                 <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
                   <span className="text-sm text-foreground truncate">{(bank as any)[key] || "—"} <span className="text-xs text-muted-foreground">(auto-fetched from customer)</span></span>
@@ -2429,12 +2456,12 @@ const BankDetailsStep: React.FC<{
               ["NomineeName", "Name"], ["NomineeContact", "Contact"],
             ].map(([key, label]) => (
               <div key={key}>
-                <label className={labelCls}>{label}</label>
+                <label className={labelCls}>{label}{BANK_STEP_REQUIRED_FIELDS.some(([rk]) => rk === key) && " *"}</label>
                 <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
               </div>
             ))}
             <div>
-              <label className={labelCls}>Relation</label>
+              <label className={labelCls}>Relation *</label>
               <select value={bank.NomineeRelation} onChange={(e) => setBank((b) => ({ ...b, NomineeRelation: e.target.value }))} className={inputCls}>
                 <option value="">Select</option>
                 <option value="Spouse">Spouse</option>
