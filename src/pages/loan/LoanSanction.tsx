@@ -1048,11 +1048,11 @@ function CustomerComboField({
     ? customers.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()))
     : customers;
 
-  const PANEL_MAX = 256; // desired max height px
-  const GAP = 6;
+  const PANEL_MAX = 256;
+  const GAP = 8;
   const spaceBelow = rect ? window.innerHeight - rect.bottom - GAP : 0;
   const spaceAbove = rect ? rect.top - GAP : 0;
-  const openUpward = spaceBelow < Math.min(PANEL_MAX, 180) && spaceAbove > spaceBelow;
+  const openUpward = spaceAbove > spaceBelow;
   const maxHeight  = Math.min(PANEL_MAX, openUpward ? spaceAbove : spaceBelow);
 
   const panel = open && rect && createPortal(
@@ -1069,10 +1069,10 @@ function CustomerComboField({
         maxHeight,
         zIndex: 9999,
       }}
-      className="overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5"
+      className="overflow-y-auto rounded-lg border border-border bg-card shadow-2xl py-1"
     >
       {filtered.length === 0 ? (
-        <p className="px-3 py-3 text-xs text-muted-foreground text-center">No customers found</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground text-center">No customers found</p>
       ) : (
         filtered.map((c) => (
           <button
@@ -1080,7 +1080,7 @@ function CustomerComboField({
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { onChange(String(c.id), c.source); setOpen(false); setQuery(""); }}
-            className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
+            className={`w-full text-left px-4 py-3 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
               String(c.id) === value && selected?.source === c.source
                 ? "text-emerald-600 dark:text-emerald-400 font-medium"
                 : "text-foreground"
@@ -1174,11 +1174,11 @@ function ComboField({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const PANEL_MAX = 224; // desired max height px
-  const GAP = 6;
+  const PANEL_MAX = 224;
+  const GAP = 8;
   const spaceBelow = rect ? window.innerHeight - rect.bottom - GAP : 0;
   const spaceAbove = rect ? rect.top - GAP : 0;
-  const openUpward = spaceBelow < Math.min(PANEL_MAX, 180) && spaceAbove > spaceBelow;
+  const openUpward = spaceAbove > spaceBelow;
   const maxHeight  = Math.min(PANEL_MAX, openUpward ? spaceAbove : spaceBelow);
 
   const panel = open && rect && createPortal(
@@ -1195,7 +1195,7 @@ function ComboField({
         maxHeight,
         zIndex: 9999,
       }}
-      className="overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5"
+      className="overflow-y-auto rounded-lg border border-border bg-card shadow-2xl py-1"
     >
       {options.map((o) => (
         <button
@@ -1203,7 +1203,7 @@ function ComboField({
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { onChange(o.value); setOpen(false); }}
-          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors ${
+          className={`w-full text-left px-4 py-3 text-sm hover:bg-muted/60 transition-colors ${
             value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
           }`}
         >
