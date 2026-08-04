@@ -34,6 +34,7 @@ export interface LoanSanctionPayload {
   lenderCompanyId: number | string;
   borrowerCompanyId?: number | string | null;
   borrowerCustomerId?: number | string | null;
+  borrowerCustomerSource?: "AH" | "CRM" | null;
   loanDate: string;
   amount: number | string;
   interestRate?: number | string | null;
@@ -58,6 +59,7 @@ export interface LoanEMI {
 export interface CustomerOption {
   id: number;
   label: string;
+  source: "AH" | "CRM"; // discriminator: which table the customer comes from
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -95,6 +97,6 @@ export const deleteLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => handle(r));
 
 export const getCustomerOptions = () =>
-  fetchWithAuth("/api/account-head/options?type=A").then((r) =>
+  fetchWithAuth(`${BASE}/customer-options`).then((r) =>
     handle<CustomerOption[]>(r),
   );

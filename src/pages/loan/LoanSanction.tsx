@@ -69,6 +69,7 @@ const EMPTY_FORM = {
   lenderCompanyId: "",
   borrowerCompanyId: "",
   borrowerCustomerId: "",
+  borrowerCustomerSource: "AH" as "AH" | "CRM",
   loanDate: new Date().toISOString().slice(0, 10),
   amount: "",
   interestRate: "",
@@ -176,6 +177,7 @@ export default function LoanSanctionPage() {
         lenderCompanyId: form.lenderCompanyId,
         borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
         borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
+        borrowerCustomerSource: isCustomerLoan ? form.borrowerCustomerSource : null,
         loanDate: form.loanDate,
         amount: form.amount,
         interestRate: form.interestRate || null,
@@ -544,18 +546,15 @@ export default function LoanSanctionPage() {
                           Borrower {isCustomerLoan ? "Customer" : "Company"} <span className="text-red-500">*</span>
                         </label>
                         {isCustomerLoan ? (
-                          <select
-                            className={inputCls}
+                          <CustomerComboField
+                            customers={customers as CustomerOption[]}
                             value={form.borrowerCustomerId}
-                            onChange={(e) => set("borrowerCustomerId", e.target.value)}
-                          >
-                            <option value="">— Select —</option>
-                            {customers.map((c: CustomerOption) => (
-                              <option key={c.id} value={c.id}>
-                                {c.label}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(id, source) => {
+                              set("borrowerCustomerId", id);
+                              setForm((f) => ({ ...f, borrowerCustomerSource: source }));
+                            }}
+                            inputClassName={inputCls}
+                          />
                         ) : (
                           <select
                             className={inputCls}
@@ -994,6 +993,98 @@ function ChainNode({
   );
 }
 
+// ── CustomerComboField ─────────────────────────────────────────────────────
+// Searchable customer picker that shows a CRM / AH source pill beside each
+// option and fires onChange(id, source) so the form can track which table the
+// customer belongs to.
+function CustomerComboField({
+  customers,
+  value,
+  onChange,
+  inputClassName,
+}: {
+  customers: CustomerOption[];
+  value: string;
+  onChange: (id: string, source: "AH" | "CRM") => void;
+  inputClassName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = customers.find((c) => String(c.id) === value);
+  const filtered = query
+    ? customers.filter((c) =>
+        c.label.toLowerCase().includes(query.toLowerCase()),
+      )
+    : customers;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <div className="relative">
+        <input
+          type="text"
+          className={`${inputClassName} pr-8`}
+          placeholder="Search customer…"
+          value={open ? query : (selected?.label ?? "")}
+          onFocus={() => { setOpen(true); setQuery(""); }}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setOpen((o) => !o)}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute z-20 mt-2 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-xl py-1.5">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-muted-foreground text-center">No customers found</p>
+          ) : (
+            filtered.map((c) => (
+              <button
+                key={`${c.source}-${c.id}`}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onChange(String(c.id), c.source); setOpen(false); setQuery(""); }}
+                className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
+                  String(c.id) === value && selected?.source === c.source
+                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "text-foreground"
+                }`}
+              >
+                <span className="truncate">{c.label}</span>
+                <span
+                  className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+                    c.source === "CRM"
+                      ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                      : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                  }`}
+                >
+                  {c.source}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Dropdown-cum-text field — pick a standard value from an app-styled panel,
 // or just type a custom one. Replaces native <datalist> (which renders with
 // unstyled OS/browser chrome that clashes with the rest of the page).
@@ -1052,7 +1143,7 @@ function ComboField({
                 onChange(o.value);
                 setOpen(false);
               }}
-              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted/60 transition-colors ${
+              className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors ${
                 value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
               }`}
             >
