@@ -917,6 +917,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    const allowedManualTypes = new Set(["Milestone", "Maintenance", "Other", "OnAccount"]);
+    if (!allowedManualTypes.has(type)) {
+      return res.status(400).json({ error: "Invoice type is not supported for manual generation" });
+    }
+
     // Booking-type invoices are 100% system-owned — maybeAutoGenerateBookingInvoice
     // creates the one-and-only Booking invoice automatically the moment the
     // booking payment clears and staff hit Confirm & Book (ready-for-approval).
@@ -936,8 +941,30 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     // of just another disconnected ad-hoc entry. MilestoneId's unique index
     // (migration 268) guarantees a milestone can never be invoiced twice.
     let milestoneId = null;
+    let onAccountPaymentId = null;
     let amount, invoiceDate, description;
-    if (type === "Milestone") {
+    if (type === "OnAccount") {
+      // On-account deposits (dbo.CrmOnAccountPayment — money received in
+      // excess of what's currently due, auto-parked and later auto-applied
+      // to future milestones) are real cash received and must not go
+      // un-invoiced. Amount is the deposit's own full Amount (what was
+      // actually received), not AppliedAmount — an invoice documents money
+      // received, independent of how it's later allocated across
+      // milestones. OnAccountPaymentId's unique index (migration 288)
+      // guarantees a deposit can never be invoiced twice.
+      onAccountPaymentId = parseInt(b.OnAccountPaymentId);
+      if (!onAccountPaymentId) return res.status(400).json({ error: "OnAccountPaymentId is required for an OnAccount invoice" });
+      const oa = await pool.request().input("oid", sql.Int, onAccountPaymentId).input("bid", sql.Int, id).query(`
+        SELECT Id, ReceiptNo, Amount, ReceivedDate, PaymentMode FROM dbo.CrmOnAccountPayment WHERE Id = @oid AND BookingId = @bid
+      `);
+      const oaRow = oa.recordset[0];
+      if (!oaRow) return res.status(404).json({ error: "On-account payment not found on this booking" });
+      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid");
+      if (already.recordset.length) return res.status(400).json({ error: `On-account payment "${oaRow.ReceiptNo}" already has an invoice` });
+      amount = Number(oaRow.Amount);
+      invoiceDate = oaRow.ReceivedDate;
+      description = b.Description || `On-account payment received — ${oaRow.ReceiptNo}`;
+    } else if (type === "Milestone") {
       milestoneId = parseInt(b.MilestoneId);
       if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
@@ -1003,10 +1030,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       .input("desc", sql.NVarChar(500), description)
       .input("cb",   sql.Int,           actorId(req))
       .input("mid",  sql.Int,           milestoneId)
+      .input("oaid", sql.Int,           onAccountPaymentId)
       .query(`
-        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId)
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId, OnAccountPaymentId)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid, @oaid)
       `);
     const invoiceId = result.recordset[0].Id;
     // Best-effort, same request — the invoice record itself is the source of
@@ -1024,10 +1052,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     // Two near-simultaneous requests can both pass the app-level duplicate
     // check above and then race into the INSERT — the unique indexes
     // (migration 268 for MilestoneId, 270 for BookingId/InvoiceType/
-    // BillingPeriod) are the real backstop and will reject the second one.
-    // Surface that as the same clear 400 instead of a raw SQL 500.
+    // BillingPeriod, 288 for OnAccountPaymentId) are the real backstop and
+    // will reject the second one. Surface that as the same clear 400
+    // instead of a raw SQL 500.
     if (e.number === 2601 || e.number === 2627) {
-      return res.status(400).json({ error: "An invoice already exists for this milestone or billing period — it can't be generated twice" });
+      return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period — it can't be generated twice" });
     }
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
     res.status(500).json({ error: e.message });

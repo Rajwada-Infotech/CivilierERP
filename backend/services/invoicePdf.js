@@ -49,6 +49,7 @@ const INVOICE_TYPE_LABEL = {
   Milestone: "Milestone Payment",
   Maintenance: "Maintenance Charges",
   Other: "Other Charges",
+  OnAccount: "On-Account Payment",
 };
 
 // Data-URL ("data:image/png;base64,....") -> Buffer pdfkit can embed, or
@@ -69,7 +70,7 @@ function decodeLogo(dataUrl) {
 async function fetchInvoiceData(pool, invoiceId) {
   const result = await pool.request().input("id", sql.Int, invoiceId).query(`
     SELECT
-      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId,
+      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId,
       b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
@@ -78,7 +79,8 @@ async function fetchInvoiceData(pool, invoiceId) {
       comp.logo AS CompanyLogo,
       proj.name AS ProjectFullName, proj.rera_no AS ProjectRera,
       c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode,
-      m.MilestoneNo, m.MilestoneName, m.PaidDate AS MilestonePaidDate, m.PaymentMode AS MilestonePaymentMode
+      m.MilestoneNo, m.MilestoneName, m.PaidDate AS MilestonePaidDate, m.PaymentMode AS MilestonePaymentMode,
+      oa.ReceiptNo AS OnAccountReceiptNo, oa.ReceivedDate AS OnAccountReceivedDate, oa.PaymentMode AS OnAccountPaymentMode
     FROM dbo.CrmInvoice inv
     JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -86,6 +88,7 @@ async function fetchInvoiceData(pool, invoiceId) {
     LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
     LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = inv.MilestoneId
+    LEFT JOIN dbo.CrmOnAccountPayment oa ON oa.Id = inv.OnAccountPaymentId
     WHERE inv.Id = @id
   `);
   return result.recordset[0] || null;
@@ -186,7 +189,8 @@ function renderInvoicePdfBuffer(d) {
     // terms, rather than leaving the reader to infer it from the line item
     // description alone. Only rendered when there's real payment data to show
     // (Milestone invoices always have it; Maintenance/Other may not).
-    if (d.InvoiceType === "Milestone" || d.MilestonePaidDate) {
+    if (d.InvoiceType === "Milestone" || d.MilestonePaidDate || d.InvoiceType === "OnAccount") {
+      const isOnAccount = d.InvoiceType === "OnAccount";
       const panelTop = doc.y;
       const panelH = 34;
       doc.rect(left, panelTop, pageWidth, panelH).fill("#f8fafc");
@@ -194,13 +198,13 @@ function renderInvoicePdfBuffer(d) {
       const cellW = pageWidth / 3;
       const cellPad = 10;
       doc.font("Helvetica").fontSize(7.5).fillColor("#64748b")
-        .text("PAYMENT STAGE", left + cellPad, panelTop + 6, { width: cellW - cellPad })
-        .text("PAID ON", left + cellW + cellPad, panelTop + 6, { width: cellW - cellPad })
+        .text(isOnAccount ? "PAYMENT REF" : "PAYMENT STAGE", left + cellPad, panelTop + 6, { width: cellW - cellPad })
+        .text(isOnAccount ? "RECEIVED ON" : "PAID ON", left + cellW + cellPad, panelTop + 6, { width: cellW - cellPad })
         .text("PAYMENT MODE", left + 2 * cellW + cellPad, panelTop + 6, { width: cellW - cellPad });
       doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#0f172a")
-        .text(d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType, left + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
-        .text(fmtDate(d.MilestonePaidDate), left + cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
-        .text(d.MilestonePaymentMode || "-", left + 2 * cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false });
+        .text(isOnAccount ? (d.OnAccountReceiptNo || "-") : (d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType), left + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
+        .text(fmtDate(isOnAccount ? d.OnAccountReceivedDate : d.MilestonePaidDate), left + cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
+        .text((isOnAccount ? d.OnAccountPaymentMode : d.MilestonePaymentMode) || "-", left + 2 * cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false });
       doc.fillColor("#000000");
       doc.y = panelTop + panelH + 14;
     }

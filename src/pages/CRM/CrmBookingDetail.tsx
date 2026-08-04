@@ -166,7 +166,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
-  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "" });
+  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   // No GstRate field here anymore — Extra Charges are always taxed at the
   // fixed 18% HSN Master rate (backend ignores any client-supplied rate),
@@ -231,7 +231,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: invoices = [] } = useQuery({
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
-    enabled: tab === "Payment & Invoice",
+    // Also needed on the Payment Plan tab now — the milestone list there
+    // shows an "Invoice Generation Pending" badge for any paid milestone
+    // with no matching invoice, which requires this data to actually be
+    // loaded rather than sitting on its stale/empty default.
+    enabled: tab === "Payment & Invoice" || tab === "Payment Plan",
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
@@ -720,6 +724,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -762,7 +767,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     // Confirm & Book (see maybeAutoGenerateBookingInvoice on the backend).
     // This manual dialog is for every other invoice (e.g. milestone-wise
     // payments after booking), so it never defaults to or offers "Booking".
-    setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "" });
+    const defaultType = uninvoicedPaidMilestones.length > 0
+      ? "Milestone"
+      : uninvoicedOnAccountPayments.length > 0
+      ? "OnAccount"
+      : "Milestone";
+    setInvoiceForm({ InvoiceType: defaultType, Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "", OnAccountPaymentId: "" });
     setInvoiceDialog(true);
   };
 
@@ -786,8 +796,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // dead end; a locked, explanatory panel replaces it in this specific
   // window only — the instant another milestone becomes eligible, the
   // regular form comes back automatically.
+  // On-account deposits (money received in excess of what's currently due,
+  // auto-parked into CrmOnAccountPayment) are just as real as a paid
+  // milestone — they're cash already received and must not sit un-invoiced
+  // either. Same "unbooked" shape as uninvoicedPaidMilestones above, folded
+  // into canGenerateAnything below so the header button/dead-end-form
+  // suppression logic treats it the same way.
+  const uninvoicedOnAccountPayments = (onAccountData?.payments || []).filter(
+    (p: any) => !p.InvoiceId && !(invoices as any[]).some((inv: any) => inv.OnAccountPaymentId === p.Id)
+  );
   const hasBookingInvoice = (invoices as any[]).some((inv: any) => inv.InvoiceType === "Booking");
-  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0;
+  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0 && uninvoicedOnAccountPayments.length === 0;
   // Nothing to raise right now: the Booking invoice already exists (nothing
   // to force), and no other milestone is sitting paid-but-uninvoiced. Hiding
   // the button here (instead of opening a dialog whose only option is a
@@ -796,7 +815,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // needs invoicing. Maintenance/Other invoices are ad-hoc and don't belong
   // at this early booking-review stage either; they become reachable again
   // once a milestone is genuinely awaiting invoicing.
-  const canGenerateAnything = !hasBookingInvoice || uninvoicedPaidMilestones.length > 0;
+  const canGenerateAnything = !hasBookingInvoice || uninvoicedPaidMilestones.length > 0 || uninvoicedOnAccountPayments.length > 0;
 
   const [forcingBookingInvoice, setForcingBookingInvoice] = useState(false);
   const handleForceBookingInvoice = async () => {
@@ -818,6 +837,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const handleGenerateInvoice = async () => {
     if (invoiceForm.InvoiceType === "Milestone") {
       if (!invoiceForm.MilestoneId) { toast.error("Select a milestone"); return; }
+    } else if (invoiceForm.InvoiceType === "OnAccount") {
+      if (!invoiceForm.OnAccountPaymentId) { toast.error("Select an on-account payment"); return; }
     } else if (!invoiceForm.Amount) {
       toast.error("Amount is required"); return;
     }
@@ -826,6 +847,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const body: any = { InvoiceType: invoiceForm.InvoiceType, Description: invoiceForm.Description };
       if (invoiceForm.InvoiceType === "Milestone") {
         body.MilestoneId = parseInt(invoiceForm.MilestoneId);
+      } else if (invoiceForm.InvoiceType === "OnAccount") {
+        body.OnAccountPaymentId = parseInt(invoiceForm.OnAccountPaymentId);
       } else {
         body.Amount = parseFloat(invoiceForm.Amount);
         body.InvoiceDate = invoiceForm.InvoiceDate;
@@ -844,6 +867,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [generatingOnAccountId, setGeneratingOnAccountId] = useState<number | null>(null);
+  const handleGenerateOnAccountInvoice = async (onAccountPaymentId: number) => {
+    setGeneratingOnAccountId(onAccountPaymentId);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ InvoiceType: "OnAccount", OnAccountPaymentId: onAccountPaymentId }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setGeneratingOnAccountId(null);
     }
   };
 
@@ -1147,6 +1191,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
                                 : "text-amber-700 bg-amber-50 border-amber-200"
                             }`}>{m.Status}</span>
+                            {/* Same "no orphan money" principle as the
+                                On-Account section above: a milestone that's
+                                fully paid but has no matching invoice yet is
+                                real money sitting un-invoiced. Milestone 1
+                                (Booking) is excluded — it's auto-invoiced on
+                                its own separate path. Read-only here; the
+                                existing "+ Generate Invoice" dialog on the
+                                Payment & Invoice tab already raises it. */}
+                            {m.Status === "Paid" && Number(m.MilestoneNo) !== 1
+                              && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id) && (
+                              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
+                                Invoice Generation Pending
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1253,6 +1311,56 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <p className="text-[11px] text-emerald-700">Booking Amount fully paid — locked from further edits.</p>
                   )}
                 </div>
+
+                {/* On-account deposits — money received in excess of what's
+                    currently due (CrmOnAccountPayment), auto-parked and later
+                    auto-applied to future milestones as they come due. Real
+                    cash received, so each one needs an invoice just like a
+                    paid milestone — this card is where that gets raised.
+                    Only rendered when the booking actually has any deposits,
+                    so a booking with none doesn't show an empty card. */}
+                {(onAccountData?.payments || []).length > 0 && (
+                  <div className="rounded-xl border border-border p-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> On-Account Payments</h3>
+                    <div className="space-y-1.5">
+                      {(onAccountData.payments as any[]).map((p: any) => {
+                        const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
+                          || (p.InvoiceId ? { Id: p.InvoiceId, InvoiceNo: p.InvoiceNo, InvoiceType: "OnAccount", Amount: p.Amount, InvoiceDate: p.InvoiceDate, Status: p.InvoiceStatus, OnAccountPaymentId: p.Id } : null);
+                        return (
+                          <div key={p.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <div className="space-y-0.5">
+                              <div className="font-medium">{p.ReceiptNo} — {fmt(p.Amount)}</div>
+                              <div className="text-muted-foreground">
+                                {p.ReceivedDate ? new Date(p.ReceivedDate).toLocaleDateString("en-IN") : "—"} · {p.PaymentMode || "—"}
+                              </div>
+                            </div>
+                            {inv ? (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
+                                <button onClick={() => setPreviewInvoice(inv)}
+                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  <Eye size={12} /> View
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border text-amber-700 bg-amber-50 border-amber-200">
+                                  Invoice Generation Pending
+                                </span>
+                                {canEdit && (
+                                  <button onClick={() => handleGenerateOnAccountInvoice(p.Id)} disabled={generatingOnAccountId === p.Id}
+                                    className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+                                    {generatingOnAccountId === p.Id ? "Generating…" : "Generate Invoice"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
@@ -1751,9 +1859,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <>
                           <div className="space-y-2">
                             <select value={invoiceForm.InvoiceType}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
                               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                               <option value="Milestone">Milestone Payment</option>
+                              {uninvoicedOnAccountPayments.length > 0 && <option value="OnAccount">On-Account Payment</option>}
                               <option value="Maintenance">Maintenance</option>
                               <option value="Other">Other</option>
                             </select>
@@ -1771,6 +1880,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
                                 )}
                                 <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
+                              </>
+                            ) : invoiceForm.InvoiceType === "OnAccount" ? (
+                              <>
+                                <select value={invoiceForm.OnAccountPaymentId}
+                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
+                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                                  <option value="">-- Select an on-account payment --</option>
+                                  {uninvoicedOnAccountPayments.map((p: any) => (
+                                    <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} - {fmt(p.Amount)}</option>
+                                  ))}
+                                </select>
+                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the on-account receipt - not editable here.</p>
                               </>
                             ) : (
                               <>
@@ -1792,7 +1913,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               Cancel
                             </button>
                             <button onClick={handleGenerateInvoice}
-                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId)}
+                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId) || (invoiceForm.InvoiceType === "OnAccount" && !invoiceForm.OnAccountPaymentId)}
                               className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                               {saving ? "Generating..." : "Generate"}
                             </button>
