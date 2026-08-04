@@ -15,7 +15,7 @@ const { releaseAllParkingForBooking } = require("./crmParking");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
-const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
+const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
@@ -651,8 +651,19 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
+    // dbo.Users has no plain-text "role" column — role is a RoleId FK into
+    // dbo.Role (RId / RName / RCode). RName is the machine-readable value
+    // ('admin', 'super_admin', 'marketing_head', ...) that matches every
+    // other role check in this codebase (e.g. CRM_APPROVER_ROLES in
+    // approvalService.js, req.user.role); RCode is a short display code
+    // (SA/ADM/MAR/...) and isn't what's compared elsewhere. The previous
+    // `WHERE LOWER(role) IN (...)` referenced a column that doesn't exist
+    // at all and 500'd this entire endpoint (surfaced in the CRM UI as
+    // "Invalid column name 'role'." on Confirm & Book).
     const admins = await pool.request().query(`
-      SELECT id FROM dbo.Users WHERE LOWER(role) IN ('admin', 'super_admin', 'marketing_head') AND discontinue = 0
+      SELECT u.id FROM dbo.Users u
+      JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) IN ('admin', 'super_admin', 'marketing_head') AND u.discontinue = 0
     `);
     for (const a of admins.recordset) {
       await emitNotification(pool, a.id, "crm_booking_ready_for_approval",
@@ -932,6 +943,36 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
       invoiceDate = b.InvoiceDate || null;
       description = b.Description || null;
+
+      // Maintenance/Other invoices aren't tied to a milestone, so there's no
+      // MilestoneId to anchor a uniqueness check on the way "Milestone" does
+      // above. The billing period (calendar month of InvoiceDate) is the
+      // next best anchor — one Maintenance/Other invoice per booking per
+      // month, blocking accidental double-generation while still allowing
+      // legitimate repeat billing (e.g. next quarter's maintenance) once the
+      // period rolls over. Checked here for a fast, clear error message, and
+      // enforced again at the DB level (migration 270's unique index on
+      // BookingId/InvoiceType/BillingPeriod) so it can never be raced by two
+      // near-simultaneous requests.
+      const effectiveDate = invoiceDate ? new Date(invoiceDate) : new Date();
+      const periodYear = effectiveDate.getFullYear();
+      const periodMonth = effectiveDate.getMonth() + 1;
+      const dup = await pool.request()
+        .input("bid", sql.Int, id)
+        .input("type", sql.NVarChar(30), type)
+        .input("yr", sql.Int, periodYear)
+        .input("mo", sql.Int, periodMonth)
+        .query(`
+          SELECT TOP 1 Id, InvoiceNo FROM dbo.CrmInvoice
+          WHERE BookingId = @bid AND InvoiceType = @type
+            AND YEAR(InvoiceDate) = @yr AND MONTH(InvoiceDate) = @mo
+        `);
+      if (dup.recordset.length) {
+        const monthLabel = effectiveDate.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+        return res.status(400).json({
+          error: `A ${type} invoice (${dup.recordset[0].InvoiceNo}) already exists for ${monthLabel} on this booking — only one ${type} invoice is allowed per billing period`,
+        });
+      }
     }
 
     const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
@@ -952,8 +993,9 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const invoiceId = result.recordset[0].Id;
     // Best-effort, same request — the invoice record itself is the source of
     // truth and must not fail to create just because PDF rendering hit a
-    // problem; the download route regenerates on demand if the file is ever
-    // missing, so a rendering failure here is recoverable, not data loss.
+    // problem; generateInvoicePdf writes the base64 straight onto the row,
+    // and the download route regenerates + re-persists on demand if it's
+    // ever missing, so a rendering failure here is recoverable, not data loss.
     try {
       await generateInvoicePdf(pool, invoiceId);
     } catch (pdfErr) {
@@ -961,14 +1003,23 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     }
     res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
+    // Two near-simultaneous requests can both pass the app-level duplicate
+    // check above and then race into the INSERT — the unique indexes
+    // (migration 268 for MilestoneId, 270 for BookingId/InvoiceType/
+    // BillingPeriod) are the real backstop and will reject the second one.
+    // Surface that as the same clear 400 instead of a raw SQL 500.
+    if (e.number === 2601 || e.number === 2627) {
+      return res.status(400).json({ error: "An invoice already exists for this milestone or billing period — it can't be generated twice" });
+    }
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF. Regenerates it
-// on the fly if the file is missing from disk (e.g. a fresh deploy that
-// didn't carry over /uploads) instead of 404ing on a real, existing invoice.
+// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF straight from
+// the CrmInvoice row's stored base64. Regenerates + re-persists it on the
+// fly if the row predates the PdfBase64 column (getInvoicePdfBuffer handles
+// that) instead of 404ing on a real, existing invoice.
 router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -978,13 +1029,10 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
       .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid");
     if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
     const invoiceNo = row.recordset[0].InvoiceNo;
-    let filePath = invoicePdfPath(invoiceNo);
-    if (!fs.existsSync(filePath)) {
-      filePath = await generateInvoicePdf(pool, invoiceId);
-    }
+    const buffer = await getInvoicePdfBuffer(pool, invoiceId);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
-    fs.createReadStream(filePath).pipe(res);
+    res.send(buffer);
   } catch (e) {
     console.error("[crm-bookings] GET /:id/invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
