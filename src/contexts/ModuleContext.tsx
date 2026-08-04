@@ -107,6 +107,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "civilworkdpr",
       "sales-automation",
       "crm",
+      "loan",
       "admin",
     ];
 
@@ -140,6 +141,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/civilworkdpr")) {
       setActiveModuleState("civilworkdpr");
       localStorage.setItem("activeModule", "civilworkdpr");
+    } else if (pathname.startsWith("/loan")) {
+      setActiveModuleState("loan");
+      localStorage.setItem("activeModule", "loan");
     } else if (
       pathname.startsWith("/finance") ||
       pathname === "/finance" ||

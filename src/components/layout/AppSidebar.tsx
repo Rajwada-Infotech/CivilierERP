@@ -23,6 +23,7 @@ import {
   Buildings2,
   Volume,
   TickCircle,
+  MoneyRecive,
 } from "iconsax-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -39,6 +40,7 @@ import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
+import { loanNavItems } from "./sidebars/LoanSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -127,6 +129,13 @@ const MODULE_HEADER: Record<
     color: "#0ea5e9",
     from: "from-sky-500/30",
     to: "to-sky-500/0",
+  },
+  loan: {
+    label: "Loan",
+    icon: MoneyRecive,
+    color: "#22c55e",
+    from: "from-green-500/30",
+    to: "to-green-500/0",
   },
   admin: {
     label: "Admin",
@@ -345,6 +354,9 @@ export const AppSidebar = () => {
         break;
       case "crm":
         raw = crmNavItems;
+        break;
+      case "loan":
+        raw = loanNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);

@@ -115,6 +115,7 @@ const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
+const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -752,6 +753,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="loan-dashboard">
             <LoanDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/loan/sanction"
+        element={
+          <ProtectedRoute pageKey="loan-sanction">
+            <LoanSanction />
           </ProtectedRoute>
         }
       />

@@ -521,7 +521,7 @@ const Payment: React.FC = () => {
         ${[companyDetail?.phone_number, companyDetail?.email].filter(Boolean).join("  ·  ")}
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">
-        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan_no ? `PAN: ${companyDetail.pan_no}` : null].filter(Boolean).join("  ·  ")}
+        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan ? `PAN: ${companyDetail.pan}` : null].filter(Boolean).join("  ·  ")}
       </div>
     </div>
     <div style="text-align:right;">
@@ -4415,8 +4415,8 @@ const Payment: React.FC = () => {
                         viewingCompanyDetail.gst_no
                           ? `GSTIN: ${viewingCompanyDetail.gst_no}`
                           : null,
-                        viewingCompanyDetail.pan_no
-                          ? `PAN: ${viewingCompanyDetail.pan_no}`
+                        viewingCompanyDetail.pan
+                          ? `PAN: ${viewingCompanyDetail.pan}`
                           : null,
                       ]
                         .filter(Boolean)

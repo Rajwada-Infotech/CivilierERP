@@ -449,6 +449,50 @@ router.get("/adjustable", requirePageRight("on-account-adjustment", "view"), asy
       WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'CrmOnAccountPayment'
         ${partyFilter}
 
+      UNION ALL
+
+      -- Sanctioned loans — see routes/loanSanction.js. Amount lands as a
+      -- CREDIT on the borrower's system-generated "Loan - <Company>" ledger
+      -- head; visible here for adjustment, same as a vendor's excess payment.
+      SELECT
+        oa.OAId,
+        oa.PartyId,
+        ahm.LHeadName  AS PartyName,
+        ahm.LHeadType  AS PartyTypeCode,
+        oa.TxnDate     AS PaymentDate,
+        oa.RefDocNo    AS PaymentDocNo,
+        oa.Amount              AS ExcessAmount,
+        ls.LoanNo               AS InvoiceRef,
+        NULL                    AS PaymentAmount,
+        NULL                    AS ENetAmount,
+        NULL                    AS EAmount,
+        NULL                    AS ECgstRate,
+        NULL                    AS ESgstRate,
+        NULL                    AS EBillingTermsData,
+        NULL                    AS EDiscountData,
+        NULL                    AS ESourceType,
+        NULL                    AS ESourceId,
+        NULL                    AS ELinkedGrnIds,
+        NULL                    AS GrnTotalAmount,
+        NULL                    AS InvoiceTotalPaid,
+        ls.LoanNo               AS InvoiceDocNo,
+        pb.Balance             AS AvailableBalance,
+        oa.Notes,
+        'Loan'                  AS Source,
+        NULL                    AS CrmBookingNo,
+        NULL                    AS CrmProjectName,
+        NULL                    AS CrmUnitNo,
+        NULL                    AS CrmApplicantName,
+        NULL                    AS CrmNextMilestoneName,
+        NULL                    AS CrmNextMilestoneDue,
+        NULL                    AS CrmNextMilestoneDueDate
+      FROM dbo.OnAccountLedger oa
+      JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = oa.RefId AND oa.RefType = 'Loan'
+      WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'Loan'
+        ${partyFilter}
+
       ORDER BY AvailableBalance DESC, PaymentDate DESC
     `);
     // For GRN-source invoices, recompute the correct GST-inclusive net payable from
