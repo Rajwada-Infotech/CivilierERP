@@ -65,4 +65,4 @@ CivilierERP Documentation.pdf
 # Never committed; production is served from /apk-releases/ by nginx instead.
 public/downloads/
 
-backend/uploads/crm-invoices/
+uploads/crm-invoices/
