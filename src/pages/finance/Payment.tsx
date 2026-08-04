@@ -107,6 +107,7 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 
@@ -810,6 +811,44 @@ const Payment: React.FC = () => {
     }));
   };
 
+  // ── Loan EMI source ──────────────────────────────────────────────────────
+  const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
+  const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
+  const [loanLateFee, setLoanLateFee] = useState("");
+  const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+  const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
+    queryKey: ["payment-loan-emis"],
+    queryFn: getPayableEmis,
+    staleTime: 60_000,
+  });
+  const handleLoanEmiSelect = (emi: PayableEmi) => {
+    setSelectedLoanEmi(emi);
+    setSelectedContract(null);
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo} (${emi.BorrowerName})`,
+      expenseRef: "",
+      expenseId: "",
+      contractId: "",
+      amount: Number(emi.EMIAmount),
+    }));
+    // Late fee / loan-specific charges are collected separately — a Loan
+    // EMI payment isn't just an amount, it may also carry a late charge the
+    // regular payment form has no field for.
+    setLoanPaymentDetailsOpen(true);
+  };
+  // Only clears the loan-side selection state — deliberately does NOT touch
+  // paymentName/amount, since this also fires defensively whenever an
+  // invoice/contract is picked (to un-highlight a previous loan pick), and
+  // must not stomp on the fields that selection just set.
+  const clearLoanEmiLink = () => {
+    setSelectedLoanEmi(null);
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+  };
+
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
@@ -832,6 +871,8 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    setSelectedLoanEmi(null);
+    setLoanPaymentDetailsOpen(false);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setView("form");
@@ -840,6 +881,8 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
+    setSelectedLoanEmi(null);
+    setLoanPaymentDetailsOpen(false);
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
@@ -863,6 +906,9 @@ const Payment: React.FC = () => {
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setSelectedContract(null);
+    setSelectedLoanEmi(null);
+    setLoanPaymentDetailsOpen(false);
   };
 
   const blank = blankForm();
@@ -1603,7 +1649,34 @@ const Payment: React.FC = () => {
         toast.success("Payment updated.");
       } else {
         await addPayment(payload);
-        toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+        // A Loan EMI payment isn't just a NewPayment record — it also has to
+        // actually settle the EMI on the loan itself (mark it paid, run the
+        // payoff/early-closure check, generate the payment ref). That's what
+        // the loan-sanction backend's own /pay endpoint does; this triggers
+        // it right after the payment record is created.
+        if (selectedLoanEmi) {
+          try {
+            const res = await payLoan(selectedLoanEmi.LoanId, {
+              emiIds: [selectedLoanEmi.EMIId],
+              paymentDate: form.date,
+              lateFee: loanLateFee || undefined,
+              notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
+            });
+            toast.success(
+              res.loanClosed
+                ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
+                : `EMI settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+            );
+            queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
+            queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment saved, but the loan EMI could not be settled: ${loanErr.message}. Settle it manually from the Loan Sanction page.`,
+            );
+          }
+        } else {
+          toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
@@ -1922,7 +1995,26 @@ const Payment: React.FC = () => {
                           selectedContract={selectedContract}
                           onContractSelect={handleContractSelect}
                           onContractClear={clearContractLink}
+                          loanEmis={loanEmiOptions}
+                          loanEmisLoading={loanEmisLoading}
+                          selectedLoanEmi={selectedLoanEmi}
+                          onLoanEmiSelect={handleLoanEmiSelect}
+                          onLoanEmiClear={clearLoanEmiLink}
                         />
+                        {selectedLoanEmi && (
+                          <p className="text-[11px] text-muted-foreground flex items-center gap-2">
+                            <span>
+                              Late fee: <span className="font-mono font-medium text-foreground/80">{loanLateFee ? formatINR(Number(loanLateFee)) : "—"}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setLoanPaymentDetailsOpen(true)}
+                              className="text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                            >
+                              Edit loan payment details
+                            </button>
+                          </p>
+                        )}
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
                             <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
@@ -4915,6 +5007,83 @@ const Payment: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loan Payment Details — late fee / notes specific to a Loan EMI payment.
+          Separate from the main payment form since a loan repayment carries
+          charges (bank-applied or company-set late fee) that don't apply to
+          invoice/contract payments. */}
+      {loanPaymentDetailsOpen && selectedLoanEmi && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/10 shrink-0">
+                <Receipt size={16} className="text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-heading font-semibold text-foreground">
+                  Loan Payment Details
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {selectedLoanEmi.LoanNo} · EMI {selectedLoanEmi.InstallmentNo} · {formatINR(selectedLoanEmi.EMIAmount)}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+                Late Fee ({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={loanLateFee}
+                onChange={(e) => setLoanLateFee(e.target.value)}
+                placeholder="0"
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              {selectedLoanEmi.IsOverdue && (
+                <p className="text-[11px] text-red-500">This installment is overdue — a late fee may apply.</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+                Notes (optional)
+              </label>
+              <input
+                type="text"
+                value={loanPaymentNotes}
+                onChange={(e) => setLoanPaymentNotes(e.target.value)}
+                placeholder="Reason for late fee, remarks…"
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => {
+                  clearLoanEmiLink();
+                  setLoanPaymentDetailsOpen(false);
+                  // Selecting a loan EMI cleared the invoice/contract side
+                  // and set form fields directly — undo that too so
+                  // cancelling leaves a clean form, not a half-filled one.
+                  setForm((prev) => ({ ...prev, paymentName: "", amount: null }));
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel Loan Payment
+              </button>
+              <button
+                onClick={() => setLoanPaymentDetailsOpen(false)}
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                Continue
               </button>
             </div>
           </div>

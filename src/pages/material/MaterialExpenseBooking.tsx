@@ -34,6 +34,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import {
   Plus,
@@ -232,6 +234,9 @@ export default function MaterialExpenseBooking() {
     [],
   );
   const [supplierHeads, setSupplierHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  const [contractorHeads, setContractorHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
@@ -436,6 +441,20 @@ export default function MaterialExpenseBooking() {
           paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setSupplierHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=C")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setContractorHeads(heads);
       })
       .catch((err) => {
         toast.error(
@@ -1157,8 +1176,11 @@ export default function MaterialExpenseBooking() {
     statusCounts["Pending"] ??
     records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
-  const vendorLabel =
-    selectedDoc?.kind === "WORK_DONE" ? "Contractor" : "Supplier / Vendor";
+  const vendorLabel = selectedDoc?.vendorLabel
+    ? selectedDoc.kind === "WORK_DONE"
+      ? "Contractor"
+      : "Supplier / Vendor"
+    : "Payable To";
   const isPOorWO =
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
@@ -1476,7 +1498,10 @@ export default function MaterialExpenseBooking() {
                         <Select value={form.supplier || "__none__"} onValueChange={(val) => {
                           const name = val === "__none__" ? "" : val;
                           set("supplier", name);
-                          const head = name ? supplierHeads.find((s) => s.label === name) : undefined;
+                          const head = name
+                            ? supplierHeads.find((s) => s.label === name) ??
+                              contractorHeads.find((c) => c.label === name)
+                            : undefined;
                           set("supplierLHeadId", head?.id ?? null);
                           // Other Expenses (TOD) bookings have no source-doc
                           // label to name themselves after — keep the
@@ -1499,13 +1524,26 @@ export default function MaterialExpenseBooking() {
                           }
                         }}>
                           <SelectTrigger className={selectTriggerCls}>
-                            <SelectValue placeholder="All suppliers" />
+                            <SelectValue placeholder="Select supplier or contractor" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">— None —</SelectItem>
-                            {supplierHeads.map((s) => (
-                              <SelectItem key={s.id} value={s.label}>{s.label}</SelectItem>
-                            ))}
+                            {supplierHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Suppliers</SelectLabel>
+                                {supplierHeads.map((s) => (
+                                  <SelectItem key={`s-${s.id}`} value={s.label}>{s.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {contractorHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Contractors</SelectLabel>
+                                {contractorHeads.map((c) => (
+                                  <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
                           </SelectContent>
                         </Select>
                       )}
