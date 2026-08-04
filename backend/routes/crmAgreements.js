@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -31,18 +29,8 @@ const AGREEMENT_TRANSITIONS = {
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 10 },
   fileFilter: (_req, file, cb) => {
     const ALLOWED = [
@@ -165,7 +153,12 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
     const [agRes, docRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${AGR_SELECT} WHERE ag.Id = @id`),
       pool.request().input("id", sql.Int, id).query(
-        `SELECT d.*, cu.name AS CreatedByName FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
+        `SELECT d.Id, d.AgreementId, d.DocumentType, d.DocumentUrl, d.FileName, d.IssuedBy, d.Status, d.Remarks,
+                d.UploadedAt, d.CreatedBy, d.CreatedAt, d.VersionNo, d.FileSize, d.MimeType, d.UploadedByType,
+                d.RequestedBy, d.RequestedAt, d.Label, d.IsMandatory,
+                CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
+                cu.name AS CreatedByName
+         FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
     ]);
     if (!agRes.recordset[0]) return res.status(404).json({ error: "Agreement not found" });
     res.json({ agreement: agRes.recordset[0], documents: docRes.recordset });
@@ -1085,10 +1078,6 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
 
       const lockReason = await getAgreementBookingLockReason(pool, agreementId);
       if (lockReason) {
-        for (const file of req.files) {
-          const resolved = path.resolve(file.path);
-          if (resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolved, () => {});
-        }
         return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
       }
 
@@ -1103,7 +1092,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
           .input("agid",  sql.Int, agreementId)
           .input("dtype", sql.NVarChar(100), docType)
           .input("fname", sql.NVarChar(300), file.originalname)
-          .input("fp",    sql.NVarChar(500), file.path)
+          .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
           .input("fs",    sql.BigInt, file.size)
           .input("mt",    sql.NVarChar(150), file.mimetype)
           .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
@@ -1112,18 +1101,14 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
           .input("cb",    sql.Int, actorId(req))
           .query(`
             INSERT INTO dbo.CrmAgreementDocument
-              (AgreementId, DocumentType, FileName, FilePath, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+              (AgreementId, DocumentType, FileName, FileBase64, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id
-            VALUES (@agid, @dtype, @fname, @fp, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
+            VALUES (@agid, @dtype, @fname, @fb64, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
           `);
         inserted.push(result.recordset[0].Id);
       }
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
-      for (const file of req.files || []) {
-        const resolved = path.resolve(file.path);
-        if (resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolved, () => {});
-      }
       console.error("[crm-agreements] upload documents error:", e.message);
       res.status(500).json({ error: e.message });
     }
@@ -1149,7 +1134,8 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     const result = await req0.query(`
       SELECT
         d.Id, d.AgreementId, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
-        d.FileName, d.FilePath, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
+        d.FileName, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
+        d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
         d.RequestedAt, d.UploadedAt, d.CreatedAt,
         ag.AgreementNo, ag.Status AS AgreementStatus,
         b.BookingNo, b.UnitNo, a.ApplicantName
@@ -1172,17 +1158,13 @@ router.get("/documents/file/:docId", requirePageRight("crm-documents", "view"), 
   try {
     const id = parseInt(req.params.docId);
     const result = await getPool().request().input("id", sql.Int, id)
-      .query("SELECT FileName, FilePath, MimeType FROM dbo.CrmAgreementDocument WHERE Id = @id");
-    if (!result.recordset.length || !result.recordset[0].FilePath) return res.status(404).json({ error: "File not found" });
+      .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmAgreementDocument WHERE Id = @id");
+    if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
     const doc = result.recordset[0];
-
-    const resolvedPath = path.resolve(doc.FilePath);
-    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
-    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
 
     res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
-    fs.createReadStream(resolvedPath).pipe(res);
+    res.send(Buffer.from(doc.FileBase64, "base64"));
   } catch (e) {
     console.error("[crm-agreements] file GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1210,11 +1192,11 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     // agreement's document.
     const cur = await pool.request()
       .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
-      .query("SELECT Status, FilePath FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
+      .query("SELECT Status, FileBase64 FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
     if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
     const oldRow = cur.recordset[0];
 
-    if (b.Status === "Verified" && !oldRow.FilePath) {
+    if (b.Status === "Verified" && !oldRow.FileBase64) {
       return res.status(400).json({ error: "Cannot verify a document that hasn't been uploaded yet" });
     }
 

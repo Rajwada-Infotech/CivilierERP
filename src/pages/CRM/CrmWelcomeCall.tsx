@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -166,6 +166,53 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
           {blobUrl && (
             <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline">Download</a>
           )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// Real PDF preview for an invoice — same blob-fetch pattern as
+// DocPreviewDialog above, pointed at the actual invoice PDF route
+// (CrmBookingDetail.tsx's Payment & Invoice tab uses the identical
+// component) instead of the old plain-text Type/Amount/Date summary.
+const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () => void }> = ({ bookingId, invoice, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`${BKG_API}/${bookingId}/invoices/${invoice.Id}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [bookingId, invoice.Id]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
+            : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
+        </div>
+        <div className="text-xs text-muted-foreground pt-1">
+          {invoice.InvoiceType} · {fmt(invoice.Amount)}
         </div>
       </DialogContent>
     </Dialog>
@@ -528,18 +575,40 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   <div className="font-medium text-sm truncate" title={callContext?.booking?.PaymentPlanName}>{callContext?.booking?.PaymentPlanName || "7-stage default"}</div>
                 </button>
                 {expandedCard === "plan" && (
-                  <div className="border-t border-border px-2.5 py-2 space-y-1 bg-muted/10">
+                  <div className="border-t border-border px-2.5 py-1.5 space-y-1.5 bg-muted/10">
                     {milestones.length === 0 ? (
                       <p className="text-[11px] text-muted-foreground">No milestone schedule generated yet.</p>
-                    ) : milestones.map((m: any) => (
-                      <div key={m.Id} className="flex items-center justify-between text-[11px]">
-                        <span className="text-foreground/90 truncate">{m.MilestoneNo}. {m.MilestoneName}</span>
-                        <span className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-muted-foreground">{fmt(m.AmountDue)}</span>
-                          <span className={`px-1.5 py-0.5 rounded-full border font-medium ${m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/40 border-border"}`}>{m.Status}</span>
-                        </span>
-                      </div>
-                    ))}
+                    ) : milestones.map((m: any) => {
+                      // Due/Paid per milestone are already the real, live
+                      // numbers — including any excess from an earlier
+                      // milestone auto-swept in via on-account (crmPayments.js's
+                      // autoApplyOnAccount caps a milestone's own AmountPaid at
+                      // its AmountDue and carries any further excess forward to
+                      // the next milestone), so this stays accurate with zero
+                      // extra plumbing here — just render what's already there.
+                      const due = Number(m.AmountDue || 0);
+                      const paid = Number(m.AmountPaid || 0);
+                      const balance = Math.max(0, due - paid);
+                      const isDone = m.Status === "Paid" || m.Status === "Waived";
+                      const label = m.Status === "Waived" ? "Waived" : isDone ? "Paid" : paid > 0 ? "Partially Paid" : "Pending";
+                      return (
+                        <div key={m.Id} className="text-[11px] space-y-0.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-foreground/90 truncate">{m.MilestoneNo}. {m.MilestoneName}</span>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded-full border font-medium ${
+                              isDone ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                                : paid > 0 ? "text-amber-700 bg-amber-50 border-amber-200"
+                                : "text-muted-foreground bg-muted/40 border-border"
+                            }`}>{label}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <span>Due {fmt(due)}</span>
+                            {paid > 0 && <span className="text-emerald-700">Paid {fmt(paid)}</span>}
+                            {!isDone && balance > 0 && <span className="text-amber-700">Balance {fmt(balance)}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1030,34 +1099,9 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
 
     {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
 
-    {/* Invoice detail dialog */}
+    {/* Invoice PDF preview — real generated PDF, same as CrmBookingDetail.tsx's Payment & Invoice tab */}
     {viewingInvoice && (
-      <Dialog open onOpenChange={(o) => !o && setViewingInvoice(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-primary" /> {viewingInvoice.InvoiceNo}</DialogTitle></DialogHeader>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="font-medium">{viewingInvoice.InvoiceType}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-semibold">{fmt(viewingInvoice.Amount)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{viewingInvoice.InvoiceDate ? String(viewingInvoice.InvoiceDate).slice(0, 10) : "—"}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium">{viewingInvoice.Status || "Generated"}</span></div>
-            {viewingInvoice.Description && (
-              <div className="pt-1 border-t border-border">
-                <span className="text-muted-foreground block mb-0.5">Description</span>
-                <span>{viewingInvoice.Description}</span>
-              </div>
-            )}
-            {viewingInvoice.CreatedByName && (
-              <div className="flex justify-between text-xs text-muted-foreground pt-1 border-t border-border">
-                <span>Generated by {viewingInvoice.CreatedByName}</span>
-                {viewingInvoice.CreatedAt && <span>{new Date(viewingInvoice.CreatedAt).toLocaleDateString("en-IN")}</span>}
-              </div>
-            )}
-          </div>
-          <div className="flex justify-end pt-2 border-t border-border">
-            <button onClick={() => setViewingInvoice(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <InvoicePdfDialog bookingId={booking.BookingId} invoice={viewingInvoice} onClose={() => setViewingInvoice(null)} />
     )}
     </>
   );

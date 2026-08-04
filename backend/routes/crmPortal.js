@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
 const bcrypt = require("bcrypt");
@@ -11,7 +9,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
 const { maybeResolveAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
+const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -351,13 +349,10 @@ router.get("/invoices/:invoiceId/pdf", async (req, res) => {
     `);
     if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
     const invoiceNo = row.recordset[0].InvoiceNo;
-    let filePath = invoicePdfPath(invoiceNo);
-    if (!fs.existsSync(filePath)) {
-      filePath = await generateInvoicePdf(pool, invoiceId);
-    }
+    const buffer = await getInvoicePdfBuffer(pool, invoiceId);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
-    fs.createReadStream(filePath).pipe(res);
+    res.send(buffer);
   } catch (e) {
     console.error("[crm-portal] GET /invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
@@ -390,9 +385,6 @@ router.get("/agreement", async (req, res) => {
   }
 });
 
-const AGREEMENT_UPLOAD_DIR = path.join(__dirname, "../uploads/crm-agreement-documents");
-if (!fs.existsSync(AGREEMENT_UPLOAD_DIR)) fs.mkdirSync(AGREEMENT_UPLOAD_DIR, { recursive: true });
-
 // GET /agreement/documents — requires ?applicationId=
 router.get("/agreement/documents", async (req, res) => {
   try {
@@ -416,15 +408,8 @@ router.get("/agreement/documents", async (req, res) => {
   }
 });
 
-const portalDocStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, AGREEMENT_UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
-  },
-});
 const portalDocUpload = multer({
-  storage: portalDocStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     const ALLOWED = [
@@ -436,15 +421,6 @@ const portalDocUpload = multer({
   },
 });
 
-// Deletes a just-uploaded temp file, but only after confirming it actually
-// resolves inside AGREEMENT_UPLOAD_DIR (path-traversal guard).
-function safeUnlinkUpload(filePath) {
-  if (!filePath) return;
-  const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(AGREEMENT_UPLOAD_DIR) + path.sep)) return;
-  fs.unlink(resolved, () => {});
-}
-
 // POST /agreement/documents/:docId/upload — requires ?applicationId=
 router.post("/agreement/documents/:docId/upload", (req, res) => {
   portalDocUpload.single("file")(req, res, async (err) => {
@@ -453,7 +429,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
     try {
       const pool = getPool();
       const appId = await resolveAndAssertApplication(pool, req, res);
-      if (appId === null) { safeUnlinkUpload(req.file.path); return; }
+      if (appId === null) return;
       const docId = parseInt(req.params.docId, 10);
 
       const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
@@ -465,24 +441,22 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
         WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
       `);
       if (!check.recordset.length) {
-        safeUnlinkUpload(req.file.path);
         return res.status(404).json({ error: "Document not found" });
       }
       const doc = check.recordset[0];
       if (!["Requested", "Rejected"].includes(doc.Status)) {
-        safeUnlinkUpload(req.file.path);
         return res.status(400).json({ error: "This document isn't open for upload" });
       }
 
       await pool.request()
         .input("id", sql.Int, docId)
         .input("fname", sql.NVarChar(300), req.file.originalname)
-        .input("fp", sql.NVarChar(500), req.file.path)
+        .input("fb64", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
         .input("fs", sql.BigInt, req.file.size)
         .input("mt", sql.NVarChar(150), req.file.mimetype)
         .query(`
           UPDATE dbo.CrmAgreementDocument SET
-            FileName = @fname, FilePath = @fp, FileSize = @fs, MimeType = @mt,
+            FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
             Status = 'Submitted', Remarks = NULL, UploadedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -500,7 +474,6 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
 
       res.json({ success: true });
     } catch (e) {
-      if (req.file) safeUnlinkUpload(req.file.path);
       console.error("[crm-portal] POST /agreement/documents/:docId/upload error:", e.message);
       res.status(500).json({ error: e.message });
     }
@@ -515,22 +488,18 @@ router.get("/agreement/documents/file/:docId", async (req, res) => {
     if (appId === null) return;
     const docId = parseInt(req.params.docId);
     const result = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
-      SELECT d.FileName, d.FilePath, d.MimeType
+      SELECT d.FileName, d.FileBase64, d.MimeType
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
     `);
-    if (!result.recordset.length || !result.recordset[0].FilePath) return res.status(404).json({ error: "File not found" });
+    if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
     const doc = result.recordset[0];
-
-    const resolvedPath = path.resolve(doc.FilePath);
-    if (!resolvedPath.startsWith(path.resolve(AGREEMENT_UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
-    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
 
     res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
-    fs.createReadStream(resolvedPath).pipe(res);
+    res.send(Buffer.from(doc.FileBase64, "base64"));
   } catch (e) {
     console.error("[crm-portal] GET /agreement/documents/file error:", e.message);
     res.status(500).json({ error: e.message });

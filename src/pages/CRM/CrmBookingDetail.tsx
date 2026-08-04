@@ -10,6 +10,7 @@ import {
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -93,6 +94,22 @@ async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
   return r.ok ? r.json() : [];
 }
 
+// Live "what will this actually cost" preview for the Extra Charge add
+// form — 18% is fixed from the HSN Master "Extra Work" row (useGstRates
+// fetches it live, never hardcoded), matching exactly what the backend will
+// charge once submitted.
+function ExtraWorkGstPreview({ amount }: { amount: number }) {
+  const { data: rates, isLoading } = useGstRates();
+  if (isLoading || !rates) return null;
+  const gst = computeExtraWorkGst(amount, rates);
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+      <span>GST ({gst.rate}%, fixed — HSN Master)</span>
+      <span className="font-semibold">{fmtInr(gst.gstAmount)} → Total {fmtInr(gst.total)}</span>
+    </div>
+  );
+}
+
 // Auth here is a bearer token via fetchWithAuth, same reason the Customer
 // Portal's own invoice/document previews (PortalAgreement.tsx) fetch as a
 // blob rather than using a plain <a href> — a raw link can't carry the
@@ -117,19 +134,22 @@ function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
         </DialogHeader>
         <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
           {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
             : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
         </div>
-        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-          <span>{invoice.InvoiceType} · {fmt(invoice.Amount)}</span>
-          {blobUrl && (
-            <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`} className="text-primary hover:underline flex items-center gap-1">
-              <Download size={12} /> Download
-            </a>
-          )}
+        <div className="text-xs text-muted-foreground pt-1">
+          {invoice.InvoiceType} · {fmt(invoice.Amount)}
         </div>
       </DialogContent>
     </Dialog>
@@ -146,9 +166,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
-  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "" });
+  const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
-  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+  // No GstRate field here anymore — Extra Charges are always taxed at the
+  // fixed 18% HSN Master rate (backend ignores any client-supplied rate),
+  // so there's nothing left to pick.
+  const [extraForm, setExtraForm] = useState({ ExtraChargeMasterId: "", Description: "", Amount: "" });
   const [chargesSaving, setChargesSaving] = useState(false);
   const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
   const [editingParkingId, setEditingParkingId] = useState<number | null>(null);
@@ -208,7 +231,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: invoices = [] } = useQuery({
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
-    enabled: tab === "Payment & Invoice",
+    // Also needed on the Payment Plan tab now — the milestone list there
+    // shows an "Invoice Generation Pending" badge for any paid milestone
+    // with no matching invoice, which requires this data to actually be
+    // loaded rather than sitting on its stale/empty default.
+    enabled: tab === "Payment & Invoice" || tab === "Payment Plan",
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
@@ -421,7 +448,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           ExtraChargeMasterId: extraForm.ExtraChargeMasterId || null,
           Description: extraForm.Description.trim(),
           Amount: parseFloat(extraForm.Amount),
-          GstRate: parseFloat(extraForm.GstRate) || 0,
           Reason: legalWorkStarted ? extraReason.trim() : undefined,
         }),
       });
@@ -429,7 +455,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (!res.ok) throw new Error(resData.error);
       toast.success(resData.pending ? "Amendment request submitted — pending approval" : (isEdit ? `Charge updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}` : `Charge added — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`));
       setEditingExtraId(null);
-      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+      setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "" });
       setExtraReason("");
       invalidateCharges();
     } catch (e: any) {
@@ -445,12 +471,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       ExtraChargeMasterId: c.ExtraChargeMasterId ? String(c.ExtraChargeMasterId) : "",
       Description: c.Description || "",
       Amount: c.Amount != null ? String(c.Amount) : "",
-      GstRate: c.GstRate != null ? String(c.GstRate) : "18",
     });
   };
   const cancelEditExtra = () => {
     setEditingExtraId(null);
-    setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "", GstRate: "18" });
+    setExtraForm({ ExtraChargeMasterId: "", Description: "", Amount: "" });
     setExtraReason("");
   };
 
@@ -699,6 +724,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -741,7 +767,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     // Confirm & Book (see maybeAutoGenerateBookingInvoice on the backend).
     // This manual dialog is for every other invoice (e.g. milestone-wise
     // payments after booking), so it never defaults to or offers "Booking".
-    setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "" });
+    const defaultType = uninvoicedPaidMilestones.length > 0
+      ? "Milestone"
+      : uninvoicedOnAccountPayments.length > 0
+      ? "OnAccount"
+      : "Milestone";
+    setInvoiceForm({ InvoiceType: defaultType, Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "", OnAccountPaymentId: "" });
     setInvoiceDialog(true);
   };
 
@@ -765,12 +796,49 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // dead end; a locked, explanatory panel replaces it in this specific
   // window only — the instant another milestone becomes eligible, the
   // regular form comes back automatically.
+  // On-account deposits (money received in excess of what's currently due,
+  // auto-parked into CrmOnAccountPayment) are just as real as a paid
+  // milestone — they're cash already received and must not sit un-invoiced
+  // either. Same "unbooked" shape as uninvoicedPaidMilestones above, folded
+  // into canGenerateAnything below so the header button/dead-end-form
+  // suppression logic treats it the same way.
+  const uninvoicedOnAccountPayments = (onAccountData?.payments || []).filter(
+    (p: any) => !p.InvoiceId && !(invoices as any[]).some((inv: any) => inv.OnAccountPaymentId === p.Id)
+  );
   const hasBookingInvoice = (invoices as any[]).some((inv: any) => inv.InvoiceType === "Booking");
-  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0;
+  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0 && uninvoicedOnAccountPayments.length === 0;
+  // Nothing to raise right now: the Booking invoice already exists (nothing
+  // to force), and no other milestone is sitting paid-but-uninvoiced. Hiding
+  // the button here (instead of opening a dialog whose only option is a
+  // dead-end "no paid milestone waiting" dropdown) is what keeps this
+  // action honest — it reappears the moment a milestone payment actually
+  // needs invoicing. Maintenance/Other invoices are ad-hoc and don't belong
+  // at this early booking-review stage either; they become reachable again
+  // once a milestone is genuinely awaiting invoicing.
+  const canGenerateAnything = !hasBookingInvoice || uninvoicedPaidMilestones.length > 0 || uninvoicedOnAccountPayments.length > 0;
+
+  const [forcingBookingInvoice, setForcingBookingInvoice] = useState(false);
+  const handleForceBookingInvoice = async () => {
+    setForcingBookingInvoice(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/invoices/force-booking`, { method: "POST" });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
+      setInvoiceDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setForcingBookingInvoice(false);
+    }
+  };
 
   const handleGenerateInvoice = async () => {
     if (invoiceForm.InvoiceType === "Milestone") {
       if (!invoiceForm.MilestoneId) { toast.error("Select a milestone"); return; }
+    } else if (invoiceForm.InvoiceType === "OnAccount") {
+      if (!invoiceForm.OnAccountPaymentId) { toast.error("Select an on-account payment"); return; }
     } else if (!invoiceForm.Amount) {
       toast.error("Amount is required"); return;
     }
@@ -779,6 +847,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const body: any = { InvoiceType: invoiceForm.InvoiceType, Description: invoiceForm.Description };
       if (invoiceForm.InvoiceType === "Milestone") {
         body.MilestoneId = parseInt(invoiceForm.MilestoneId);
+      } else if (invoiceForm.InvoiceType === "OnAccount") {
+        body.OnAccountPaymentId = parseInt(invoiceForm.OnAccountPaymentId);
       } else {
         body.Amount = parseFloat(invoiceForm.Amount);
         body.InvoiceDate = invoiceForm.InvoiceDate;
@@ -797,6 +867,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.error(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [generatingOnAccountId, setGeneratingOnAccountId] = useState<number | null>(null);
+  const handleGenerateOnAccountInvoice = async (onAccountPaymentId: number) => {
+    setGeneratingOnAccountId(onAccountPaymentId);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ InvoiceType: "OnAccount", OnAccountPaymentId: onAccountPaymentId }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setGeneratingOnAccountId(null);
     }
   };
 
@@ -882,7 +973,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{fmt(booking.RatePerSqFt)}</div>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Total Value</label>
+                    <label className="text-xs text-muted-foreground block mb-1">Grand Total</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30 font-semibold">{fmt(booking.GrandTotal ?? booking.TotalValue)}</div>
                   </div>
                 </div>
@@ -892,24 +983,65 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     off the Rs. 45L bracket automatically; Extra Work is
                     always 18%. The only way to change a rate is editing the
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
-                <div className="rounded-lg border border-border p-3 space-y-2">
+                <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">GST (fixed — set by HSN Master)</p>
-                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode}</span>}
+                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Unit+Parking GST</span>
-                      <span className="font-semibold">{booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"} ({fmt(booking.UnitParkingGstAmount)})</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Extra Work GST (18%)</span>
-                      <span className="font-semibold">{fmt(booking.ExtraWorkGstAmount)}</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-muted-foreground block">Total GST</span>
-                      <span className="font-semibold">{fmt(booking.TotalGstAmount)}</span>
-                    </div>
+
+                  {/* Same explicit sequence everywhere this is shown (see
+                      GstBreakdownBox in CrmApplication.tsx): Unit (+ its own
+                      GST), Parking (+ its own GST), Extra Work (+ its own
+                      GST) -> Amount (all three bases combined) -> GST
+                      (combined) -> Total Amount. Unit and Parking share the
+                      same HSN-resolved rate (the Rs. 45L bracket); Extra
+                      Work is always 18% regardless of that bracket. */}
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Unit</span>
+                    <span>{fmt(Number(booking.TotalValue))}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground pl-2">
+                    <span>Unit GST</span>
+                    <span>{fmt(booking.UnitGstAmount)}</span>
+                  </div>
+                  {Number(booking.ParkingTotal) > 0 && (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Parking</span>
+                        <span>{fmt(Number(booking.ParkingTotal) - Number(booking.ParkingGstAmount || 0))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground pl-2">
+                        <span>Parking GST</span>
+                        <span>{fmt(booking.ParkingGstAmount)}</span>
+                      </div>
+                    </>
+                  )}
+                  {Number(booking.ExtraChargesTotal) > 0 && (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Extra Work</span>
+                        <span>{fmt(Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground pl-2">
+                        <span>Extra Work GST (18%)</span>
+                        <span>{fmt(booking.ExtraWorkGstAmount)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-border pt-1">
+                    <span className="text-foreground">Amount</span>
+                    <span className="font-medium text-foreground">
+                      {fmt(Number(booking.TotalValue) + (Number(booking.ParkingTotal) - Number(booking.ParkingGstAmount || 0)) + (Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0)))}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-foreground">GST</span>
+                    <span className="font-medium text-foreground">{fmt(booking.TotalGstAmount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
+                    <span>Total Amount</span>
+                    <span className="text-primary">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
 
@@ -994,17 +1126,21 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Total Price Breakdown</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Unit Value</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
                           <div className="font-medium">{fmt(unitValue)}</div>
                         </div>
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Parking</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Unit GST</div>
+                          <div className="font-medium">{fmt(booking.UnitGstAmount)}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                          <div className="text-xs text-muted-foreground mb-0.5">Parking incl. GST</div>
                           <div className="font-medium">{fmt(parkingTotal)}</div>
                         </div>
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                          <div className="text-xs text-muted-foreground mb-0.5">Extra Charges</div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
                           <div className="font-medium">{fmt(extraTotal)}</div>
                         </div>
                         <div className="rounded-lg bg-primary/10 px-2.5 py-2">
@@ -1055,6 +1191,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
                                 : "text-amber-700 bg-amber-50 border-amber-200"
                             }`}>{m.Status}</span>
+                            {/* Same "no orphan money" principle as the
+                                On-Account section above: a milestone that's
+                                fully paid but has no matching invoice yet is
+                                real money sitting un-invoiced. Milestone 1
+                                (Booking) is excluded — it's auto-invoiced on
+                                its own separate path. Read-only here; the
+                                existing "+ Generate Invoice" dialog on the
+                                Payment & Invoice tab already raises it. */}
+                            {m.Status === "Paid" && Number(m.MilestoneNo) !== 1
+                              && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id) && (
+                              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
+                                Invoice Generation Pending
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1162,6 +1312,56 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   )}
                 </div>
 
+                {/* On-account deposits — money received in excess of what's
+                    currently due (CrmOnAccountPayment), auto-parked and later
+                    auto-applied to future milestones as they come due. Real
+                    cash received, so each one needs an invoice just like a
+                    paid milestone — this card is where that gets raised.
+                    Only rendered when the booking actually has any deposits,
+                    so a booking with none doesn't show an empty card. */}
+                {(onAccountData?.payments || []).length > 0 && (
+                  <div className="rounded-xl border border-border p-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> On-Account Payments</h3>
+                    <div className="space-y-1.5">
+                      {(onAccountData.payments as any[]).map((p: any) => {
+                        const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
+                          || (p.InvoiceId ? { Id: p.InvoiceId, InvoiceNo: p.InvoiceNo, InvoiceType: "OnAccount", Amount: p.Amount, InvoiceDate: p.InvoiceDate, Status: p.InvoiceStatus, OnAccountPaymentId: p.Id } : null);
+                        return (
+                          <div key={p.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <div className="space-y-0.5">
+                              <div className="font-medium">{p.ReceiptNo} — {fmt(p.Amount)}</div>
+                              <div className="text-muted-foreground">
+                                {p.ReceivedDate ? new Date(p.ReceivedDate).toLocaleDateString("en-IN") : "—"} · {p.PaymentMode || "—"}
+                              </div>
+                            </div>
+                            {inv ? (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
+                                <button onClick={() => setPreviewInvoice(inv)}
+                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  <Eye size={12} /> View
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border text-amber-700 bg-amber-50 border-amber-200">
+                                  Invoice Generation Pending
+                                </span>
+                                {canEdit && (
+                                  <button onClick={() => handleGenerateOnAccountInvoice(p.Id)} disabled={generatingOnAccountId === p.Id}
+                                    className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+                                    {generatingOnAccountId === p.Id ? "Generating…" : "Generate Invoice"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Submit Payment for Approval</h3>
@@ -1262,6 +1462,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <input type="number" min="1" value={parkingForm.Quantity}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
                                     className="w-16 text-sm border border-border rounded px-1.5 py-1 bg-background" />
+                                  {/* Approximate preview at the booking's CURRENT bracket
+                                      rate — if this quantity change itself crosses the
+                                      Rs. 45L bracket, the confirmed rate/amount (possibly
+                                      different) is what actually saves. */}
+                                  {parkingForm.Quantity && Number(parkingForm.Quantity) > 0 && booking.UnitParkingGstRate != null && (
+                                    <span className="text-[11px] text-sky-700 whitespace-nowrap">
+                                      ≈ {fmtInr(Number(p.RateSnapshot) * Number(parkingForm.Quantity) * (1 + Number(booking.UnitParkingGstRate) / 100))} incl. GST
+                                    </span>
+                                  )}
                                   <button onClick={handleAddParking} disabled={chargesSaving}
                                     className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
                                     Save
@@ -1367,7 +1576,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             ExtraChargeMasterId: e.target.value,
                             Description: selected?.Name || f.Description,
                             Amount: selected?.DefaultAmount ? String(selected.DefaultAmount) : f.Amount,
-                            GstRate: selected?.GstRate != null ? String(selected.GstRate) : f.GstRate,
                           }));
                         }}
                           className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
@@ -1384,15 +1592,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <input type="number" placeholder="Amount" value={extraForm.Amount}
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                           className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                        <select value={extraForm.GstRate} onChange={(e) => setExtraForm((f) => ({ ...f, GstRate: e.target.value }))}
-                          className="w-20 text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                          {["0", "5", "12", "18", "28"].map((r) => <option key={r} value={r}>{r}%</option>)}
-                        </select>
                         <button onClick={handleAddExtra} disabled={chargesSaving}
                           className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
+                      {/* Live GST preview — 18% is fixed from the HSN Master
+                          "Extra Work" row; there's no rate to pick anymore. */}
+                      {extraForm.Amount && Number(extraForm.Amount) > 0 && (
+                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
+                      )}
                     </>
                   )}
                 </div>
@@ -1550,7 +1759,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
                 <div className="flex items-center justify-between gap-2 pt-3">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
-                  {canEdit && booking.Status !== "Approved" && (
+                  {canEdit && booking.Status !== "Approved" && canGenerateAnything && (
                     <button onClick={openInvoiceDialog}
                       className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
                       + Generate Invoice
@@ -1613,32 +1822,47 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                       <h3 className="text-sm font-semibold">Generate Invoice</h3>
-                      {bookingInvoiceOnly ? (
-                        <>
-                          <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
-                            <FileText size={14} className="shrink-0 mt-0.5" />
+                      {!hasBookingInvoice && (
+                        <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
+                          <FileText size={14} className="shrink-0 mt-0.5" />
+                          <div className="space-y-1.5 w-full">
                             <span>
                               <span className="font-medium">Booking Invoice — auto-generated.</span>{" "}
-                              This booking has only its Booking Amount paid so far, and that invoice is
-                              created automatically the moment you click <span className="font-medium">Confirm &amp; Book</span> —
-                              it never needs to be raised manually here. Once another milestone is paid, you'll be
-                              able to generate its invoice from this same dialog.
+                              It's created automatically the moment the Booking Amount is fully paid and you
+                              click <span className="font-medium">Confirm &amp; Book</span> — it never needs to be raised manually here.
                             </span>
+                            {bookingAmountPaidInFull ? (
+                              <>
+                                <p className="text-amber-700 font-medium">
+                                  The Booking Amount is fully paid but no Booking invoice exists yet — auto-generation
+                                  may not have run. Use this only to recover from that.
+                                </p>
+                                <button onClick={handleForceBookingInvoice} disabled={forcingBookingInvoice}
+                                  className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded-md font-medium hover:bg-amber-700 disabled:opacity-40">
+                                  {forcingBookingInvoice ? "Generating…" : "Force Generate Booking Invoice"}
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-sky-700">It will auto-generate once the Booking Amount is fully paid.</span>
+                            )}
                           </div>
-                          <div className="flex justify-end pt-1">
-                            <button onClick={() => setInvoiceDialog(false)}
-                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                              Close
-                            </button>
-                          </div>
-                        </>
+                        </div>
+                      )}
+                      {bookingInvoiceOnly ? (
+                        <div className="flex justify-end pt-1">
+                          <button onClick={() => setInvoiceDialog(false)}
+                            className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                            Close
+                          </button>
+                        </div>
                       ) : (
                         <>
                           <div className="space-y-2">
                             <select value={invoiceForm.InvoiceType}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
+                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
                               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                              <option value="Milestone">Milestone Payment</option>
+                              {uninvoicedPaidMilestones.length > 0 && <option value="Milestone">Milestone Payment</option>}
+                              {uninvoicedOnAccountPayments.length > 0 && <option value="OnAccount">On-Account Payment</option>}
                               <option value="Maintenance">Maintenance</option>
                               <option value="Other">Other</option>
                             </select>
@@ -1656,6 +1880,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
                                 )}
                                 <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
+                              </>
+                            ) : invoiceForm.InvoiceType === "OnAccount" ? (
+                              <>
+                                <select value={invoiceForm.OnAccountPaymentId}
+                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
+                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                                  <option value="">-- Select an on-account payment --</option>
+                                  {uninvoicedOnAccountPayments.map((p: any) => (
+                                    <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} - {fmt(p.Amount)}</option>
+                                  ))}
+                                </select>
+                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the on-account receipt - not editable here.</p>
                               </>
                             ) : (
                               <>
@@ -1677,7 +1913,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               Cancel
                             </button>
                             <button onClick={handleGenerateInvoice}
-                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId)}
+                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId) || (invoiceForm.InvoiceType === "OnAccount" && !invoiceForm.OnAccountPaymentId)}
                               className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                               {saving ? "Generating..." : "Generate"}
                             </button>
@@ -1715,12 +1951,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
                     Save &amp; Next <ArrowRight size={14} />
                   </button>
-                ) : canEdit && booking.Status !== "Approved" ? (
+                ) : canEdit && booking.Status !== "Approved" && !booking.ReadyForApprovalAt ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady}
                     title={!mandatoryReady ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
                     {bookingRequesting ? "Submitting..." : "Confirm & Book"}
                     {!bookingRequesting && <Check size={14} />}
+                  </button>
+                ) : canEdit && booking.Status !== "Approved" && booking.ReadyForApprovalAt ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-emerald-100 text-emerald-700 rounded-lg font-medium cursor-default flex items-center gap-1">
+                    <Check size={14} /> Booked — Sent for Approval
                   </button>
                 ) : null}
               </div>

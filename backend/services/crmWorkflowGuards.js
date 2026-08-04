@@ -334,7 +334,7 @@ async function maybeAutoGenerateInvoice(pool, bookingId, actorUserId) {
     .input("no",   sql.NVarChar(30),  invoiceNo)
     .input("bid",  sql.Int,           bookingId)
     .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Auto-generated — all payment milestones settled (on-possession stage)")
+    .input("desc", sql.NVarChar(500), "Final settlement — possession of unit")
     .input("cb",   sql.Int,           actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
@@ -388,7 +388,7 @@ async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
     .input("no",   sql.NVarChar(30),  invoiceNo)
     .input("bid",  sql.Int,           bookingId)
     .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Auto-generated — agreement executed, both sides approved")
+    .input("desc", sql.NVarChar(500), "Agreement execution charges")
     .input("cb",   sql.Int,           actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
@@ -869,7 +869,7 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
     .input("no",   sql.NVarChar(30),  invoiceNo)
     .input("bid",  sql.Int,           bookingId)
     .input("amt",  sql.Decimal(18,2), bookingRow.BookingAmount)
-    .input("desc", sql.NVarChar(500), "Auto-generated — booking submitted for approval")
+    .input("desc", sql.NVarChar(500), "Booking amount received against unit booking")
     .input("cb",   sql.Int,           actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
